@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magnite-backend"
+version = "0.1.0"
+description = "Python ML backend for Magnite LLM desktop app"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "huggingface_hub>=0.24.0",
+    "llama-cpp-python>=0.3.0",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+ml = [
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "peft>=0.7.0",
+    "bitsandbytes>=0.41.0",
+    "sentence-transformers>=2.2.0",
+    "datasets>=2.16.0",
+    "accelerate>=0.26.0",
+    "safetensors>=0.4.0",
+]
+
+[project.scripts]
+magnite-backend = "backend.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
