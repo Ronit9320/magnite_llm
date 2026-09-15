@@ -11,11 +11,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Svg)
 
 set(MAGNITE_SOURCES
     src/main.cpp
     src/mainwindow.cpp
+    src/theme.cpp
     src/backend_manager.cpp
     src/backend_client.cpp
     src/panels/basepanel.cpp
@@ -25,6 +26,7 @@ set(MAGNITE_SOURCES
     src/panels/adapterspanel.cpp
     src/panels/chatpanel.cpp
     src/panels/settingspanel.cpp
+    resources.qrc
 )
 
 add_executable(magnite-app ${MAGNITE_SOURCES})
@@ -34,4 +36,5 @@ target_include_directories(magnite-app PRIVATE src)
 target_link_libraries(magnite-app PRIVATE
     Qt6::Widgets
     Qt6::Network
+    Qt6::Svg
 )

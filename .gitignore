@@ -1,6 +1,7 @@
 # Build planning & docs
 app.md
 BUILD_PLAN.md
+design_doc.md
 
 # Python
 __pycache__/

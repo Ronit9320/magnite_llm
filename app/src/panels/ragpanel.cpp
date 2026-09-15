@@ -34,9 +34,12 @@ void RagPanel::setupUi() {
 
     auto *btnRow = new QHBoxLayout();
     m_addButton = new QPushButton("Add Documents...", this);
+    m_addButton->setObjectName("primaryBtn");
     m_removeButton = new QPushButton("Remove Selected", this);
+    m_removeButton->setObjectName("secondaryBtn");
     m_removeButton->setEnabled(false);
     m_clearButton = new QPushButton("Clear All", this);
+    m_clearButton->setObjectName("destructiveBtn");
     btnRow->addWidget(m_addButton);
     btnRow->addWidget(m_removeButton);
     btnRow->addWidget(m_clearButton);
@@ -46,7 +49,7 @@ void RagPanel::setupUi() {
     m_docList = new QListWidget(this);
     layout->addWidget(m_docList, 1);
     QLabel *emptyHint = new QLabel("No documents ingested yet.", this);
-    emptyHint->setStyleSheet("color: #888;");
+    emptyHint->setObjectName("mutedLabel");
     layout->addWidget(emptyHint);
 
     connect(m_docList, &QListWidget::itemSelectionChanged, this, [this]() {
@@ -76,7 +79,7 @@ void RagPanel::setupUi() {
     layout->addWidget(retrievalBox);
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #666;");
+    m_statusLabel->setObjectName("statusLabel");
     layout->addWidget(m_statusLabel);
     m_statusLabel->setText("Ready. RAG engine lands in Phase 6.");
 

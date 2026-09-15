@@ -27,6 +27,10 @@ protected:
     QVBoxLayout *contentLayout() const { return m_contentLayout; }
     void setHeaderSubtitle(const QString &subtitle);
 
+    // Re-tint a #statusLabel after its "state" property changed (the global
+    // QSS selects on QLabel#statusLabel[state="ok|error|warn"]).
+    static void applyStatusTone(QLabel *label, const QString &tone);
+
 private:
     QString m_title;
     QVBoxLayout *m_contentLayout;

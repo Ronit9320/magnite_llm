@@ -47,3 +47,5 @@ class InferenceStatus(BaseModel):
     loaded_model: Optional[str] = None
     model_source: str = ""
     backend_available: bool
+    active_adapter: Optional[str] = None
+    active_adapter_id: Optional[str] = None

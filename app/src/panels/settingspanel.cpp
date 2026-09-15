@@ -49,6 +49,7 @@ void SettingsPanel::setupUi() {
     auto *dataForm = new QFormLayout(dataBox);
     m_dataDir = new QLineEdit(this);
     auto *dirBtn = new QPushButton("Browse...", this);
+    dirBtn->setObjectName("secondaryBtn");
     auto *dirRow = new QHBoxLayout();
     dirRow->addWidget(m_dataDir, 1);
     dirRow->addWidget(dirBtn);
@@ -76,12 +77,13 @@ void SettingsPanel::setupUi() {
 
     auto *btnRow = new QHBoxLayout();
     m_saveButton = new QPushButton("Save Settings", this);
+    m_saveButton->setObjectName("primaryBtn");
     btnRow->addWidget(m_saveButton);
     btnRow->addStretch();
     layout->addLayout(btnRow);
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #666;");
+    m_statusLabel->setObjectName("statusLabel");
     layout->addWidget(m_statusLabel);
 
     layout->addStretch();

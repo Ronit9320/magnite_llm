@@ -3,10 +3,14 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from backend.adapters.schemas import AdapterRecord
+from backend.adapters.store import AdapterStore
 from backend.inference.engines.base import BaseEngine
 from backend.inference.engines.llamacpp import LlamaCppEngine
+from backend.inference.engines.torch import TorchPeftEngine
 from backend.inference.engines.vllm import VllmEngine
 from backend.inference.schemas import EngineInfo, InferenceStatus
+from backend.training.trainer import _resolve_base
 
 
 def detect_gpu() -> tuple[bool, str]:
@@ -37,12 +41,18 @@ class InferenceSupervisor:
         self._engine: Optional[BaseEngine] = None
         self.model_ref = model_ref
         self.engine_override = engine_override
+        self._adapter_store: Optional[AdapterStore] = None
+        self.active_adapter: Optional[AdapterRecord] = None
 
         has_gpu, gpu_detail = detect_gpu()
         self.has_gpu = has_gpu
         self.gpu_detail = gpu_detail
         self.llamacpp_ok = LlamaCppEngine.is_available()
         self.vllm_ok = VllmEngine.is_available()
+        self.torch_peft_ok = TorchPeftEngine.is_available()
+
+    def set_adapter_store(self, store: AdapterStore) -> None:
+        self._adapter_store = store
 
     def _preferred_engine_name(self) -> str:
         # Override meanings (kept in sync with the C++ Settings panel orders):
@@ -73,6 +83,13 @@ class InferenceSupervisor:
                 selected=(preferred == "llamacpp"),
                 description="Local serving via llama.cpp (CPU/GPU)",
                 detail=("GPU: " + self.gpu_detail) if self.has_gpu else "CPU-only",
+            ),
+            EngineInfo(
+                name="torch",
+                available=self.torch_peft_ok,
+                selected=False,
+                description="Transformers + PEFT serving for LoRA adapters",
+                detail="Adapter engine (requires transformers + peft)" if self.torch_peft_ok else "Not installed",
             ),
         ]
         return engines
@@ -105,21 +122,57 @@ class InferenceSupervisor:
             loaded_model=self.model_ref if self._engine else None,
             model_source="",
             backend_available=True,
+            active_adapter=self.active_adapter.name if self.active_adapter else None,
+            active_adapter_id=self.active_adapter.id if self.active_adapter else None,
         )
 
     def load_model(self, model_ref: str, engine_name: str | None = None) -> None:
-        """Load (or swap) a model into the active engine."""
+        """Load (or swap) a model into the active engine. Clears any active adapter."""
         ename, mref = self._resolve_engine(engine_name, model_ref)
         if not mref:
             raise ValueError("No model selected for inference")
         self.model_ref = mref
 
-        # Unload any existing engine/model.
+        # Unload any existing engine/model (also clears the active adapter).
         self.unload()
 
         engine = self.make_engine(ename, mref)
         engine.load()
         self._engine = engine
+
+    def activate_adapter(self, adapter_id: str) -> AdapterRecord:
+        """Activate a trained adapter for inference, restarting the engine.
+
+        The adapter is loaded on top of its base model via transformers + PEFT
+        (the 'torch' engine). Any currently-loaded plain model is unloaded first.
+        """
+        if self._adapter_store is None:
+            raise RuntimeError("Adapter store not initialized")
+        rec = self._adapter_store.get(adapter_id)
+        if rec is None:
+            raise ValueError(f"Unknown adapter '{adapter_id}'")
+        if rec.status != "ready" or not rec.path or not os.path.isdir(rec.path):
+            raise ValueError(
+                f"Adapter '{rec.name}' cannot be used (missing files on disk)"
+            )
+        if not self.torch_peft_ok:
+            raise RuntimeError(
+                "Adapter inference needs transformers + peft. Install with "
+                "'uv pip install --python .venv/bin/python -e 'backend[ml]''."
+            )
+        base = _resolve_base(rec.base_model)
+
+        self.unload()
+        engine = TorchPeftEngine(base, rec.path)
+        engine.load()
+        self._engine = engine
+        self.model_ref = base
+        self.active_adapter = rec
+        return rec
+
+    def deactivate_adapter(self) -> None:
+        """Clear the active adapter and unload the adapter engine."""
+        self.unload()
 
     def chat_stream(self, messages, **kwargs):
         if self._engine is None:
@@ -137,6 +190,7 @@ class InferenceSupervisor:
                 self._engine.unload()
             finally:
                 self._engine = None
+        self.active_adapter = None
 
 
 _supervisor: InferenceSupervisor | None = None

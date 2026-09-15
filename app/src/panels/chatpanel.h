@@ -30,6 +30,9 @@ public:
     QString settingsJson() const override;
     void applySettingsJson(const QString &json) override;
 
+public slots:
+    void refreshEngineStatus();
+
 private slots:
     void onLoadModel();
     void onSend();
@@ -38,8 +41,8 @@ private slots:
 
 private:
     void setupUi();
-    void setStatus(const QString &text, const QString &color = QString());
-    void refreshEngineStatus();
+    // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
+    void setStatus(const QString &text, const QString &tone = QString());
     void updateStreamingBlock(const QString &text, bool showCursor);
     QString currentEngineName() const;
 

@@ -18,7 +18,10 @@ app = FastAPI(title="Magnite LLM Backend", version="0.1.0")
 async def startup():
     _registry_setup()
     _training_setup()
-    _adapter_setup()
+    store = _adapter_setup()
+    from backend.inference.supervisor import get_supervisor
+
+    get_supervisor().set_adapter_store(store)
 
 
 app.include_router(health_router)

@@ -47,7 +47,9 @@ void ModelsPanel::setupUi() {
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("Search HuggingFace models...");
     m_searchButton = new QPushButton("Search", this);
+    m_searchButton->setObjectName("primaryBtn");
     m_refreshButton = new QPushButton("Refresh", this);
+    m_refreshButton->setObjectName("secondaryBtn");
     searchRow->addWidget(m_searchEdit, 1);
     searchRow->addWidget(m_searchButton);
     searchRow->addWidget(m_refreshButton);
@@ -57,7 +59,9 @@ void ModelsPanel::setupUi() {
     m_viewCombo = new QComboBox(this);
     m_viewCombo->addItems({"Local Models", "Hub Search Results"});
     m_downloadButton = new QPushButton("Download", this);
+    m_downloadButton->setObjectName("primaryBtn");
     m_deleteButton = new QPushButton("Delete", this);
+    m_deleteButton->setObjectName("destructiveBtn");
     m_downloadButton->setEnabled(false);
     m_deleteButton->setEnabled(false);
     viewRow->addWidget(m_viewCombo);
@@ -75,7 +79,7 @@ void ModelsPanel::setupUi() {
     layout->addWidget(m_table, 1);
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #666;");
+    m_statusLabel->setObjectName("statusLabel");
     layout->addWidget(m_statusLabel);
 
     connect(m_searchButton, &QPushButton::clicked, this, &ModelsPanel::onSearch);
@@ -122,7 +126,7 @@ void ModelsPanel::refresh() {
     if (isLocalView()) {
         m_client->get("/models", [this](int status, const QJsonDocument &doc) {
             if (status != 200) {
-                setStatus(QString("Failed to load models (HTTP %1).").arg(status), "#c0392b");
+                setStatus(QString("Failed to load models (HTTP %1).").arg(status), "error");
                 return;
             }
             showLocalModels(doc.array());
@@ -200,7 +204,7 @@ void ModelsPanel::onSearch() {
     m_client->get("/models/search?" + q.toString(QUrl::FullyEncoded),
                   [this](int status, const QJsonDocument &doc) {
         if (status != 200) {
-            setStatus(QString("Search failed (HTTP %1).").arg(status), "#c0392b");
+            setStatus(QString("Search failed (HTTP %1).").arg(status), "error");
             return;
         }
         showSearchResults(doc.array());
@@ -252,7 +256,7 @@ void ModelsPanel::onDownload() {
     body["source"] = "huggingface";
     m_client->post("/models/pull", body, [this](int status, const QJsonDocument &doc) {
         if (status != 202) {
-            setStatus(QString("Could not start download (HTTP %1).").arg(status), "#c0392b");
+            setStatus(QString("Could not start download (HTTP %1).").arg(status), "error");
             return;
         }
         startPullPolling(doc.object().value("id").toString());
@@ -275,7 +279,7 @@ void ModelsPanel::onPullPoll() {
         if (status != 200) {
             m_pullTimer->stop();
             m_pullJobId.clear();
-            setStatus(QString("Lost track of download job (HTTP %1).").arg(status), "#c0392b");
+            setStatus(QString("Lost track of download job (HTTP %1).").arg(status), "error");
             return;
         }
         const QJsonObject job = doc.object();
@@ -286,13 +290,13 @@ void ModelsPanel::onPullPoll() {
         if (jobStatus == "done") {
             m_pullTimer->stop();
             m_pullJobId.clear();
-            setStatus("Download complete. Refreshing local models...", "#27ae60");
+            setStatus("Download complete. Refreshing local models...", "ok");
             switchToLocalView();
             refresh();
         } else if (jobStatus == "error") {
             m_pullTimer->stop();
             m_pullJobId.clear();
-            setStatus("Download failed: " + job.value("error").toString(), "#c0392b");
+            setStatus("Download failed: " + job.value("error").toString(), "error");
         } else {
             setStatus(QString("Downloading: %1%  (%2)")
                           .arg(static_cast<int>(progress))
@@ -314,14 +318,14 @@ void ModelsPanel::onDeleteModel() {
             setStatus("Model not found (already removed?).");
             refresh();
         } else {
-            setStatus(QString("Delete failed (HTTP %1).").arg(status), "#c0392b");
+            setStatus(QString("Delete failed (HTTP %1).").arg(status), "error");
         }
     });
 }
 
-void ModelsPanel::setStatus(const QString &text, const QString &color) {
+void ModelsPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
-    m_statusLabel->setStyleSheet(color.isEmpty() ? "color: #666;" : QString("color: %1;").arg(color));
+    applyStatusTone(m_statusLabel, tone);
 }
 
 QString ModelsPanel::settingsJson() const {

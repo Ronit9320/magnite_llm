@@ -8,21 +8,29 @@
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
 #include "panels/settingspanel.h"
+#include "theme.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QDir>
+#include <QEasingCurve>
 #include <QFile>
 #include <QFrame>
+#include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QMessageBox>
+#include <QPropertyAnimation>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
+#include <QVariant>
 
 #include <memory>
 
@@ -37,11 +45,15 @@ MainWindow::MainWindow(QWidget *parent)
     , m_adaptersPanel(nullptr)
     , m_chatPanel(nullptr)
     , m_settingsPanel(nullptr)
+    , m_statusPill(nullptr)
+    , m_crossfade(nullptr)
+    , m_skipFade(false)
     , m_selfTest(false)
 {
     setupUi();
     setWindowTitle("Magnite LLM");
     resize(1200, 800);
+    setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
     connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
     connect(m_backend, &BackendManager::errorOccurred, this, &MainWindow::onBackendError);
@@ -56,76 +68,74 @@ MainWindow::~MainWindow() {
 
 void MainWindow::setupUi() {
     auto *central = new QWidget(this);
+    // Flat black base; the glass side panels render transparent over it.
+    // The background lives in the global QSS (#appRoot -> @bgVoid) so no
+    // widget-level stylesheet cascades color onto the child controls.
+    central->setObjectName("appRoot");
     auto *mainLayout = new QHBoxLayout(central);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // ---- Sidebar ----
+    // ---- Sidebar (design doc §5) ----
     auto *sidebar = new QWidget();
     sidebar->setObjectName("sidebar");
-    sidebar->setStyleSheet(
-        "#sidebar { background: #2b2b2b; }"
-        "#sidebar QPushButton { text-align: left; padding: 10px 16px; border: none;"
-        "   color: #ddd; font-weight: 500; }"
-        "#sidebar QPushButton:hover { background: #3a3a3a; }"
-        "#sidebar QPushButton:checked { background: #3d6da9; color: white; }"
-        "#statusLabel { padding: 10px 16px; color: #aaa; font-size: 12px; }");
+    sidebar->setFixedWidth(Theme::sidebarWidthExpanded());
     auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(0, 0, 0, 0);
-    sidebarLayout->setSpacing(0);
+    sidebarLayout->setContentsMargins(Theme::spacingBase(), 16,
+                                      Theme::spacingBase(), 16);
+    sidebarLayout->setSpacing(2);
 
     auto *logoLabel = new QLabel("Magnite", sidebar);
-    logoLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: white; padding: 16px;");
+    logoLabel->setObjectName("logoLabel");
     sidebarLayout->addWidget(logoLabel);
 
-    auto *sep = new QFrame(sidebar);
-    sep->setFrameShape(QFrame::HLine);
-    sep->setStyleSheet("color: #444;");
-    sidebarLayout->addWidget(sep);
-
-    struct PanelInfo {
+    struct NavInfo {
         QString label;
-        Panel panel;
+        QString icon;
+        int panel;
     };
 
-    const QList<PanelInfo> panels = {
-        {"Models", PanelModels},
-        {"Training", PanelTraining},
-        {"RAG", PanelRag},
-        {"Adapters", PanelAdapters},
-        {"Chat", PanelChat},
-        {"Settings", PanelSettings},
-    };
-
-    for (const auto &info : panels) {
-        auto *btn = new QPushButton(info.label, sidebar);
+    auto makeNavButton = [this](const NavInfo &info) {
+        auto *btn = new QPushButton(info.label);
+        btn->setObjectName("navBtn");
         btn->setCheckable(true);
-        btn->setChecked(info.panel == PanelModels);
-        connect(btn, &QPushButton::clicked, this, [this, btn, info]() {
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setProperty("navicon", info.icon);
+        btn->setProperty("panel", info.panel);
+        connect(btn, &QPushButton::clicked, this, [this, info]() {
             switchPanel(info.panel);
-            for (auto *other : m_sideButtons) {
-                other->setChecked(other == btn);
-            }
         });
-        sidebarLayout->addWidget(btn);
         m_sideButtons.append(btn);
-    }
+        return btn;
+    };
+
+    // 5 nav items in stack order; Settings is pinned to the bottom.
+    const QList<NavInfo> navs = {
+        {"Models",   "database",       PanelModels},
+        {"Training", "graduation-cap", PanelTraining},
+        {"RAG",      "folder",         PanelRag},
+        {"Adapters", "layers",         PanelAdapters},
+        {"Chat",     "message-circle", PanelChat},
+    };
+    for (const auto &info : navs)
+        sidebarLayout->addWidget(makeNavButton(info));
 
     sidebarLayout->addStretch();
 
-    auto *statusLabel = new QLabel("Backend: starting...", sidebar);
-    statusLabel->setObjectName("statusLabel");
-    sidebarLayout->addWidget(statusLabel);
-    connect(m_backend, &BackendManager::started, statusLabel, [statusLabel]() {
-        statusLabel->setText("Backend: connected");
-        statusLabel->setStyleSheet(
-            "padding: 10px 16px; color: #7dc27a; font-size: 12px;");
+    // Backend status pill: state property drives the color via QSS.
+    m_statusPill = new QLabel("Backend: starting…", sidebar);
+    m_statusPill->setObjectName("statusPill");
+    m_statusPill->setAlignment(Qt::AlignCenter);
+    sidebarLayout->addWidget(m_statusPill);
+    connect(m_backend, &BackendManager::started, this, [this]() {
+        setPillState("ok", "Backend: connected");
     });
-    connect(m_backend, &BackendManager::errorOccurred, statusLabel, [statusLabel]() {
-        statusLabel->setText("Backend: error");
-        statusLabel->setStyleSheet(
-            "padding: 10px 16px; color: #e07a7a; font-size: 12px;");
+    connect(m_backend, &BackendManager::errorOccurred, this,
+            [this](QProcess::ProcessError) {
+        setPillState("err", "Backend: error");
     });
+
+    sidebarLayout->addWidget(makeNavButton({"Settings", "settings", PanelSettings}));
 
     mainLayout->addWidget(sidebar);
 
@@ -149,12 +159,102 @@ void MainWindow::setupUi() {
     mainLayout->addWidget(m_stack, 1);
 
     setCentralWidget(central);
+
+    refreshNavIcons();
 }
 
 void MainWindow::switchPanel(int index) {
-    // Persist whichever panel we're leaving, then show the new one.
+    // Persist whichever panel we're leaving, then show the new one. The nav
+    // buttons mirror the active panel (also on programmatic switches, e.g.
+    // selftest), then the incoming panel crossfades in.
     m_stack->setCurrentIndex(index);
+    for (auto *btn : m_sideButtons)
+        btn->setChecked(btn->property("panel").toInt() == index);
+    refreshNavIcons();
+    startPanelFade();
     savePanelSettings();
+}
+
+void MainWindow::refreshNavIcons() {
+    // Stroke-tinted icons: blue on the active item, secondary when idle.
+    for (auto *btn : m_sideButtons) {
+        const QString name = btn->property("navicon").toString();
+        const QColor color = btn->isChecked()
+            ? QColor(Theme::accentPrimary())
+            : QColor(Theme::textSecondary());
+        btn->setIcon(Theme::coloredIcon(name, color, 18));
+        btn->setIconSize(QSize(18, 18));
+    }
+}
+
+void MainWindow::startPanelFade() {
+    // 150ms fade-in of the destination panel (design doc §6). Skipped in
+    // selftest mode so the panel navigation stays deterministic, and the
+    // effect is removed on completion so Qt doesn't keep an offscreen buffer.
+    if (m_selfTest || m_skipFade)
+        return;
+
+    if (m_crossfade) {
+        m_crossfade->stop();
+        delete m_crossfade;
+        m_crossfade = nullptr;
+    }
+    m_stack->setGraphicsEffect(nullptr);
+
+    auto *effect = new QGraphicsOpacityEffect(m_stack);
+    m_stack->setGraphicsEffect(effect);
+    effect->setOpacity(0.0);
+
+    m_crossfade = new QPropertyAnimation(effect, "opacity", this);
+    m_crossfade->setDuration(150);
+    m_crossfade->setStartValue(0.0);
+    m_crossfade->setEndValue(1.0);
+    m_crossfade->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_crossfade, &QPropertyAnimation::finished, this, [this]() {
+        if (m_crossfade) {
+            m_crossfade->deleteLater();
+            m_crossfade = nullptr;
+        }
+        m_stack->setGraphicsEffect(nullptr);
+    });
+    m_crossfade->start();
+}
+
+void MainWindow::setPillState(const char *state, const QString &text) {
+    m_statusPill->setText(text);
+    m_statusPill->setProperty("state", state);
+    m_statusPill->style()->unpolish(m_statusPill);
+    m_statusPill->style()->polish(m_statusPill);
+}
+
+void MainWindow::captureScreenshots(const QString &dir) {
+    // Dev tool (+ Phase 5.5.7 review aid): captures each panel to
+    // <dir>/panel-<index>.png using an in-process widget grab, which works
+    // on Wayland where the X root grab comes back black.
+    QDir().mkpath(dir);
+    m_shotDir = dir;
+    m_skipFade = true;
+    captureNextPanel(0);
+}
+
+void MainWindow::captureNextPanel(int index) {
+    if (index >= PanelCount) {
+        fprintf(stderr, "[screenshot] done\n");
+        QCoreApplication::exit(0);
+        return;
+    }
+    switchPanel(index);
+    QTimer::singleShot(300, this, [this, index]() {
+        const QPixmap pm = this->grab();
+        const QString path = QStringLiteral("%1/panel-%2.png").arg(m_shotDir).arg(index);
+        if (!pm.save(path)) {
+            fprintf(stderr, "[screenshot] FAIL: %s\n", qUtf8Printable(path));
+            QCoreApplication::exit(1);
+            return;
+        }
+        fprintf(stderr, "[screenshot] ok: %s\n", qUtf8Printable(path));
+        captureNextPanel(index + 1);
+    });
 }
 
 void MainWindow::savePanelSettings() {
@@ -194,6 +294,8 @@ void MainWindow::onBackendStarted() {
             m_trainingPanel, &TrainingPanel::refreshOptions);
     connect(m_trainingPanel, &TrainingPanel::trainingCompleted,
             m_adaptersPanel, &AdaptersPanel::refresh);
+    connect(m_adaptersPanel, &AdaptersPanel::adapterActivated,
+            m_chatPanel, &ChatPanel::refreshEngineStatus);
     statusBar()->showMessage(QString("Backend connected (%1)").arg(m_backend->baseUrl()), 4000);
 }
 
@@ -259,7 +361,15 @@ void MainWindow::runSelfTest() {
         }
 
         // Backend IPC check: GET /models should return 200 once connected.
-        if (m_backendClient && m_backendClient->isReady()) {
+        // Phase selftests (training/adapter/pull/inference) depend on the
+        // backend being up, so they wait for readiness first.
+        const bool phaseTest =
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_TRAINING") ||
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_ADAPTER") ||
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_PULL") ||
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE");
+
+        auto beginIpcStage = [this, failCount, finish]() {
             m_backendClient->get("/models", [this, failCount, finish](int status, const QJsonDocument &doc) {
                 fprintf(stderr, "[selftest] %s GET /models status=%d, count=%d\n",
                         status == 200 ? "ok:" : "FAIL:",
@@ -275,6 +385,8 @@ void MainWindow::runSelfTest() {
 
                     if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_TRAINING")) {
                         trainingSelfTest(failCount, finish);
+                    } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_ADAPTER")) {
+                        adapterSelfTest(failCount, finish);
                     } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_PULL")) {
                         pullModelSelfTest(failCount, finish);
                     } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE")) {
@@ -284,11 +396,42 @@ void MainWindow::runSelfTest() {
                     }
                 });
             });
+        };
+
+        if (phaseTest) {
+            waitForBackend(failCount, finish, beginIpcStage);
+        } else if (m_backendClient && m_backendClient->isReady()) {
+            beginIpcStage();
         } else {
             fprintf(stderr, "[selftest] ok: backend not ready, skipping IPC check\n");
             finish();
         }
     });
+}
+
+void MainWindow::waitForBackend(std::shared_ptr<int> failCount,
+                                std::function<void()> finish,
+                                std::function<void()> proceed, int attempt) {
+    if (m_backendClient && m_backendClient->isReady()) {
+        proceed();
+        return;
+    }
+    if (m_backend && !m_backend->isRunning()) {
+        ++(*failCount);
+        fprintf(stderr, "[selftest] FAIL: backend process died during startup\n");
+        finish();
+        return;
+    }
+    if (attempt > 60) {
+        ++(*failCount);
+        fprintf(stderr, "[selftest] FAIL: backend never became ready (timeout)\n");
+        proceed();
+        return;
+    }
+    QTimer::singleShot(500, this,
+        [this, failCount, finish, proceed, attempt]() {
+            waitForBackend(failCount, finish, proceed, attempt + 1);
+        });
 }
 
 void MainWindow::pullModelSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish) {
@@ -522,5 +665,193 @@ void MainWindow::pollTrainingSelfTest(const QString &jobId, int attempts,
                     pollTrainingSelfTest(jobId, attempts + 1, failCount, finish);
                 });
             }
+        });
+}
+
+void MainWindow::adapterSelfTest(std::shared_ptr<int> failCount,
+                                 std::function<void()> finish) {
+    // End-to-end Phase 5: train a tiny QLoRA adapter, activate it for
+    // inference (torch/PEFT engine), stream a chat through it, then clear it.
+    const QString path = QDir::temp().filePath("magnite-selftest-adapter.jsonl");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        ++(*failCount);
+        fprintf(stderr, "[selftest] FAIL: write adapter dataset\n");
+        finish();
+        return;
+    }
+    const char *const lines[] = {
+        R"({"instruction":"Introduce Magnite","output":"Magnite is a local LLM workstation."})",
+        R"({"instruction":"What is QLoRA?","output":"A memory-efficient way to fine-tune large models."})",
+        R"({"instruction":"Define an adapter","output":"A small trainable module layered on a frozen base."})",
+        R"({"instruction":"Name a reptile","output":"A crocodile basks beside the river."})",
+        R"({"instruction":"Pick a color","output":"Teal feels calm and precise."})",
+        R"({"instruction":"Sum one and two","output":"One plus two equals three."})",
+    };
+    for (const char *line : lines) {
+        f.write(line);
+        f.write("\n", 1);
+    }
+    f.close();
+
+    QJsonObject ingest;
+    ingest["path"] = path;
+    m_backendClient->post("/datasets/ingest", ingest,
+        [this, failCount, finish](int status, const QJsonDocument &doc) {
+            if (status != 201) {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: ingest adapter dataset (status=%d)\n", status);
+                finish();
+                return;
+            }
+            const QString datasetId = doc.object()["id"].toString();
+            fprintf(stderr, "[selftest] ok: ingested adapter dataset %s\n",
+                    qUtf8Printable(datasetId));
+
+            QJsonObject body;
+            body["base_model"] = "sshleifer/tiny-gpt2";
+            body["dataset_id"] = datasetId;
+            body["name"] = "selftest-activate";
+            body["rank"] = 4;
+            body["alpha"] = 8;
+            body["target_modules"] = "all-linear";
+            body["quantization"] = "4bit";
+            body["epochs"] = 3;
+            body["max_steps"] = 3;
+            body["learning_rate"] = 2e-4;
+            body["batch_size"] = 1;
+            body["warmup_ratio"] = 0.03;
+            body["max_length"] = 64;
+
+            m_backendClient->post("/training/start", body,
+                [this, failCount, finish](int s2, const QJsonDocument &d2) {
+                    if (s2 != 202) {
+                        ++(*failCount);
+                        fprintf(stderr, "[selftest] FAIL: adapter training start (status=%d)\n", s2);
+                        finish();
+                        return;
+                    }
+                    const QString jobId = d2.object()["id"].toString();
+                    fprintf(stderr, "[selftest] ok: adapter training started job=%s\n",
+                            qUtf8Printable(jobId));
+                    pollTrainingForAdapter(jobId, 0, failCount, finish);
+                });
+        });
+}
+
+void MainWindow::pollTrainingForAdapter(const QString &jobId, int attempts,
+                                        std::shared_ptr<int> failCount,
+                                        std::function<void()> finish) {
+    m_backendClient->get("/training/status/" + jobId,
+        [this, jobId, attempts, failCount, finish](int status, const QJsonDocument &doc) {
+            if (status != 200) {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: adapter training poll (status=%d)\n", status);
+                finish();
+                return;
+            }
+            const QJsonObject job = doc.object();
+            const QString jobStatus = job["status"].toString();
+            fprintf(stderr, "[selftest] train %s: %s (step %lld/%lld)\n",
+                    qUtf8Printable(jobStatus),
+                    qUtf8Printable(job["message"].toString()),
+                    job["current_step"].toVariant().toLongLong(),
+                    job["total_steps"].toVariant().toLongLong());
+            if (jobStatus == "done") {
+                m_backendClient->get("/adapters",
+                    [this, jobId, failCount, finish](int s, const QJsonDocument &d) {
+                        QString adapterId;
+                        if (s == 200) {
+                            for (const auto &v : d.array()) {
+                                if (v.toObject()["training_job_id"].toString() == jobId)
+                                    adapterId = v.toObject()["id"].toString();
+                            }
+                        }
+                        if (adapterId.isEmpty()) {
+                            ++(*failCount);
+                            fprintf(stderr, "[selftest] FAIL: no adapter for training job\n");
+                            finish();
+                            return;
+                        }
+                        fprintf(stderr, "[selftest] ok: adapter registered %s\n",
+                                qUtf8Printable(adapterId));
+                        activateAdapterSelfTest(adapterId, failCount, finish);
+                    });
+            } else if (jobStatus == "error" || jobStatus == "cancelled") {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: adapter training %s: %s\n",
+                        qUtf8Printable(jobStatus),
+                        qUtf8Printable(job["error"].toString()));
+                finish();
+            } else if (attempts > 240) {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: adapter training timed out\n");
+                finish();
+            } else {
+                QTimer::singleShot(1000, this, [this, jobId, attempts, failCount, finish]() {
+                    pollTrainingForAdapter(jobId, attempts + 1, failCount, finish);
+                });
+            }
+        });
+}
+
+void MainWindow::activateAdapterSelfTest(const QString &adapterId,
+                                         std::shared_ptr<int> failCount,
+                                         std::function<void()> finish) {
+    // Activate via the real /inference/adapter path; the engine should be
+    // "torch" and the status should report the active adapter.
+    QJsonObject activateBody;
+    activateBody["adapter_id"] = adapterId;
+    m_backendClient->post("/inference/adapter", activateBody,
+        [this, adapterId, failCount, finish](int status, const QJsonDocument &doc) {
+            if (status != 200) {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: adapter activate (status=%d, %s)\n",
+                        status, qUtf8Printable(doc.object()["detail"].toString()));
+                finish();
+                return;
+            }
+            const QJsonObject obj = doc.object();
+            const QString engineName = obj["engine"].toObject()["name"].toString();
+            const bool ok = (obj["active_adapter_id"].toString() == adapterId &&
+                             engineName == "torch");
+            if (!ok) ++(*failCount);
+            fprintf(stderr, "[selftest] %s adapter activate: engine=%s active=%s\n",
+                    ok ? "ok:" : "FAIL:", qUtf8Printable(engineName),
+                    qUtf8Printable(obj["active_adapter"].toString()));
+
+            // Stream a chat through the adapter and count token deltas.
+            QJsonObject chatBody;
+            chatBody["messages"] = QJsonArray{
+                QJsonObject{{"role", "user"}, {"content", "Hello from the adapter"}}};
+            chatBody["max_tokens"] = 8;
+            chatBody["temperature"] = 0.7;
+
+            int *deltaCount = new int(0);
+            m_backendClient->streamPost("/inference/chat", chatBody,
+                [deltaCount](const QJsonObject &event) {
+                    if (event.contains("delta")) ++(*deltaCount);
+                },
+                [this, adapterId, failCount, finish, deltaCount](int streamStatus) {
+                    const int dc = *deltaCount;
+                    delete deltaCount;
+                    const bool ok = (streamStatus == 200 && dc > 0);
+                    if (!ok) ++(*failCount);
+                    fprintf(stderr, "[selftest] %s adapter e2e: status=%d, deltas=%d\n",
+                            ok ? "ok:" : "FAIL:", streamStatus, dc);
+
+                    // Clear the adapter to leave a clean state.
+                    QJsonObject clearBody;
+                    clearBody["adapter_id"] = "";
+                    m_backendClient->post("/inference/adapter", clearBody,
+                        [this, failCount, finish](int s, const QJsonDocument &d) {
+                            const bool cleared =
+                                (s == 200 && d.object()["active_adapter_id"].toString().isEmpty());
+                            if (!cleared) ++(*failCount);
+                            fprintf(stderr, "[selftest] %s adapter cleared\n",
+                                    cleared ? "ok:" : "FAIL:");
+                            finish();
+                        });
+                });
         });
 }

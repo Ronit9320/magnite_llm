@@ -50,7 +50,8 @@ private:
     void refreshDatasets(const QString &selectId = QString());
     QString quantizationCode() const;
     void finishJob(const QString &message, const QString &color);
-    void setStatus(const QString &text, const QString &color = QString());
+    // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
+    void setStatus(const QString &text, const QString &tone = QString());
 
     BackendClient *m_client;
     QTimer *m_pollTimer;

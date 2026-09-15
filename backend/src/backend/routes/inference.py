@@ -4,11 +4,16 @@ import json
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from backend.inference.schemas import ChatRequest, CompletionRequest, InferenceStatus
 from backend.inference.supervisor import get_supervisor
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+
+class AdapterActivateRequest(BaseModel):
+    adapter_id: str = ""
 
 
 def _sse(data: str) -> str:
@@ -18,6 +23,27 @@ def _sse(data: str) -> str:
 @router.get("/status", response_model=InferenceStatus)
 def status():
     return get_supervisor().status()
+
+
+@router.post("/adapter", response_model=InferenceStatus)
+def set_adapter(body: AdapterActivateRequest):
+    """Activate (or clear) a trained adapter for the current inference session.
+
+    Switching adapters restart the engine on the adapter's base model with the
+    PEFT weights loaded. An empty ``adapter_id`` clears the active adapter.
+    """
+    sup = get_supervisor()
+    adapter_id = (body.adapter_id or "").strip()
+    try:
+        if not adapter_id:
+            sup.deactivate_adapter()
+        else:
+            sup.activate_adapter(adapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return sup.status()
 
 
 @router.post("/load")

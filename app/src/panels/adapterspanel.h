@@ -7,8 +7,8 @@ class QPushButton;
 class QLabel;
 class BackendClient;
 
-// Adapters panel: manage trained LoRA adapters and switch the active one.
-// Hot-switching (Activate) lands in Phase 5; list/delete are live now.
+// Adapters panel: manage trained LoRA adapters, export/import them, and
+// hot-switch the adapter active in the Chat panel.
 class AdaptersPanel : public BasePanel {
     Q_OBJECT
 
@@ -17,21 +17,34 @@ public:
 
     void setBackendClient(BackendClient *client);
 
+    QString activeAdapterId() const { return m_activeAdapterId; }
+
+signals:
+    // Emitted when the active adapter changes (activate/clear/delete).
+    void adapterActivated();
+
 public slots:
     void refresh();
 
 private slots:
     void onActivate();
     void onDeleteAdapter();
+    void onExportAdapter();
+    void onImportAdapter();
 
 private:
     void setupUi();
-    void setStatus(const QString &text);
+    // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
+    void setStatus(const QString &text, const QString &tone = QString());
     QString selectedId() const;
+    void loadActiveAdapter();
 
     BackendClient *m_client;
     QTableWidget *m_table;
     QPushButton *m_activateButton;
+    QPushButton *m_exportButton;
+    QPushButton *m_importButton;
     QPushButton *m_deleteButton;
     QLabel *m_statusLabel;
+    QString m_activeAdapterId;
 };

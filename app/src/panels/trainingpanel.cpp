@@ -82,7 +82,9 @@ void TrainingPanel::setupUi() {
     addField(m_modelCombo, "Base model:");
     auto *modelRow = new QHBoxLayout();
     auto *refreshBtn = new QPushButton("Refresh", this);
+    refreshBtn->setObjectName("secondaryBtn");
     auto *folderBtn = new QPushButton("Folder...", this);
+    folderBtn->setObjectName("secondaryBtn");
     modelRow->addWidget(refreshBtn);
     modelRow->addWidget(folderBtn);
     modelRow->addStretch();
@@ -97,6 +99,7 @@ void TrainingPanel::setupUi() {
     addField(m_datasetCombo, "Dataset:");
     auto *datasetRow = new QHBoxLayout();
     auto *ingestBtn = new QPushButton("Import file...", this);
+    ingestBtn->setObjectName("secondaryBtn");
     datasetRow->addWidget(ingestBtn);
     datasetRow->addStretch();
     layout->addLayout(datasetRow);
@@ -121,7 +124,9 @@ void TrainingPanel::setupUi() {
 
     auto *btns = new QHBoxLayout();
     m_startButton = new QPushButton("Start Training", this);
+    m_startButton->setObjectName("primaryBtn");
     m_stopButton = new QPushButton("Stop", this);
+    m_stopButton->setObjectName("destructiveBtn");
     m_stopButton->setEnabled(false);
     btns->addWidget(m_startButton);
     btns->addWidget(m_stopButton);
@@ -132,10 +137,11 @@ void TrainingPanel::setupUi() {
     m_log->setReadOnly(true);
     m_log->setPlaceholderText("Training log will appear here.");
     m_log->setMaximumBlockCount(2000);
+    m_log->setObjectName("logView");
     layout->addWidget(m_log, 1);
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #666;");
+    m_statusLabel->setObjectName("statusLabel");
     layout->addWidget(m_statusLabel);
     m_statusLabel->setText("Ready. Select a base model and an ingested dataset.");
 
@@ -284,9 +290,9 @@ void TrainingPanel::onBrowseDataset() {
         [this](int status, const QJsonDocument &doc) {
             if (status != 201) {
                 if (status == 400) {
-                    setStatus("Import failed: " + doc.object()["detail"].toString(), "#c0392b");
+                    setStatus("Import failed: " + doc.object()["detail"].toString(), "error");
                 } else {
-                    setStatus(QString("Import failed (HTTP %1).").arg(status), "#c0392b");
+                    setStatus(QString("Import failed (HTTP %1).").arg(status), "error");
                 }
                 return;
             }
@@ -307,18 +313,18 @@ QString TrainingPanel::quantizationCode() const {
 
 void TrainingPanel::onStart() {
     if (!m_client || !m_client->isReady()) {
-        setStatus("Backend not connected.", "#c0392b");
+        setStatus("Backend not connected.", "error");
         return;
     }
     const QString baseText = m_modelCombo->currentText().trimmed();
     if (baseText.isEmpty()) {
-        setStatus("Select or type a base model.", "#c0392b");
+        setStatus("Select or type a base model.", "error");
         return;
     }
     const QString dsText = m_datasetCombo->currentText().trimmed();
     const int di = m_datasetCombo->findText(dsText);
     if (di < 0) {
-        setStatus("Select an ingested dataset.", "#c0392b");
+        setStatus("Select an ingested dataset.", "error");
         return;
     }
 
@@ -347,7 +353,7 @@ void TrainingPanel::onStart() {
                 const QString msg = doc.object().value("detail").isString()
                     ? doc.object()["detail"].toString()
                     : QString("HTTP %1").arg(status);
-                setStatus("Could not start training: " + msg, "#c0392b");
+                setStatus("Could not start training: " + msg, "error");
                 return;
             }
             m_jobId = doc.object()["id"].toString();
@@ -368,7 +374,7 @@ void TrainingPanel::onStop() {
             if (status == 200) {
                 setStatus("Cancelling...");
             } else {
-                setStatus(QString("Cancel request failed (HTTP %1).").arg(status), "#c0392b");
+                setStatus(QString("Cancel request failed (HTTP %1).").arg(status), "error");
             }
         });
 }
@@ -382,7 +388,7 @@ void TrainingPanel::onPollStatus() {
         [this](int status, const QJsonDocument &doc) {
             if (status != 200) {
                 m_pollTimer->stop();
-                finishJob(QString("Lost track of training job (HTTP %1).").arg(status), "#c0392b");
+                finishJob(QString("Lost track of training job (HTTP %1).").arg(status), "error");
                 return;
             }
             const QJsonObject job = doc.object();
@@ -408,7 +414,7 @@ void TrainingPanel::onPollStatus() {
             if (st == "done" || st == "error" || st == "cancelled") {
                 m_pollTimer->stop();
                 m_log->appendPlainText(QString("[%1] %2").arg(st.toUpper()).arg(message));
-                finishJob(message, st == "done" ? "#27ae60" : "#c0392b");
+                finishJob(message, st == "done" ? "ok" : "error");
                 return;
             }
 
@@ -419,19 +425,18 @@ void TrainingPanel::onPollStatus() {
         });
 }
 
-void TrainingPanel::finishJob(const QString &message, const QString &color) {
+void TrainingPanel::finishJob(const QString &message, const QString &tone) {
     m_jobId.clear();
     m_startButton->setEnabled(true);
     m_stopButton->setEnabled(false);
-    setStatus(message, color);
-    if (color != "#c0392b")
+    setStatus(message, tone);
+    if (tone != "error")
         emit trainingCompleted();
 }
 
-void TrainingPanel::setStatus(const QString &text, const QString &color) {
+void TrainingPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
-    m_statusLabel->setStyleSheet(
-        color.isEmpty() ? "color: #666;" : QString("color: %1;").arg(color));
+    applyStatusTone(m_statusLabel, tone);
 }
 
 QString TrainingPanel::settingsJson() const {

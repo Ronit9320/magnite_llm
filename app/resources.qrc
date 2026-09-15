@@ -1,0 +1,37 @@
+<RCC>
+    <qresource prefix="/">
+        <!-- Theme stylesheet (placeholders resolved by Theme::qss at runtime) -->
+        <file alias="theme/theme.qss">resources/theme/theme.qss</file>
+
+        <!-- Bundled OFL fonts (SIL OFL, see resources/fonts/OFL-*.txt) -->
+        <file alias="fonts/SpaceGrotesk-Regular.ttf">resources/fonts/SpaceGrotesk-Regular.ttf</file>
+        <file alias="fonts/SpaceGrotesk-Medium.ttf">resources/fonts/SpaceGrotesk-Medium.ttf</file>
+        <file alias="fonts/SpaceGrotesk-SemiBold.ttf">resources/fonts/SpaceGrotesk-SemiBold.ttf</file>
+        <file alias="fonts/DMSans-Regular.ttf">resources/fonts/DMSans-Regular.ttf</file>
+        <file alias="fonts/DMSans-Medium.ttf">resources/fonts/DMSans-Medium.ttf</file>
+
+        <!-- Lucide-style line icons (MIT), stroke="currentColor", tinted by Theme::coloredIcon -->
+        <file alias="icons/box.svg">resources/icons/box.svg</file>
+        <file alias="icons/check.svg">resources/icons/check.svg</file>
+        <file alias="icons/check-white.svg">resources/icons/check-white.svg</file>
+        <file alias="icons/circle-stop.svg">resources/icons/circle-stop.svg</file>
+        <file alias="icons/cpu.svg">resources/icons/cpu.svg</file>
+        <file alias="icons/database.svg">resources/icons/database.svg</file>
+        <file alias="icons/download.svg">resources/icons/download.svg</file>
+        <file alias="icons/file-down.svg">resources/icons/file-down.svg</file>
+        <file alias="icons/file-text.svg">resources/icons/file-text.svg</file>
+        <file alias="icons/file-up.svg">resources/icons/file-up.svg</file>
+        <file alias="icons/folder.svg">resources/icons/folder.svg</file>
+        <file alias="icons/graduation-cap.svg">resources/icons/graduation-cap.svg</file>
+        <file alias="icons/layers.svg">resources/icons/layers.svg</file>
+        <file alias="icons/message-circle.svg">resources/icons/message-circle.svg</file>
+        <file alias="icons/play.svg">resources/icons/play.svg</file>
+        <file alias="icons/plus.svg">resources/icons/plus.svg</file>
+        <file alias="icons/refresh-cw.svg">resources/icons/refresh-cw.svg</file>
+        <file alias="icons/search.svg">resources/icons/search.svg</file>
+        <file alias="icons/send.svg">resources/icons/send.svg</file>
+        <file alias="icons/settings.svg">resources/icons/settings.svg</file>
+        <file alias="icons/square.svg">resources/icons/square.svg</file>
+        <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+    </qresource>
+</RCC>

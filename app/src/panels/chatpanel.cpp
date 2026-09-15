@@ -52,6 +52,7 @@ void ChatPanel::setupUi() {
     m_engineCombo->setCurrentIndex(0);
 
     auto *loadBtn = new QPushButton("Load Model", this);
+    loadBtn->setObjectName("primaryBtn");
     connect(loadBtn, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
 
     ctrlRow1->addWidget(new QLabel("Model:", this));
@@ -79,6 +80,7 @@ void ChatPanel::setupUi() {
     m_ragCheck->setToolTip("Phase 6: inject retrieved context.");
 
     auto *statusBtn = new QPushButton("Refresh Status", this);
+    statusBtn->setObjectName("secondaryBtn");
     connect(statusBtn, &QPushButton::clicked, this, &ChatPanel::refreshEngineStatus);
 
     ctrlRow2->addWidget(m_maxTokensSpin);
@@ -95,7 +97,6 @@ void ChatPanel::setupUi() {
     m_conversation->setPlaceholderText(
         "Load a model, then type a message to begin.\n"
         "Inference supports HuggingFace GGUF repos directly.");
-    m_conversation->setStyleSheet("QPlainTextEdit { font-size: 13px; }");
     layout->addWidget(m_conversation, 1);
 
     // Input row
@@ -103,9 +104,12 @@ void ChatPanel::setupUi() {
     m_input = new QLineEdit(this);
     m_input->setPlaceholderText("Type a message...");
     m_sendButton = new QPushButton("Send", this);
+    m_sendButton->setObjectName("primaryBtn");
     m_stopButton = new QPushButton("Stop", this);
+    m_stopButton->setObjectName("destructiveBtn");
     m_stopButton->setEnabled(false);
     m_clearButton = new QPushButton("Clear Chat", this);
+    m_clearButton->setObjectName("secondaryBtn");
     inputRow->addWidget(m_input, 1);
     inputRow->addWidget(m_sendButton);
     inputRow->addWidget(m_stopButton);
@@ -114,7 +118,7 @@ void ChatPanel::setupUi() {
 
     // Status
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #666;");
+    m_statusLabel->setObjectName("statusLabel");
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
@@ -172,9 +176,14 @@ void ChatPanel::refreshEngineStatus() {
             setStatus("No inference engine loaded. Load a model to begin.");
             return;
         }
-        setStatus(QString("Engine: %1 | Model: %2")
-                      .arg(engine["description"].toString(),
-                           obj["loaded_model"].toString()));
+        QString out = QString("Engine: %1 | Model: %2")
+                             .arg(engine["description"].toString(),
+                                  obj["loaded_model"].toString());
+        const QString adapter = obj["active_adapter"].toString();
+        if (!adapter.isEmpty()) {
+            out += QString(" | Adapter: %1").arg(adapter);
+        }
+        setStatus(out);
     });
 }
 
@@ -188,12 +197,12 @@ QString ChatPanel::currentEngineName() const {
 
 void ChatPanel::onLoadModel() {
     if (!m_client || !m_client->isReady()) {
-        setStatus("Backend not connected.", "#c0392b");
+        setStatus("Backend not connected.", "error");
         return;
     }
     const QString modelRef = m_modelCombo->currentText().trimmed();
     if (modelRef.isEmpty() || modelRef.startsWith("(")) {
-        setStatus("Enter or select a model id.", "#c0392b");
+        setStatus("Enter or select a model id.", "error");
         return;
     }
     const QString engineName = currentEngineName();
@@ -217,7 +226,7 @@ void ChatPanel::onLoadModel() {
             const QString err = doc.object().contains("detail")
                                     ? doc.object()["detail"].toString()
                                     : QString("HTTP %1").arg(status);
-            setStatus("Load failed: " + err, "#c0392b");
+            setStatus("Load failed: " + err, "error");
         }
     });
 }
@@ -226,7 +235,7 @@ void ChatPanel::onSend() {
     const QString text = m_input->text().trimmed();
     if (text.isEmpty() || m_streaming) return;
     if (!m_client || !m_client->isReady()) {
-        setStatus("Backend not connected.", "#c0392b");
+        setStatus("Backend not connected.", "error");
         return;
     }
 
@@ -286,7 +295,7 @@ void ChatPanel::onSend() {
                 const QString err = m_pendingResponse.isEmpty()
                                        ? QString("HTTP %1").arg(statusCode)
                                        : m_pendingResponse;
-                setStatus("Generation error: " + err, "#c0392b");
+                setStatus("Generation error: " + err, "error");
             }
             // If not already finalized by done event
             if (m_streaming) {
@@ -331,9 +340,9 @@ void ChatPanel::updateStreamingBlock(const QString &text, bool showCursor) {
     cur.insertText(showCursor ? (text + QStringLiteral(" ")) : text);
 }
 
-void ChatPanel::setStatus(const QString &text, const QString &color) {
+void ChatPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
-    m_statusLabel->setStyleSheet(color.isEmpty() ? "color: #666;" : QString("color: %1;").arg(color));
+    applyStatusTone(m_statusLabel, tone);
 }
 
 QString ChatPanel::settingsJson() const {

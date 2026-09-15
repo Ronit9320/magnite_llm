@@ -38,7 +38,8 @@ private slots:
 private:
     void setupUi();
     void clearTable();
-    void setStatus(const QString &text, const QString &color = QString());
+    // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
+    void setStatus(const QString &text, const QString &tone = QString());
     void switchToLocalView();
     void showSearchResults(const QJsonArray &results);
     void showLocalModels(const QJsonArray &models);
