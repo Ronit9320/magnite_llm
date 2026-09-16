@@ -23,6 +23,14 @@ inline QString accentPrimary() { return QStringLiteral("#3B82F6"); }
 inline QString accentBlue()    { return QStringLiteral("#3B82F6"); }
 inline QString accentGlow()    { return QStringLiteral("rgba(59, 130, 246, 0.35)"); }
 inline QString accentPink()    { return QStringLiteral("#EC4899"); }
+// Derived accent shades used by QSS interaction states (hover/pressed) and the
+// light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
+inline QString accentHover()   { return QStringLiteral("#60A5FA"); }
+inline QString accentActive()  { return QStringLiteral("#2563EB"); }
+inline QString accentText()    { return QStringLiteral("#FFFFFF"); }
+// Destructive-button hover + text-on-danger fills (status-error family).
+inline QString dangerHover()   { return QStringLiteral("#FCA5A5"); }
+inline QString onDanger()      { return QStringLiteral("#1B0A0A"); }
 
 inline QString glassFill()          { return QStringLiteral("rgba(255, 255, 255, 0.04)"); }
 inline QString glassFillHover()     { return QStringLiteral("rgba(255, 255, 255, 0.07)"); }

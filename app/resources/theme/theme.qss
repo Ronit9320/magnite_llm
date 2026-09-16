@@ -43,15 +43,15 @@ QPushButton:focus {
 QPushButton#primaryBtn {
     background-color: @accentPrimary;
     border: 1px solid rgba(59, 130, 246, 0.55);
-    color: #FFFFFF;
+    color: @accentText;
     font-weight: 500;
 }
 QPushButton#primaryBtn:hover {
-    background: #60A5FA;
-    border-color: #60A5FA;
+    background: @accentHover;
+    border-color: @accentHover;
 }
 QPushButton#primaryBtn:pressed {
-    background: #2563EB;
+    background: @accentActive;
 }
 QPushButton#primaryBtn:disabled {
     background: rgba(59, 130, 246, 0.35);
@@ -76,11 +76,11 @@ QPushButton#secondaryBtn:disabled {
 QPushButton#destructiveBtn {
     background-color: @statusError;
     border: 1px solid rgba(248, 113, 113, 0.55);
-    color: #1B0A0A;
+    color: @onDanger;
     font-weight: 500;
 }
 QPushButton#destructiveBtn:hover {
-    background: #FCA5A5;
+    background: @dangerHover;
 }
 QPushButton#destructiveBtn:disabled {
     background: rgba(248, 113, 113, 0.35);
@@ -104,12 +104,12 @@ QPlainTextEdit {
     font-size: 13px;
     padding: 6px 10px;
     selection-background-color: @accentPrimary;
-    selection-color: #FFFFFF;
+    selection-color: @accentText;
 }
 QPlainTextEdit {
     /* Multi-line sinks (: conversation, log) read as glass cards too. */
     selection-background-color: @accentPrimary;
-    selection-color: #FFFFFF;
+    selection-color: @accentText;
 }
 QLineEdit:hover,
 QComboBox:hover,
@@ -163,7 +163,7 @@ QComboBox QAbstractItemView {
     border-radius: 8px;
     color: @textPrimary;
     selection-background-color: @accentPrimary;
-    selection-color: #FFFFFF;
+    selection-color: @accentText;
     padding: 4px;
     outline: none;
 }
@@ -312,18 +312,18 @@ QLabel#adapterPill {
 QPushButton#cardPrimary {
     background-color: @accentPrimary;
     border: 1px solid rgba(59, 130, 246, 0.55);
-    color: #FFFFFF;
+    color: @accentText;
     font-family: "@bodyFont";
     font-size: 12px;
     font-weight: 500;
     padding: 4px 10px;
 }
 QPushButton#cardPrimary:hover {
-    background: #60A5FA;
-    border-color: #60A5FA;
+    background: @accentHover;
+    border-color: @accentHover;
 }
 QPushButton#cardPrimary:pressed {
-    background: #2563EB;
+    background: @accentActive;
 }
 QPushButton#cardBtn {
     background: @glassFill;
@@ -340,14 +340,14 @@ QPushButton#cardBtn:hover {
 QPushButton#cardDanger {
     background-color: @statusError;
     border: 1px solid rgba(248, 113, 113, 0.55);
-    color: #1B0A0A;
+    color: @onDanger;
     font-family: "@bodyFont";
     font-size: 12px;
     font-weight: 500;
     padding: 4px 10px;
 }
 QPushButton#cardDanger:hover {
-    background: #FCA5A5;
+    background: @dangerHover;
 }
 
 /* ---------- RAG cards (design doc §8) ---------- */
@@ -500,7 +500,7 @@ QSlider::add-page:vertical {
     border-radius: 2px;
 }
 QSlider::handle:horizontal {
-    background: #FFFFFF;
+    background: @accentText;
     border: 2px solid @accentPrimary;
     border-radius: 7px;
     width: 14px;
@@ -508,7 +508,7 @@ QSlider::handle:horizontal {
     margin: -7px 0;
 }
 QSlider::handle:vertical {
-    background: #FFFFFF;
+    background: @accentText;
     border: 2px solid @accentPrimary;
     border-radius: 7px;
     width: 14px;
@@ -517,7 +517,7 @@ QSlider::handle:vertical {
 }
 QSlider::handle:horizontal:hover,
 QSlider::handle:vertical:hover {
-    background: #DDD6FE;
+    background: @accentHover;
 }
 
 /* ---------- Scrollbars (design doc §7: thin, dark) ---------- */
@@ -595,7 +595,7 @@ QLabel#bodyLabel {
     color: @textPrimary;
 }
 QLabel#mutedLabel {
-    color: @textMuted;
+    color: @textSecondary;
 }
 QLabel#monoLabel {
     color: @textSecondary;
@@ -603,7 +603,7 @@ QLabel#monoLabel {
     font-size: 13px;
 }
 QLabel#statusLabel {
-    color: @textMuted;
+    color: @textSecondary;
     font-family: "@monoFont";
     font-size: 12px;
 }

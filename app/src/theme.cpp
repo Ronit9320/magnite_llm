@@ -61,6 +61,11 @@ std::vector<Token> tokens() {
         {"@accentBlue",         Theme::accentBlue()},
         {"@accentGlow",         Theme::accentGlow()},
         {"@accentPink",         Theme::accentPink()},
+        {"@accentHover",        Theme::accentHover()},
+        {"@accentActive",       Theme::accentActive()},
+        {"@accentText",         Theme::accentText()},
+        {"@dangerHover",        Theme::dangerHover()},
+        {"@onDanger",           Theme::onDanger()},
         {"@glassFill",          Theme::glassFill()},
         {"@glassFillHover",     Theme::glassFillHover()},
         {"@glassFillActive",    Theme::glassFillActive()},
@@ -103,8 +108,12 @@ QIcon Theme::coloredIcon(const QString &lucideName, const QColor &color, int siz
     if (svg.isEmpty()) return QIcon();
     const QByteArray tinted = tintSvg(svg, color).toUtf8();
 
+    // Render at the current device pixel ratio so icons stay crisp on HiDPI
+    // (identical output at 1x, sharper at 2x — no blank-icon regressions).
     QSvgRenderer renderer(tinted);
-    QPixmap pm(size, size);
+    const qreal dpr = qApp->devicePixelRatio();
+    QPixmap pm(qRound(size * dpr), qRound(size * dpr));
+    pm.setDevicePixelRatio(dpr);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     renderer.render(&p);
@@ -162,6 +171,11 @@ int Theme::selfCheck() {
     check("accentPrimary", Theme::accentPrimary() == "#3B82F6");
     check("accentBlue", Theme::accentBlue() == "#3B82F6");
     check("accentPink", Theme::accentPink() == "#EC4899");
+    check("accentHover", Theme::accentHover() == "#60A5FA");
+    check("accentActive", Theme::accentActive() == "#2563EB");
+    check("accentText", Theme::accentText() == "#FFFFFF");
+    check("dangerHover", Theme::dangerHover() == "#FCA5A5");
+    check("onDanger", Theme::onDanger() == "#1B0A0A");
     check("textPrimary", Theme::textPrimary() == "#F5F5F7");
     check("textSecondary", Theme::textSecondary() == "#A1A1AA");
     check("textMuted", Theme::textMuted() == "#6B7280");

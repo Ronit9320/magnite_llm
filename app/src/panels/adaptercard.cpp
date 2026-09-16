@@ -128,9 +128,14 @@ void AdapterCard::paintEvent(QPaintEvent *event) {
                                 .adjusted(0.5, 0.5, -0.5, -0.5),
                             Theme::cornerRadius(), Theme::cornerRadius());
         QRadialGradient glow(rect().center(), width() / 2.0);
-        glow.setColorAt(0.0, QColor(59, 130, 246, 16));
-        glow.setColorAt(0.65, QColor(59, 130, 246, 42));
-        glow.setColorAt(1.0, QColor(59, 130, 246, 92));
+        auto accentAt = [](int alpha) {
+            QColor c(Theme::accentPrimary());
+            c.setAlpha(alpha);
+            return c;
+        };
+        glow.setColorAt(0.0, accentAt(16));
+        glow.setColorAt(0.65, accentAt(42));
+        glow.setColorAt(1.0, accentAt(92));
         painter.fillPath(path, glow);
     }
     QFrame::paintEvent(event);
