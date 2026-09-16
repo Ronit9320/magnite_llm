@@ -2,15 +2,22 @@
 
 #include "panels/basepanel.h"
 
+#include <QJsonArray>
+#include <QList>
+
 class QLineEdit;
 class QPushButton;
-class QTableWidget;
+class QScrollArea;
 class QComboBox;
 class QLabel;
 class QTimer;
+class QWidget;
+class FlowLayout;
+class ModelCard;
 class BackendClient;
 
 // Models panel: browse local models, search HuggingFace, download, and delete.
+// Phase 5.5.3: the old QTableWidget is a scrollable grid of glass ModelCards.
 class ModelsPanel : public BasePanel {
     Q_OBJECT
 
@@ -37,15 +44,20 @@ private slots:
 
 private:
     void setupUi();
-    void clearTable();
+    void clearCards();
     // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
     void setStatus(const QString &text, const QString &tone = QString());
     void switchToLocalView();
     void showSearchResults(const QJsonArray &results);
     void showLocalModels(const QJsonArray &models);
+    void addCards(const QJsonArray &items, bool isHub);
     void startPullPolling(const QString &jobId);
+    void onCardClicked(ModelCard *card);
+    void updateActionButtons();
     bool isLocalView() const;
     QString selectedId() const;
+    ModelCard *cardById(const QString &id) const;
+    QWidget *makeCardHost();
 
     BackendClient *m_client;
     QLineEdit *m_searchEdit;
@@ -54,9 +66,14 @@ private:
     QPushButton *m_downloadButton;
     QPushButton *m_deleteButton;
     QComboBox *m_viewCombo;
-    QTableWidget *m_table;
+    QScrollArea *m_scrollArea;
+    FlowLayout *m_flowLayout;
+    QWidget *m_cardHost;
     QLabel *m_statusLabel;
     QTimer *m_pullTimer;
+    QList<ModelCard *> m_cards;
+    ModelCard *m_selectedCard;
     QString m_pullJobId;
+    QString m_downloadingId;
     QString m_lastSearch;
 };

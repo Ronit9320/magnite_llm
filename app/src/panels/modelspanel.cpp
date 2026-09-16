@@ -1,18 +1,19 @@
 #include "panels/modelspanel.h"
 
 #include "backend_client.h"
+#include "panels/modelcard.h"
+#include "widgets/flowlayout.h"
 
+#include <QComboBox>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QScrollArea>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -31,13 +32,24 @@ ModelsPanel::ModelsPanel(QWidget *parent)
     , m_downloadButton(nullptr)
     , m_deleteButton(nullptr)
     , m_viewCombo(nullptr)
-    , m_table(nullptr)
+    , m_scrollArea(nullptr)
+    , m_flowLayout(nullptr)
+    , m_cardHost(nullptr)
     , m_statusLabel(nullptr)
     , m_pullTimer(nullptr)
+    , m_selectedCard(nullptr)
 {
     setHeaderSubtitle(
         "Browse and download models from HuggingFace, then run them locally.");
     setupUi();
+}
+
+QWidget *ModelsPanel::makeCardHost() {
+    m_cardHost = new QWidget(this);
+    m_flowLayout = new FlowLayout(m_cardHost, 12, 12);
+    m_flowLayout->setContentsMargins(2, 2, 2, 2);
+    m_cardHost->setLayout(m_flowLayout);
+    return m_cardHost;
 }
 
 void ModelsPanel::setupUi() {
@@ -71,12 +83,15 @@ void ModelsPanel::setupUi() {
     viewRow->addStretch();
     layout->addLayout(viewRow);
 
-    m_table = new QTableWidget(this);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_table->horizontalHeader()->setStretchLastSection(true);
-    layout->addWidget(m_table, 1);
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setObjectName("cardScroll");
+    // The viewport would otherwise paint the default light palette; let the
+    // flat-black app root show through between the cards.
+    m_scrollArea->viewport()->setAutoFillBackground(false);
+    m_scrollArea->setWidget(makeCardHost());
+    layout->addWidget(m_scrollArea, 1);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
@@ -88,11 +103,6 @@ void ModelsPanel::setupUi() {
     connect(m_viewCombo, &QComboBox::currentIndexChanged, this, &ModelsPanel::onViewChanged);
     connect(m_downloadButton, &QPushButton::clicked, this, &ModelsPanel::onDownload);
     connect(m_deleteButton, &QPushButton::clicked, this, &ModelsPanel::onDeleteModel);
-    connect(m_table, &QTableWidget::itemSelectionChanged, this, [this]() {
-        bool has = !m_table->selectedItems().isEmpty();
-        m_downloadButton->setEnabled(has && !isLocalView());
-        m_deleteButton->setEnabled(has && isLocalView());
-    });
 
     m_pullTimer = new QTimer(this);
     m_pullTimer->setInterval(kPullPollMs);
@@ -136,9 +146,8 @@ void ModelsPanel::refresh() {
 
 void ModelsPanel::onViewChanged(int index) {
     Q_UNUSED(index);
-    clearTable();
-    m_downloadButton->setEnabled(false);
-    m_deleteButton->setEnabled(false);
+    clearCards();
+    updateActionButtons();
     if (isLocalView()) {
         m_refreshButton->setEnabled(true);
         m_searchButton->setEnabled(true);
@@ -149,39 +158,41 @@ void ModelsPanel::onViewChanged(int index) {
     }
 }
 
-void ModelsPanel::clearTable() {
-    m_table->clear();
-    m_table->setRowCount(0);
-    m_table->setColumnCount(0);
+void ModelsPanel::clearCards() {
+    while (QLayoutItem *item = m_flowLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) {
+            w->hide();            // stop painting immediately
+            w->setParent(nullptr); // detach from host so it can't overlap new cards
+            w->deleteLater();
+        }
+        delete item;
+    }
+    m_cards.clear();
+    if (m_selectedCard) {
+        m_selectedCard = nullptr;
+    }
+    m_flowLayout->invalidate();
+    m_cardHost->updateGeometry();
+}
+
+void ModelsPanel::addCards(const QJsonArray &items, bool isHub) {
+    for (const auto &value : items) {
+        auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
+        connect(card, &ModelCard::cardClicked, this, &ModelsPanel::onCardClicked);
+        m_flowLayout->addWidget(card);
+        m_cards.append(card);
+    }
+    m_flowLayout->invalidate();
+    m_cardHost->updateGeometry();
 }
 
 void ModelsPanel::showLocalModels(const QJsonArray &models) {
-    m_table->clear();
-    m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels(
-        {"Name", "Source", "Architecture", "Size", "License"});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 5; ++i)
-        m_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
-    m_table->setRowCount(models.size());
-
-    for (int row = 0; row < models.size(); ++row) {
-        const QJsonObject m = models.at(row).toObject();
-        const QString size = m.value("size_mb").toDouble() > 0
-            ? QString("%1 MB").arg(m.value("size_mb").toDouble(), 0, 'f', 1)
-            : "-";
-        auto *name = new QTableWidgetItem(m.value("name").toString());
-        name->setData(Qt::UserRole, m.value("id").toString());
-        m_table->setItem(row, 0, name);
-        m_table->setItem(row, 1, new QTableWidgetItem(m.value("source").toString()));
-        m_table->setItem(row, 2, new QTableWidgetItem(m.value("architecture").toString()));
-        m_table->setItem(row, 3, new QTableWidgetItem(size));
-        m_table->setItem(row, 4, new QTableWidgetItem(m.value("license").toString()));
-    }
+    clearCards();
+    addCards(models, false);
     setStatus(models.isEmpty()
                   ? "No local models yet. Search the Hub and download one."
                   : QString("%1 local model(s).").arg(models.size()));
-    m_deleteButton->setEnabled(false);
+    updateActionButtons();
     emit modelsChanged();
 }
 
@@ -212,36 +223,40 @@ void ModelsPanel::onSearch() {
 }
 
 void ModelsPanel::showSearchResults(const QJsonArray &results) {
-    m_table->clear();
-    m_table->setColumnCount(4);
-    m_table->setHorizontalHeaderLabels(
-        {"Model", "Downloads", "Likes", "License"});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 4; ++i)
-        m_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
-    m_table->setRowCount(results.size());
-
-    for (int row = 0; row < results.size(); ++row) {
-        const QJsonObject r = results.at(row).toObject();
-        auto *name = new QTableWidgetItem(r.value("repo_id").toString());
-        name->setData(Qt::UserRole, r.value("repo_id").toString());
-        m_table->setItem(row, 0, name);
-        m_table->setItem(row, 1, new QTableWidgetItem(
-            QString::number(r.value("downloads").toInt())));
-        m_table->setItem(row, 2, new QTableWidgetItem(
-            QString::number(r.value("likes").toInt())));
-        m_table->setItem(row, 3, new QTableWidgetItem(r.value("license").toString()));
-    }
+    clearCards();
+    addCards(results, true);
     setStatus(results.isEmpty()
                   ? "No results. Try a different search term."
                   : QString("%1 result(s). Select one and click Download.")
                         .arg(results.size()));
+    updateActionButtons();
+}
+
+void ModelsPanel::onCardClicked(ModelCard *card) {
+    if (m_selectedCard == card) return;
+    if (m_selectedCard)
+        m_selectedCard->setSelected(false);
+    m_selectedCard = card;
+    card->setSelected(true);
+    updateActionButtons();
+}
+
+void ModelsPanel::updateActionButtons() {
+    const bool hasSelection = m_selectedCard != nullptr;
+    m_downloadButton->setEnabled(hasSelection && !isLocalView());
+    m_deleteButton->setEnabled(hasSelection && isLocalView());
 }
 
 QString ModelsPanel::selectedId() const {
-    const auto items = m_table->selectedItems();
-    if (items.isEmpty()) return QString();
-    return items.first()->data(Qt::UserRole).toString();
+    return m_selectedCard ? m_selectedCard->id() : QString();
+}
+
+ModelCard *ModelsPanel::cardById(const QString &id) const {
+    for (ModelCard *card : m_cards) {
+        if (card && card->id() == id)
+            return card;
+    }
+    return nullptr;
 }
 
 void ModelsPanel::onDownload() {
@@ -250,6 +265,9 @@ void ModelsPanel::onDownload() {
 
     setStatus(QString("Downloading \"%1\"...").arg(ref));
     m_downloadButton->setEnabled(false);
+    m_downloadingId = ref;
+    if (ModelCard *card = cardById(ref))
+        card->setProgress(0);
 
     QJsonObject body;
     body["ref"] = ref;
@@ -290,14 +308,22 @@ void ModelsPanel::onPullPoll() {
         if (jobStatus == "done") {
             m_pullTimer->stop();
             m_pullJobId.clear();
+            if (ModelCard *card = cardById(m_downloadingId))
+                card->setProgress(-1);
+            m_downloadingId.clear();
             setStatus("Download complete. Refreshing local models...", "ok");
             switchToLocalView();
             refresh();
         } else if (jobStatus == "error") {
             m_pullTimer->stop();
             m_pullJobId.clear();
+            if (ModelCard *card = cardById(m_downloadingId))
+                card->setProgress(-1);
+            m_downloadingId.clear();
             setStatus("Download failed: " + job.value("error").toString(), "error");
         } else {
+            if (ModelCard *card = cardById(m_downloadingId))
+                card->setProgress(progress);
             setStatus(QString("Downloading: %1%  (%2)")
                           .arg(static_cast<int>(progress))
                           .arg(message));

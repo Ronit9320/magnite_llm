@@ -1,23 +1,28 @@
 #include "panels/ragpanel.h"
 
+#include "panels/ragdoccard.h"
+
 #include <QFileDialog>
 #include <QFormLayout>
-#include <QGroupBox>
+#include <QFrame>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QListWidget>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 RagPanel::RagPanel(QWidget *parent)
     : BasePanel("RAG", parent)
-    , m_docList(nullptr)
     , m_addButton(nullptr)
     , m_removeButton(nullptr)
     , m_clearButton(nullptr)
+    , m_docScroll(nullptr)
+    , m_docHost(nullptr)
+    , m_docLayout(nullptr)
+    , m_emptyState(nullptr)
     , m_chunkSizeSpin(nullptr)
     , m_chunkOverlapSpin(nullptr)
     , m_topKSpin(nullptr)
@@ -46,18 +51,43 @@ void RagPanel::setupUi() {
     btnRow->addStretch();
     layout->addLayout(btnRow);
 
-    m_docList = new QListWidget(this);
-    layout->addWidget(m_docList, 1);
-    QLabel *emptyHint = new QLabel("No documents ingested yet.", this);
-    emptyHint->setObjectName("mutedLabel");
-    layout->addWidget(emptyHint);
+    // Document list — full-width glass cards in a transparent scroll area.
+    m_docScroll = new QScrollArea(this);
+    m_docScroll->setWidgetResizable(true);
+    m_docScroll->setFrameShape(QFrame::NoFrame);
+    m_docScroll->setObjectName("cardScroll");
+    m_docScroll->viewport()->setAutoFillBackground(false);
+    m_docHost = new QWidget(this);
+    m_docLayout = new QVBoxLayout(m_docHost);
+    m_docLayout->setContentsMargins(2, 2, 2, 2);
+    m_docLayout->setSpacing(8);
+    m_docScroll->setWidget(m_docHost);
+    layout->addWidget(m_docScroll, 1);
 
-    connect(m_docList, &QListWidget::itemSelectionChanged, this, [this]() {
-        m_removeButton->setEnabled(!m_docList->selectedItems().isEmpty());
-    });
+    // Empty state (shown instead of the scroll area when no docs are added).
+    m_emptyState = new QWidget(this);
+    auto *emptyLayout = new QVBoxLayout(m_emptyState);
+    emptyLayout->setContentsMargins(24, 24, 24, 24);
+    emptyLayout->setAlignment(Qt::AlignCenter);
+    auto *hint = new QLabel("No documents ingested yet.\nAdd PDFs, text, markdown or HTML above.", m_emptyState);
+    hint->setObjectName("mutedLabel");
+    hint->setAlignment(Qt::AlignCenter);
+    hint->setWordWrap(true);
+    emptyLayout->addWidget(hint);
+    m_emptyState->setLayout(emptyLayout);
+    layout->addWidget(m_emptyState, 1);
 
-    auto *retrievalBox = new QGroupBox("Retrieval Configuration", this);
-    auto *form = new QFormLayout(retrievalBox);
+    // Retrieval config as a glass card (design doc §4/§8).
+    auto *configCard = new QFrame(this);
+    configCard->setObjectName("ragConfigCard");
+    auto *configLayout = new QVBoxLayout(configCard);
+    configLayout->setContentsMargins(16, 14, 16, 14);
+    configLayout->setSpacing(10);
+    auto *configTitle = new QLabel("Retrieval Configuration", this);
+    configTitle->setObjectName("cardTitle");
+    configLayout->addWidget(configTitle);
+    auto *form = new QFormLayout();
+    form->setSpacing(8);
 
     m_chunkSizeSpin = new QSpinBox(this);
     m_chunkSizeSpin->setRange(64, 4096);
@@ -76,7 +106,8 @@ void RagPanel::setupUi() {
     m_topKSpin->setValue(4);
     form->addRow("Top-K retrieved chunks:", m_topKSpin);
 
-    layout->addWidget(retrievalBox);
+    configLayout->addLayout(form);
+    layout->addWidget(configCard);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
@@ -86,32 +117,98 @@ void RagPanel::setupUi() {
     connect(m_addButton, &QPushButton::clicked, this, &RagPanel::onAddDocuments);
     connect(m_removeButton, &QPushButton::clicked, this, &RagPanel::onRemoveDocument);
     connect(m_clearButton, &QPushButton::clicked, this, &RagPanel::onClearAll);
+
+    updateEmptyState();
 }
 
 void RagPanel::onAddDocuments() {
-    QStringList files = QFileDialog::getOpenFileNames(
+    const QStringList files = QFileDialog::getOpenFileNames(
         this, "Select documents",
         QString(),
         "Documents (*.pdf *.txt *.md *.html);;All Files (*)");
     for (const QString &f : files) {
-        m_docList->addItem(f);
+        auto *card = new RagDocCard(f, m_docHost);
+        connect(card, &RagDocCard::cardClicked, this, &RagPanel::onCardClicked);
+        m_docLayout->addWidget(card);
+        m_cards.append(card);
     }
+    m_docLayout->invalidate();
+    m_docHost->updateGeometry();
+    updateEmptyState();
     if (!files.isEmpty()) {
         setStatus(QString("%1 document(s) queued for ingestion (Phase 6).")
                       .arg(files.size()));
     }
 }
 
-void RagPanel::onRemoveDocument() {
-    for (auto *item : m_docList->selectedItems()) {
-        delete m_docList->takeItem(m_docList->row(item));
+void RagPanel::onCardClicked(RagDocCard *card, bool ctrl) {
+    if (!card) return;
+    if (!ctrl) {
+        for (RagDocCard *c : m_cards) {
+            if (c != card && c->isCardSelected())
+                c->setSelected(false);
+        }
+        card->setSelected(true);
+    } else {
+        card->setSelected(!card->isCardSelected());
     }
-    setStatus("Document(s) removed.");
+    m_removeButton->setEnabled(hasSelection());
+}
+
+bool RagPanel::hasSelection() const {
+    for (const RagDocCard *c : m_cards) {
+        if (c->isCardSelected())
+            return true;
+    }
+    return false;
+}
+
+void RagPanel::onRemoveDocument() {
+    int removed = 0;
+    QList<RagDocCard *> toRemove;
+    for (RagDocCard *c : m_cards) {
+        if (c->isCardSelected())
+            toRemove.append(c);
+    }
+    for (RagDocCard *c : toRemove) {
+        m_docLayout->removeWidget(c);
+        c->hide();
+        c->setParent(nullptr);
+        c->deleteLater();
+        m_cards.removeOne(c);
+        ++removed;
+    }
+    m_docLayout->invalidate();
+    m_docHost->updateGeometry();
+    m_removeButton->setEnabled(false);
+    updateEmptyState();
+    setStatus(removed ? QString("%1 document(s) removed.").arg(removed)
+                      : "No documents selected.");
 }
 
 void RagPanel::onClearAll() {
-    m_docList->clear();
+    clearCards();
     setStatus("Cleared all documents.");
+}
+
+void RagPanel::clearCards() {
+    while (!m_cards.isEmpty()) {
+        RagDocCard *c = m_cards.takeFirst();
+        m_docLayout->removeWidget(c);
+        c->hide();
+        c->setParent(nullptr);
+        c->deleteLater();
+    }
+    m_docLayout->invalidate();
+    m_docHost->updateGeometry();
+    m_removeButton->setEnabled(false);
+    updateEmptyState();
+}
+
+void RagPanel::updateEmptyState() {
+    const bool hasDocs = !m_cards.isEmpty();
+    m_docScroll->setVisible(hasDocs);
+    m_emptyState->setVisible(!hasDocs);
 }
 
 void RagPanel::setStatus(const QString &text) {

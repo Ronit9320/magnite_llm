@@ -21,10 +21,15 @@ set(MAGNITE_SOURCES
     src/backend_client.cpp
     src/panels/basepanel.cpp
     src/panels/modelspanel.cpp
+    src/panels/modelcard.cpp
+    src/panels/adaptercard.cpp
+    src/widgets/flowlayout.cpp
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp
+    src/panels/ragdoccard.cpp
     src/panels/adapterspanel.cpp
     src/panels/chatpanel.cpp
+    src/panels/chatbubble.cpp
     src/panels/settingspanel.cpp
     resources.qrc
 )

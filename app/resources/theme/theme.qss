@@ -223,6 +223,190 @@ QGroupBox::title {
     color: @textSecondary;
 }
 
+/* ---------- Model cards (design doc §8 card grid) ---------- */
+
+QScrollArea#cardScroll {
+    background: transparent;
+    border: none;
+}
+/* The viewport and its content host are unstyled QWidgets and would paint the
+ * default light palette; transparent lets the flat-black app root show through. */
+QScrollArea#cardScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QFrame#modelCard {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    border-radius: 12px;
+}
+QFrame#modelCard:hover {
+    border-color: @glassBorderHover;
+}
+QFrame#modelCard[selected="true"] {
+    border: 1px solid @glassBorderActive;
+}
+
+QLabel#cardTitle {
+    color: @textPrimary;
+    font-family: "@headingFont";
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#cardMeta {
+    color: @textSecondary;
+    font-family: "@bodyFont";
+    font-size: 12px;
+}
+QLabel#archBadge {
+    background: @glassFillHover;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 100px;
+    color: @accentPrimary;
+    font-family: "@bodyFont";
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+QProgressBar#cardProgress {
+    background: @glassFill;
+    border: none;
+    border-radius: 2px;
+    max-height: 4px;
+    min-height: 4px;
+}
+QProgressBar#cardProgress::chunk {
+    border-radius: 2px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                stop: 0 rgba(96, 165, 250, 1),
+                                stop: 1 @accentPrimary);
+}
+
+/* ---------- Adapter cards (design doc §8) ---------- */
+
+QFrame#adapterCard {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    border-radius: 12px;
+}
+QFrame#adapterCard:hover {
+    border-color: @glassBorderHover;
+}
+QFrame#adapterCard[active="true"] {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid @glassBorderActive;
+}
+
+/* Method pill (LoRA/QLoRA) — same language as the arch badge but neutral. */
+QLabel#adapterPill {
+    background: @glassFillHover;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 100px;
+    color: @accentPrimary;
+    font-family: "@bodyFont";
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+/* Compact card footer buttons (design doc §8). */
+QPushButton#cardPrimary {
+    background-color: @accentPrimary;
+    border: 1px solid rgba(59, 130, 246, 0.55);
+    color: #FFFFFF;
+    font-family: "@bodyFont";
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+}
+QPushButton#cardPrimary:hover {
+    background: #60A5FA;
+    border-color: #60A5FA;
+}
+QPushButton#cardPrimary:pressed {
+    background: #2563EB;
+}
+QPushButton#cardBtn {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    color: @textPrimary;
+    font-family: "@bodyFont";
+    font-size: 12px;
+    padding: 4px 10px;
+}
+QPushButton#cardBtn:hover {
+    background: @glassFillHover;
+    border-color: @glassBorderHover;
+}
+QPushButton#cardDanger {
+    background-color: @statusError;
+    border: 1px solid rgba(248, 113, 113, 0.55);
+    color: #1B0A0A;
+    font-family: "@bodyFont";
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+}
+QPushButton#cardDanger:hover {
+    background: #FCA5A5;
+}
+
+/* ---------- RAG cards (design doc §8) ---------- */
+
+QFrame#ragDocCard {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    border-radius: 12px;
+}
+QFrame#ragDocCard:hover {
+    border-color: @glassBorderHover;
+}
+QFrame#ragDocCard[selected="true"] {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid @glassBorderActive;
+}
+
+/* Retrieval config card (chunk size/overlap/top-K). */
+QFrame#ragConfigCard {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    border-radius: 12px;
+}
+
+/* ---------- Chat bubbles (specifics: comprehensive) ---------- */
+
+/* User message: right-aligned, glass-hover fill, primary text (design doc §5). */
+QFrame#chatBubbleUser {
+    background: @glassFillHover;
+    color: @textPrimary;
+    border: 1px solid @glassBorder;
+    border-radius: 12px;
+}
+
+/* Model response: left-aligned, glass fill, 2px accent left border. */
+QFrame#chatBubbleAssistant {
+    background: @glassFill;
+    color: @textPrimary;
+    border: 1px solid @glassBorder;
+    border-left: 2px solid @accentPrimary;
+    border-radius: 12px;
+}
+
+/* Bubble label: QSS `color` on the frame does not cascade into child widgets,
+   so the text color has to be set on the label itself (design doc §5.5.6). */
+QLabel#chatBubbleText {
+    color: @textPrimary;
+    background: transparent;
+}
+
+QLabel#chatPill {
+    background: @glassFill;
+    border: 1px solid @glassBorder;
+    border-radius: 100px;
+    padding: 4px 10px;
+    color: @textSecondary;
+    font-size: 12px;
+}
+
 /* ---------- Tables & lists (models/adapters grids, RAG doc list) ---------- */
 
 QTableWidget {
@@ -515,4 +699,17 @@ QToolTip {
     font-family: "@bodyFont";
     font-size: 12px;
     padding: 4px 8px;
+}
+
+/* ---------- Status bar ---------- */
+
+QStatusBar {
+    background: @bgVoid;
+    border-top: 1px solid @glassBorder;
+    color: @textSecondary;
+    font-family: "@bodyFont";
+    font-size: 12px;
+}
+QStatusBar::item {
+    border: none;
 }

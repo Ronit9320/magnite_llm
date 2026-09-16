@@ -1,6 +1,7 @@
 #include "panels/chatpanel.h"
 
 #include "backend_client.h"
+#include "panels/chatbubble.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -11,10 +12,11 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
-#include <QTextCursor>
+#include <QTimer>
 #include <QVBoxLayout>
 
 ChatPanel::ChatPanel(QWidget *parent)
@@ -25,13 +27,21 @@ ChatPanel::ChatPanel(QWidget *parent)
     , m_maxTokensSpin(nullptr)
     , m_tempSpin(nullptr)
     , m_ragCheck(nullptr)
-    , m_conversation(nullptr)
+    , m_enginePill(nullptr)
+    , m_modelPill(nullptr)
+    , m_adapterPill(nullptr)
+    , m_chatScroll(nullptr)
+    , m_chatHost(nullptr)
+    , m_chatLayout(nullptr)
     , m_input(nullptr)
     , m_sendButton(nullptr)
     , m_stopButton(nullptr)
     , m_clearButton(nullptr)
     , m_statusLabel(nullptr)
+    , m_streamBubble(nullptr)
     , m_streaming(false)
+    , m_cursorTimer(nullptr)
+    , m_cursorVisible(false)
 {
     setHeaderSubtitle("Converse with the active model.");
     setupUi();
@@ -44,7 +54,7 @@ void ChatPanel::setupUi() {
     auto *ctrlRow1 = new QHBoxLayout();
     m_modelCombo = new QComboBox(this);
     m_modelCombo->setEditable(true);
-    m_modelCombo->setToolTip("Registered model id, or type a HuggingFace repo id with a GGUF file.");
+    m_modelCombo->setToolTip("Registered model id, or a HuggingFace repo id with a GGUF file.");
     m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
 
     m_engineCombo = new QComboBox(this);
@@ -91,13 +101,33 @@ void ChatPanel::setupUi() {
     ctrlRow2->addWidget(statusBtn);
     layout->addLayout(ctrlRow2);
 
-    // Conversation
-    m_conversation = new QPlainTextEdit(this);
-    m_conversation->setReadOnly(true);
-    m_conversation->setPlaceholderText(
-        "Load a model, then type a message to begin.\n"
-        "Inference supports HuggingFace GGUF repos directly.");
-    layout->addWidget(m_conversation, 1);
+    // Pinned engine / model / adapter indicator pills (design doc §8).
+    auto *pillRow = new QHBoxLayout();
+    m_enginePill = new QLabel("engine: —", this);
+    m_enginePill->setObjectName("chatPill");
+    m_modelPill = new QLabel("model: —", this);
+    m_modelPill->setObjectName("chatPill");
+    m_adapterPill = new QLabel("adapter: —", this);
+    m_adapterPill->setObjectName("chatPill");
+    m_adapterPill->setVisible(false);
+    pillRow->addWidget(m_enginePill);
+    pillRow->addWidget(m_modelPill);
+    pillRow->addWidget(m_adapterPill);
+    pillRow->addStretch();
+    layout->addLayout(pillRow);
+
+    // Conversation — real bubbles in a transparent auto-scrolling area.
+    m_chatScroll = new QScrollArea(this);
+    m_chatScroll->setWidgetResizable(true);
+    m_chatScroll->setFrameShape(QFrame::NoFrame);
+    m_chatScroll->setObjectName("cardScroll");
+    m_chatScroll->viewport()->setAutoFillBackground(false);
+    m_chatHost = new QWidget(this);
+    m_chatLayout = new QVBoxLayout(m_chatHost);
+    m_chatLayout->setContentsMargins(2, 2, 2, 2);
+    m_chatLayout->setSpacing(8);
+    m_chatScroll->setWidget(m_chatHost);
+    layout->addWidget(m_chatScroll, 1);
 
     // Input row
     auto *inputRow = new QHBoxLayout();
@@ -126,6 +156,15 @@ void ChatPanel::setupUi() {
     connect(m_input, &QLineEdit::returnPressed, this, &ChatPanel::onSend);
     connect(m_stopButton, &QPushButton::clicked, this, &ChatPanel::onStop);
     connect(m_clearButton, &QPushButton::clicked, this, &ChatPanel::onClearChat);
+
+    // Streaming cursor: blinking block toggled every 500ms (design doc §5).
+    m_cursorTimer = new QTimer(this);
+    m_cursorTimer->setInterval(500);
+    connect(m_cursorTimer, &QTimer::timeout, this, [this]() {
+        m_cursorVisible = !m_cursorVisible;
+        if (m_streamBubble)
+            m_streamBubble->setCursorVisible(m_cursorVisible);
+    });
 
     setStatus("Load a model to begin.");
 }
@@ -167,23 +206,34 @@ void ChatPanel::refreshEngineStatus() {
     }
     m_client->get("/inference/status", [this](int status, const QJsonDocument &doc) {
         if (status != 200) {
+            m_enginePill->setText("engine: —");
+            m_modelPill->setText("model: —");
+            m_adapterPill->setVisible(false);
             setStatus("Inference status unavailable.");
             return;
         }
         const QJsonObject obj = doc.object();
         const QJsonObject engine = obj["engine"].toObject();
         if (engine.isEmpty()) {
+            m_enginePill->setText("engine: none");
+            m_modelPill->setText("model: —");
+            m_adapterPill->setVisible(false);
             setStatus("No inference engine loaded. Load a model to begin.");
             return;
         }
-        QString out = QString("Engine: %1 | Model: %2")
-                             .arg(engine["description"].toString(),
-                                  obj["loaded_model"].toString());
+        m_enginePill->setText(QString("engine: %1")
+                                  .arg(engine["description"].toString()));
+        m_modelPill->setText(QString("model: %1")
+                                 .arg(obj["loaded_model"].toString()));
+
         const QString adapter = obj["active_adapter"].toString();
-        if (!adapter.isEmpty()) {
-            out += QString(" | Adapter: %1").arg(adapter);
+        if (adapter.isEmpty()) {
+            m_adapterPill->setVisible(false);
+        } else {
+            m_adapterPill->setText(QString("adapter: %1").arg(adapter));
+            m_adapterPill->setVisible(true);
         }
-        setStatus(out);
+        setStatus("Engine ready.");
     });
 }
 
@@ -231,6 +281,13 @@ void ChatPanel::onLoadModel() {
     });
 }
 
+void ChatPanel::ensureTrailingStretch() {
+    for (int i = 0; i < m_chatLayout->count(); ++i) {
+        if (m_chatLayout->itemAt(i)->spacerItem()) return;
+    }
+    m_chatLayout->addStretch(1);
+}
+
 void ChatPanel::onSend() {
     const QString text = m_input->text().trimmed();
     if (text.isEmpty() || m_streaming) return;
@@ -240,20 +297,23 @@ void ChatPanel::onSend() {
     }
 
     m_input->clear();
-    m_conversation->appendPlainText(QString("[%1] %2").arg("You", text));
+
+    // User bubble — right aligned.
+    auto *userBubble = new ChatBubble(ChatBubble::User, text, m_chatHost);
+    m_chatLayout->addWidget(userBubble, 0, Qt::AlignRight);
+    // Assistant bubble — left aligned; streamed into below.
+    m_streamBubble = new ChatBubble(ChatBubble::Assistant, QString(), m_chatHost);
+    m_chatLayout->addWidget(m_streamBubble, 0, Qt::AlignLeft);
+    ensureTrailingStretch();
+    scrollToBottom();
 
     // Append to history
     m_history.append(QJsonObject{{"role", "user"}, {"content", text}});
 
-    // Prepare streaming block
-    {
-        QTextCursor cur(m_conversation->document());
-        cur.movePosition(QTextCursor::End);
-        cur.insertBlock();
-        m_streamBlock = cur.block();
-    }
     m_pendingResponse.clear();
     m_streaming = true;
+    m_cursorVisible = false;
+    m_cursorTimer->start();
     m_sendButton->setEnabled(false);
     m_stopButton->setEnabled(true);
 
@@ -276,13 +336,15 @@ void ChatPanel::onSend() {
             const QString delta = event.value("delta").toString();
             if (!delta.isEmpty()) {
                 m_pendingResponse += delta;
-                updateStreamingBlock(m_pendingResponse, true);
+                updateStreamingBubble(m_pendingResponse, true);
             }
             if (event.value("done").toBool()) {
-                updateStreamingBlock(m_pendingResponse, false);
+                updateStreamingBubble(m_pendingResponse, false);
                 m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
-                m_streamBlock = QTextBlock();
+                m_streamBubble = nullptr;
                 m_streaming = false;
+                m_cursorTimer->stop();
+                m_cursorVisible = false;
                 m_sendButton->setEnabled(true);
                 m_stopButton->setEnabled(false);
                 setStatus("Ready.");
@@ -299,11 +361,13 @@ void ChatPanel::onSend() {
             }
             // If not already finalized by done event
             if (m_streaming) {
-                updateStreamingBlock(m_pendingResponse, false);
+                updateStreamingBubble(m_pendingResponse, false);
                 if (!m_pendingResponse.isEmpty())
                     m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
-                m_streamBlock = QTextBlock();
+                m_streamBubble = nullptr;
                 m_streaming = false;
+                m_cursorTimer->stop();
+                m_cursorVisible = false;
                 m_sendButton->setEnabled(true);
                 m_stopButton->setEnabled(false);
             }
@@ -314,9 +378,11 @@ void ChatPanel::onStop() {
     if (!m_streaming || !m_client) return;
     m_client->abortStream();
     if (!m_pendingResponse.isEmpty())
-        updateStreamingBlock(m_pendingResponse, false);
-    m_streamBlock = QTextBlock();
+        updateStreamingBubble(m_pendingResponse, false);
+    m_streamBubble = nullptr;
     m_streaming = false;
+    m_cursorTimer->stop();
+    m_cursorVisible = false;
     m_sendButton->setEnabled(true);
     m_stopButton->setEnabled(false);
     setStatus("Generation stopped.");
@@ -324,20 +390,42 @@ void ChatPanel::onStop() {
 
 void ChatPanel::onClearChat() {
     m_history.clear();
-    m_conversation->clear();
-    m_streamBlock = QTextBlock();
-    m_pendingResponse.clear();
+    // Tear down streaming state.
     m_streaming = false;
+    m_cursorTimer->stop();
+    m_cursorVisible = false;
+    m_streamBubble = nullptr;
+    m_pendingResponse.clear();
+    // Remove every bubble.
+    while (QLayoutItem *item = m_chatLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) {
+            w->hide();
+            w->setParent(nullptr);
+            w->deleteLater();
+        }
+        delete item;
+    }
+    m_chatLayout->invalidate();
+    m_chatHost->updateGeometry();
+    ensureTrailingStretch();
     m_sendButton->setEnabled(true);
     m_stopButton->setEnabled(false);
     setStatus("Chat cleared.");
 }
 
-void ChatPanel::updateStreamingBlock(const QString &text, bool showCursor) {
-    if (!m_streamBlock.isValid()) return;
-    QTextCursor cur(m_streamBlock);
-    cur.select(QTextCursor::BlockUnderCursor);
-    cur.insertText(showCursor ? (text + QStringLiteral(" ")) : text);
+void ChatPanel::updateStreamingBubble(const QString &text, bool showCursor) {
+    if (!m_streamBubble) return;
+    m_streamBubble->setText(text);
+    m_streamBubble->setCursorVisible(showCursor);
+    m_chatLayout->invalidate();
+    m_chatLayout->activate();
+    m_chatHost->updateGeometry();
+    scrollToBottom();
+}
+
+void ChatPanel::scrollToBottom() {
+    QScrollBar *sb = m_chatScroll->verticalScrollBar();
+    sb->setValue(sb->maximum());
 }
 
 void ChatPanel::setStatus(const QString &text, const QString &tone) {

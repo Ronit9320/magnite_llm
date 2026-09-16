@@ -30,10 +30,11 @@ int main(int argc, char *argv[]) {
     window.show();
 
     // Dev tool: capture every panel to <dir>/panel-<n>.png, then exit.
-    if (argc > 2 && QString(argv[1]) == "--screenshot")
+    if (argc > 2 && QString(argv[1]) == "--screenshot") {
         QTimer::singleShot(400, &window, [&window, dir = QString(argv[2])]() {
             window.captureScreenshots(dir);
         });
+    }
 
     if (argc > 1 && QString(argv[1]) == "--selftest") {
         window.setSelfTestMode(true);

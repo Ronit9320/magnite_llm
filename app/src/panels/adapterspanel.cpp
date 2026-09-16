@@ -1,29 +1,26 @@
 #include "panels/adapterspanel.h"
 
 #include "backend_client.h"
-#include "theme.h"
+#include "panels/adaptercard.h"
+#include "widgets/flowlayout.h"
 
-#include <QBrush>
-#include <QColor>
 #include <QFileDialog>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 AdaptersPanel::AdaptersPanel(QWidget *parent)
     : BasePanel("Adapters", parent)
     , m_client(nullptr)
-    , m_table(nullptr)
-    , m_activateButton(nullptr)
-    , m_exportButton(nullptr)
-    , m_importButton(nullptr)
-    , m_deleteButton(nullptr)
+    , m_scrollArea(nullptr)
+    , m_flowLayout(nullptr)
+    , m_cardHost(nullptr)
+    , m_emptyState(nullptr)
     , m_statusLabel(nullptr)
 {
     setHeaderSubtitle(
@@ -32,40 +29,47 @@ AdaptersPanel::AdaptersPanel(QWidget *parent)
     setupUi();
 }
 
+QWidget *AdaptersPanel::makeCardHost() {
+    m_cardHost = new QWidget(this);
+    m_flowLayout = new FlowLayout(m_cardHost, 12, 12);
+    m_flowLayout->setContentsMargins(2, 2, 2, 2);
+    m_cardHost->setLayout(m_flowLayout);
+    return m_cardHost;
+}
+
 void AdaptersPanel::setupUi() {
     auto *layout = contentLayout();
 
-    m_table = new QTableWidget(this);
-    m_table->setColumnCount(7);
-    m_table->setHorizontalHeaderLabels(
-        {"Name", "Base Model", "Rank", "Method", "Size", "Trained", "Active"});
-    m_table->horizontalHeader()->setStretchLastSection(true);
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int i = 1; i < 7; ++i)
-        m_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    layout->addWidget(m_table, 1);
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setObjectName("cardScroll");
+    m_scrollArea->viewport()->setAutoFillBackground(false);
+    m_scrollArea->setWidget(makeCardHost());
+    m_scrollArea->setVisible(false);
+    layout->addWidget(m_scrollArea, 1);
 
-    auto *btnRow = new QHBoxLayout();
-    m_activateButton = new QPushButton("Activate", this);
-    m_activateButton->setObjectName("primaryBtn");
-    m_exportButton = new QPushButton("Export", this);
-    m_exportButton->setObjectName("secondaryBtn");
-    m_importButton = new QPushButton("Import...", this);
-    m_importButton->setObjectName("secondaryBtn");
-    m_deleteButton = new QPushButton("Delete", this);
-    m_deleteButton->setObjectName("destructiveBtn");
-    m_activateButton->setEnabled(false);
-    m_exportButton->setEnabled(false);
-    m_deleteButton->setEnabled(false);
-    btnRow->addWidget(m_activateButton);
-    btnRow->addWidget(m_exportButton);
-    btnRow->addWidget(m_importButton);
-    btnRow->addStretch();
-    btnRow->addWidget(m_deleteButton);
-    layout->addLayout(btnRow);
+    // Empty state: centered hint + Import (import is the only adapter action
+    // usable with no cards present).
+    m_emptyState = new QWidget(this);
+    auto *emptyLayout = new QVBoxLayout(m_emptyState);
+    emptyLayout->setContentsMargins(24, 24, 24, 24);
+    emptyLayout->setSpacing(14);
+    emptyLayout->setAlignment(Qt::AlignCenter);
+    auto *hint = new QLabel(
+        "No adapters yet. Train one in the Training panel.\n\n"
+        "Have an export archive? Import it below.",
+        m_emptyState);
+    hint->setObjectName("bodyLabel");
+    hint->setAlignment(Qt::AlignCenter);
+    hint->setWordWrap(true);
+    emptyLayout->addWidget(hint);
+    auto *importButton = new QPushButton("Import adapter...", m_emptyState);
+    importButton->setObjectName("secondaryBtn");
+    importButton->setCursor(Qt::PointingHandCursor);
+    emptyLayout->addWidget(importButton, 0, Qt::AlignHCenter);
+    m_emptyState->setLayout(emptyLayout);
+    layout->addWidget(m_emptyState, 1);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
@@ -73,17 +77,7 @@ void AdaptersPanel::setupUi() {
     layout->addWidget(m_statusLabel);
     m_statusLabel->setText("No adapters yet. Train one in the Training panel.");
 
-    connect(m_table, &QTableWidget::itemSelectionChanged, this, [this]() {
-        bool has = !m_table->selectedItems().isEmpty();
-        m_activateButton->setEnabled(has);
-        m_exportButton->setEnabled(has);
-        m_deleteButton->setEnabled(has);
-    });
-
-    connect(m_activateButton, &QPushButton::clicked, this, &AdaptersPanel::onActivate);
-    connect(m_exportButton, &QPushButton::clicked, this, &AdaptersPanel::onExportAdapter);
-    connect(m_importButton, &QPushButton::clicked, this, &AdaptersPanel::onImportAdapter);
-    connect(m_deleteButton, &QPushButton::clicked, this, &AdaptersPanel::onDeleteAdapter);
+    connect(importButton, &QPushButton::clicked, this, &AdaptersPanel::onImportAdapter);
 }
 
 void AdaptersPanel::setBackendClient(BackendClient *client) {
@@ -101,38 +95,36 @@ void AdaptersPanel::refresh() {
     loadActiveAdapter();
     m_client->get("/adapters", [this](int status, const QJsonDocument &doc) {
         if (status != 200) {
-            setStatus(QString("Failed to load adapters (HTTP %1).").arg(status));
+            setStatus(QString("Failed to load adapters (HTTP %1).").arg(status), "error");
             return;
         }
+        clearCards();
         const QJsonArray arr = doc.array();
-        m_table->setRowCount(arr.size());
-        for (int row = 0; row < arr.size(); ++row) {
-            const QJsonObject a = arr.at(row).toObject();
-            auto *name = new QTableWidgetItem(a["name"].toString());
-            name->setData(Qt::UserRole, a["id"].toString());
-            m_table->setItem(row, 0, name);
-            m_table->setItem(row, 1, new QTableWidgetItem(a["base_model"].toString()));
-            m_table->setItem(row, 2, new QTableWidgetItem(QString::number(a["rank"].toInt())));
-            m_table->setItem(row, 3, new QTableWidgetItem(a["method"].toString().toUpper()));
-            m_table->setItem(row, 4, new QTableWidgetItem(
-                QString("%1 MB").arg(a["size_mb"].toDouble(), 0, 'f', 1)));
-            m_table->setItem(row, 5, new QTableWidgetItem(a["trained_at"].toString()));
-            auto *active = new QTableWidgetItem(
-                a["id"].toString() == m_activeAdapterId ? "Active" : "");
-            active->setForeground(QBrush(QColor(Theme::statusSuccess())));
-            m_table->setItem(row, 6, active);
+        for (const auto &value : arr) {
+            if (!value.isObject()) continue;
+            const QJsonObject adapter = value.toObject();
+            auto *card = new AdapterCard(adapter, m_cardHost);
+            connect(card, &AdapterCard::activateRequested, this, &AdaptersPanel::onActivate);
+            connect(card, &AdapterCard::exportRequested, this, &AdaptersPanel::onExportAdapter);
+            connect(card, &AdapterCard::deleteRequested, this, &AdaptersPanel::onDeleteAdapter);
+            connect(card, &AdapterCard::importRequested, this, &AdaptersPanel::onImportAdapter);
+            card->setActive(card->id() == m_activeAdapterId);
+            m_flowLayout->addWidget(card);
+            m_cards.append(card);
         }
-        m_activateButton->setEnabled(false);
-        m_exportButton->setEnabled(false);
-        m_deleteButton->setEnabled(false);
+        m_flowLayout->invalidate();
+        m_cardHost->updateGeometry();
+
         const bool hasAdapter = !arr.isEmpty();
+        m_scrollArea->setVisible(hasAdapter);
+        m_emptyState->setVisible(!hasAdapter);
         if (!hasAdapter) {
             setStatus("No adapters yet. Train one in the Training panel.");
         } else if (m_activeAdapterId.isEmpty()) {
-            setStatus(QString("%1 adapter(s). Select one and press Activate.")
+            setStatus(QString("%1 adapter(s). Press Activate on one to serve Chat.")
                           .arg(arr.size()));
         } else {
-            setStatus(QString("%1 adapter(s). \"Active\" marks the one serving Chat right now.")
+            setStatus(QString("%1 adapter(s). The glowing card serves Chat right now.")
                           .arg(arr.size()));
         }
     });
@@ -150,25 +142,15 @@ void AdaptersPanel::loadActiveAdapter() {
     });
 }
 
-QString AdaptersPanel::selectedId() const {
-    const auto items = m_table->selectedItems();
-    if (items.isEmpty()) return QString();
-    return items.first()->data(Qt::UserRole).toString();
-}
-
-void AdaptersPanel::onActivate() {
-    int row = m_table->currentRow();
-    if (row < 0) return;
-    const QString id = selectedId();
-    if (id.isEmpty() || !m_client || !m_client->isReady()) return;
-
+void AdaptersPanel::onActivate(AdapterCard *card) {
+    if (!card || !m_client || !m_client->isReady()) return;
+    const QString id = card->id();
     const bool willActivate = (id != m_activeAdapterId);
     QJsonObject body;
     body["adapter_id"] = willActivate ? id : "";
     setStatus(willActivate ? "Activating adapter (loading base model + PEFT weights)..."
                            : "Clearing active adapter...");
-    m_client->post("/inference/adapter", body,
-                   [this, id](int status, const QJsonDocument &doc) {
+    m_client->post("/inference/adapter", body, [this, id](int status, const QJsonDocument &doc) {
         if (status == 200) {
             const QJsonObject obj = doc.object();
             m_activeAdapterId = obj["active_adapter_id"].toString();
@@ -186,8 +168,8 @@ void AdaptersPanel::onActivate() {
     });
 }
 
-void AdaptersPanel::onDeleteAdapter() {
-    const QString id = selectedId();
+void AdaptersPanel::onDeleteAdapter(AdapterCard *card) {
+    const QString id = card ? card->id() : QString();
     if (id.isEmpty() || !m_client || !m_client->isReady()) return;
     m_client->remove("/adapters/" + id, [this, id](int status, const QJsonDocument &) {
         if (status == 204 || status == 404) {
@@ -202,8 +184,8 @@ void AdaptersPanel::onDeleteAdapter() {
     });
 }
 
-void AdaptersPanel::onExportAdapter() {
-    const QString id = selectedId();
+void AdaptersPanel::onExportAdapter(AdapterCard *card) {
+    const QString id = card ? card->id() : QString();
     if (id.isEmpty() || !m_client || !m_client->isReady()) return;
     setStatus("Exporting adapter...");
     m_client->post(QString("/adapters/export/%1").arg(id), QJsonObject(),
@@ -227,8 +209,7 @@ void AdaptersPanel::onImportAdapter() {
     QJsonObject body;
     body["path"] = path;
     setStatus("Importing adapter...");
-    m_client->post("/adapters/import", body,
-                   [this](int status, const QJsonDocument &doc) {
+    m_client->post("/adapters/import", body, [this](int status, const QJsonDocument &doc) {
         if (status == 201) {
             const QJsonObject obj = doc.object();
             setStatus(QString("Imported adapter '%1'.").arg(obj["name"].toString()));
@@ -240,6 +221,20 @@ void AdaptersPanel::onImportAdapter() {
             setStatus("Import failed: " + err, "error");
         }
     });
+}
+
+void AdaptersPanel::clearCards() {
+    while (QLayoutItem *item = m_flowLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) {
+            w->hide();             // stop painting immediately
+            w->setParent(nullptr); // detach from host so it can't overlap new cards
+            w->deleteLater();
+        }
+        delete item;
+    }
+    m_cards.clear();
+    m_flowLayout->invalidate();
+    m_cardHost->updateGeometry();
 }
 
 void AdaptersPanel::setStatus(const QString &text, const QString &tone) {
