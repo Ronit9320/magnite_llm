@@ -2,18 +2,20 @@
 
 #include <QFrame>
 
+#include <QJsonObject>
 #include <QString>
 
-// A full-width glass card for one ingested document (design doc §8). Shows a
-// type icon (file-text tinted by extension: pdf/txt/md/html), the file name
-// and its path. Clicking selects the card so the panel's "Remove Selected"
-// can delete it; cards are cosmetic until the Phase 6 store lands.
+// A full-width glass card for one ingested RAG document (design doc §8).
+// Shows a type icon (file-text tinted by kind: pdf/txt/md/html), the document
+// name, its source path and chunk count. Clicking selects the card so the
+// panel's "Remove Selected" can delete it.
 class RagDocCard : public QFrame {
     Q_OBJECT
 
 public:
-    explicit RagDocCard(const QString &filePath, QWidget *parent = nullptr);
+    explicit RagDocCard(const QJsonObject &data, QWidget *parent = nullptr);
 
+    QString id() const { return m_id; }
     QString filePath() const { return m_path; }
     bool isCardSelected() const { return m_selected; }
 
@@ -26,6 +28,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
 
 private:
+    QString m_id;
     QString m_path;
     bool m_selected = false;
 };

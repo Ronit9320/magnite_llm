@@ -6,8 +6,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend.inference.schemas import ChatRequest, CompletionRequest, InferenceStatus
+from backend.inference.schemas import ChatMessage, ChatRequest, ChatRole, CompletionRequest, InferenceStatus
 from backend.inference.supervisor import get_supervisor
+from backend.rag.context import injectable_context
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -18,6 +19,23 @@ class AdapterActivateRequest(BaseModel):
 
 def _sse(data: str) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _with_rag_context(req: ChatRequest) -> list[ChatMessage]:
+    messages = list(req.messages)
+    if not (req.rag and req.rag.enabled):
+        return messages
+    last_user = next(
+        (m for m in reversed(messages) if m.role == ChatRole.user), None
+    )
+    if last_user is None:
+        return messages
+    context = injectable_context(
+        last_user.content, top_k=req.rag.top_k, min_score=req.rag.min_score
+    )
+    if context:
+        messages.insert(0, ChatMessage(role=ChatRole.system, content=context))
+    return messages
 
 
 @router.get("/status", response_model=InferenceStatus)
@@ -69,8 +87,9 @@ def unload_model():
 async def chat(req: ChatRequest):
     try:
         sup = get_supervisor()
+        messages = _with_rag_context(req)
         gen = sup.chat_stream(
-            req.messages,
+            messages,
             max_tokens=req.max_tokens,
             temperature=req.temperature,
             top_p=req.top_p,

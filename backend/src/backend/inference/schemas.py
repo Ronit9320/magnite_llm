@@ -17,6 +17,14 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class RagChatOptions(BaseModel):
+    """When enabled, retrieved document context is prepended to the chat."""
+
+    enabled: bool = False
+    top_k: Optional[int] = Field(default=None, ge=1, le=50)
+    min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     model: Optional[str] = None
@@ -24,6 +32,7 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     stream: bool = True
+    rag: Optional[RagChatOptions] = None
 
 
 class CompletionRequest(BaseModel):

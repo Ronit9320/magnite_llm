@@ -87,7 +87,8 @@ void ChatPanel::setupUi() {
     m_tempSpin->setPrefix("Temp: ");
 
     m_ragCheck = new QCheckBox("Use RAG", this);
-    m_ragCheck->setToolTip("Phase 6: inject retrieved context.");
+    m_ragCheck->setToolTip("Retrieve matching chunks from ingested documents "
+                           "and inject them into each message.");
 
     auto *statusBtn = new QPushButton("Refresh Status", this);
     statusBtn->setObjectName("secondaryBtn");
@@ -326,6 +327,7 @@ void ChatPanel::onSend() {
     body["max_tokens"] = m_maxTokensSpin->value();
     body["temperature"] = m_tempSpin->value();
     body["stream"] = true;
+    body["rag"] = QJsonObject{{"enabled", m_ragCheck->isChecked()}};
 
     setStatus("Generating...");
     m_client->streamPost(

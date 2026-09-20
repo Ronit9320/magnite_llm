@@ -136,6 +136,7 @@ MAGNITE_SELFTEST_PULL=1       ./build/magnite-app --selftest   # model pull e2e
 MAGNITE_SELFTEST_INFERENCE=1  ./build/magnite-app --selftest   # load → chat (llama.cpp) → unload
 MAGNITE_SELFTEST_TRAINING=1   ./build/magnite-app --selftest   # LoRA job e2e
 MAGNITE_SELFTEST_ADAPTER=1    ./build/magnite-app --selftest   # train + hot-switch adapter e2e
+MAGNITE_SELFTEST_RAG=1        ./build/magnite-app --selftest   # ingest -> query -> delete e2e
 ```
 
 Each prints `[selftest] PASS (0 failures)`. The backend is spawned automatically; the

@@ -287,6 +287,7 @@ void MainWindow::onBackendStarted() {
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
+    m_ragPanel->setBackendClient(m_backendClient);
     m_adaptersPanel->setBackendClient(m_backendClient);
     m_chatPanel->setBackendClient(m_backendClient);
     connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels);
@@ -367,7 +368,8 @@ void MainWindow::runSelfTest() {
             qEnvironmentVariableIsSet("MAGNITE_SELFTEST_TRAINING") ||
             qEnvironmentVariableIsSet("MAGNITE_SELFTEST_ADAPTER") ||
             qEnvironmentVariableIsSet("MAGNITE_SELFTEST_PULL") ||
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE");
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE") ||
+            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_RAG");
 
         auto beginIpcStage = [this, failCount, finish]() {
             m_backendClient->get("/models", [this, failCount, finish](int status, const QJsonDocument &doc) {
@@ -391,6 +393,8 @@ void MainWindow::runSelfTest() {
                         pullModelSelfTest(failCount, finish);
                     } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE")) {
                         inferenceSelfTest(failCount, finish);
+                    } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_RAG")) {
+                        ragSelfTest(failCount, finish);
                     } else {
                         finish();
                     }
@@ -851,6 +855,88 @@ void MainWindow::activateAdapterSelfTest(const QString &adapterId,
                             fprintf(stderr, "[selftest] %s adapter cleared\n",
                                     cleared ? "ok:" : "FAIL:");
                             finish();
+                        });
+                });
+        });
+}
+
+void MainWindow::ragSelfTest(std::shared_ptr<int> failCount,
+                             std::function<void()> finish) {
+    // Phase 6 e2e: ingest a small document, retrieve it back through the
+    // vector store, then delete it and confirm cleanup. (Chat-context
+    // injection shares the same store/embedding code paths.)
+    const QString path = QDir::temp().filePath("magnite-selftest-rag.txt");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        ++(*failCount);
+        fprintf(stderr, "[selftest] FAIL: write rag document\n");
+        finish();
+        return;
+    }
+    f.write("Magnite RAG knowledge base.\n");
+    f.write("The Eiffel Tower is a wrought-iron lattice tower in Paris.\n");
+    f.write("Retrieval-augmented generation injects matching passages into chat context.\n");
+    f.close();
+
+    QJsonObject ingest;
+    ingest["path"] = path;
+    m_backendClient->post("/rag/documents", ingest,
+        [this, failCount, finish](int status, const QJsonDocument &doc) {
+            if (status != 201) {
+                ++(*failCount);
+                fprintf(stderr, "[selftest] FAIL: rag ingest (status=%d, %s)\n",
+                        status, qUtf8Printable(doc.object()["detail"].toString()));
+                finish();
+                return;
+            }
+            const QString docId = doc.object()["id"].toString();
+            const int chunks = doc.object()["chunks"].toInt();
+            if (chunks < 1) ++(*failCount);
+            fprintf(stderr, "[selftest] %s rag ingest: id=%s chunks=%d\n",
+                    chunks >= 1 ? "ok:" : "FAIL:", qUtf8Printable(docId), chunks);
+
+            QJsonObject query;
+            query["query"] = "What is the Eiffel Tower made of?";
+            query["top_k"] = 3;
+            m_backendClient->post("/rag/query", query,
+                [this, failCount, finish, docId](int s, const QJsonDocument &d) {
+                    bool found = false;
+                    double score = 0.0;
+                    if (s == 200) {
+                        const QJsonArray results = d.object()["results"].toArray();
+                        for (const auto &v : results) {
+                            if (v.toObject()["document_id"].toString() == docId) {
+                                found = true;
+                                score = v.toObject()["score"].toDouble();
+                                break;
+                            }
+                        }
+                    }
+                    if (!found) ++(*failCount);
+                    fprintf(stderr, "[selftest] %s rag query: status=%d score=%.3f\n",
+                            found ? "ok:" : "FAIL:", s, score);
+
+                    m_backendClient->remove("/rag/documents/" + docId,
+                        [this, failCount, finish, docId](int del, const QJsonDocument &) {
+                            const bool deleted = (del == 204);
+                            if (!deleted) ++(*failCount);
+                            fprintf(stderr, "[selftest] %s rag delete\n",
+                                    deleted ? "ok:" : "FAIL:");
+                            m_backendClient->get("/rag/documents",
+                                [this, failCount, finish, docId](int list,
+                                                                const QJsonDocument &ld) {
+                                    bool gone = true;
+                                    if (list == 200) {
+                                        for (const auto &v : ld.array()) {
+                                            if (v.toObject()["id"].toString() == docId)
+                                                gone = false;
+                                        }
+                                    }
+                                    if (!gone) ++(*failCount);
+                                    fprintf(stderr, "[selftest] %s rag cleanup\n",
+                                            gone ? "ok:" : "FAIL:");
+                                    finish();
+                                });
                         });
                 });
         });

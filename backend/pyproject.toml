@@ -27,6 +27,7 @@ ml = [
     "datasets>=2.16.0",
     "accelerate>=0.26.0",
     "safetensors>=0.4.0",
+    "pypdf>=4.0",
 ]
 
 [project.scripts]

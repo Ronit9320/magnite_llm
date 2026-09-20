@@ -56,6 +56,7 @@ private:
     void pollTrainingSelfTest(const QString &jobId, int attempts,
                               std::shared_ptr<int> failCount, std::function<void()> finish);
     void adapterSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish);
+    void ragSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish);
     void pollTrainingForAdapter(const QString &jobId, int attempts,
                                 std::shared_ptr<int> failCount, std::function<void()> finish);
     void activateAdapterSelfTest(const QString &adapterId,

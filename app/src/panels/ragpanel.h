@@ -4,23 +4,30 @@
 
 #include <QList>
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QSpinBox;
 class QVBoxLayout;
 class QWidget;
+class BackendClient;
 class RagDocCard;
 
-// RAG panel: ingest documents, configure retrieval, and manage the local
-// vector store (Phase 5.5.5: documents render as glass cards, config as a
-// glass card). Backend RAG engine lands in Phase 6; UI skeleton here.
+// RAG panel: ingest documents, embed them locally, configure retrieval, and
+// test queries against the vector store (Phase 6). The card grid, empty state
+// and retrieval config card render documents returned by the backend.
 class RagPanel : public BasePanel {
     Q_OBJECT
 
 public:
     explicit RagPanel(QWidget *parent = nullptr);
 
+    void setBackendClient(BackendClient *client);
+    void refresh();
+
     QString settingsJson() const override;
+
+protected:
     void applySettingsJson(const QString &json) override;
 
 private slots:
@@ -28,14 +35,19 @@ private slots:
     void onRemoveDocument();
     void onClearAll();
     void onCardClicked(RagDocCard *card, bool ctrl);
+    void onTestQuery();
+    void onConfigChanged();
 
 private:
     void setupUi();
-    void setStatus(const QString &text);
+    void setStatus(const QString &text, const QString &tone = QString());
     void clearCards();
     void updateEmptyState();
     bool hasSelection() const;
+    QString selectedIds() const;
+    void pushConfig();
 
+    BackendClient *m_client;
     QPushButton *m_addButton;
     QPushButton *m_removeButton;
     QPushButton *m_clearButton;
@@ -46,6 +58,9 @@ private:
     QSpinBox *m_chunkSizeSpin;
     QSpinBox *m_chunkOverlapSpin;
     QSpinBox *m_topKSpin;
+    QLineEdit *m_queryEdit;
+    QLabel *m_resultLabel;
     QLabel *m_statusLabel;
     QList<RagDocCard *> m_cards;
+    bool m_loadingConfig;
 };
