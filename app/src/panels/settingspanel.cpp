@@ -82,16 +82,16 @@ void SettingsPanel::setupUi() {
     m_telemetryOptIn->setToolTip("Local-first by default. Opt-in only.");
     privacyForm->addRow("Telemetry:", m_telemetryOptIn);
     auto *appearance = Surface::card(this,"Appearance");
-    auto *theme = new QLabel("Midnight · dark blue and white",this);
+    auto *theme = new QLabel("Studio · graphite, mint & cream",this);
     theme->setObjectName("bodyLabel");
     appearance->addWidget(theme);
-    m_stars = new QCheckBox("Floating stars",this);
+    m_stars = new QCheckBox("Ambient canvas",this);
     m_stars->setObjectName("starsToggle");
     m_reducedMotion = new QCheckBox("Reduce motion",this);
     m_reducedMotion->setObjectName("reducedMotionToggle");
     appearance->addWidget(m_stars);
     appearance->addWidget(m_reducedMotion);
-    auto *hint = new QLabel("Reduced motion freezes the starfield and disables panel fades.",this);
+    auto *hint = new QLabel("A quiet moving glow behind your workspace. Reduced motion freezes the glow and disables panel fades.",this);
     hint->setWordWrap(true);
     hint->setObjectName("cardMeta");
     appearance->addWidget(hint);
@@ -129,8 +129,8 @@ void SettingsPanel::loadFromSettings() {
     m_hostedEndpoint->setText(s.value("hosted/endpoint").toString());
     m_hostedKey->setText(s.value("hosted/apiKey").toString());
     m_telemetryOptIn->setChecked(s.value("privacy/telemetry", false).toBool());
-    m_stars->setChecked(s.value("appearance/stars",true).toBool());
-    m_reducedMotion->setChecked(s.value("appearance/reducedMotion",false).toBool());
+    m_stars->setChecked(s.value("appearance/studioAmbient",true).toBool());
+    m_reducedMotion->setChecked(s.value("appearance/studioReducedMotion",false).toBool());
 }
 
 void SettingsPanel::onBrowseDataDir() {
@@ -149,8 +149,8 @@ void SettingsPanel::onSave() {
     s.setValue("hosted/endpoint", m_hostedEndpoint->text().trimmed());
     s.setValue("hosted/apiKey", m_hostedKey->text().trimmed());
     s.setValue("privacy/telemetry", m_telemetryOptIn->isChecked());
-    s.setValue("appearance/stars",m_stars->isChecked());
-    s.setValue("appearance/reducedMotion",m_reducedMotion->isChecked());
+    s.setValue("appearance/studioAmbient",m_stars->isChecked());
+    s.setValue("appearance/studioReducedMotion",m_reducedMotion->isChecked());
     s.sync();
     setStatus("Settings saved.");
     emit settingsChanged();

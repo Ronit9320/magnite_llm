@@ -4,7 +4,8 @@
 #include <QTimer>
 #include <QElapsedTimer>
 
-// A bounded, deterministic starfield painted behind the workspace. No ML or IO.
+// Studio ambient canvas; the existing class/API names keep callers compatible.
+// Slow bounded glow motion behind content, with reduced-motion support.
 class Starfield : public QWidget {
 public:
     explicit Starfield(QWidget *parent = nullptr);

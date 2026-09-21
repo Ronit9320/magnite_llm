@@ -3,6 +3,7 @@
 #include "backend_client.h"
 #include "panels/modelcard.h"
 #include "widgets/flowlayout.h"
+#include "widgets/surface.h"
 
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -40,7 +41,7 @@ ModelsPanel::ModelsPanel(QWidget *parent)
     , m_selectedCard(nullptr)
 {
     setHeaderSubtitle(
-        "Browse and download models from HuggingFace, then run them locally.");
+        "A home for the intelligence you make your own.");
     setupUi();
 }
 
@@ -55,6 +56,30 @@ QWidget *ModelsPanel::makeCardHost() {
 void ModelsPanel::setupUi() {
     auto *layout = contentLayout();
 
+    auto *hero = new QFrame(this);
+    hero->setObjectName("studioHero");
+    auto *heroLayout = new QHBoxLayout(hero);
+    heroLayout->setContentsMargins(28,24,28,24);
+    auto *copy = new QVBoxLayout();
+    copy->setSpacing(12);
+    auto *kicker = new QLabel("YOUR NEXT IDEA STARTS HERE",hero);
+    kicker->setObjectName("heroKicker");
+    copy->addWidget(kicker);
+    auto *headline = new QLabel("Small models. Big possibilities.",hero);
+    headline->setObjectName("heroTitle");
+    headline->setWordWrap(true);
+    copy->addWidget(headline);
+    auto *description = new QLabel("Discover a model, shape it with your data, and see what you can create.",hero);
+    description->setWordWrap(true);
+    copy->addWidget(description);
+    heroLayout->addLayout(copy,1);
+    auto *art = new QLabel("✳",hero);
+    art->setObjectName("heroArt");
+    art->setAlignment(Qt::AlignCenter);
+    art->setMinimumWidth(120);
+    heroLayout->addWidget(art);
+    layout->addWidget(hero);
+
     auto *searchRow = new QHBoxLayout();
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("Search HuggingFace models...");
@@ -66,6 +91,22 @@ void ModelsPanel::setupUi() {
     searchRow->addWidget(m_searchButton);
     searchRow->addWidget(m_refreshButton);
     layout->addLayout(searchRow);
+
+    auto *discovery = new QHBoxLayout();
+    auto *discoverLabel = new QLabel("EXPLORE",this);
+    discoverLabel->setObjectName("heroKicker");
+    discovery->addWidget(discoverLabel);
+    for (const auto &term : {QString("Qwen"),QString("Llama"),QString("Gemma"),QString("SmolLM")}) {
+        auto *chip = new QPushButton(term,this);
+        chip->setCursor(Qt::PointingHandCursor);
+        connect(chip,&QPushButton::clicked,this,[this,term]() {
+            m_searchEdit->setText(term);
+            onSearch();
+        });
+        discovery->addWidget(chip);
+    }
+    discovery->addStretch();
+    layout->addLayout(discovery);
 
     auto *viewRow = new QHBoxLayout();
     m_viewCombo = new QComboBox(this);
@@ -92,6 +133,32 @@ void ModelsPanel::setupUi() {
     m_scrollArea->viewport()->setAutoFillBackground(false);
     m_scrollArea->setWidget(makeCardHost());
     layout->addWidget(m_scrollArea, 1);
+
+    m_welcome = new QWidget(this);
+    auto *welcome = new QHBoxLayout(m_welcome);
+    welcome->setContentsMargins(0,0,0,0);
+    welcome->setSpacing(16);
+    const QStringList titles = {"01   Make it yours", "02   Add your context", "03   Try an idea"};
+    const QStringList descriptions = {
+        "Fine-tune a model with examples that sound like you.",
+        "Turn your documents into knowledge your model can use.",
+        "Load a local model and start a conversation."};
+    const QStringList actions = {"Open training →","Open knowledge →","Open playground →"};
+    const int targets[] = {1,2,4};
+    for (int i=0;i<3;++i) {
+        auto *tile = Surface::card(m_welcome,titles[i]);
+        auto *detail = new QLabel(descriptions[i],m_welcome);
+        detail->setWordWrap(true);
+        tile->addWidget(detail);
+        tile->addStretch();
+        auto *action = new QPushButton(actions[i],m_welcome);
+        action->setCursor(Qt::PointingHandCursor);
+        connect(action,&QPushButton::clicked,this,[this,target=targets[i]]() { emit workspaceRequested(target); });
+        tile->addWidget(action);
+        welcome->addWidget(tile->parentWidget(),1);
+    }
+    layout->addWidget(m_welcome);
+    m_scrollArea->hide();
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
@@ -159,6 +226,8 @@ void ModelsPanel::onViewChanged(int index) {
 }
 
 void ModelsPanel::clearCards() {
+    m_welcome->show();
+    m_scrollArea->hide();
     while (QLayoutItem *item = m_flowLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) {
             w->hide();            // stop painting immediately
@@ -176,6 +245,8 @@ void ModelsPanel::clearCards() {
 }
 
 void ModelsPanel::addCards(const QJsonArray &items, bool isHub) {
+    m_welcome->setVisible(items.isEmpty());
+    m_scrollArea->setVisible(!items.isEmpty());
     for (const auto &value : items) {
         auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
         connect(card, &ModelCard::cardClicked, this, &ModelsPanel::onCardClicked);

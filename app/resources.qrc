@@ -29,6 +29,7 @@
         <file alias="icons/plus.svg">resources/icons/plus.svg</file>
         <file alias="icons/refresh-cw.svg">resources/icons/refresh-cw.svg</file>
         <file alias="icons/search.svg">resources/icons/search.svg</file>
+        <file alias="icons/chevron-down.svg">resources/icons/chevron-down.svg</file>
         <file alias="icons/send.svg">resources/icons/send.svg</file>
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>

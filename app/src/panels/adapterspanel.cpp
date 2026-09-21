@@ -52,10 +52,20 @@ void AdaptersPanel::setupUi() {
     // Empty state: centered hint + Import (import is the only adapter action
     // usable with no cards present).
     m_emptyState = new QWidget(this);
+    m_emptyState->setObjectName("surfaceCard");
     auto *emptyLayout = new QVBoxLayout(m_emptyState);
     emptyLayout->setContentsMargins(24, 24, 24, 24);
     emptyLayout->setSpacing(14);
     emptyLayout->setAlignment(Qt::AlignCenter);
+    auto *mark = new QLabel("✳",m_emptyState);
+    mark->setObjectName("heroArt");
+    mark->setAlignment(Qt::AlignCenter);
+    emptyLayout->addWidget(mark);
+    auto *title = new QLabel("Give your model a new specialty.",m_emptyState);
+    title->setObjectName("headingLabel");
+    title->setWordWrap(true);
+    title->setAlignment(Qt::AlignCenter);
+    emptyLayout->addWidget(title);
     auto *hint = new QLabel(
         "No adapters yet. Train one in the Training panel.\n\n"
         "Have an export archive? Import it below.",
@@ -65,7 +75,7 @@ void AdaptersPanel::setupUi() {
     hint->setWordWrap(true);
     emptyLayout->addWidget(hint);
     auto *importButton = new QPushButton("Import adapter...", m_emptyState);
-    importButton->setObjectName("secondaryBtn");
+    importButton->setObjectName("primaryBtn");
     importButton->setCursor(Qt::PointingHandCursor);
     emptyLayout->addWidget(importButton, 0, Qt::AlignHCenter);
     m_emptyState->setLayout(emptyLayout);

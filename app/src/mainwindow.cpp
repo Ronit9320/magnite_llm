@@ -74,8 +74,8 @@ void MainWindow::setupUi() {
     // widget-level stylesheet cascades color onto the child controls.
     central->setObjectName("appRoot");
     auto *mainLayout = new QHBoxLayout(central);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-    mainLayout->setSpacing(0);
+    mainLayout->setContentsMargins(14, 14, 14, 14);
+    mainLayout->setSpacing(8);
 
     // ---- Sidebar (design doc §5) ----
     auto *sidebar = new QWidget();
@@ -85,10 +85,13 @@ void MainWindow::setupUi() {
     sidebarLayout->setContentsMargins(16, 16, 16, 24);
     sidebarLayout->setSpacing(12);
 
-    auto *logoLabel = new QLabel("◎  magnite", sidebar);
+    auto *logoLabel = new QLabel("✳  magnite", sidebar);
     logoLabel->setObjectName("logoLabel");
     sidebarLayout->addWidget(logoLabel);
-    auto *eyebrow = new QLabel("YOUR AI WORKSPACE", sidebar);
+    auto *edition = new QLabel("STUDIO  /  PERSONAL", sidebar);
+    edition->setObjectName("studioTag");
+    sidebarLayout->addWidget(edition,0,Qt::AlignLeft);
+    auto *eyebrow = new QLabel("WORKSPACE", sidebar);
     eyebrow->setObjectName("eyebrow");
     sidebarLayout->addWidget(eyebrow);
     sidebarLayout->addSpacing(12);
@@ -115,11 +118,11 @@ void MainWindow::setupUi() {
 
     // 5 nav items in stack order; Settings is pinned to the bottom.
     const QList<NavInfo> navs = {
-        {"Models",   "box",       PanelModels},
+        {"Model library",   "box",       PanelModels},
         {"Training", "graduation-cap", PanelTraining},
-        {"RAG",      "database",         PanelRag},
+        {"Knowledge",      "database",         PanelRag},
         {"Adapters", "layers",         PanelAdapters},
-        {"Chat",     "message-circle", PanelChat},
+        {"Playground",     "message-circle", PanelChat},
     };
     for (const auto &info : navs)
         sidebarLayout->addWidget(makeNavButton(info));
@@ -151,6 +154,8 @@ void MainWindow::setupUi() {
     m_chatPanel = new ChatPanel();
     m_settingsPanel = new SettingsPanel();
 
+    connect(m_modelsPanel,&ModelsPanel::workspaceRequested,this,&MainWindow::switchPanel);
+
     connect(m_modelsPanel,&ModelsPanel::loadRequested,this,[this](const QString &id) {
         switchPanel(PanelChat);
         m_chatPanel->loadModel(id);
@@ -173,7 +178,7 @@ void MainWindow::setupUi() {
     bar->setFixedHeight(56);
     auto *barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(32,0,32,0);
-    auto *breadcrumb = new QLabel("WORKSPACE   /   Local",bar);
+    auto *breadcrumb = new QLabel("Personal workspace   /   Local studio",bar);
     breadcrumb->setObjectName("cardMeta");
     barLayout->addWidget(breadcrumb);
     barLayout->addStretch();
@@ -187,16 +192,16 @@ void MainWindow::setupUi() {
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this]() {
         QSettings settings;
-        m_background->setStarsVisible(settings.value("appearance/stars",true).toBool());
-        m_background->setMotionEnabled(!settings.value("appearance/reducedMotion",false).toBool());
+        m_background->setStarsVisible(settings.value("appearance/studioAmbient",true).toBool());
+        m_background->setMotionEnabled(!settings.value("appearance/studioReducedMotion",false).toBool());
     };
     connect(m_settingsPanel, &SettingsPanel::settingsChanged,this,applyAppearance);
     applyAppearance();
-    auto *local = new QLabel("LOCAL BY DEFAULT",sidebar);
+    auto *local = new QLabel("BUILT FOR YOUR IDEAS",sidebar);
     local->setObjectName("eyebrow");
     sidebarLayout->addSpacing(12);
     sidebarLayout->addWidget(local);
-    auto *localHint = new QLabel("Your models. Your machine.",sidebar);
+    auto *localHint = new QLabel("Private by design.\nPowered by your machine.",sidebar);
     localHint->setObjectName("cardMeta");
     sidebarLayout->addWidget(localHint);
 
@@ -222,7 +227,7 @@ void MainWindow::refreshNavIcons() {
     for (auto *btn : m_sideButtons) {
         const QString name = btn->property("navicon").toString();
         const QColor color = btn->isChecked()
-            ? QColor(Theme::accentIce())
+            ? QColor(Theme::accentText())
             : QColor(Theme::textSecondary());
         btn->setIcon(Theme::coloredIcon(name, color, 18));
         btn->setIconSize(QSize(18, 18));
@@ -233,7 +238,7 @@ void MainWindow::startPanelFade() {
     // 150ms fade-in of the destination panel (design doc §6). Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
-    if (m_selfTest || m_skipFade || QSettings().value("appearance/reducedMotion", false).toBool())
+    if (m_selfTest || m_skipFade || QSettings().value("appearance/studioReducedMotion", false).toBool())
         return;
 
     if (m_crossfade) {
@@ -248,7 +253,7 @@ void MainWindow::startPanelFade() {
     effect->setOpacity(0.0);
 
     m_crossfade = new QPropertyAnimation(effect, "opacity", this);
-    m_crossfade->setDuration(150);
+    m_crossfade->setDuration(220);
     m_crossfade->setStartValue(0.0);
     m_crossfade->setEndValue(1.0);
     m_crossfade->setEasingCurve(QEasingCurve::OutCubic);
@@ -399,8 +404,9 @@ void MainWindow::runSelfTest() {
             QSettings s;
             savePanelSettings();
             s.sync();
-            bool allPersist = s.contains("panels/Models") && s.contains("panels/Training") &&
-                              s.contains("panels/RAG") && s.contains("panels/Chat");
+            bool allPersist = true;
+            for (const auto *panel : panels)
+                allPersist = allPersist && s.contains("panels/" + panel->title());
             checkC(allPersist, "settings persisted to QSettings");
         }
 

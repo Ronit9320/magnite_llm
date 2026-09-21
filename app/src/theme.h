@@ -5,48 +5,44 @@
 
 class QIcon;
 
-// Space-theme design tokens (design doc §2–§4). This is the single source of
+// Studio design tokens (design doc §11). This is the single source of
 // truth for every color, font, radius and spacing value in the UI. Panels and
 // the global QSS (Theme::qss) read tokens from here — never hardcode hex
 // literals in widget code.
 namespace Theme {
 
-// ---- Color tokens (design doc §2) ----
-// bg-void is the app base background — flat black per product request (the
-// nebula wash was dropped; it was purple-tinted and clashed with the blue accent).
-inline QString bgVoid()        { return QStringLiteral("#030914"); }
-inline QString bgDeep()        { return QStringLiteral("#071222"); }
-// Primary accent — blue (#2563EB) per product request. Formerly "accent-violet"
-// (#7C3AED); renamed so code and the design doc agree. The secondary accent
-// (accentBlue, reused for info states) is the same blue.
-inline QString accentPrimary() { return QStringLiteral("#2563EB"); }
-inline QString accentBlue()    { return QStringLiteral("#2563EB"); }
-inline QString accentGlow()    { return QStringLiteral("rgba(59, 130, 246, 0.35)"); }
-inline QString accentIce()    { return QStringLiteral("#93C5FD"); }
+// ---- Graphite, mint, cream and lavender palette ----
+inline QString bgVoid()        { return QStringLiteral("#101716"); }
+inline QString bgDeep()        { return QStringLiteral("#151E1C"); }
+// Keep existing semantic names for consumers; the secondary accent is lavender.
+inline QString accentPrimary() { return QStringLiteral("#BEF4CF"); }
+inline QString accentBlue()    { return QStringLiteral("#B6AEF2"); }
+inline QString accentGlow()    { return QStringLiteral("rgba(190, 244, 207, 0.18)"); }
+inline QString accentIce()    { return QStringLiteral("#BEF4CF"); }
 // Derived accent shades used by QSS interaction states (hover/pressed) and the
 // light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
-inline QString accentHover()   { return QStringLiteral("#3B82F6"); }
-inline QString accentActive()  { return QStringLiteral("#1D4ED8"); }
-inline QString accentText()    { return QStringLiteral("#FFFFFF"); }
+inline QString accentHover()   { return QStringLiteral("#D8FFE4"); }
+inline QString accentActive()  { return QStringLiteral("#98DCAE"); }
+inline QString accentText()    { return QStringLiteral("#152A1C"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
-inline QString dangerHover()   { return QStringLiteral("#93C5FD"); }
-inline QString onDanger()      { return QStringLiteral("#FFFFFF"); }
+inline QString dangerHover()   { return QStringLiteral("#FFD0BD"); }
+inline QString onDanger()      { return QStringLiteral("#301F19"); }
 
-inline QString glassFill()          { return QStringLiteral("#0C1B30"); }
-inline QString glassFillHover()     { return QStringLiteral("#122640"); }
-inline QString glassFillActive()    { return QStringLiteral("#122640"); }
-inline QString glassBorder()        { return QStringLiteral("#243D5E"); }
-inline QString glassBorderHover()   { return QStringLiteral("#3B82F6"); }
-inline QString glassBorderActive()  { return QStringLiteral("#93C5FD"); }
+inline QString glassFill()          { return QStringLiteral("#1B2623"); }
+inline QString glassFillHover()     { return QStringLiteral("#273832"); }
+inline QString glassFillActive()    { return QStringLiteral("#273832"); }
+inline QString glassBorder()        { return QStringLiteral("#33453D"); }
+inline QString glassBorderHover()   { return QStringLiteral("#D8FFE4"); }
+inline QString glassBorderActive()  { return QStringLiteral("#BEF4CF"); }
 
-inline QString textPrimary()   { return QStringLiteral("#FFFFFF"); }
-inline QString textSecondary() { return QStringLiteral("#B3C7E1"); }
-inline QString textMuted()     { return QStringLiteral("#7B96B9"); }
+inline QString textPrimary()   { return QStringLiteral("#F4F1E8"); }
+inline QString textSecondary() { return QStringLiteral("#B6C5BB"); }
+inline QString textMuted()     { return QStringLiteral("#80988A"); }
 
-inline QString statusSuccess() { return QStringLiteral("#93C5FD"); }
-inline QString statusWarning() { return QStringLiteral("#FFFFFF"); }
-inline QString statusError()   { return QStringLiteral("#93C5FD"); }
-inline QString statusInfo()    { return QStringLiteral("#2563EB"); }
+inline QString statusSuccess() { return QStringLiteral("#BEF4CF"); }
+inline QString statusWarning() { return QStringLiteral("#EBC98C"); }
+inline QString statusError()   { return QStringLiteral("#F3AF98"); }
+inline QString statusInfo()    { return QStringLiteral("#B6AEF2"); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }

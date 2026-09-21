@@ -16,6 +16,7 @@
 
 #include <QApplication>
 #include <QScreen>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cstdio>
@@ -41,7 +42,7 @@ QString tintSvg(const QString &svg, const QColor &color) {
     out.replace("stroke='currentColor'", "stroke='" + hex + "'");
     out.replace("stroke=\"currentcolor\"", "stroke=\"" + hex + "\"");
     // Any fill an icon happens to carry is hardcoded; leave untouched.
-    out.replace("#030914", hex);
+    out.replace("#101716", hex);
     return out;
 }
 
@@ -148,7 +149,13 @@ void Theme::setupApplicationTheme() {
 QString Theme::qss() {
     QString tpl = loadText(QStringLiteral(":/theme/theme.qss"));
     if (tpl.isEmpty()) return QString();
-    for (const auto &tk : tokens())
+    // Replace longer token names first so @glassFill is not consumed inside
+    // @glassFillHover or @glassFillActive.
+    auto replacements = tokens();
+    std::sort(replacements.begin(), replacements.end(), [](const Token &a, const Token &b) {
+        return a.name.size() > b.name.size();
+    });
+    for (const auto &tk : replacements)
         tpl.replace(tk.name, tk.value);
     return tpl;
 }
@@ -166,23 +173,23 @@ int Theme::selfCheck() {
     };
 
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
-    check("bgVoid", Theme::bgVoid() == "#030914");
-    check("bgDeep", Theme::bgDeep() == "#071222");
-    check("accentPrimary", Theme::accentPrimary() == "#2563EB");
-    check("accentBlue", Theme::accentBlue() == "#2563EB");
-    check("accentIce", Theme::accentIce() == "#93C5FD");
-    check("accentHover", Theme::accentHover() == "#3B82F6");
-    check("accentActive", Theme::accentActive() == "#1D4ED8");
-    check("accentText", Theme::accentText() == "#FFFFFF");
-    check("dangerHover", Theme::dangerHover() == "#93C5FD");
-    check("onDanger", Theme::onDanger() == "#FFFFFF");
-    check("textPrimary", Theme::textPrimary() == "#FFFFFF");
-    check("textSecondary", Theme::textSecondary() == "#B3C7E1");
-    check("textMuted", Theme::textMuted() == "#7B96B9");
-    check("statusSuccess", Theme::statusSuccess() == "#93C5FD");
-    check("statusWarning", Theme::statusWarning() == "#FFFFFF");
-    check("statusError", Theme::statusError() == "#93C5FD");
-    check("statusInfo", Theme::statusInfo() == "#2563EB");
+    check("bgVoid", Theme::bgVoid() == "#101716");
+    check("bgDeep", Theme::bgDeep() == "#151E1C");
+    check("accentPrimary", Theme::accentPrimary() == "#BEF4CF");
+    check("accentBlue", Theme::accentBlue() == "#B6AEF2");
+    check("accentIce", Theme::accentIce() == "#BEF4CF");
+    check("accentHover", Theme::accentHover() == "#D8FFE4");
+    check("accentActive", Theme::accentActive() == "#98DCAE");
+    check("accentText", Theme::accentText() == "#152A1C");
+    check("dangerHover", Theme::dangerHover() == "#FFD0BD");
+    check("onDanger", Theme::onDanger() == "#301F19");
+    check("textPrimary", Theme::textPrimary() == "#F4F1E8");
+    check("textSecondary", Theme::textSecondary() == "#B6C5BB");
+    check("textMuted", Theme::textMuted() == "#80988A");
+    check("statusSuccess", Theme::statusSuccess() == "#BEF4CF");
+    check("statusWarning", Theme::statusWarning() == "#EBC98C");
+    check("statusError", Theme::statusError() == "#F3AF98");
+    check("statusInfo", Theme::statusInfo() == "#B6AEF2");
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());
@@ -193,6 +200,19 @@ int Theme::selfCheck() {
     const QString styles = Theme::qss();
     check("qss() non-empty", !styles.isEmpty());
     check("qss() tokens substituted", !styles.contains("@"));
+    // Prefix collisions used to leave strings like #0C1B30Hover behind.
+    // Validate the resulting color literals, not only the absence of tokens.
+    const QRegularExpression colorLiteral(QStringLiteral("#[A-Za-z0-9]+"));
+    auto matches = colorLiteral.globalMatch(styles);
+    bool validColors = true;
+    while (matches.hasNext()) {
+        const QString value = matches.next().captured();
+        // QSS object selectors are also #names; only inspect digit-leading
+        // or hexadecimal-looking words with a six-digit color prefix.
+        if (QRegularExpression("^#[0-9A-Fa-f]{6}").match(value).hasMatch())
+            validColors = validColors && QColor(value).isValid();
+    }
+    check("qss() color literals valid", validColors);
 
     // 3. Qt resource tree: theme/fonts/icons embedded via resources.qrc.
     check("theme.qss embedded", !loadText(":/theme/theme.qss").isEmpty());

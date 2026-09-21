@@ -32,6 +32,7 @@ public:
 signals:
     void modelsChanged();
     void loadRequested(const QString &id);
+    void workspaceRequested(int panel);
 
 public slots:
     void refresh();
@@ -71,6 +72,7 @@ private:
     FlowLayout *m_flowLayout;
     QWidget *m_cardHost;
     QLabel *m_statusLabel;
+    QWidget *m_welcome = nullptr;
     QTimer *m_pullTimer;
     QList<ModelCard *> m_cards;
     ModelCard *m_selectedCard;

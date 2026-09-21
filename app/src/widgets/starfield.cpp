@@ -3,13 +3,13 @@
 
 #include <QApplication>
 #include <QPainter>
-#include <QRandomGenerator>
 #include <QWindow>
+#include <QRadialGradient>
 #include <cmath>
 
 Starfield::Starfield(QWidget *parent) : QWidget(parent) {
     m_clock.start();
-    m_timer.setInterval(50); // 20 fps is sufficient for a 48-second ambient loop.
+    m_timer.setInterval(50); // 20 fps is sufficient for the slow ambient loop.
     connect(&m_timer, &QTimer::timeout, this, qOverload<>(&QWidget::update));
     connect(qApp, &QGuiApplication::applicationStateChanged, this,
             [this](Qt::ApplicationState) { updateTimer(); });
@@ -42,15 +42,19 @@ void Starfield::paintEvent(QPaintEvent *) {
     if (!m_stars) return;
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen);
-    QRandomGenerator rng(24);
-    const double phase = m_motion ? (1.0-std::cos(m_clock.elapsed()*6.283185307/48000.0))/2.0 : 0;
-    for (int i = 0; i < 145; ++i) {
-        const double x = rng.generateDouble()*width();
-        const double y = rng.generateDouble()*height();
-        const double radius = 0.6+rng.generateDouble()*0.7;
-        QColor color(Theme::textPrimary());
-        color.setAlphaF(0.15+rng.generateDouble()*0.45);
-        painter.setBrush(color);
-        painter.drawEllipse(QPointF(x+8*phase,y-12*phase),radius,radius);
-    }
+    const double phase = m_motion ? std::sin(m_clock.elapsed()*6.283185307/32000.0) : 0;
+    auto glow = [&](QPointF center, qreal radius, const QString &token, qreal opacity) {
+        QColor core(token); core.setAlphaF(opacity);
+        QColor edge(core); edge.setAlpha(0);
+        QRadialGradient gradient(center,radius);
+        gradient.setColorAt(0,core); gradient.setColorAt(1,edge);
+        painter.fillRect(rect(),gradient);
+    };
+    glow(QPointF(width()*0.83 + phase*45, height()*0.12),width()*0.6,Theme::accentPrimary(),0.10);
+    glow(QPointF(width()*0.15, height()*0.9 + phase*30),width()*0.5,Theme::accentBlue(),0.065);
+    QColor grid(Theme::glassBorder()); grid.setAlphaF(0.24);
+    painter.setBrush(grid);
+    for (int x=24;x<width();x+=32)
+        for (int y=24;y<height();y+=32)
+            painter.drawEllipse(QPointF(x,y),0.6,0.6);
 }

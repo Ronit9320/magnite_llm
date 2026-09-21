@@ -86,6 +86,7 @@ void ChatPanel::setupUi() {
     m_chatScroll->setWidget(m_chatHost);
     conversation->addWidget(m_chatScroll,1);
     auto *controls = Surface::card(this,"Generation settings");
+    controls->setSpacing(10);
     columns->addWidget(controls->parentWidget(),2);
     m_modelCombo = new QComboBox(this);
     m_modelCombo->setEditable(true);
@@ -98,13 +99,19 @@ void ChatPanel::setupUi() {
     m_maxTokensSpin = new QSpinBox(this);
     m_maxTokensSpin->setRange(1,8192);
     m_maxTokensSpin->setValue(256);
-    Surface::field(controls,"Max tokens",m_maxTokensSpin);
     m_tempSpin = new QDoubleSpinBox(this);
     m_tempSpin->setRange(0.0,2.0);
     m_tempSpin->setValue(0.7);
     m_tempSpin->setSingleStep(0.05);
     m_tempSpin->setDecimals(2);
-    Surface::field(controls,"Temperature",m_tempSpin);
+    auto *parameters = new QHBoxLayout();
+    auto *tokens = new QVBoxLayout();
+    auto *temperature = new QVBoxLayout();
+    Surface::field(tokens,"Max tokens",m_maxTokensSpin);
+    Surface::field(temperature,"Temperature",m_tempSpin);
+    parameters->addLayout(tokens,1);
+    parameters->addLayout(temperature,1);
+    controls->addLayout(parameters);
     auto *loadBtn = new QPushButton("Load model",this);
     loadBtn->setObjectName("primaryBtn");
     controls->addWidget(loadBtn);
@@ -112,6 +119,8 @@ void ChatPanel::setupUi() {
     connect(loadBtn,&QPushButton::clicked,this,&ChatPanel::onLoadModel);
 
     auto *composer = Surface::card(this);
+    composer->setContentsMargins(16,16,16,16);
+    composer->setSpacing(8);
     auto *inputRow = new QHBoxLayout();
     m_input = new QLineEdit(this);
     m_input->setPlaceholderText("Type a message…");

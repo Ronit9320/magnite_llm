@@ -20,7 +20,9 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
                              Theme::panelPadding(), Theme::panelPadding());
     root->setSpacing(Theme::spacingBase());
 
-    auto *titleLabel = new QLabel(title, this);
+    const QString displayTitle = title == "Models" ? "Model library"
+        : title == "Chat" ? "Playground" : title;
+    auto *titleLabel = new QLabel(displayTitle, this);
     titleLabel->setObjectName("panelTitle");
 
     m_subtitleLabel = new QLabel(this);
