@@ -4,8 +4,8 @@
 #include <QTimer>
 #include <QElapsedTimer>
 
-// Studio ambient canvas; the existing class/API names keep callers compatible.
-// Slow bounded glow motion behind content, with reduced-motion support.
+// Studio 02 registration grid or kinetic hero graphic (kineticGlyph property).
+// Existing API names keep callers compatible; motion respects app visibility.
 class Starfield : public QWidget {
 public:
     explicit Starfield(QWidget *parent = nullptr);

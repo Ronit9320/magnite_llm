@@ -42,7 +42,7 @@ QString tintSvg(const QString &svg, const QColor &color) {
     out.replace("stroke='currentColor'", "stroke='" + hex + "'");
     out.replace("stroke=\"currentcolor\"", "stroke=\"" + hex + "\"");
     // Any fill an icon happens to carry is hardcoded; leave untouched.
-    out.replace("#101716", hex);
+    out.replace("#F1EFE7", hex);
     return out;
 }
 
@@ -173,23 +173,23 @@ int Theme::selfCheck() {
     };
 
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
-    check("bgVoid", Theme::bgVoid() == "#101716");
-    check("bgDeep", Theme::bgDeep() == "#151E1C");
-    check("accentPrimary", Theme::accentPrimary() == "#BEF4CF");
-    check("accentBlue", Theme::accentBlue() == "#B6AEF2");
-    check("accentIce", Theme::accentIce() == "#BEF4CF");
-    check("accentHover", Theme::accentHover() == "#D8FFE4");
-    check("accentActive", Theme::accentActive() == "#98DCAE");
-    check("accentText", Theme::accentText() == "#152A1C");
+    check("bgVoid", Theme::bgVoid() == "#F1EFE7");
+    check("bgDeep", Theme::bgDeep() == "#E9E6DC");
+    check("accentPrimary", Theme::accentPrimary() == "#FF5C28");
+    check("accentBlue", Theme::accentBlue() == "#5145B7");
+    check("accentIce", Theme::accentIce() == "#FF5C28");
+    check("accentHover", Theme::accentHover() == "#FF784E");
+    check("accentActive", Theme::accentActive() == "#E1491B");
+    check("accentText", Theme::accentText() == "#201D18");
     check("dangerHover", Theme::dangerHover() == "#FFD0BD");
     check("onDanger", Theme::onDanger() == "#301F19");
-    check("textPrimary", Theme::textPrimary() == "#F4F1E8");
-    check("textSecondary", Theme::textSecondary() == "#B6C5BB");
-    check("textMuted", Theme::textMuted() == "#80988A");
-    check("statusSuccess", Theme::statusSuccess() == "#BEF4CF");
-    check("statusWarning", Theme::statusWarning() == "#EBC98C");
-    check("statusError", Theme::statusError() == "#F3AF98");
-    check("statusInfo", Theme::statusInfo() == "#B6AEF2");
+    check("textPrimary", Theme::textPrimary() == "#20221F");
+    check("textSecondary", Theme::textSecondary() == "#555D54");
+    check("textMuted", Theme::textMuted() == "#74786F");
+    check("statusSuccess", Theme::statusSuccess() == "#FF5C28");
+    check("statusWarning", Theme::statusWarning() == "#855C14");
+    check("statusError", Theme::statusError() == "#B13D24");
+    check("statusInfo", Theme::statusInfo() == "#5145B7");
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());

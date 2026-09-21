@@ -4,6 +4,7 @@
 #include "panels/modelcard.h"
 #include "widgets/flowlayout.h"
 #include "widgets/surface.h"
+#include "widgets/starfield.h"
 
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -62,10 +63,10 @@ void ModelsPanel::setupUi() {
     heroLayout->setContentsMargins(28,24,28,24);
     auto *copy = new QVBoxLayout();
     copy->setSpacing(12);
-    auto *kicker = new QLabel("YOUR NEXT IDEA STARTS HERE",hero);
+    auto *kicker = new QLabel("INDEPENDENT THINKING / LOCAL COMPUTING",hero);
     kicker->setObjectName("heroKicker");
     copy->addWidget(kicker);
-    auto *headline = new QLabel("Small models. Big possibilities.",hero);
+    auto *headline = new QLabel("INTELLIGENCE.\nON YOUR TERMS.",hero);
     headline->setObjectName("heroTitle");
     headline->setWordWrap(true);
     copy->addWidget(headline);
@@ -73,10 +74,9 @@ void ModelsPanel::setupUi() {
     description->setWordWrap(true);
     copy->addWidget(description);
     heroLayout->addLayout(copy,1);
-    auto *art = new QLabel("✳",hero);
-    art->setObjectName("heroArt");
-    art->setAlignment(Qt::AlignCenter);
-    art->setMinimumWidth(120);
+    auto *art = new Starfield(hero);
+    art->setProperty("kineticGlyph",true);
+    art->setFixedSize(230,210);
     heroLayout->addWidget(art);
     layout->addWidget(hero);
 

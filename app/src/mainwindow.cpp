@@ -69,32 +69,32 @@ MainWindow::~MainWindow() {
 
 void MainWindow::setupUi() {
     auto *central = new QWidget(this);
-    // Flat black base; the glass side panels render transparent over it.
-    // The background lives in the global QSS (#appRoot -> @bgVoid) so no
-    // widget-level stylesheet cascades color onto the child controls.
+    // The paper workspace and horizontal masthead share global theme tokens.
     central->setObjectName("appRoot");
-    auto *mainLayout = new QHBoxLayout(central);
-    mainLayout->setContentsMargins(14, 14, 14, 14);
-    mainLayout->setSpacing(8);
+    auto *mainLayout = new QVBoxLayout(central);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
 
-    // ---- Sidebar (design doc §5) ----
+    // ---- Horizontal masthead (design doc §12) ----
     auto *sidebar = new QWidget();
     sidebar->setObjectName("sidebar");
-    sidebar->setFixedWidth(Theme::sidebarWidthExpanded());
+    sidebar->setFixedHeight(142);
     auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(16, 16, 16, 24);
+    sidebarLayout->setContentsMargins(32, 14, 32, 12);
     sidebarLayout->setSpacing(12);
+    auto *brandRow = new QHBoxLayout();
+    sidebarLayout->addLayout(brandRow);
 
-    auto *logoLabel = new QLabel("✳  magnite", sidebar);
+    auto *logoLabel = new QLabel("magnite®", sidebar);
     logoLabel->setObjectName("logoLabel");
-    sidebarLayout->addWidget(logoLabel);
-    auto *edition = new QLabel("STUDIO  /  PERSONAL", sidebar);
+    brandRow->addWidget(logoLabel);
+    auto *edition = new QLabel("THE LOCAL INTELLIGENCE WORKBENCH", sidebar);
     edition->setObjectName("studioTag");
-    sidebarLayout->addWidget(edition,0,Qt::AlignLeft);
-    auto *eyebrow = new QLabel("WORKSPACE", sidebar);
-    eyebrow->setObjectName("eyebrow");
-    sidebarLayout->addWidget(eyebrow);
-    sidebarLayout->addSpacing(12);
+    brandRow->addWidget(edition);
+    brandRow->addStretch();
+    auto *navigation = new QHBoxLayout();
+    navigation->setSpacing(8);
+    sidebarLayout->addLayout(navigation);
 
     struct NavInfo {
         QString label;
@@ -116,18 +116,18 @@ void MainWindow::setupUi() {
         return btn;
     };
 
-    // 5 nav items in stack order; Settings is pinned to the bottom.
+    // Five numbered workspaces; Settings anchors the right edge.
     const QList<NavInfo> navs = {
-        {"Model library",   "box",       PanelModels},
-        {"Training", "graduation-cap", PanelTraining},
-        {"Knowledge",      "database",         PanelRag},
-        {"Adapters", "layers",         PanelAdapters},
-        {"Playground",     "message-circle", PanelChat},
+        {"01  Discover",   "box",       PanelModels},
+        {"02  Train", "graduation-cap", PanelTraining},
+        {"03  Knowledge",      "database",         PanelRag},
+        {"04  Adapters", "layers",         PanelAdapters},
+        {"05  Playground",     "message-circle", PanelChat},
     };
     for (const auto &info : navs)
-        sidebarLayout->addWidget(makeNavButton(info));
+        navigation->addWidget(makeNavButton(info));
 
-    sidebarLayout->addStretch();
+    navigation->addStretch();
 
     // Backend status pill: state property drives the color via QSS.
     m_statusPill = new QLabel("Backend: starting…", sidebar);
@@ -142,7 +142,8 @@ void MainWindow::setupUi() {
         setPillState("err", "Backend: error");
     });
 
-    sidebarLayout->addWidget(makeNavButton({"Settings", "settings", PanelSettings}));
+    navigation->addWidget(makeNavButton({"Settings", "settings", PanelSettings}));
+    brandRow->addWidget(m_statusPill);
 
     mainLayout->addWidget(sidebar);
 
@@ -175,14 +176,13 @@ void MainWindow::setupUi() {
     workspaceLayout->setSpacing(0);
     auto *bar = new QFrame(workspace);
     bar->setObjectName("workspaceBar");
-    bar->setFixedHeight(56);
+    bar->setFixedHeight(30);
     auto *barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(32,0,32,0);
-    auto *breadcrumb = new QLabel("Personal workspace   /   Local studio",bar);
+    auto *breadcrumb = new QLabel("STUDIO / 02     —     EXPERIMENT. ITERATE. MAKE IT YOURS.",bar);
     breadcrumb->setObjectName("cardMeta");
     barLayout->addWidget(breadcrumb);
     barLayout->addStretch();
-    barLayout->addWidget(m_statusPill);
     workspaceLayout->addWidget(bar);
     m_background = new Starfield(workspace);
     auto *starLayout = new QVBoxLayout(m_background);
@@ -192,18 +192,15 @@ void MainWindow::setupUi() {
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this]() {
         QSettings settings;
-        m_background->setStarsVisible(settings.value("appearance/studioAmbient",true).toBool());
-        m_background->setMotionEnabled(!settings.value("appearance/studioReducedMotion",false).toBool());
+        m_background->setStarsVisible(settings.value("appearance/studio2Ambient",true).toBool());
+        m_background->setMotionEnabled(!settings.value("appearance/studio2ReducedMotion",false).toBool());
+        for (auto *widget : m_stack->findChildren<QWidget *>()) {
+            if (auto *canvas = dynamic_cast<Starfield *>(widget))
+                canvas->setMotionEnabled(!settings.value("appearance/studio2ReducedMotion",false).toBool());
+        }
     };
     connect(m_settingsPanel, &SettingsPanel::settingsChanged,this,applyAppearance);
     applyAppearance();
-    auto *local = new QLabel("BUILT FOR YOUR IDEAS",sidebar);
-    local->setObjectName("eyebrow");
-    sidebarLayout->addSpacing(12);
-    sidebarLayout->addWidget(local);
-    auto *localHint = new QLabel("Private by design.\nPowered by your machine.",sidebar);
-    localHint->setObjectName("cardMeta");
-    sidebarLayout->addWidget(localHint);
 
     setCentralWidget(central);
 
@@ -227,7 +224,7 @@ void MainWindow::refreshNavIcons() {
     for (auto *btn : m_sideButtons) {
         const QString name = btn->property("navicon").toString();
         const QColor color = btn->isChecked()
-            ? QColor(Theme::accentText())
+            ? QColor(Theme::glassFill())
             : QColor(Theme::textSecondary());
         btn->setIcon(Theme::coloredIcon(name, color, 18));
         btn->setIconSize(QSize(18, 18));
@@ -238,7 +235,7 @@ void MainWindow::startPanelFade() {
     // 150ms fade-in of the destination panel (design doc §6). Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
-    if (m_selfTest || m_skipFade || QSettings().value("appearance/studioReducedMotion", false).toBool())
+    if (m_selfTest || m_skipFade || QSettings().value("appearance/studio2ReducedMotion", false).toBool())
         return;
 
     if (m_crossfade) {

@@ -5,44 +5,44 @@
 
 class QIcon;
 
-// Studio design tokens (design doc §11). This is the single source of
+// Studio 02 design tokens (design doc §12). This is the single source of
 // truth for every color, font, radius and spacing value in the UI. Panels and
 // the global QSS (Theme::qss) read tokens from here — never hardcode hex
 // literals in widget code.
 namespace Theme {
 
-// ---- Graphite, mint, cream and lavender palette ----
-inline QString bgVoid()        { return QStringLiteral("#101716"); }
-inline QString bgDeep()        { return QStringLiteral("#151E1C"); }
+// ---- Paper, ink, orange and violet palette ----
+inline QString bgVoid()        { return QStringLiteral("#F1EFE7"); }
+inline QString bgDeep()        { return QStringLiteral("#E9E6DC"); }
 // Keep existing semantic names for consumers; the secondary accent is lavender.
-inline QString accentPrimary() { return QStringLiteral("#BEF4CF"); }
-inline QString accentBlue()    { return QStringLiteral("#B6AEF2"); }
-inline QString accentGlow()    { return QStringLiteral("rgba(190, 244, 207, 0.18)"); }
-inline QString accentIce()    { return QStringLiteral("#BEF4CF"); }
+inline QString accentPrimary() { return QStringLiteral("#FF5C28"); }
+inline QString accentBlue()    { return QStringLiteral("#5145B7"); }
+inline QString accentGlow()    { return QStringLiteral("rgba(255, 92, 40, 0.18)"); }
+inline QString accentIce()    { return QStringLiteral("#FF5C28"); }
 // Derived accent shades used by QSS interaction states (hover/pressed) and the
 // light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
-inline QString accentHover()   { return QStringLiteral("#D8FFE4"); }
-inline QString accentActive()  { return QStringLiteral("#98DCAE"); }
-inline QString accentText()    { return QStringLiteral("#152A1C"); }
+inline QString accentHover()   { return QStringLiteral("#FF784E"); }
+inline QString accentActive()  { return QStringLiteral("#E1491B"); }
+inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return QStringLiteral("#FFD0BD"); }
 inline QString onDanger()      { return QStringLiteral("#301F19"); }
 
-inline QString glassFill()          { return QStringLiteral("#1B2623"); }
-inline QString glassFillHover()     { return QStringLiteral("#273832"); }
-inline QString glassFillActive()    { return QStringLiteral("#273832"); }
-inline QString glassBorder()        { return QStringLiteral("#33453D"); }
-inline QString glassBorderHover()   { return QStringLiteral("#D8FFE4"); }
-inline QString glassBorderActive()  { return QStringLiteral("#BEF4CF"); }
+inline QString glassFill()          { return QStringLiteral("#FFFEF8"); }
+inline QString glassFillHover()     { return QStringLiteral("#E5E8D5"); }
+inline QString glassFillActive()    { return QStringLiteral("#E5E8D5"); }
+inline QString glassBorder()        { return QStringLiteral("#CFD2C5"); }
+inline QString glassBorderHover()   { return QStringLiteral("#FF784E"); }
+inline QString glassBorderActive()  { return QStringLiteral("#FF5C28"); }
 
-inline QString textPrimary()   { return QStringLiteral("#F4F1E8"); }
-inline QString textSecondary() { return QStringLiteral("#B6C5BB"); }
-inline QString textMuted()     { return QStringLiteral("#80988A"); }
+inline QString textPrimary()   { return QStringLiteral("#20221F"); }
+inline QString textSecondary() { return QStringLiteral("#555D54"); }
+inline QString textMuted()     { return QStringLiteral("#74786F"); }
 
-inline QString statusSuccess() { return QStringLiteral("#BEF4CF"); }
-inline QString statusWarning() { return QStringLiteral("#EBC98C"); }
-inline QString statusError()   { return QStringLiteral("#F3AF98"); }
-inline QString statusInfo()    { return QStringLiteral("#B6AEF2"); }
+inline QString statusSuccess() { return QStringLiteral("#FF5C28"); }
+inline QString statusWarning() { return QStringLiteral("#855C14"); }
+inline QString statusError()   { return QStringLiteral("#B13D24"); }
+inline QString statusInfo()    { return QStringLiteral("#5145B7"); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
