@@ -1,6 +1,7 @@
 #include "panels/ragpanel.h"
 
 #include "backend_client.h"
+#include "widgets/surface.h"
 #include "panels/ragdoccard.h"
 
 #include <QFileDialog>
@@ -18,7 +19,7 @@
 #include <QVBoxLayout>
 
 RagPanel::RagPanel(QWidget *parent)
-    : BasePanel("RAG", parent)
+    : BasePanel("Knowledge & retrieval", parent)
     , m_client(nullptr)
     , m_addButton(nullptr)
     , m_removeButton(nullptr)
@@ -58,7 +59,12 @@ void RagPanel::setupUi() {
     btnRow->addStretch();
     layout->addLayout(btnRow);
 
-    // Document list — full-width glass cards in a transparent scroll area.
+    auto *columns = new QHBoxLayout();
+    columns->setSpacing(24);
+    layout->addLayout(columns,1);
+    auto *documents = Surface::card(this,"Your documents");
+    columns->addWidget(documents->parentWidget(),3);
+    // Document list.
     m_docScroll = new QScrollArea(this);
     m_docScroll->setWidgetResizable(true);
     m_docScroll->setFrameShape(QFrame::NoFrame);
@@ -69,7 +75,8 @@ void RagPanel::setupUi() {
     m_docLayout->setContentsMargins(2, 2, 2, 2);
     m_docLayout->setSpacing(8);
     m_docScroll->setWidget(m_docHost);
-    layout->addWidget(m_docScroll, 1);
+    m_docScroll->setMinimumHeight(260);
+    documents->addWidget(m_docScroll, 1);
 
     // Empty state (shown instead of the scroll area when no docs are added).
     m_emptyState = new QWidget(this);
@@ -82,7 +89,7 @@ void RagPanel::setupUi() {
     hint->setWordWrap(true);
     emptyLayout->addWidget(hint);
     m_emptyState->setLayout(emptyLayout);
-    layout->addWidget(m_emptyState, 1);
+    documents->addWidget(m_emptyState, 1);
 
     // Retrieval config as a glass card (design doc §4/§8).
     auto *configCard = new QFrame(this);
@@ -94,7 +101,8 @@ void RagPanel::setupUi() {
     configTitle->setObjectName("cardTitle");
     configLayout->addWidget(configTitle);
     auto *form = new QFormLayout();
-    form->setSpacing(8);
+    form->setSpacing(16);
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
     m_chunkSizeSpin = new QSpinBox(this);
     m_chunkSizeSpin->setRange(64, 4096);
@@ -115,7 +123,11 @@ void RagPanel::setupUi() {
 
     configLayout->addLayout(form);
 
-    // Test-retrieval row (design doc §8 RAG panel).
+    configLayout->addStretch();
+    columns->addWidget(configCard,2);
+    auto *retrieval = Surface::card(this,"Test retrieval");
+    layout->addWidget(retrieval->parentWidget());
+    // Test-retrieval row.
     auto *queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
     m_queryEdit->setPlaceholderText("Test a query against the ingested documents...");
@@ -124,15 +136,15 @@ void RagPanel::setupUi() {
     searchButton->setObjectName("secondaryBtn");
     queryRow->addWidget(m_queryEdit, 1);
     queryRow->addWidget(searchButton);
-    configLayout->addLayout(queryRow);
+    retrieval->addLayout(queryRow);
 
     m_resultLabel = new QLabel(this);
     m_resultLabel->setObjectName("monoLabel");
     m_resultLabel->setWordWrap(true);
     m_resultLabel->setText(" ");
-    configLayout->addWidget(m_resultLabel);
+    retrieval->addWidget(m_resultLabel);
 
-    layout->addWidget(configCard);
+
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");

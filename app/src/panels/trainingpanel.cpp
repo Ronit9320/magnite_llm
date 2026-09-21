@@ -1,6 +1,8 @@
 #include "panels/trainingpanel.h"
 
 #include "backend_client.h"
+#include "widgets/surface.h"
+#include <QProgressBar>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -73,13 +75,20 @@ QLabel* TrainingPanel::addField(QWidget *editor, const QString &label) {
 }
 
 void TrainingPanel::setupUi() {
-    auto *layout = contentLayout();
+    auto *columns = new QHBoxLayout();
+    columns->setSpacing(24);
+    contentLayout()->addLayout(columns,1);
+    auto *layout = Surface::card(this,"Training configuration");
+    auto *right = new QVBoxLayout();
+    right->setSpacing(24);
+    columns->addWidget(layout->parentWidget(),1);
+    columns->addLayout(right,1);
 
     m_modelCombo = new QComboBox(this);
     m_modelCombo->setEditable(true);
     m_modelCombo->setInsertPolicy(QComboBox::NoInsert);
     m_modelCombo->setPlaceholderText("e.g. meta-llama/Llama-3.2-1B-Instruct");
-    addField(m_modelCombo, "Base model:");
+    Surface::field(layout, "Base model", m_modelCombo);
     auto *modelRow = new QHBoxLayout();
     auto *refreshBtn = new QPushButton("Refresh", this);
     refreshBtn->setObjectName("secondaryBtn");
@@ -96,7 +105,7 @@ void TrainingPanel::setupUi() {
     m_datasetCombo->setEditable(true);
     m_datasetCombo->setInsertPolicy(QComboBox::NoInsert);
     m_datasetCombo->setPlaceholderText("Select an ingested dataset");
-    addField(m_datasetCombo, "Dataset:");
+    Surface::field(layout, "Dataset", m_datasetCombo);
     auto *datasetRow = new QHBoxLayout();
     auto *ingestBtn = new QPushButton("Import file...", this);
     ingestBtn->setObjectName("secondaryBtn");
@@ -105,11 +114,20 @@ void TrainingPanel::setupUi() {
     layout->addLayout(datasetRow);
     connect(ingestBtn, &QPushButton::clicked, this, &TrainingPanel::onBrowseDataset);
 
-    addField(m_adapterNameEdit = new QLineEdit(this), "Adapter name:");
+    Surface::field(layout, "Adapter name", m_adapterNameEdit = new QLineEdit(this));
     m_adapterNameEdit->setPlaceholderText("Auto-named from job if empty");
 
     setupHyperparameters(this);
+    auto *advanced = new QPushButton("Hyperparameters ▾",this);
+    advanced->setCheckable(true);
+    layout->addWidget(advanced);
     layout->addWidget(m_hyperBox);
+    m_hyperBox->hide();
+    connect(advanced,&QPushButton::toggled,m_hyperBox,&QWidget::setVisible);
+    auto *defaults = new QLabel("LoRA rank 8 · alpha 16 · 3 epochs by default",this);
+    defaults->setObjectName("cardMeta");
+    defaults->setWordWrap(true);
+    layout->addWidget(defaults);
 
     m_qloraCheck = new QCheckBox("Use QLoRA (quantized base model)", this);
     m_qloraCheck->setChecked(true);
@@ -122,6 +140,17 @@ void TrainingPanel::setupUi() {
     connect(m_qloraCheck, &QCheckBox::toggled, this, &TrainingPanel::onQuantizationToggled);
     onQuantizationToggled();
 
+    layout->addStretch();
+    auto *run = Surface::card(this,"Training run");
+    right->addWidget(run->parentWidget());
+    m_progressLabel = new QLabel("Ready to train",this);
+    m_progressLabel->setObjectName("metricValue");
+    run->addWidget(m_progressLabel);
+    m_progress = new QProgressBar(this);
+    m_progress->setRange(0,100);
+    m_progress->setValue(0);
+    m_progress->setTextVisible(false);
+    run->addWidget(m_progress);
     auto *btns = new QHBoxLayout();
     m_startButton = new QPushButton("Start Training", this);
     m_startButton->setObjectName("primaryBtn");
@@ -131,18 +160,28 @@ void TrainingPanel::setupUi() {
     btns->addWidget(m_startButton);
     btns->addWidget(m_stopButton);
     btns->addStretch();
-    layout->addLayout(btns);
+    run->addLayout(btns);
 
+    auto *metrics = Surface::card(this,"Live metrics");
+    m_metrics = new QLabel("Waiting for a training job.",this);
+    m_metrics->setObjectName("monoLabel");
+    m_metrics->setWordWrap(true);
+    metrics->addWidget(m_metrics);
+    right->addWidget(metrics->parentWidget());
+    auto *logs = Surface::card(this,"Training log");
+    right->addWidget(logs->parentWidget(),1);
     m_log = new QPlainTextEdit(this);
     m_log->setReadOnly(true);
     m_log->setPlaceholderText("Training log will appear here.");
     m_log->setMaximumBlockCount(2000);
     m_log->setObjectName("logView");
-    layout->addWidget(m_log, 1);
+    m_log->setMinimumHeight(180);
+    logs->addWidget(m_log, 1);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
-    layout->addWidget(m_statusLabel);
+    m_statusLabel->setWordWrap(true);
+    contentLayout()->addWidget(m_statusLabel);
     m_statusLabel->setText("Ready. Select a base model and an ingested dataset.");
 
     m_pollTimer = new QTimer(this);
@@ -359,6 +398,9 @@ void TrainingPanel::onStart() {
             m_jobId = doc.object()["id"].toString();
             m_lastLoggedStep = -1;
             m_lastMessage.clear();
+            m_progress->setValue(0);
+            m_progressLabel->setText("Queued");
+            m_metrics->setText("Waiting for the first training step.");
             m_log->appendPlainText(QString("Training job %1 queued.").arg(m_jobId));
             m_stopButton->setEnabled(true);
             m_pollTimer->start();
@@ -397,6 +439,11 @@ void TrainingPanel::onPollStatus() {
             const int step = job["current_step"].toInt();
             const int total = job["total_steps"].toInt();
             const double loss = job["loss"].toDouble(-1.0);
+            const int progress = qBound(0,qRound(job["progress"].toDouble()),100);
+            m_progress->setValue(progress);
+            m_progressLabel->setText(QString("%1% · %2").arg(progress).arg(st));
+            m_metrics->setText(QString("Step %1 / %2\nLoss: %3")
+                .arg(step).arg(total).arg(loss < 0 ? QString("—") : QString::number(loss,'f',4)));
 
             if (!message.isEmpty() && message != m_lastMessage) {
                 m_lastMessage = message;

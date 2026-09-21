@@ -41,7 +41,7 @@ QString tintSvg(const QString &svg, const QColor &color) {
     out.replace("stroke='currentColor'", "stroke='" + hex + "'");
     out.replace("stroke=\"currentcolor\"", "stroke=\"" + hex + "\"");
     // Any fill an icon happens to carry is hardcoded; leave untouched.
-    out.replace("#000000", hex);
+    out.replace("#030914", hex);
     return out;
 }
 
@@ -60,7 +60,7 @@ std::vector<Token> tokens() {
         {"@accentPrimary",      Theme::accentPrimary()},
         {"@accentBlue",         Theme::accentBlue()},
         {"@accentGlow",         Theme::accentGlow()},
-        {"@accentPink",         Theme::accentPink()},
+        {"@accentIce",         Theme::accentIce()},
         {"@accentHover",        Theme::accentHover()},
         {"@accentActive",       Theme::accentActive()},
         {"@accentText",         Theme::accentText()},
@@ -166,23 +166,23 @@ int Theme::selfCheck() {
     };
 
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
-    check("bgVoid", Theme::bgVoid() == "#000000");
-    check("bgDeep", Theme::bgDeep() == "#0A0A14");
-    check("accentPrimary", Theme::accentPrimary() == "#3B82F6");
-    check("accentBlue", Theme::accentBlue() == "#3B82F6");
-    check("accentPink", Theme::accentPink() == "#EC4899");
-    check("accentHover", Theme::accentHover() == "#60A5FA");
-    check("accentActive", Theme::accentActive() == "#2563EB");
+    check("bgVoid", Theme::bgVoid() == "#030914");
+    check("bgDeep", Theme::bgDeep() == "#071222");
+    check("accentPrimary", Theme::accentPrimary() == "#2563EB");
+    check("accentBlue", Theme::accentBlue() == "#2563EB");
+    check("accentIce", Theme::accentIce() == "#93C5FD");
+    check("accentHover", Theme::accentHover() == "#3B82F6");
+    check("accentActive", Theme::accentActive() == "#1D4ED8");
     check("accentText", Theme::accentText() == "#FFFFFF");
-    check("dangerHover", Theme::dangerHover() == "#FCA5A5");
-    check("onDanger", Theme::onDanger() == "#1B0A0A");
-    check("textPrimary", Theme::textPrimary() == "#F5F5F7");
-    check("textSecondary", Theme::textSecondary() == "#A1A1AA");
-    check("textMuted", Theme::textMuted() == "#6B7280");
-    check("statusSuccess", Theme::statusSuccess() == "#34D399");
-    check("statusWarning", Theme::statusWarning() == "#FBBF24");
-    check("statusError", Theme::statusError() == "#F87171");
-    check("statusInfo", Theme::statusInfo() == "#3B82F6");
+    check("dangerHover", Theme::dangerHover() == "#93C5FD");
+    check("onDanger", Theme::onDanger() == "#FFFFFF");
+    check("textPrimary", Theme::textPrimary() == "#FFFFFF");
+    check("textSecondary", Theme::textSecondary() == "#B3C7E1");
+    check("textMuted", Theme::textMuted() == "#7B96B9");
+    check("statusSuccess", Theme::statusSuccess() == "#93C5FD");
+    check("statusWarning", Theme::statusWarning() == "#FFFFFF");
+    check("statusError", Theme::statusError() == "#93C5FD");
+    check("statusInfo", Theme::statusInfo() == "#2563EB");
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());

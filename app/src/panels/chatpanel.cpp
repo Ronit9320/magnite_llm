@@ -1,6 +1,7 @@
 #include "panels/chatpanel.h"
 
 #include "backend_client.h"
+#include "widgets/surface.h"
 #include "panels/chatbubble.h"
 
 #include <QCheckBox>
@@ -50,104 +51,87 @@ ChatPanel::ChatPanel(QWidget *parent)
 void ChatPanel::setupUi() {
     auto *layout = contentLayout();
 
-    // Row 1: model + engine + load
-    auto *ctrlRow1 = new QHBoxLayout();
-    m_modelCombo = new QComboBox(this);
-    m_modelCombo->setEditable(true);
-    m_modelCombo->setToolTip("Registered model id, or a HuggingFace repo id with a GGUF file.");
-    m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-
-    m_engineCombo = new QComboBox(this);
-    m_engineCombo->addItems({"Auto (detect hardware)", "Local (vLLM)", "Local (llama.cpp)"});
-    m_engineCombo->setCurrentIndex(0);
-
-    auto *loadBtn = new QPushButton("Load Model", this);
-    loadBtn->setObjectName("primaryBtn");
-    connect(loadBtn, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
-
-    ctrlRow1->addWidget(new QLabel("Model:", this));
-    ctrlRow1->addWidget(m_modelCombo, 1);
-    ctrlRow1->addWidget(new QLabel("Engine:", this));
-    ctrlRow1->addWidget(m_engineCombo);
-    ctrlRow1->addWidget(loadBtn);
-    layout->addLayout(ctrlRow1);
-
-    // Row 2: generation params + RAG
-    auto *ctrlRow2 = new QHBoxLayout();
-    m_maxTokensSpin = new QSpinBox(this);
-    m_maxTokensSpin->setRange(1, 8192);
-    m_maxTokensSpin->setValue(256);
-    m_maxTokensSpin->setPrefix("Tokens: ");
-
-    m_tempSpin = new QDoubleSpinBox(this);
-    m_tempSpin->setRange(0.0, 2.0);
-    m_tempSpin->setValue(0.7);
-    m_tempSpin->setSingleStep(0.05);
-    m_tempSpin->setDecimals(2);
-    m_tempSpin->setPrefix("Temp: ");
-
-    m_ragCheck = new QCheckBox("Use RAG", this);
-    m_ragCheck->setToolTip("Retrieve matching chunks from ingested documents "
-                           "and inject them into each message.");
-
-    auto *statusBtn = new QPushButton("Refresh Status", this);
-    statusBtn->setObjectName("secondaryBtn");
-    connect(statusBtn, &QPushButton::clicked, this, &ChatPanel::refreshEngineStatus);
-
-    ctrlRow2->addWidget(m_maxTokensSpin);
-    ctrlRow2->addWidget(m_tempSpin);
-    ctrlRow2->addSpacing(8);
-    ctrlRow2->addWidget(m_ragCheck);
-    ctrlRow2->addStretch();
-    ctrlRow2->addWidget(statusBtn);
-    layout->addLayout(ctrlRow2);
-
-    // Pinned engine / model / adapter indicator pills (design doc §8).
+    auto *session = Surface::card(this);
     auto *pillRow = new QHBoxLayout();
-    m_enginePill = new QLabel("engine: —", this);
-    m_enginePill->setObjectName("chatPill");
-    m_modelPill = new QLabel("model: —", this);
-    m_modelPill->setObjectName("chatPill");
-    m_adapterPill = new QLabel("adapter: —", this);
-    m_adapterPill->setObjectName("chatPill");
-    m_adapterPill->setVisible(false);
-    pillRow->addWidget(m_enginePill);
-    pillRow->addWidget(m_modelPill);
-    pillRow->addWidget(m_adapterPill);
-    pillRow->addStretch();
-    layout->addLayout(pillRow);
+    m_enginePill = new QLabel("engine: —",this);
+    m_modelPill = new QLabel("model: —",this);
+    m_adapterPill = new QLabel("adapter: —",this);
+    for (auto *pill : {m_enginePill,m_modelPill,m_adapterPill}) {
+        pill->setObjectName("chatPill");
+        pill->setWordWrap(true);
+        pillRow->addWidget(pill);
+    }
+    m_adapterPill->hide();
+    auto *statusBtn = new QPushButton("Refresh status",this);
+    pillRow->addWidget(statusBtn);
+    session->addLayout(pillRow);
+    layout->addWidget(session->parentWidget());
+    connect(statusBtn,&QPushButton::clicked,this,&ChatPanel::refreshEngineStatus);
 
-    // Conversation — real bubbles in a transparent auto-scrolling area.
+    auto *columns = new QHBoxLayout();
+    columns->setSpacing(24);
+    layout->addLayout(columns,1);
+    auto *conversation = Surface::card(this,"Conversation");
+    columns->addWidget(conversation->parentWidget(),3);
     m_chatScroll = new QScrollArea(this);
     m_chatScroll->setWidgetResizable(true);
     m_chatScroll->setFrameShape(QFrame::NoFrame);
     m_chatScroll->setObjectName("cardScroll");
     m_chatScroll->viewport()->setAutoFillBackground(false);
+    m_chatScroll->setMinimumHeight(260);
     m_chatHost = new QWidget(this);
     m_chatLayout = new QVBoxLayout(m_chatHost);
-    m_chatLayout->setContentsMargins(2, 2, 2, 2);
-    m_chatLayout->setSpacing(8);
+    m_chatLayout->setContentsMargins(2,2,2,2);
+    m_chatLayout->setSpacing(16);
     m_chatScroll->setWidget(m_chatHost);
-    layout->addWidget(m_chatScroll, 1);
+    conversation->addWidget(m_chatScroll,1);
+    auto *controls = Surface::card(this,"Generation settings");
+    columns->addWidget(controls->parentWidget(),2);
+    m_modelCombo = new QComboBox(this);
+    m_modelCombo->setEditable(true);
+    m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_modelCombo->setMinimumContentsLength(14);
+    Surface::field(controls,"Model",m_modelCombo);
+    m_engineCombo = new QComboBox(this);
+    m_engineCombo->addItems({"Auto (detect hardware)","Local (vLLM)","Local (llama.cpp)"});
+    Surface::field(controls,"Engine",m_engineCombo);
+    m_maxTokensSpin = new QSpinBox(this);
+    m_maxTokensSpin->setRange(1,8192);
+    m_maxTokensSpin->setValue(256);
+    Surface::field(controls,"Max tokens",m_maxTokensSpin);
+    m_tempSpin = new QDoubleSpinBox(this);
+    m_tempSpin->setRange(0.0,2.0);
+    m_tempSpin->setValue(0.7);
+    m_tempSpin->setSingleStep(0.05);
+    m_tempSpin->setDecimals(2);
+    Surface::field(controls,"Temperature",m_tempSpin);
+    auto *loadBtn = new QPushButton("Load model",this);
+    loadBtn->setObjectName("primaryBtn");
+    controls->addWidget(loadBtn);
+    controls->addStretch();
+    connect(loadBtn,&QPushButton::clicked,this,&ChatPanel::onLoadModel);
 
-    // Input row
+    auto *composer = Surface::card(this);
     auto *inputRow = new QHBoxLayout();
     m_input = new QLineEdit(this);
-    m_input->setPlaceholderText("Type a message...");
-    m_sendButton = new QPushButton("Send", this);
+    m_input->setPlaceholderText("Type a message…");
+    m_sendButton = new QPushButton("Send",this);
     m_sendButton->setObjectName("primaryBtn");
-    m_stopButton = new QPushButton("Stop", this);
-    m_stopButton->setObjectName("destructiveBtn");
+    m_stopButton = new QPushButton("Stop",this);
     m_stopButton->setEnabled(false);
-    m_clearButton = new QPushButton("Clear Chat", this);
-    m_clearButton->setObjectName("secondaryBtn");
-    inputRow->addWidget(m_input, 1);
+    inputRow->addWidget(m_input,1);
     inputRow->addWidget(m_sendButton);
     inputRow->addWidget(m_stopButton);
-    inputRow->addWidget(m_clearButton);
-    layout->addLayout(inputRow);
-
-    // Status
+    composer->addLayout(inputRow);
+    auto *options = new QHBoxLayout();
+    m_ragCheck = new QCheckBox("Use RAG",this);
+    m_ragCheck->setToolTip("Retrieve matching passages from your documents.");
+    options->addWidget(m_ragCheck);
+    options->addStretch();
+    m_clearButton = new QPushButton("Clear chat",this);
+    options->addWidget(m_clearButton);
+    composer->addLayout(options);
+    layout->addWidget(composer->parentWidget());
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
     m_statusLabel->setWordWrap(true);
@@ -460,4 +444,8 @@ void ChatPanel::applySettingsJson(const QString &json) {
         if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
         else m_modelCombo->setEditText(m);
     }
+}
+void ChatPanel::loadModel(const QString &id) {
+    m_modelCombo->setCurrentText(id);
+    onLoadModel();
 }

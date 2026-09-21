@@ -12,6 +12,7 @@ class QPushButton;
 class QLabel;
 class QPlainTextEdit;
 class QTimer;
+class QProgressBar;
 class BackendClient;
 
 // Training panel: configure and monitor LoRA/QLoRA fine-tuning jobs.
@@ -78,4 +79,7 @@ private:
     QPushButton *m_stopButton;
     QPlainTextEdit *m_log;
     QLabel *m_statusLabel;
+    QLabel *m_progressLabel = nullptr;
+    QLabel *m_metrics = nullptr;
+    QProgressBar *m_progress = nullptr;
 };

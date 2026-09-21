@@ -31,7 +31,7 @@ AdaptersPanel::AdaptersPanel(QWidget *parent)
 
 QWidget *AdaptersPanel::makeCardHost() {
     m_cardHost = new QWidget(this);
-    m_flowLayout = new FlowLayout(m_cardHost, 12, 12);
+    m_flowLayout = new FlowLayout(m_cardHost, 24, 24);
     m_flowLayout->setContentsMargins(2, 2, 2, 2);
     m_cardHost->setLayout(m_flowLayout);
     return m_cardHost;

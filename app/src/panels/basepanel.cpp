@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QStyle>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 BasePanel::BasePanel(const QString &title, QWidget *parent)
@@ -33,7 +34,15 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
 
     auto *content = new QWidget(this);
     content->setLayout(m_contentLayout);
-    root->addWidget(content, 1);
+    m_contentLayout->setContentsMargins(0,0,0,0);
+    m_contentLayout->setSpacing(24);
+    auto *scroll = new QScrollArea(this);
+    scroll->setObjectName("cardScroll");
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->viewport()->setAutoFillBackground(false);
+    scroll->setWidget(content);
+    root->addWidget(scroll,1);
 }
 
 void BasePanel::setHeaderSubtitle(const QString &subtitle) {

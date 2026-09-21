@@ -70,25 +70,29 @@ QSize FlowLayout::minimumSize() const {
 }
 
 int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
-    const int h = smartSpacing(const_cast<FlowLayout *>(this), m_hSpace);
-    const int v = smartSpacing(const_cast<FlowLayout *>(this), m_vSpace);
-    int left = rect.left();
-    int top = rect.top();
-    int height = 0;
-    int x = left;
-    // Rows wrap when the next item would overflow the right edge.
+    const int gap = std::max(0, smartSpacing(const_cast<FlowLayout *>(this), m_hSpace));
+    const int rowGap = std::max(0, smartSpacing(const_cast<FlowLayout *>(this), m_vSpace));
+    const QMargins margins = contentsMargins();
+    const QRect area = rect.marginsRemoved(margins);
+    const int columns = area.width() >= 984 ? 2 : 1;
+    const int width = std::max(1, (area.width() - (columns - 1) * gap) / columns);
+    int y = area.top();
+    int rowHeight = 0;
+    int column = 0;
     for (QLayoutItem *item : m_items) {
-        const int w = item->sizeHint().width();
-        const int ih = item->sizeHint().height();
-        if (x + w > rect.right() + 1 && x > left) {
-            x = left;
-            top += height + v;
-            height = 0;
-        }
+        if (item->isEmpty()) continue;
+        const int height = std::max(item->minimumSize().height(),
+            item->hasHeightForWidth() ? item->heightForWidth(width) : item->sizeHint().height());
         if (!testOnly)
-            item->setGeometry(QRect(QPoint(x, top), item->sizeHint()));
-        x += w + h;
-        height = std::max(height, ih);
+            item->setGeometry(QRect(area.left() + column * (width + gap), y, width, height));
+        rowHeight = std::max(rowHeight, height);
+        if (++column == columns) {
+            y += rowHeight + rowGap;
+            column = 0;
+            rowHeight = 0;
+        }
     }
-    return top + height;
+    if (column) y += rowHeight;
+    else if (y > area.top()) y -= rowGap;
+    return y - rect.top() + margins.bottom();
 }

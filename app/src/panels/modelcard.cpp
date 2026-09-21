@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QProgressBar>
+#include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -27,12 +28,13 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     , m_progressBar(nullptr)
 {
     setObjectName(QStringLiteral("modelCard"));
-    setFixedWidth(320);
+    setMinimumWidth(300);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     setCursor(Qt::PointingHandCursor);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(16, 14, 16, 14);
-    layout->setSpacing(6);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(16);
 
     // Row 1: name (Space Grotesk) + architecture pill.
     auto *nameRow = new QHBoxLayout();
@@ -102,6 +104,15 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     layout->addLayout(footRow);
 
     appendProgressRow();
+    auto *actions = new QHBoxLayout();
+    auto *state = new QLabel(isHub ? "Available on the Hub" : "✓ Ready locally",this);
+    state->setObjectName("cardMeta");
+    actions->addWidget(state,1);
+    auto *action = new QPushButton(isHub ? "Download" : "Load model",this);
+    action->setObjectName("primaryBtn");
+    actions->addWidget(action);
+    layout->addLayout(actions);
+    connect(action,&QPushButton::clicked,this,[this]() { emit actionRequested(this); });
 }
 
 void ModelCard::appendProgressRow() {

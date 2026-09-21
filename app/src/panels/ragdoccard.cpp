@@ -14,10 +14,8 @@ namespace {
 // Per-kind tint for the shared file-text glyph so pdf/txt/md/html read
 // as distinct document types without shipping four SVG assets.
 QColor typeColor(const QString &kind) {
-    if (kind == QStringLiteral("pdf")) return QColor(248, 113, 113);   // soft red
-    if (kind == QStringLiteral("md")) return QColor(52, 211, 153);     // mint
-    if (kind == QStringLiteral("html")) return QColor(251, 191, 36);   // amber
-    return QColor(Theme::textSecondary());                            // txt + others
+    Q_UNUSED(kind);
+    return QColor(Theme::accentIce());
 }
 
 }  // namespace

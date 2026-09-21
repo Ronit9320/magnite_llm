@@ -9,6 +9,7 @@
 #include "panels/chatpanel.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
+#include "widgets/starfield.h"
 
 #include <QApplication>
 #include <QCursor>
@@ -52,7 +53,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setupUi();
     setWindowTitle("Magnite LLM");
-    resize(1200, 800);
+    resize(1440, 960);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
     connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
@@ -81,13 +82,16 @@ void MainWindow::setupUi() {
     sidebar->setObjectName("sidebar");
     sidebar->setFixedWidth(Theme::sidebarWidthExpanded());
     auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(Theme::spacingBase(), 16,
-                                      Theme::spacingBase(), 16);
-    sidebarLayout->setSpacing(2);
+    sidebarLayout->setContentsMargins(16, 16, 16, 24);
+    sidebarLayout->setSpacing(12);
 
-    auto *logoLabel = new QLabel("Magnite", sidebar);
+    auto *logoLabel = new QLabel("◎  magnite", sidebar);
     logoLabel->setObjectName("logoLabel");
     sidebarLayout->addWidget(logoLabel);
+    auto *eyebrow = new QLabel("YOUR AI WORKSPACE", sidebar);
+    eyebrow->setObjectName("eyebrow");
+    sidebarLayout->addWidget(eyebrow);
+    sidebarLayout->addSpacing(12);
 
     struct NavInfo {
         QString label;
@@ -111,9 +115,9 @@ void MainWindow::setupUi() {
 
     // 5 nav items in stack order; Settings is pinned to the bottom.
     const QList<NavInfo> navs = {
-        {"Models",   "database",       PanelModels},
+        {"Models",   "box",       PanelModels},
         {"Training", "graduation-cap", PanelTraining},
-        {"RAG",      "folder",         PanelRag},
+        {"RAG",      "database",         PanelRag},
         {"Adapters", "layers",         PanelAdapters},
         {"Chat",     "message-circle", PanelChat},
     };
@@ -126,7 +130,7 @@ void MainWindow::setupUi() {
     m_statusPill = new QLabel("Backend: starting…", sidebar);
     m_statusPill->setObjectName("statusPill");
     m_statusPill->setAlignment(Qt::AlignCenter);
-    sidebarLayout->addWidget(m_statusPill);
+    
     connect(m_backend, &BackendManager::started, this, [this]() {
         setPillState("ok", "Backend: connected");
     });
@@ -147,6 +151,10 @@ void MainWindow::setupUi() {
     m_chatPanel = new ChatPanel();
     m_settingsPanel = new SettingsPanel();
 
+    connect(m_modelsPanel,&ModelsPanel::loadRequested,this,[this](const QString &id) {
+        switchPanel(PanelChat);
+        m_chatPanel->loadModel(id);
+    });
     m_stack->addWidget(m_modelsPanel);
     m_stack->addWidget(m_trainingPanel);
     m_stack->addWidget(m_ragPanel);
@@ -156,7 +164,41 @@ void MainWindow::setupUi() {
 
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
 
-    mainLayout->addWidget(m_stack, 1);
+    auto *workspace = new QWidget(central);
+    auto *workspaceLayout = new QVBoxLayout(workspace);
+    workspaceLayout->setContentsMargins(0,0,0,0);
+    workspaceLayout->setSpacing(0);
+    auto *bar = new QFrame(workspace);
+    bar->setObjectName("workspaceBar");
+    bar->setFixedHeight(56);
+    auto *barLayout = new QHBoxLayout(bar);
+    barLayout->setContentsMargins(32,0,32,0);
+    auto *breadcrumb = new QLabel("WORKSPACE   /   Local",bar);
+    breadcrumb->setObjectName("cardMeta");
+    barLayout->addWidget(breadcrumb);
+    barLayout->addStretch();
+    barLayout->addWidget(m_statusPill);
+    workspaceLayout->addWidget(bar);
+    m_background = new Starfield(workspace);
+    auto *starLayout = new QVBoxLayout(m_background);
+    starLayout->setContentsMargins(0,0,0,0);
+    starLayout->addWidget(m_stack);
+    workspaceLayout->addWidget(m_background,1);
+    mainLayout->addWidget(workspace, 1);
+    auto applyAppearance = [this]() {
+        QSettings settings;
+        m_background->setStarsVisible(settings.value("appearance/stars",true).toBool());
+        m_background->setMotionEnabled(!settings.value("appearance/reducedMotion",false).toBool());
+    };
+    connect(m_settingsPanel, &SettingsPanel::settingsChanged,this,applyAppearance);
+    applyAppearance();
+    auto *local = new QLabel("LOCAL BY DEFAULT",sidebar);
+    local->setObjectName("eyebrow");
+    sidebarLayout->addSpacing(12);
+    sidebarLayout->addWidget(local);
+    auto *localHint = new QLabel("Your models. Your machine.",sidebar);
+    localHint->setObjectName("cardMeta");
+    sidebarLayout->addWidget(localHint);
 
     setCentralWidget(central);
 
@@ -180,7 +222,7 @@ void MainWindow::refreshNavIcons() {
     for (auto *btn : m_sideButtons) {
         const QString name = btn->property("navicon").toString();
         const QColor color = btn->isChecked()
-            ? QColor(Theme::accentPrimary())
+            ? QColor(Theme::accentIce())
             : QColor(Theme::textSecondary());
         btn->setIcon(Theme::coloredIcon(name, color, 18));
         btn->setIconSize(QSize(18, 18));
@@ -191,7 +233,7 @@ void MainWindow::startPanelFade() {
     // 150ms fade-in of the destination panel (design doc §6). Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
-    if (m_selfTest || m_skipFade)
+    if (m_selfTest || m_skipFade || QSettings().value("appearance/reducedMotion", false).toBool())
         return;
 
     if (m_crossfade) {
@@ -234,6 +276,7 @@ void MainWindow::captureScreenshots(const QString &dir) {
     QDir().mkpath(dir);
     m_shotDir = dir;
     m_skipFade = true;
+    m_background->setMotionEnabled(false);
     captureNextPanel(0);
 }
 

@@ -37,6 +37,7 @@ protected:
 
 public slots:
     void refreshEngineStatus();
+    void loadModel(const QString &id);
 
 private slots:
     void onLoadModel();

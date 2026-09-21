@@ -16,11 +16,12 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     , m_id(data.value("id").toString())
 {
     setObjectName(QStringLiteral("adapterCard"));
-    setFixedWidth(320);
+    setMinimumWidth(300);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(16, 14, 16, 14);
-    layout->setSpacing(6);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(16);
 
     // Row 1: name (Space Grotesk) + base-model badge.
     auto *nameRow = new QHBoxLayout();

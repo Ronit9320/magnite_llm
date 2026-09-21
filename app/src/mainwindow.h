@@ -11,6 +11,7 @@
 #include <memory>
 #include <functional>
 
+class Starfield;
 class BackendManager;
 class BackendClient;
 class BasePanel;
@@ -64,6 +65,7 @@ private:
     void waitForBackend(std::shared_ptr<int> failCount, std::function<void()> finish,
                         std::function<void()> proceed, int attempt = 0);
 
+    Starfield *m_background = nullptr;
     QStackedWidget *m_stack;
     BackendManager *m_backend;
     BackendClient *m_backendClient;

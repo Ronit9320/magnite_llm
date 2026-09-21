@@ -34,6 +34,8 @@ private:
     QLineEdit *m_hostedEndpoint;
     QLineEdit *m_hostedKey;
     QCheckBox *m_telemetryOptIn;
+    QCheckBox *m_stars = nullptr;
+    QCheckBox *m_reducedMotion = nullptr;
     QPushButton *m_saveButton;
     QLabel *m_statusLabel;
 };

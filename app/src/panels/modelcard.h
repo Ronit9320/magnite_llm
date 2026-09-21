@@ -29,6 +29,7 @@ public:
 
 signals:
     void cardClicked(ModelCard *card);
+    void actionRequested(ModelCard *card);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

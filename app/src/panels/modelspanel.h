@@ -31,6 +31,7 @@ public:
 
 signals:
     void modelsChanged();
+    void loadRequested(const QString &id);
 
 public slots:
     void refresh();

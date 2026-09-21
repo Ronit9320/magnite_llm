@@ -46,7 +46,7 @@ ModelsPanel::ModelsPanel(QWidget *parent)
 
 QWidget *ModelsPanel::makeCardHost() {
     m_cardHost = new QWidget(this);
-    m_flowLayout = new FlowLayout(m_cardHost, 12, 12);
+    m_flowLayout = new FlowLayout(m_cardHost, 24, 24);
     m_flowLayout->setContentsMargins(2, 2, 2, 2);
     m_cardHost->setLayout(m_flowLayout);
     return m_cardHost;
@@ -179,6 +179,10 @@ void ModelsPanel::addCards(const QJsonArray &items, bool isHub) {
     for (const auto &value : items) {
         auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
         connect(card, &ModelCard::cardClicked, this, &ModelsPanel::onCardClicked);
+        connect(card,&ModelCard::actionRequested,this,[this,isHub](ModelCard *selected) {
+            onCardClicked(selected);
+            if (isHub) onDownload(); else emit loadRequested(selected->id());
+        });
         m_flowLayout->addWidget(card);
         m_cards.append(card);
     }
