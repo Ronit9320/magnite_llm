@@ -25,6 +25,9 @@ public:
     void setText(const QString &text);
     void setCursorVisible(bool show);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     // Deterministic size for `text` at the current font: wraps by word at the
     // bubble's maximum width and returns (bubble, bubble) size. Layout engine

@@ -36,7 +36,7 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
 
     auto *row = new QHBoxLayout(this);
     row->setContentsMargins(14, 10, 14, 10);
-    row->setSpacing(12);
+    row->setSpacing(8);
 
     const QIcon icon = Theme::coloredIcon(QStringLiteral("file-text"), typeColor(kind), 18);
     if (!icon.isNull()) {

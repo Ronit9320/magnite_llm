@@ -31,14 +31,29 @@ AdaptersPanel::AdaptersPanel(QWidget *parent)
 
 QWidget *AdaptersPanel::makeCardHost() {
     m_cardHost = new QWidget(this);
-    m_flowLayout = new FlowLayout(m_cardHost, 24, 24);
+    m_flowLayout = new QVBoxLayout(m_cardHost);
     m_flowLayout->setContentsMargins(2, 2, 2, 2);
+    m_flowLayout->setAlignment(Qt::AlignTop);
+    m_flowLayout->setSpacing(8);
     m_cardHost->setLayout(m_flowLayout);
     return m_cardHost;
 }
 
 void AdaptersPanel::setupUi() {
     auto *layout = contentLayout();
+
+    auto *toolbar = new QHBoxLayout();
+    auto *rackLabel = new QLabel("ADAPTER REGISTRY",this);
+    rackLabel->setObjectName("heroKicker");
+    toolbar->addWidget(rackLabel);
+    toolbar->addStretch();
+    auto *refreshButton = new QPushButton("Refresh registry",this);
+    auto *importButton = new QPushButton("Import archive…",this);
+    importButton->setObjectName("primaryBtn");
+    toolbar->addWidget(refreshButton);
+    toolbar->addWidget(importButton);
+    layout->addLayout(toolbar);
+    connect(refreshButton,&QPushButton::clicked,this,&AdaptersPanel::refresh);
 
     m_scrollArea = new QScrollArea(this);
     m_scrollArea->setWidgetResizable(true);
@@ -54,30 +69,23 @@ void AdaptersPanel::setupUi() {
     m_emptyState = new QWidget(this);
     m_emptyState->setObjectName("surfaceCard");
     auto *emptyLayout = new QVBoxLayout(m_emptyState);
-    emptyLayout->setContentsMargins(24, 24, 24, 24);
-    emptyLayout->setSpacing(14);
-    emptyLayout->setAlignment(Qt::AlignCenter);
-    auto *mark = new QLabel("✳",m_emptyState);
-    mark->setObjectName("heroArt");
-    mark->setAlignment(Qt::AlignCenter);
-    emptyLayout->addWidget(mark);
-    auto *title = new QLabel("Give your model a new specialty.",m_emptyState);
+    emptyLayout->setContentsMargins(12, 12, 12, 12);
+    emptyLayout->setSpacing(10);
+    emptyLayout->setAlignment(Qt::AlignTop);
+    auto *title = new QLabel("Adapter rack empty",m_emptyState);
     title->setObjectName("headingLabel");
     title->setWordWrap(true);
-    title->setAlignment(Qt::AlignCenter);
+    title->setAlignment(Qt::AlignLeft);
     emptyLayout->addWidget(title);
     auto *hint = new QLabel(
         "No adapters yet. Train one in the Training panel.\n\n"
-        "Have an export archive? Import it below.",
+        "Import an archive from the registry toolbar, or train an adapter in Training.",
         m_emptyState);
     hint->setObjectName("bodyLabel");
-    hint->setAlignment(Qt::AlignCenter);
+    hint->setAlignment(Qt::AlignLeft);
     hint->setWordWrap(true);
     emptyLayout->addWidget(hint);
-    auto *importButton = new QPushButton("Import adapter...", m_emptyState);
-    importButton->setObjectName("primaryBtn");
-    importButton->setCursor(Qt::PointingHandCursor);
-    emptyLayout->addWidget(importButton, 0, Qt::AlignHCenter);
+    emptyLayout->addStretch();
     m_emptyState->setLayout(emptyLayout);
     layout->addWidget(m_emptyState, 1);
 

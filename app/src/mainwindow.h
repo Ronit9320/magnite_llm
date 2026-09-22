@@ -79,6 +79,7 @@ private:
 
     QList<QPushButton*> m_sideButtons;
     QLabel *m_statusPill;
+    QLabel *m_connectionDot = nullptr;
     QPropertyAnimation *m_crossfade;
     bool m_skipFade;
     bool m_selfTest;

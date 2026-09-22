@@ -1,3 +1,4 @@
+#include <QTabWidget>
 #include "panels/settingspanel.h"
 
 #include <QCheckBox>
@@ -35,13 +36,19 @@ SettingsPanel::SettingsPanel(QWidget *parent)
 
 void SettingsPanel::setupUi() {
     auto *layout = contentLayout();
-    auto *columns = new QHBoxLayout();
-    columns->setSpacing(24);
-    auto *left = new QVBoxLayout();
-    auto *right = new QVBoxLayout();
-    left->setSpacing(24); right->setSpacing(24);
-    columns->addLayout(left,1); columns->addLayout(right,1);
-    layout->addLayout(columns);
+    auto *tabs = new QTabWidget(this);
+    layout->addWidget(tabs,1);
+    auto makeCategory = [this,tabs](const QString &name) {
+        auto *page = new QWidget(this);
+        auto *column = new QVBoxLayout(page);
+        column->setContentsMargins(20,20,20,20);
+        column->setSpacing(16);
+        tabs->addTab(page,name);
+        return column;
+    };
+    auto *runtime = makeCategory("Runtime");
+    auto *storage = makeCategory("Storage && privacy");
+    auto *visual = makeCategory("Appearance");
 
     auto *engineBox = new QGroupBox("Engine", this);
     auto *engineForm = new QFormLayout(engineBox);
@@ -51,7 +58,7 @@ void SettingsPanel::setupUi() {
         "Override automatic engine selection. 'Auto' picks vLLM if a GPU is present, "
         "else llama.cpp (or a hosted API if configured).");
     engineForm->addRow("Inference engine:", m_engineOverride);
-    left->addWidget(engineBox);
+    runtime->addWidget(engineBox);
 
     auto *dataBox = new QGroupBox("Storage", this);
     auto *dataForm = new QFormLayout(dataBox);
@@ -63,7 +70,7 @@ void SettingsPanel::setupUi() {
     dirRow->addWidget(dirBtn);
     dataForm->addRow("Data directory:", dirRow);
     connect(dirBtn, &QPushButton::clicked, this, &SettingsPanel::onBrowseDataDir);
-    left->addWidget(dataBox);
+    storage->addWidget(dataBox);
 
     auto *hostedBox = new QGroupBox("Hosted Inference", this);
     auto *hostedForm = new QFormLayout(hostedBox);
@@ -74,7 +81,8 @@ void SettingsPanel::setupUi() {
     m_hostedKey->setEchoMode(QLineEdit::Password);
     m_hostedKey->setPlaceholderText("sk-...");
     hostedForm->addRow("API key:", m_hostedKey);
-    left->addWidget(hostedBox);
+    runtime->addWidget(hostedBox);
+    runtime->addStretch();
 
     auto *privacyBox = new QGroupBox("Privacy", this);
     auto *privacyForm = new QFormLayout(privacyBox);
@@ -82,27 +90,28 @@ void SettingsPanel::setupUi() {
     m_telemetryOptIn->setToolTip("Local-first by default. Opt-in only.");
     privacyForm->addRow("Telemetry:", m_telemetryOptIn);
     auto *appearance = Surface::card(this,"Appearance");
-    auto *theme = new QLabel("Studio 02 · paper, ink & orange",this);
+    auto *theme = new QLabel("Studio · paper, charcoal & orange",this);
     theme->setObjectName("bodyLabel");
     appearance->addWidget(theme);
-    m_stars = new QCheckBox("Workbench grid",this);
+    m_stars = new QCheckBox("Instrument grid",this);
     m_stars->setObjectName("starsToggle");
     m_reducedMotion = new QCheckBox("Reduce motion",this);
     m_reducedMotion->setObjectName("reducedMotionToggle");
     appearance->addWidget(m_stars);
     appearance->addWidget(m_reducedMotion);
-    auto *hint = new QLabel("Registration marks on the workspace. Reduce motion freezes the rotating centerpiece and disables panel fades.",this);
+    auto *hint = new QLabel("Subtle workspace texture. Reduce motion freezes the studio seal and disables panel transitions.",this);
     hint->setWordWrap(true);
     hint->setObjectName("cardMeta");
     appearance->addWidget(hint);
-    right->addWidget(appearance->parentWidget());
-    right->addWidget(privacyBox);
+    visual->addWidget(appearance->parentWidget());
+    visual->addStretch();
+    storage->addWidget(privacyBox);
     auto *local = Surface::card(this,"Local by default");
-    auto *copy = new QLabel("Models, adapters and documents stay in your local data directory.\n\nAdditional color themes will be explored later.",this);
+    auto *copy = new QLabel("Models, adapters and documents stay in your local data directory.\n\nUse the Light / Dark switch in the top bar to change appearance.",this);
     copy->setWordWrap(true);
     local->addWidget(copy);
-    right->addWidget(local->parentWidget());
-    right->addStretch();
+    storage->addWidget(local->parentWidget());
+    storage->addStretch();
 
     auto *btnRow = new QHBoxLayout();
     m_saveButton = new QPushButton("Save Settings", this);
@@ -115,7 +124,7 @@ void SettingsPanel::setupUi() {
     m_statusLabel->setObjectName("statusLabel");
     layout->addWidget(m_statusLabel);
 
-    layout->addStretch();
+
 
     connect(m_saveButton, &QPushButton::clicked, this, &SettingsPanel::onSave);
 
@@ -129,8 +138,8 @@ void SettingsPanel::loadFromSettings() {
     m_hostedEndpoint->setText(s.value("hosted/endpoint").toString());
     m_hostedKey->setText(s.value("hosted/apiKey").toString());
     m_telemetryOptIn->setChecked(s.value("privacy/telemetry", false).toBool());
-    m_stars->setChecked(s.value("appearance/studio2Ambient",true).toBool());
-    m_reducedMotion->setChecked(s.value("appearance/studio2ReducedMotion",false).toBool());
+    m_stars->setChecked(s.value("appearance/studio3Ambient",true).toBool());
+    m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
 }
 
 void SettingsPanel::onBrowseDataDir() {
@@ -149,8 +158,8 @@ void SettingsPanel::onSave() {
     s.setValue("hosted/endpoint", m_hostedEndpoint->text().trimmed());
     s.setValue("hosted/apiKey", m_hostedKey->text().trimmed());
     s.setValue("privacy/telemetry", m_telemetryOptIn->isChecked());
-    s.setValue("appearance/studio2Ambient",m_stars->isChecked());
-    s.setValue("appearance/studio2ReducedMotion",m_reducedMotion->isChecked());
+    s.setValue("appearance/studio3Ambient",m_stars->isChecked());
+    s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
     s.sync();
     setStatus("Settings saved.");
     emit settingsChanged();

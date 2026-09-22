@@ -28,13 +28,13 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     , m_progressBar(nullptr)
 {
     setObjectName(QStringLiteral("modelCard"));
-    setMinimumWidth(300);
+    setMinimumWidth(230);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     setCursor(Qt::PointingHandCursor);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
-    layout->setSpacing(16);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
 
     // Row 1: name (Space Grotesk) + architecture pill.
     auto *nameRow = new QHBoxLayout();
@@ -63,6 +63,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     if (!srcIcon.isNull()) {
         auto *iconLabel = new QLabel(this);
         iconLabel->setObjectName(QStringLiteral("cardMeta"));
+        iconLabel->setProperty("themeIcon", iconName);
         iconLabel->setPixmap(srcIcon.pixmap(14, 14));
         metaRow->addWidget(iconLabel);
     }

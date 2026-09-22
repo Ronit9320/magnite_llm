@@ -1,3 +1,5 @@
+#include <QSplitter>
+#include <QTabWidget>
 #include "panels/trainingpanel.h"
 
 #include "backend_client.h"
@@ -75,14 +77,18 @@ QLabel* TrainingPanel::addField(QWidget *editor, const QString &label) {
 }
 
 void TrainingPanel::setupUi() {
-    auto *columns = new QHBoxLayout();
-    columns->setSpacing(24);
-    contentLayout()->addLayout(columns,1);
-    auto *layout = Surface::card(this,"Training configuration");
+    auto *columns = new QSplitter(Qt::Horizontal,this);
+    columns->setChildrenCollapsible(false);
+    columns->setHandleWidth(4);
+    contentLayout()->addWidget(columns,1);
+    auto *layout = Surface::card(this,"01 / Run setup");
     auto *right = new QVBoxLayout();
-    right->setSpacing(24);
-    columns->addWidget(layout->parentWidget(),1);
-    columns->addLayout(right,1);
+    right->setSpacing(8);
+    columns->addWidget(layout->parentWidget());
+    auto *monitor = new QWidget(this);
+    monitor->setLayout(right);
+    columns->addWidget(monitor);
+    columns->setSizes({350,750});
 
     m_modelCombo = new QComboBox(this);
     m_modelCombo->setEditable(true);
@@ -141,7 +147,7 @@ void TrainingPanel::setupUi() {
     onQuantizationToggled();
 
     layout->addStretch();
-    auto *run = Surface::card(this,"Training run");
+    auto *run = Surface::card(this,"02 / Run monitor");
     right->addWidget(run->parentWidget());
     m_progressLabel = new QLabel("Ready to train",this);
     m_progressLabel->setObjectName("metricValue");
@@ -162,20 +168,24 @@ void TrainingPanel::setupUi() {
     btns->addStretch();
     run->addLayout(btns);
 
+    auto *telemetry = new QTabWidget(this);
+    right->addWidget(telemetry,1);
     auto *metrics = Surface::card(this,"Live metrics");
     m_metrics = new QLabel("Waiting for a training job.",this);
     m_metrics->setObjectName("monoLabel");
     m_metrics->setWordWrap(true);
     metrics->addWidget(m_metrics);
-    right->addWidget(metrics->parentWidget());
+    metrics->addStretch();
+    telemetry->addTab(metrics->parentWidget(),"Metrics");
     auto *logs = Surface::card(this,"Training log");
-    right->addWidget(logs->parentWidget(),1);
+    telemetry->addTab(logs->parentWidget(),"Event log");
+    telemetry->setCurrentIndex(1);
     m_log = new QPlainTextEdit(this);
     m_log->setReadOnly(true);
     m_log->setPlaceholderText("Training log will appear here.");
     m_log->setMaximumBlockCount(2000);
     m_log->setObjectName("logView");
-    m_log->setMinimumHeight(180);
+    m_log->setMinimumHeight(140);
     logs->addWidget(m_log, 1);
 
     m_statusLabel = new QLabel(this);

@@ -1,3 +1,4 @@
+#include <QSplitter>
 #include "panels/ragpanel.h"
 
 #include "backend_client.h"
@@ -59,11 +60,18 @@ void RagPanel::setupUi() {
     btnRow->addStretch();
     layout->addLayout(btnRow);
 
-    auto *columns = new QHBoxLayout();
-    columns->setSpacing(24);
-    layout->addLayout(columns,1);
-    auto *documents = Surface::card(this,"Your documents");
-    columns->addWidget(documents->parentWidget(),3);
+    auto *columns = new QSplitter(Qt::Horizontal,this);
+    columns->setChildrenCollapsible(false);
+    columns->setHandleWidth(4);
+    layout->addWidget(columns,1);
+    auto *inspector = new QWidget(this);
+    auto *bench = new QVBoxLayout(inspector);
+    bench->setContentsMargins(0,0,0,0);
+    bench->setSpacing(8);
+    auto *documents = Surface::card(this,"Source collection");
+    columns->addWidget(documents->parentWidget());
+    columns->addWidget(inspector);
+    columns->setSizes({650,450});
     // Document list.
     m_docScroll = new QScrollArea(this);
     m_docScroll->setWidgetResizable(true);
@@ -75,13 +83,13 @@ void RagPanel::setupUi() {
     m_docLayout->setContentsMargins(2, 2, 2, 2);
     m_docLayout->setSpacing(8);
     m_docScroll->setWidget(m_docHost);
-    m_docScroll->setMinimumHeight(260);
+    m_docScroll->setMinimumHeight(200);
     documents->addWidget(m_docScroll, 1);
 
     // Empty state (shown instead of the scroll area when no docs are added).
     m_emptyState = new QWidget(this);
     auto *emptyLayout = new QVBoxLayout(m_emptyState);
-    emptyLayout->setContentsMargins(24, 24, 24, 24);
+    emptyLayout->setContentsMargins(12, 12, 12, 12);
     emptyLayout->setAlignment(Qt::AlignCenter);
     auto *hint = new QLabel("No documents ingested yet.\nAdd PDFs, text, markdown or HTML above.", m_emptyState);
     hint->setObjectName("mutedLabel");
@@ -101,7 +109,7 @@ void RagPanel::setupUi() {
     configTitle->setObjectName("cardTitle");
     configLayout->addWidget(configTitle);
     auto *form = new QFormLayout();
-    form->setSpacing(16);
+    form->setSpacing(8);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
     m_chunkSizeSpin = new QSpinBox(this);
@@ -124,9 +132,9 @@ void RagPanel::setupUi() {
     configLayout->addLayout(form);
 
     configLayout->addStretch();
-    columns->addWidget(configCard,2);
-    auto *retrieval = Surface::card(this,"Test retrieval");
-    layout->addWidget(retrieval->parentWidget());
+    bench->addWidget(configCard);
+    auto *retrieval = Surface::card(this,"Query laboratory");
+    bench->addWidget(retrieval->parentWidget(),1);
     // Test-retrieval row.
     auto *queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
@@ -143,6 +151,7 @@ void RagPanel::setupUi() {
     m_resultLabel->setWordWrap(true);
     m_resultLabel->setText(" ");
     retrieval->addWidget(m_resultLabel);
+    retrieval->addStretch();
 
 
 

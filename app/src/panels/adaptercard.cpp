@@ -16,12 +16,16 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     , m_id(data.value("id").toString())
 {
     setObjectName(QStringLiteral("adapterCard"));
-    setMinimumWidth(300);
+    setMinimumWidth(230);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
-    layout->setSpacing(16);
+    auto *row = new QHBoxLayout(this);
+    row->setContentsMargins(16,14,16,14);
+    row->setSpacing(24);
+    auto *layout = new QVBoxLayout();
+    row->addLayout(layout,1);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
 
     // Row 1: name (Space Grotesk) + base-model badge.
     auto *nameRow = new QHBoxLayout();
@@ -34,7 +38,9 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     if (!baseModel.isEmpty()) {
         auto *badge = new QLabel(baseModel, this);
         badge->setObjectName(QStringLiteral("archBadge"));
-        badge->setToolTip("Base model");
+        badge->setToolTip("Base model: " + baseModel);
+        badge->setWordWrap(true);
+        badge->setMaximumWidth(240);
         nameRow->addWidget(badge, 0, Qt::AlignTop);
     }
     layout->addLayout(nameRow);
@@ -93,7 +99,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     btnRow->addWidget(importButton);
     btnRow->addWidget(deleteButton);
     btnRow->addStretch(1);
-    layout->addLayout(btnRow);
+    row->addLayout(btnRow);
 
     connect(m_activateButton, &QPushButton::clicked, this, [this]() {
         emit activateRequested(this);

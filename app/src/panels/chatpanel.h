@@ -6,7 +6,7 @@
 #include <QJsonObject>
 
 class QComboBox;
-class QLineEdit;
+class QPlainTextEdit;
 class QPushButton;
 class QCheckBox;
 class QLabel;
@@ -33,6 +33,7 @@ public:
     QString settingsJson() const override;
 
 protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void applySettingsJson(const QString &json) override;
 
 public slots:
@@ -68,10 +69,12 @@ private:
     // Chat bubble area.
     QScrollArea *m_chatScroll;
     QWidget *m_chatHost;
+    QLabel *m_emptyConversation = nullptr;
+    QWidget *m_welcome = nullptr;
     QVBoxLayout *m_chatLayout;
 
     // Input row.
-    QLineEdit *m_input;
+    QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
     QPushButton *m_stopButton;
     QPushButton *m_clearButton;

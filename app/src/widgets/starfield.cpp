@@ -39,11 +39,13 @@ void Starfield::paintEvent(QPaintEvent *) {
     painter.setRenderHint(QPainter::Antialiasing);
     if (property("kineticGlyph").toBool()) {
         painter.translate(width()/2.0,height()/2.0);
-        painter.setPen(QPen(QColor(Theme::textPrimary()),1));
+        const qreal scale = qMin(width(),height())/210.0;
+        painter.scale(scale,scale);
+        painter.setPen(QPen(QColor(Theme::accentPrimary()),1));
         painter.drawEllipse(QPointF(0,0),99,99);
         painter.rotate(m_motion ? m_clock.elapsed()/180.0 : 0);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor(Theme::textPrimary()));
+        painter.setBrush(QColor(Theme::accentPrimary()));
         for (int i=0;i<12;++i) {
             painter.drawRoundedRect(QRectF(24,-10,63,20),2,2);
             painter.rotate(30);
@@ -55,11 +57,10 @@ void Starfield::paintEvent(QPaintEvent *) {
     painter.fillRect(rect(), QColor(Theme::bgVoid()));
     if (!m_stars) return;
     painter.setRenderHint(QPainter::Antialiasing);
-    QColor grid(Theme::glassBorder()); grid.setAlphaF(0.35);
+    QColor grid(Theme::glassBorder()); grid.setAlphaF(0.18);
     painter.setPen(QPen(grid,1));
-    for (int x=24;x<width();x+=48)
-        for (int y=24;y<height();y+=48) {
-            painter.drawLine(x-3,y,x+3,y);
-            painter.drawLine(x,y-3,x,y+3);
+    for (int x=24;x<width();x+=32)
+        for (int y=24;y<height();y+=32) {
+            painter.drawPoint(x,y);
         }
 }

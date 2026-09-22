@@ -17,6 +17,9 @@
 #include <QApplication>
 #include <QScreen>
 #include <QRegularExpression>
+#include <QSettings>
+#include <QPalette>
+#include <QLabel>
 
 #include <algorithm>
 #include <cstdio>
@@ -24,6 +27,7 @@
 #include <vector>
 
 namespace {
+bool darkMode = false;
 
 // Read a qt resource file (":/...").
 QString loadText(const QString &path) {
@@ -143,7 +147,38 @@ void Theme::loadFonts() {
 
 void Theme::setupApplicationTheme() {
     loadFonts();
+    // Start the refined dark-first design in dark mode once, then remember the switch.
+    QSettings appearance;
+    if (!appearance.value("appearance/darkRefinementApplied", false).toBool()) {
+        appearance.setValue("appearance/studio3Dark", true);
+        appearance.setValue("appearance/darkRefinementApplied", true);
+    }
+    setDark(appearance.value("appearance/studio3Dark", true).toBool());
+}
+
+bool Theme::isDark() { return darkMode; }
+
+void Theme::setDark(bool dark) {
+    darkMode = dark;
+    QPalette palette = qApp->palette();
+    palette.setColor(QPalette::Window, QColor(bgVoid()));
+    palette.setColor(QPalette::Base, QColor(glassFill()));
+    palette.setColor(QPalette::AlternateBase, QColor(bgDeep()));
+    palette.setColor(QPalette::Button, QColor(glassFill()));
+    for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+        palette.setColor(role, QColor(textPrimary()));
+    palette.setColor(QPalette::PlaceholderText, QColor(textMuted()));
+    palette.setColor(QPalette::Highlight, QColor(accentPrimary()));
+    palette.setColor(QPalette::HighlightedText, QColor(accentText()));
+    qApp->setPalette(palette);
     qApp->setStyleSheet(qss());
+    for (auto *widget : QApplication::allWidgets()) {
+        if (auto *label = qobject_cast<QLabel *>(widget);
+            label && label->property("themeIcon").isValid())
+            label->setPixmap(coloredIcon(label->property("themeIcon").toString(),
+                                        QColor(textSecondary()),14).pixmap(14,14));
+        widget->update();
+    }
 }
 
 QString Theme::qss() {
@@ -221,7 +256,7 @@ int Theme::selfCheck() {
     const std::vector<const char *> kIcons = {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
-        "file-up", "file-down", "send", "circle-stop"};
+        "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
@@ -237,6 +272,19 @@ int Theme::selfCheck() {
     const QIcon icon = Theme::coloredIcon("settings", QColor(Theme::accentPrimary()), 18);
     check("coloredIcon(settings) renders", !icon.isNull());
 
+    const bool originalDark = isDark();
+    setDark(true);
+    check("refined dark canvas", bgVoid() == "#161719");
+    check("refined dark surface", glassFill() == "#202225");
+    check("refined dark border", glassBorder() == "#383C42");
+    check("dark palette uses dark surfaces", QColor(bgVoid()).lightness() < 40);
+    check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);
+    check("dark stylesheet tokens substituted", !qss().contains('@'));
+    bool validDark = true;
+    for (const auto &token : tokens())
+        if (token.value.startsWith('#')) validDark &= QColor(token.value).isValid();
+    check("dark color tokens valid", validDark);
+    setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);
     return failures;
 }

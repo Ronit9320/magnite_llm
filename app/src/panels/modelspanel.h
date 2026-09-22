@@ -14,6 +14,7 @@ class QTimer;
 class QWidget;
 class FlowLayout;
 class ModelCard;
+class OverviewTile;
 class BackendClient;
 
 // Models panel: browse local models, search HuggingFace, download, and delete.
@@ -60,6 +61,9 @@ private:
     QString selectedId() const;
     ModelCard *cardById(const QString &id) const;
     QWidget *makeCardHost();
+    // Polls /inference/status, /adapters, /rag/documents and /training/jobs and
+    // repaints the four live-state tiles at the top of the panel.
+    void refreshOverview();
 
     BackendClient *m_client;
     QLineEdit *m_searchEdit;
@@ -72,8 +76,10 @@ private:
     FlowLayout *m_flowLayout;
     QWidget *m_cardHost;
     QLabel *m_statusLabel;
-    QWidget *m_welcome = nullptr;
+    QLabel *m_emptyRack = nullptr;
+    QList<OverviewTile *> m_overviewTiles;
     QTimer *m_pullTimer;
+    QTimer *m_overviewTimer;
     QList<ModelCard *> m_cards;
     ModelCard *m_selectedCard;
     QString m_pullJobId;

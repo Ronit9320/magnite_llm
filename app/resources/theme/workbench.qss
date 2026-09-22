@@ -1,18 +1,18 @@
 /* Studio 02: paper, ink and safety orange. Colors resolve from Theme tokens. */
-QWidget { font-family: @bodyFont; font-size: 14px; color: @textPrimary; }
+QWidget { font-family: @bodyFont; font-size: 12px; color: @textPrimary; }
 QMainWindow, QDialog { background: @bgVoid; }
 QLabel { background: transparent; border: none; }
 QWidget#sidebar { background: @glassFill; border-bottom: 2px solid @textPrimary; }
-QLabel#statusPill { padding: 6px 12px; background: @bgDeep; border-radius: 3px; font-size: 11px; }
+QLabel#statusPill { padding: 4px 9px; background: @bgDeep; border-radius: 3px; font-size: 11px; }
 QLabel#statusPill[state="err"] { color: @statusError; }
-QLabel#logoLabel { font-family: @headingFont; font-size: 34px; font-weight: 600; }
-QLabel#studioTag, QLabel#heroKicker { font-size: 11px; font-weight: 600; letter-spacing: 2px; }
-QPushButton { background: @glassFill; border: 1px solid @glassBorder; border-radius: 3px; padding: 9px 16px; min-height: 20px; font-weight: 500; }
+QLabel#logoLabel { font-family: @headingFont; font-size: 23px; font-weight: 600; }
+QLabel#studioTag, QLabel#heroKicker { font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+QPushButton { background: @glassFill; border: 1px solid @glassBorder; border-radius: 3px; padding: 4px 9px; min-height: 17px; font-weight: 500; }
 QPushButton:hover { background: @glassFillHover; border-color: @textPrimary; }
 QPushButton:pressed { background: @glassFillActive; }
 QPushButton:focus { border: 1px solid @accentBlue; }
 QPushButton:disabled { color: @textMuted; background: @bgDeep; border-color: @glassBorder; }
-QPushButton#navBtn { padding: 9px 18px; border: 1px solid transparent; background: transparent; font-family: @headingFont; }
+QPushButton#navBtn { padding: 4px 9px; border: 1px solid transparent; background: transparent; font-family: @headingFont; }
 QPushButton#navBtn:hover { border-color: @textPrimary; }
 QPushButton#navBtn:checked { background: @textPrimary; color: @glassFill; border-color: @textPrimary; }
 QPushButton#primaryBtn, QPushButton#cardPrimary { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
@@ -21,14 +21,14 @@ QPushButton#primaryBtn:pressed, QPushButton#cardPrimary:pressed { background: @a
 QPushButton#primaryBtn:disabled, QPushButton#cardPrimary:disabled { background: @bgDeep; color: @textMuted; border-color: @glassBorder; }
 QPushButton#destructiveBtn, QPushButton#cardDanger { color: @statusError; }
 QPushButton#destructiveBtn:hover, QPushButton#cardDanger:hover { background: @dangerHover; }
-QLabel#panelTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; }
-QLabel#panelSubtitle, QLabel#subtitle, QLabel#statusLabel, QLabel#cardMeta { color: @textSecondary; font-size: 12px; }
-QLabel#headingLabel, QLabel#cardTitle { font-family: @headingFont; font-size: 19px; font-weight: 600; }
-QLabel#metricValue { font-family: @headingFont; font-size: 34px; color: @accentBlue; }
-QLabel#monoLabel { font-family: @monoFont; font-size: 12px; }
+QLabel#panelTitle { font-family: @headingFont; font-size: 22px; font-weight: 600; }
+QLabel#panelSubtitle, QLabel#subtitle, QLabel#statusLabel, QLabel#cardMeta { color: @textSecondary; font-size: 11px; }
+QLabel#headingLabel, QLabel#cardTitle { font-family: @headingFont; font-size: 15px; font-weight: 600; }
+QLabel#metricValue { font-family: @headingFont; font-size: 23px; color: @accentBlue; }
+QLabel#monoLabel { font-family: @monoFont; font-size: 11px; }
 QFrame#studioHero { background: @accentPrimary; border: 1px solid @textPrimary; border-radius: 0; }
-QLabel#heroTitle { font-family: @headingFont; font-size: 46px; font-weight: 600; }
-QLabel#heroArt { color: @accentPrimary; font-size: 84px; }
+QLabel#heroTitle { font-family: @headingFont; font-size: 29px; font-weight: 600; }
+QLabel#heroArt { color: @accentPrimary; font-size: 48px; }
 QFrame#surfaceCard, QWidget#surfaceCard, QFrame#modelCard, QFrame#adapterCard, QFrame#ragDocCard, QFrame#ragConfigCard {
     background: @glassFill; border: 1px solid @glassBorder; border-radius: 4px;
 }
@@ -36,15 +36,15 @@ QFrame#modelCard:hover, QFrame#adapterCard:hover { border-color: @textPrimary; }
 QFrame#modelCard[selected="true"], QFrame#adapterCard[active="true"] { border: 2px solid @accentPrimary; }
 QLabel#archBadge, QLabel#adapterPill, QLabel#chatPill { background: @bgDeep; color: @textSecondary; padding: 4px 8px; border-radius: 2px; font-size: 11px; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
-    background: @glassFill; color: @textPrimary; border: 1px solid @glassBorder; border-radius: 3px; padding: 9px; selection-background-color: @accentPrimary; selection-color: @accentText;
+    background: @glassFill; color: @textPrimary; border: 1px solid @glassBorder; border-radius: 3px; padding: 4px; selection-background-color: @accentPrimary; selection-color: @accentText;
 }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus, QPlainTextEdit:focus { border-color: @accentBlue; }
 QLineEdit:disabled, QComboBox:disabled { background: @bgDeep; color: @textMuted; }
 QComboBox { padding-right: 28px; }
-QComboBox::drop-down { border: none; width: 24px; }
-QComboBox::down-arrow { image: url(:/icons/chevron-down.svg); width: 14px; height: 14px; }
+QComboBox::drop-down { border: none; width: 22px; background: @accentPrimary; border-radius: 2px; margin: 4px; }
+QComboBox::down-arrow { image: url(:/icons/chevron-down.svg); width: 12px; height: 12px; }
 QComboBox QAbstractItemView { background: @glassFill; color: @textPrimary; selection-background-color: @bgDeep; selection-color: @textPrimary; }
-QGroupBox { background: @glassFill; border: 1px solid @glassBorder; border-radius: 4px; margin-top: 16px; padding: 18px; }
+QGroupBox { background: @glassFill; border: 1px solid @glassBorder; border-radius: 4px; margin-top: 12px; padding: 9px; }
 QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 6px; font-weight: 600; }
 QScrollArea, QScrollArea > QWidget > QWidget, QStackedWidget { background: transparent; border: none; }
 QScrollBar:vertical { background: transparent; width: 7px; margin: 0; }
@@ -52,8 +52,8 @@ QScrollBar::handle:vertical { background: @glassBorder; min-height: 30px; border
 QScrollBar::handle:vertical:hover { background: @textMuted; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-QCheckBox { spacing: 10px; }
-QCheckBox::indicator { width: 17px; height: 17px; background: @glassFill; border: 1px solid @textMuted; border-radius: 2px; }
+QCheckBox { spacing: 7px; }
+QCheckBox::indicator { width: 13px; height: 13px; background: @glassFill; border: 1px solid @textMuted; border-radius: 2px; }
 QCheckBox::indicator:checked { background: @accentPrimary; border-color: @accentPrimary; image: url(:/icons/check.svg); }
 QProgressBar { background: @bgDeep; border: none; border-radius: 2px; min-height: 7px; text-align: center; }
 QProgressBar::chunk { background: @accentPrimary; border-radius: 2px; }
@@ -61,4 +61,6 @@ QFrame#chatBubbleUser { background: @glassFillHover; border: 1px solid @glassBor
 QFrame#chatBubbleAssistant { background: @glassFill; border: 1px solid @glassBorder; border-radius: 6px; }
 QLabel#chatBubbleText { color: @textPrimary; }
 QStatusBar { background: @bgDeep; color: @textSecondary; font-size: 11px; border-top: 1px solid @glassBorder; }
-QToolTip { background: @textPrimary; color: @glassFill; padding: 6px; border: none; }
+QToolTip { background: @textPrimary; color: @glassFill; padding: 4px; border: none; }
+
+QFrame#studioHero QLabel { color: @accentText; }

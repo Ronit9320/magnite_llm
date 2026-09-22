@@ -26,6 +26,8 @@ set(MAGNITE_SOURCES
     src/widgets/flowlayout.cpp
     src/widgets/starfield.cpp
     src/widgets/starfield.h
+    src/widgets/overviewtile.cpp
+    src/widgets/overviewtile.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp

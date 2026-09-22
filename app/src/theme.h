@@ -5,18 +5,21 @@
 
 class QIcon;
 
-// Studio 02 design tokens (design doc §12). This is the single source of
+// Studio 03 design tokens (design doc §13). This is the single source of
 // truth for every color, font, radius and spacing value in the UI. Panels and
 // the global QSS (Theme::qss) read tokens from here — never hardcode hex
 // literals in widget code.
 namespace Theme {
 
+bool isDark();
+void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
+
 // ---- Paper, ink, orange and violet palette ----
-inline QString bgVoid()        { return QStringLiteral("#F1EFE7"); }
-inline QString bgDeep()        { return QStringLiteral("#E9E6DC"); }
+inline QString bgVoid()        { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
+inline QString bgDeep()        { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
 // Keep existing semantic names for consumers; the secondary accent is lavender.
 inline QString accentPrimary() { return QStringLiteral("#FF5C28"); }
-inline QString accentBlue()    { return QStringLiteral("#5145B7"); }
+inline QString accentBlue()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
 inline QString accentGlow()    { return QStringLiteral("rgba(255, 92, 40, 0.18)"); }
 inline QString accentIce()    { return QStringLiteral("#FF5C28"); }
 // Derived accent shades used by QSS interaction states (hover/pressed) and the
@@ -25,24 +28,24 @@ inline QString accentHover()   { return QStringLiteral("#FF784E"); }
 inline QString accentActive()  { return QStringLiteral("#E1491B"); }
 inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
-inline QString dangerHover()   { return QStringLiteral("#FFD0BD"); }
+inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
 inline QString onDanger()      { return QStringLiteral("#301F19"); }
 
-inline QString glassFill()          { return QStringLiteral("#FFFEF8"); }
-inline QString glassFillHover()     { return QStringLiteral("#E5E8D5"); }
-inline QString glassFillActive()    { return QStringLiteral("#E5E8D5"); }
-inline QString glassBorder()        { return QStringLiteral("#CFD2C5"); }
+inline QString glassFill()          { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
+inline QString glassFillHover()     { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
+inline QString glassFillActive()    { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
+inline QString glassBorder()        { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
 inline QString glassBorderHover()   { return QStringLiteral("#FF784E"); }
 inline QString glassBorderActive()  { return QStringLiteral("#FF5C28"); }
 
-inline QString textPrimary()   { return QStringLiteral("#20221F"); }
-inline QString textSecondary() { return QStringLiteral("#555D54"); }
-inline QString textMuted()     { return QStringLiteral("#74786F"); }
+inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
+inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }
+inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : QStringLiteral("#74786F"); }
 
 inline QString statusSuccess() { return QStringLiteral("#FF5C28"); }
-inline QString statusWarning() { return QStringLiteral("#855C14"); }
-inline QString statusError()   { return QStringLiteral("#B13D24"); }
-inline QString statusInfo()    { return QStringLiteral("#5145B7"); }
+inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
+inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
+inline QString statusInfo()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
@@ -51,22 +54,22 @@ inline QString bodyFont()    { return QStringLiteral("DM Sans"); }
 QString monoFont();
 
 // Font pixel sizes (design doc §3 scale).
-inline int fontH1()       { return 28; }
-inline int fontH2()       { return 20; }
-inline int fontH3()       { return 16; }
-inline int fontBody()     { return 14; }
-inline int fontBodySm()   { return 12; }
-inline int fontMono()     { return 13; }
+inline int fontH1()       { return 22; }
+inline int fontH2()       { return 15; }
+inline int fontH3()       { return 14; }
+inline int fontBody()     { return 12; }
+inline int fontBodySm()   { return 11; }
+inline int fontMono()     { return 11; }
 
 // Heading weights (design doc §3).
 inline QString fontWeightSemibold() { return QStringLiteral("600"); }
 inline QString fontWeightMedium()    { return QStringLiteral("500"); }
 
 // ---- Layout & spacing (design doc §4) ----
-inline int spacingBase()           { return 8; }
-inline int panelPadding()          { return 32; }
-inline int sectionGap()            { return 24; }
-inline int formGap()               { return 16; }
+inline int spacingBase()           { return 6; }
+inline int panelPadding()          { return 16; }
+inline int sectionGap()            { return 10; }
+inline int formGap()               { return 8; }
 inline int sidebarWidthExpanded()  { return 240; }
 inline int sidebarWidthCollapsed() { return 64; }
 inline int minWindowWidth()        { return 1024; }

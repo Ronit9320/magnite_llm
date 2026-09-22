@@ -1,3 +1,4 @@
+#include <QShortcut>
 #include "mainwindow.h"
 #include "backend_manager.h"
 #include "backend_client.h"
@@ -23,6 +24,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QKeyEvent>
+#include <QPlainTextEdit>
+#include "panels/chatbubble.h"
+#include "widgets/overviewtile.h"
 #include <QMessageBox>
 #include <QPropertyAnimation>
 #include <QPixmap>
@@ -52,8 +57,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_selfTest(false)
 {
     setupUi();
-    setWindowTitle("Magnite LLM");
-    resize(1440, 960);
+    setWindowTitle("Magnite — Studio 03");
+    resize(1280, 820);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
     connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
@@ -71,30 +76,44 @@ void MainWindow::setupUi() {
     auto *central = new QWidget(this);
     // The paper workspace and horizontal masthead share global theme tokens.
     central->setObjectName("appRoot");
-    auto *mainLayout = new QVBoxLayout(central);
+    auto *mainLayout = new QHBoxLayout(central);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
     // ---- Horizontal masthead (design doc §12) ----
     auto *sidebar = new QWidget();
     sidebar->setObjectName("sidebar");
-    sidebar->setFixedHeight(142);
+    sidebar->setFixedWidth(128);
     auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(32, 14, 32, 12);
-    sidebarLayout->setSpacing(12);
-    auto *brandRow = new QHBoxLayout();
+    sidebarLayout->setContentsMargins(8, 14, 8, 10);
+    sidebarLayout->setSpacing(6);
+    auto *brandRow = new QVBoxLayout();
     sidebarLayout->addLayout(brandRow);
 
-    auto *logoLabel = new QLabel("magnite®", sidebar);
+    auto *logoLabel = new QLabel("magnite", sidebar);
     logoLabel->setObjectName("logoLabel");
     brandRow->addWidget(logoLabel);
-    auto *edition = new QLabel("THE LOCAL INTELLIGENCE WORKBENCH", sidebar);
+    auto *edition = new QLabel("LOCAL STUDIO", sidebar);
     edition->setObjectName("studioTag");
     brandRow->addWidget(edition);
-    brandRow->addStretch();
-    auto *navigation = new QHBoxLayout();
+
+    auto *mode = new QPushButton("Dark mode", sidebar);
+    mode->setObjectName("themeToggle");
+    mode->setCheckable(true);
+    mode->setChecked(Theme::isDark());
+    mode->setText(Theme::isDark() ? "Light mode" : "Dark mode");
+    mode->setToolTip("Switch between light and dark appearance");
+    mode->setCursor(Qt::PointingHandCursor);
+    connect(mode, &QPushButton::toggled, this, [this, mode](bool dark) {
+        Theme::setDark(dark);
+        QSettings().setValue("appearance/studio3Dark", dark);
+        mode->setText(dark ? "Light mode" : "Dark mode");
+        refreshNavIcons();
+    });
+
+    auto *navigation = new QVBoxLayout();
     navigation->setSpacing(8);
-    sidebarLayout->addLayout(navigation);
+    sidebarLayout->addLayout(navigation,1);
 
     struct NavInfo {
         QString label;
@@ -112,38 +131,54 @@ void MainWindow::setupUi() {
         connect(btn, &QPushButton::clicked, this, [this, info]() {
             switchPanel(info.panel);
         });
+        btn->setToolTip(info.label + " · Ctrl+" + QString::number(info.panel + 1));
+        btn->setMinimumHeight(48);
+        auto *shortcut = new QShortcut(QKeySequence(QString("Ctrl+%1").arg(info.panel + 1)), this);
+        connect(shortcut, &QShortcut::activated, btn, &QPushButton::click);
         m_sideButtons.append(btn);
         return btn;
     };
 
     // Five numbered workspaces; Settings anchors the right edge.
     const QList<NavInfo> navs = {
-        {"01  Discover",   "box",       PanelModels},
-        {"02  Train", "graduation-cap", PanelTraining},
-        {"03  Knowledge",      "database",         PanelRag},
-        {"04  Adapters", "layers",         PanelAdapters},
-        {"05  Playground",     "message-circle", PanelChat},
+        {"Library",   "box",       PanelModels},
+        {"Training", "graduation-cap", PanelTraining},
+        {"Knowledge",      "database",         PanelRag},
+        {"Adapters", "layers",         PanelAdapters},
+        {"Playground",     "message-circle", PanelChat},
     };
     for (const auto &info : navs)
         navigation->addWidget(makeNavButton(info));
 
     navigation->addStretch();
 
-    // Backend status pill: state property drives the color via QSS.
-    m_statusPill = new QLabel("Backend: starting…", sidebar);
+    // Quiet, non-interactive service status; details are available on hover.
+    auto *connection = new QFrame(sidebar);
+    connection->setObjectName("connectionStatus");
+    connection->setFixedHeight(28);
+    connection->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    auto *connectionLayout = new QHBoxLayout(connection);
+    connectionLayout->setContentsMargins(10, 0, 10, 0);
+    connectionLayout->setSpacing(7);
+    m_connectionDot = new QLabel(connection);
+    m_connectionDot->setObjectName("connectionDot");
+    m_connectionDot->setFixedSize(6, 6);
+    m_statusPill = new QLabel(connection);
     m_statusPill->setObjectName("statusPill");
-    m_statusPill->setAlignment(Qt::AlignCenter);
-    
+    connectionLayout->addWidget(m_connectionDot);
+    connectionLayout->addWidget(m_statusPill);
+    setPillState("starting", "Connecting");
+
     connect(m_backend, &BackendManager::started, this, [this]() {
-        setPillState("ok", "Backend: connected");
+        setPillState("ok", "Connected");
     });
     connect(m_backend, &BackendManager::errorOccurred, this,
             [this](QProcess::ProcessError) {
-        setPillState("err", "Backend: error");
+        setPillState("err", "Unavailable");
     });
 
     navigation->addWidget(makeNavButton({"Settings", "settings", PanelSettings}));
-    brandRow->addWidget(m_statusPill);
+
 
     mainLayout->addWidget(sidebar);
 
@@ -176,13 +211,20 @@ void MainWindow::setupUi() {
     workspaceLayout->setSpacing(0);
     auto *bar = new QFrame(workspace);
     bar->setObjectName("workspaceBar");
-    bar->setFixedHeight(30);
+    bar->setFixedHeight(44);
     auto *barLayout = new QHBoxLayout(bar);
-    barLayout->setContentsMargins(32,0,32,0);
-    auto *breadcrumb = new QLabel("STUDIO / 02     —     EXPERIMENT. ITERATE. MAKE IT YOURS.",bar);
+    barLayout->setContentsMargins(16,0,16,0);
+    auto *breadcrumb = new QLabel("LOCAL WORKSPACE   /   Intelligence, on your terms.",bar);
     breadcrumb->setObjectName("cardMeta");
     barLayout->addWidget(breadcrumb);
     barLayout->addStretch();
+    barLayout->setSpacing(12);
+    barLayout->addWidget(connection);
+    auto *separator = new QFrame(bar);
+    separator->setObjectName("headerDivider");
+    separator->setFixedSize(1, 16);
+    barLayout->addWidget(separator);
+    barLayout->addWidget(mode);
     workspaceLayout->addWidget(bar);
     m_background = new Starfield(workspace);
     auto *starLayout = new QVBoxLayout(m_background);
@@ -192,11 +234,11 @@ void MainWindow::setupUi() {
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this]() {
         QSettings settings;
-        m_background->setStarsVisible(settings.value("appearance/studio2Ambient",true).toBool());
-        m_background->setMotionEnabled(!settings.value("appearance/studio2ReducedMotion",false).toBool());
+        m_background->setStarsVisible(settings.value("appearance/studio3Ambient",true).toBool());
+        m_background->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         for (auto *widget : m_stack->findChildren<QWidget *>()) {
             if (auto *canvas = dynamic_cast<Starfield *>(widget))
-                canvas->setMotionEnabled(!settings.value("appearance/studio2ReducedMotion",false).toBool());
+                canvas->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         }
     };
     connect(m_settingsPanel, &SettingsPanel::settingsChanged,this,applyAppearance);
@@ -224,7 +266,7 @@ void MainWindow::refreshNavIcons() {
     for (auto *btn : m_sideButtons) {
         const QString name = btn->property("navicon").toString();
         const QColor color = btn->isChecked()
-            ? QColor(Theme::glassFill())
+            ? QColor(Theme::accentPrimary())
             : QColor(Theme::textSecondary());
         btn->setIcon(Theme::coloredIcon(name, color, 18));
         btn->setIconSize(QSize(18, 18));
@@ -235,7 +277,7 @@ void MainWindow::startPanelFade() {
     // 150ms fade-in of the destination panel (design doc §6). Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
-    if (m_selfTest || m_skipFade || QSettings().value("appearance/studio2ReducedMotion", false).toBool())
+    if (m_selfTest || m_skipFade || QSettings().value("appearance/studio3ReducedMotion", false).toBool())
         return;
 
     if (m_crossfade) {
@@ -266,6 +308,17 @@ void MainWindow::startPanelFade() {
 
 void MainWindow::setPillState(const char *state, const QString &text) {
     m_statusPill->setText(text);
+    const QString detail = QString::fromLatin1(state) == "ok"
+        ? "Magnite’s local service is connected.\n" + m_backend->baseUrl()
+        : QString::fromLatin1(state) == "err"
+            ? "Magnite’s local service is unavailable. Check the backend error for details."
+            : "Starting Magnite’s local service…";
+    m_statusPill->parentWidget()->setToolTip(detail);
+    m_statusPill->setAccessibleName("Local service: " + text);
+    m_connectionDot->setProperty("state", state);
+    m_connectionDot->style()->unpolish(m_connectionDot);
+    m_connectionDot->style()->polish(m_connectionDot);
+    m_connectionDot->update();
     m_statusPill->setProperty("state", state);
     m_statusPill->style()->unpolish(m_statusPill);
     m_statusPill->style()->polish(m_statusPill);
@@ -342,7 +395,7 @@ void MainWindow::onBackendStarted() {
             m_adaptersPanel, &AdaptersPanel::refresh);
     connect(m_adaptersPanel, &AdaptersPanel::adapterActivated,
             m_chatPanel, &ChatPanel::refreshEngineStatus);
-    statusBar()->showMessage(QString("Backend connected (%1)").arg(m_backend->baseUrl()), 4000);
+    // Connection details live in the header; do not create a second status bar.
 }
 
 void MainWindow::onBackendError(QProcess::ProcessError error) {
@@ -376,6 +429,55 @@ void MainWindow::runSelfTest() {
             if (!ok) ++(*failCount);
             fprintf(stderr, "[selftest] %s %s\n", ok ? "ok:" : "FAIL:", name);
         };
+
+        auto *mode = findChild<QPushButton *>("themeToggle");
+        const bool initialDark = Theme::isDark();
+        mode->click();
+        checkC(Theme::isDark() != initialDark &&
+               QSettings().value("appearance/studio3Dark").toBool() == Theme::isDark(),
+               "theme switch applies and persists");
+        mode->click();
+        checkC(Theme::isDark() == initialDark, "theme switch restores original mode");
+
+        // Overview shortcuts are native buttons: keyboard activation must navigate.
+        const auto tiles = m_modelsPanel->findChildren<OverviewTile *>();
+        checkC(tiles.size() == 4, "four accessible overview shortcuts");
+        for (auto *tile : tiles) {
+            switchPanel(PanelModels);
+            QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+            QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
+            QApplication::sendEvent(tile, &press);
+            QApplication::sendEvent(tile, &release);
+            checkC(m_stack->currentIndex() == tile->panel(), "Space activates overview shortcut");
+        }
+        switchPanel(PanelChat);
+        QMetaObject::invokeMethod(m_chatPanel, "onClearChat", Qt::DirectConnection);
+        auto *emptyChat = m_chatPanel->findChild<QLabel *>("emptyConversation");
+        checkC(emptyChat && emptyChat->isVisibleTo(m_chatPanel), "clearing chat restores empty guidance");
+
+        auto *composer = m_chatPanel->findChild<QPlainTextEdit *>("chatInput");
+        composer->setPlainText("First line");
+        auto cursor = composer->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        composer->setTextCursor(cursor);
+        QKeyEvent newline(QEvent::KeyPress, Qt::Key_Return, Qt::ShiftModifier, "\n");
+        QApplication::sendEvent(composer, &newline);
+        checkC(composer->toPlainText() == "First line\n", "Shift+Enter inserts composer newline");
+        composer->clear();
+        QKeyEvent send(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier, "\n");
+        QApplication::sendEvent(composer, &send);
+        checkC(composer->toPlainText().isEmpty(), "Enter does not insert composer newline");
+        auto *chatSettings = m_chatPanel->findChild<QWidget *>("chatSettings");
+        auto *settingsToggle = m_chatPanel->findChild<QPushButton *>("chatSettingsToggle");
+        checkC(chatSettings->isHidden(), "chat model settings collapsed by default");
+        settingsToggle->click();
+        checkC(!chatSettings->isHidden(), "chat model settings expand");
+        settingsToggle->click();
+        QWidget bubbleHost;
+        bubbleHost.resize(700, 400);
+        ChatBubble oneLine(ChatBubble::Assistant, "First line", &bubbleHost);
+        ChatBubble twoLines(ChatBubble::Assistant, "First line\nSecond line", &bubbleHost);
+        checkC(twoLines.height() > oneLine.height(), "chat bubbles respect explicit newlines");
 
         // Exercise every panel by switching to it.
         for (int i = 0; i < PanelCount; ++i) {

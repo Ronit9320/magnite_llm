@@ -37,7 +37,7 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
     auto *content = new QWidget(this);
     content->setLayout(m_contentLayout);
     m_contentLayout->setContentsMargins(0,0,0,0);
-    m_contentLayout->setSpacing(24);
+    m_contentLayout->setSpacing(8);
     auto *scroll = new QScrollArea(this);
     scroll->setObjectName("cardScroll");
     scroll->setFrameShape(QFrame::NoFrame);

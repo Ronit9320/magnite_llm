@@ -8,7 +8,7 @@ class QLabel;
 class QScrollArea;
 class QWidget;
 class QPushButton;
-class FlowLayout;
+class QVBoxLayout;
 class AdapterCard;
 class BackendClient;
 
@@ -48,7 +48,7 @@ private:
 
     BackendClient *m_client;
     QScrollArea *m_scrollArea;
-    FlowLayout *m_flowLayout;
+    QVBoxLayout *m_flowLayout;
     QWidget *m_cardHost;
     QWidget *m_emptyState;
     QLabel *m_statusLabel;

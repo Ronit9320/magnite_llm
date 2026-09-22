@@ -1,6 +1,7 @@
 #include "panels/chatbubble.h"
 
 #include <QFontMetrics>
+#include <QEvent>
 #include <QLabel>
 
 namespace {
@@ -27,6 +28,8 @@ ChatBubble::ChatBubble(Role role, const QString &text, QWidget *parent)
     m_content = new QLabel(this);
     m_content->setObjectName(QStringLiteral("chatBubbleText"));
     m_content->setWordWrap(true);
+    m_content->setTextFormat(Qt::PlainText);
+    if (parent) parent->installEventFilter(this);
     m_content->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_content->setMargin(0);
 
@@ -41,29 +44,18 @@ QSize ChatBubble::measure(const QString &text) const {
         return QSize(kPadX * 2 + kFrame * 2 + kMinInner,
                      fm.height() + kPadY * 2 + kFrame * 2);
 
-    const QStringList words = text.split(QLatin1Char(' '),
-                                         Qt::KeepEmptyParts);
-    int spaceW = fm.horizontalAdvance(QLatin1Char(' '));
-    int lineW = 0;
-    int lines = 1;
-    int widest = 0;
-    for (const QString &word : words) {
-        const int ww = fm.horizontalAdvance(word);
-        const int candidate = (lineW ? lineW + spaceW : 0) + ww;
-        if (candidate <= kMaxInner) {
-            lineW = candidate;
-        } else {
-            lineW = ww;
-            ++lines;
-        }
-        widest = qMax(widest, lineW);
-    }
-    const int innerW = qBound(kMinInner, widest, kMaxInner);
-    return QSize(innerW + kPadX * 2 + kFrame * 2,
-                 lines * fm.height() + kPadY * 2 + kFrame * 2);
+    const int available = parentWidget() ? parentWidget()->width() - 48 : 680;
+    const int innerWidth = qBound(kMinInner, available - 2 * kPadX - 2 * kFrame, kMaxInner);
+    const QRect bounds = fm.boundingRect(QRect(0, 0, innerWidth, 100000),
+                                        Qt::TextWordWrap | Qt::AlignLeft, text);
+    return QSize(qMin(innerWidth, qMax(kMinInner, bounds.width())) + 2 * kPadX + 2 * kFrame,
+                 bounds.height() + 2 * kPadY + 2 * kFrame);
+
 }
 
 void ChatBubble::remeasure() {
+    ensurePolished();
+    m_content->ensurePolished();
     const QSize s = measure(m_content->text());
     setFixedSize(s);
     m_content->setGeometry(kPadX + kFrame, kPadY + kFrame,
@@ -87,4 +79,8 @@ void ChatBubble::setText(const QString &text) {
 void ChatBubble::setCursorVisible(bool show) {
     m_content->setText(show ? (m_text + QStringLiteral("\u258D")) : m_text);
     remeasure();
+}
+bool ChatBubble::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == parentWidget() && event->type() == QEvent::Resize) remeasure();
+    return QFrame::eventFilter(watched, event);
 }

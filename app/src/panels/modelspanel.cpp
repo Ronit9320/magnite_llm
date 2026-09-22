@@ -3,6 +3,7 @@
 #include "backend_client.h"
 #include "panels/modelcard.h"
 #include "widgets/flowlayout.h"
+#include "widgets/overviewtile.h"
 #include "widgets/surface.h"
 #include "widgets/starfield.h"
 
@@ -39,10 +40,11 @@ ModelsPanel::ModelsPanel(QWidget *parent)
     , m_cardHost(nullptr)
     , m_statusLabel(nullptr)
     , m_pullTimer(nullptr)
+    , m_overviewTimer(nullptr)
     , m_selectedCard(nullptr)
 {
     setHeaderSubtitle(
-        "A home for the intelligence you make your own.");
+        "Local weights and remote repositories. Select a model to begin.");
     setupUi();
 }
 
@@ -56,33 +58,57 @@ QWidget *ModelsPanel::makeCardHost() {
 
 void ModelsPanel::setupUi() {
     auto *layout = contentLayout();
+    layout->setAlignment(Qt::AlignTop);
 
-    auto *hero = new QFrame(this);
-    hero->setObjectName("studioHero");
-    auto *heroLayout = new QHBoxLayout(hero);
-    heroLayout->setContentsMargins(28,24,28,24);
-    auto *copy = new QVBoxLayout();
-    copy->setSpacing(12);
-    auto *kicker = new QLabel("INDEPENDENT THINKING / LOCAL COMPUTING",hero);
-    kicker->setObjectName("heroKicker");
-    copy->addWidget(kicker);
-    auto *headline = new QLabel("INTELLIGENCE.\nON YOUR TERMS.",hero);
-    headline->setObjectName("heroTitle");
-    headline->setWordWrap(true);
-    copy->addWidget(headline);
-    auto *description = new QLabel("Discover a model, shape it with your data, and see what you can create.",hero);
-    description->setWordWrap(true);
-    copy->addWidget(description);
-    heroLayout->addLayout(copy,1);
-    auto *art = new Starfield(hero);
-    art->setProperty("kineticGlyph",true);
-    art->setFixedSize(230,210);
-    heroLayout->addWidget(art);
-    layout->addWidget(hero);
+    auto *note = new QFrame(this);
+    note->setObjectName("studioNote");
+    auto *noteRow = new QHBoxLayout(note);
+    noteRow->setContentsMargins(12,8,12,8);
+    auto *mark = new Starfield(note);
+    mark->setProperty("kineticGlyph",true);
+    mark->setFixedSize(34,34);
+    noteRow->addWidget(mark);
+    auto *noteTitle = new QLabel("Independent thinking.",note);
+    noteTitle->setObjectName("noteTitle");
+    noteRow->addWidget(noteTitle);
+    noteRow->addStretch();
+    auto *noteCaption = new QLabel("Your models. Your data. Your machine.",note);
+    noteCaption->setObjectName("cardMeta");
+    noteCaption->setWordWrap(false);
+    noteRow->addWidget(noteCaption);
+    layout->addWidget(note);
+
+    // Live workbench overview: one state tile per workspace. Reads real
+    // backend state and deep-links into each panel.
+    auto *overviewRow = new QHBoxLayout();
+    overviewRow->setSpacing(8);
+    struct TileSpec {
+        int panel;
+        QString kicker;
+        QString value;
+        QString caption;
+    };
+    const TileSpec specs[] = {
+        {1, "02  TRAIN", "no jobs yet", "run your first fine-tune on your data"},
+        {2, "03  KNOWLEDGE", "no documents", "add notes, PDFs and pages to search"},
+        {3, "04  ADAPTERS", "none active", "activate a trained adapter in chat"},
+        {4, "05  PLAYGROUND", "no model loaded", "load a model and start talking"},
+    };
+    for (const auto &spec : specs) {
+        auto *tile = new OverviewTile(spec.panel, spec.kicker, spec.value,
+                                      spec.caption, this);
+        connect(tile, &OverviewTile::activated,
+                this, &ModelsPanel::workspaceRequested);
+        overviewRow->addWidget(tile, 1);
+        m_overviewTiles.append(tile);
+    }
+    layout->addLayout(overviewRow);
 
     auto *searchRow = new QHBoxLayout();
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText("Search HuggingFace models...");
+    m_searchEdit->setPlaceholderText("Search Hugging Face models…");
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setAccessibleName("Search models");
     m_searchButton = new QPushButton("Search", this);
     m_searchButton->setObjectName("primaryBtn");
     m_refreshButton = new QPushButton("Refresh", this);
@@ -133,35 +159,17 @@ void ModelsPanel::setupUi() {
     m_scrollArea->viewport()->setAutoFillBackground(false);
     m_scrollArea->setWidget(makeCardHost());
     layout->addWidget(m_scrollArea, 1);
-
-    m_welcome = new QWidget(this);
-    auto *welcome = new QHBoxLayout(m_welcome);
-    welcome->setContentsMargins(0,0,0,0);
-    welcome->setSpacing(16);
-    const QStringList titles = {"01   Make it yours", "02   Add your context", "03   Try an idea"};
-    const QStringList descriptions = {
-        "Fine-tune a model with examples that sound like you.",
-        "Turn your documents into knowledge your model can use.",
-        "Load a local model and start a conversation."};
-    const QStringList actions = {"Open training →","Open knowledge →","Open playground →"};
-    const int targets[] = {1,2,4};
-    for (int i=0;i<3;++i) {
-        auto *tile = Surface::card(m_welcome,titles[i]);
-        auto *detail = new QLabel(descriptions[i],m_welcome);
-        detail->setWordWrap(true);
-        tile->addWidget(detail);
-        tile->addStretch();
-        auto *action = new QPushButton(actions[i],m_welcome);
-        action->setCursor(Qt::PointingHandCursor);
-        connect(action,&QPushButton::clicked,this,[this,target=targets[i]]() { emit workspaceRequested(target); });
-        tile->addWidget(action);
-        welcome->addWidget(tile->parentWidget(),1);
-    }
-    layout->addWidget(m_welcome);
     m_scrollArea->hide();
+    m_emptyRack = new QLabel("Your library starts here\n\nSearch a repository above, select a result, then download its weights.\nLocal models appear here when the backend is connected.",this);
+    m_emptyRack->setObjectName("rackEmpty");
+    m_emptyRack->setAlignment(Qt::AlignCenter);
+    m_emptyRack->setWordWrap(true);
+    m_emptyRack->setMinimumHeight(200);
+    layout->addWidget(m_emptyRack,1);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
     connect(m_searchButton, &QPushButton::clicked, this, &ModelsPanel::onSearch);
@@ -175,6 +183,15 @@ void ModelsPanel::setupUi() {
     m_pullTimer->setInterval(kPullPollMs);
     connect(m_pullTimer, &QTimer::timeout, this, &ModelsPanel::onPullPoll);
 
+    // Keep the overview tiles fresh while this panel is on screen. The guards
+    // inside refreshOverview() make each poll a no-op until the backend is up.
+    m_overviewTimer = new QTimer(this);
+    m_overviewTimer->setInterval(8000);
+    connect(m_overviewTimer, &QTimer::timeout, this, [this]() {
+        if (isVisible()) refreshOverview();
+    });
+    m_overviewTimer->start();
+
     switchToLocalView();
     setStatus("Backend not connected yet. The list will populate when ready.");
 }
@@ -185,6 +202,7 @@ void ModelsPanel::setBackendClient(BackendClient *client) {
                   ? "Ready. Loading local models..."
                   : "Backend not connected.");
     refresh();
+    refreshOverview();
 }
 
 bool ModelsPanel::isLocalView() const {
@@ -226,8 +244,8 @@ void ModelsPanel::onViewChanged(int index) {
 }
 
 void ModelsPanel::clearCards() {
-    m_welcome->show();
     m_scrollArea->hide();
+    m_emptyRack->show();
     while (QLayoutItem *item = m_flowLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) {
             w->hide();            // stop painting immediately
@@ -245,8 +263,10 @@ void ModelsPanel::clearCards() {
 }
 
 void ModelsPanel::addCards(const QJsonArray &items, bool isHub) {
-    m_welcome->setVisible(items.isEmpty());
     m_scrollArea->setVisible(!items.isEmpty());
+    m_emptyRack->setVisible(items.isEmpty());
+    m_emptyRack->setText(isHub ? "No models found\n\nTry a different repository name or model family."
+                             : "Your library starts here\n\nSearch a repository above and download a model to get started.");
     for (const auto &value : items) {
         auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
         connect(card, &ModelCard::cardClicked, this, &ModelsPanel::onCardClicked);
@@ -441,4 +461,30 @@ void ModelsPanel::applySettingsJson(const QString &json) {
     if (err.error != QJsonParseError::NoError || !doc.isObject())
         return;
     m_searchEdit->setText(doc.object().value("lastSearch").toString());
+}
+
+void ModelsPanel::refreshOverview() {
+    if (!m_client || !m_client->isReady()) return;
+    const QStringList endpoints = {"/training/jobs", "/rag/documents", "/adapters"};
+    const QStringList units = {"jobs", "documents", "adapters"};
+    for (int i = 0; i < endpoints.size(); ++i) {
+        m_client->get(endpoints[i], [this, i, unit = units[i]](int status, const QJsonDocument &doc) {
+            if (status != 200 || !doc.isArray()) {
+                m_overviewTiles[i]->setState("unavailable", "Open workspace to retry", "error");
+                return;
+            }
+            m_overviewTiles[i]->setState(QString("%1 %2").arg(doc.array().size()).arg(unit),
+                                        "Open workspace →");
+        });
+    }
+    m_client->get("/inference/status", [this](int status, const QJsonDocument &doc) {
+        if (status != 200) {
+            m_overviewTiles[3]->setState("unavailable", "Open inference to retry", "error");
+            return;
+        }
+        const auto state = doc.object();
+        const QString model = state.value("loaded_model").toString();
+        m_overviewTiles[3]->setState(model.isEmpty() ? "standby" : "model loaded",
+                                   model.isEmpty() ? "Load a local model →" : model);
+    });
 }
