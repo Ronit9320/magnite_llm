@@ -8,32 +8,20 @@ from backend.rag.store import RagStore, get_rag_store
 
 def injectable_context(query: str, top_k: Optional[int] = None,
                        min_score: Optional[float] = None) -> Optional[str]:
-    """Retrieve passages for ``query`` and format them as a system prompt.
-
-    Returns ``None`` (so chat proceeds without RAG) whenever the store is
-    uninitialized, the embedder is missing, no docs have been ingested, or any
-    retrieval step fails — RAG must never break plain chat.
-    """
+    """Retrieve passages, reporting failures instead of silently answering without RAG."""
     store = get_rag_store()
     if store is None or not is_available():
-        return None
+        raise RuntimeError("RAG is unavailable. Install the ML extras or disable document retrieval.")
     if store.count_chunks() == 0:
-        return None
+        raise ValueError("No RAG documents are indexed. Add documents or disable document retrieval.")
 
     cfg = store.get_config()
     top_k = top_k if top_k is not None else cfg.top_k
     min_score = min_score if min_score is not None else cfg.min_score
-    try:
-        query_vec = embed_texts([query], cfg.model)[0]
-    except Exception:  # noqa: BLE001
-        return None
-
-    try:
-        chunks = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score)
-    except Exception:  # noqa: BLE001
-        return None
+    query_vec = embed_texts([query], cfg.model)[0]
+    chunks = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score)
     if not chunks:
-        return None
+        raise ValueError("No matching document passages. Lower the similarity threshold or disable retrieval.")
 
     passages = "\n\n".join(
         f"[{i + 1}] (from {c.document_name}) {c.text}" for i, c in enumerate(chunks)

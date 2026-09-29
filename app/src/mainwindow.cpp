@@ -36,6 +36,9 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QHostAddress>
 #include <QVariant>
 
 #include <memory>
@@ -54,7 +57,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_statusPill(nullptr)
     , m_crossfade(nullptr)
     , m_skipFade(false)
-    , m_selfTest(false)
+    , m_selfTest(QCoreApplication::arguments().contains("--selftest"))
 {
     setupUi();
     setWindowTitle("Magnite — Studio 03");
@@ -204,6 +207,15 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_settingsPanel);
 
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
+    connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, [this]() {
+        if (m_backendClient->isReady()) {
+            m_backendClient->post("/inference/settings",
+                QJsonObject{{"engine_override", QSettings().value("engine/override", 0).toInt()}},
+                [this](int status, const QJsonDocument &) {
+                    if (status != 200) onBackendError(QProcess::UnknownError);
+                });
+        }
+    });
 
     auto *workspace = new QWidget(central);
     auto *workspaceLayout = new QVBoxLayout(workspace);
@@ -410,7 +422,11 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
         default:
             msg = "Backend error.";
     }
-    QMessageBox::warning(this, "Backend Error", msg);
+    m_backendClient->abortAll();
+    m_backendClient->setBaseUrl(QString());
+    setPillState("error", msg);
+    if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
+    else QMessageBox::warning(this, "Backend Error", msg);
 }
 
 void MainWindow::runSelfTest() {
@@ -512,13 +528,6 @@ void MainWindow::runSelfTest() {
         // Backend IPC check: GET /models should return 200 once connected.
         // Phase selftests (training/adapter/pull/inference) depend on the
         // backend being up, so they wait for readiness first.
-        const bool phaseTest =
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_TRAINING") ||
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_ADAPTER") ||
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_PULL") ||
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_INFERENCE") ||
-            qEnvironmentVariableIsSet("MAGNITE_SELFTEST_RAG");
-
         auto beginIpcStage = [this, failCount, finish]() {
             m_backendClient->get("/models", [this, failCount, finish](int status, const QJsonDocument &doc) {
                 fprintf(stderr, "[selftest] %s GET /models status=%d, count=%d\n",
@@ -544,20 +553,80 @@ void MainWindow::runSelfTest() {
                     } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_RAG")) {
                         ragSelfTest(failCount, finish);
                     } else {
-                        finish();
+                        chatErrorSelfTest(failCount, finish);
                     }
                 });
             });
         };
 
-        if (phaseTest) {
-            waitForBackend(failCount, finish, beginIpcStage);
-        } else if (m_backendClient && m_backendClient->isReady()) {
-            beginIpcStage();
-        } else {
-            fprintf(stderr, "[selftest] ok: backend not ready, skipping IPC check\n");
-            finish();
+        waitForBackend(failCount, finish, beginIpcStage);
+    });
+}
+
+void MainWindow::chatErrorSelfTest(std::shared_ptr<int> failures,
+                                  std::function<void()> finish, int scenario) {
+    if (scenario == 4) { finish(); return; }
+    auto *probe = new ChatPanel(this);
+    probe->hide();
+    auto *server = new QTcpServer(probe);
+    if (!server->listen(QHostAddress::LocalHost, 0)) {
+        ++*failures;
+        probe->deleteLater();
+        finish();
+        return;
+    }
+    connect(server, &QTcpServer::newConnection, probe, [server, scenario, probe]() {
+        while (auto *socket = server->nextPendingConnection()) {
+            auto data = std::make_shared<QByteArray>();
+            connect(socket, &QTcpSocket::readyRead, probe, [socket, data, scenario]() {
+                data->append(socket->readAll());
+                if (!data->contains("\r\n\r\n") || socket->property("answered").toBool()) return;
+                socket->setProperty("answered", true);
+                const bool chat = data->startsWith("POST /inference/chat ");
+                if (chat && scenario == 2) { socket->abort(); return; }
+                QByteArray body = data->startsWith("GET /models ") ? "[]" : "{}";
+                QByteArray status = "200 OK";
+                QByteArray type = "application/json";
+                if (chat) {
+                    if (scenario == 1) { status = "400 Bad Request"; body = "{\"detail\":\"audit HTTP failure\"}"; }
+                    else {
+                        type = "text/event-stream";
+                        body = scenario == 0 ? "data: {\"error\":\"audit SSE failure\"}\n\n"
+                                             : "data: {\"delta\":\"partial\"}\n\n";
+                    }
+                }
+                socket->write("HTTP/1.1 " + status + "\r\nContent-Type: " + type +
+                              "\r\nContent-Length: " + QByteArray::number(body.size()) +
+                              "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
         }
+    });
+    auto *client = new BackendClient(probe);
+    client->setBaseUrl(QString("http://127.0.0.1:%1").arg(server->serverPort()));
+    probe->setBackendClient(client);
+    QTimer::singleShot(150, probe, [this, probe, failures, finish, scenario]() {
+        probe->findChild<QPlainTextEdit *>("chatInput")->setPlainText("audit question");
+        QMetaObject::invokeMethod(probe, "onSend");
+        auto *timer = new QTimer(probe);
+        auto attempts = std::make_shared<int>(0);
+        connect(timer, &QTimer::timeout, probe, [this, probe, timer, attempts, failures, finish, scenario]() {
+            const QString status = probe->findChild<QLabel *>("statusLabel")->text();
+            auto *send = probe->findChild<QPushButton *>("primaryBtn");
+            const bool ready = send->isEnabled() && status.startsWith("Generation ") && status != "Generating...";
+            if (!ready && ++*attempts < 100) return;
+            timer->stop();
+            const bool visible = scenario == 0 ? status.contains("audit SSE failure") :
+                                 scenario == 1 ? status.contains("audit HTTP failure") :
+                                 scenario == 3 ? status.contains("unexpectedly") : status.contains("error");
+            const bool ok = ready && visible;
+            if (!ok) ++*failures;
+            fprintf(stderr, "[selftest] %s chat error recovery scenario %d: %s\n",
+                    ok ? "ok:" : "FAIL:", scenario, qUtf8Printable(status));
+            probe->deleteLater();
+            chatErrorSelfTest(failures, finish, scenario + 1);
+        });
+        timer->start(25);
     });
 }
 
@@ -1073,7 +1142,7 @@ void MainWindow::ragSelfTest(std::shared_ptr<int> failCount,
                             m_backendClient->get("/rag/documents",
                                 [this, failCount, finish, docId](int list,
                                                                 const QJsonDocument &ld) {
-                                    bool gone = true;
+                                    bool gone = (list == 200);
                                     if (list == 200) {
                                         for (const auto &v : ld.array()) {
                                             if (v.toObject()["id"].toString() == docId)

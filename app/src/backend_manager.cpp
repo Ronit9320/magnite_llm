@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QTimer>
 #include <QUrl>
+#include <QSettings>
 
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
@@ -18,6 +19,9 @@ BackendManager::BackendManager(QObject *parent)
 {
     connect(m_process, &QProcess::readyReadStandardError, this, &BackendManager::onProcessReadyRead);
     connect(m_process, &QProcess::finished, this, &BackendManager::onProcessFinished);
+    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (!m_stopping && error == QProcess::FailedToStart) emit errorOccurred(error);
+    });
 }
 
 BackendManager::~BackendManager() {
@@ -41,8 +45,9 @@ void BackendManager::stop() {
     m_stopping = true;
     if (m_process->state() != QProcess::NotRunning) {
         m_process->terminate();
-        if (!m_process->waitForFinished(3000)) {
+        if (!m_process->waitForFinished(15000)) {
             m_process->kill();
+            m_process->waitForFinished(3000);
         }
     }
 }
@@ -76,17 +81,24 @@ void BackendManager::launchBackend() {
     args << "-m" << "backend.main" << "--port" << "0";
 
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QSettings settings;
+    const QString dataDir = settings.value("storage/dataDir").toString().trimmed();
+    if (!env.contains("MAGNITE_HOME") && !dataDir.isEmpty()) env.insert("MAGNITE_HOME", dataDir);
+    env.insert("MAGNITE_ENGINE_OVERRIDE", QString::number(qBound(0, settings.value("engine/override", 0).toInt(), 2)));
     if (!modulePath.isEmpty()) {
         QString existing = env.value("PYTHONPATH");
         QString merged = modulePath;
         if (!existing.isEmpty()) {
-            merged += ":" + existing;
+            merged += QDir::listSeparator() + existing;
         }
         env.insert("PYTHONPATH", merged);
     }
 
     // Prefer the repo venv python if present
     QString venvPython = repoRoot + "/.venv/bin/python";
+#ifdef Q_OS_WIN
+    venvPython = repoRoot + "/.venv/Scripts/python.exe";
+#endif
     QString python = QFileInfo::exists(venvPython) ? venvPython : QString("python3");
 
     m_process->setProcessEnvironment(env);
@@ -164,7 +176,6 @@ void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
     // Ignore failures caused by our own deliberate termination.
     if (m_stopping)
         return;
-    if (exitCode != 0) {
-        emit errorOccurred(QProcess::Crashed);
-    }
+    Q_UNUSED(exitCode);
+    emit errorOccurred(QProcess::Crashed);
 }

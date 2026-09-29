@@ -85,6 +85,8 @@ private:
     ChatBubble *m_streamBubble;
     QString m_pendingResponse;
     bool m_streaming;
+    bool m_streamFailed = false;
+    quint64 m_requestId = 0;
     QTimer *m_cursorTimer;
     bool m_cursorVisible;
 };

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
+import platform
+import threading
+import anyio
+from contextlib import contextmanager, aclosing
+from pathlib import Path
 from typing import Optional
 
 from backend.adapters.schemas import AdapterRecord
@@ -9,15 +15,16 @@ from backend.inference.engines.base import BaseEngine
 from backend.inference.engines.llamacpp import LlamaCppEngine
 from backend.inference.engines.torch import TorchPeftEngine
 from backend.inference.engines.vllm import VllmEngine
+from backend.inference.engines.ollama import OllamaEngine
+from backend.inference.engines.streaming import run_blocking
 from backend.inference.schemas import EngineInfo, InferenceStatus
 from backend.training.trainer import _resolve_base
 
 
 def detect_gpu() -> tuple[bool, str]:
     """Return (has_usable_gpu, detail). Prefers an NVIDIA GPU via nvidia-smi."""
-    if os.name == "nt":
-        # On Windows, try WMI/nvidia-smi is unreliable in CI-less envs; assume none.
-        return False, "GPU detection not implemented on this platform"
+    if sys.platform == "darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+        return True, "Apple Silicon (Metal/MPS)"
     try:
         import subprocess
 
@@ -38,9 +45,10 @@ class InferenceSupervisor:
     """Detects hardware and owns the currently-active inference engine."""
 
     def __init__(self, model_ref: Optional[str] = None, engine_override: int = 0):
+        self._operation = threading.Lock()
         self._engine: Optional[BaseEngine] = None
         self.model_ref = model_ref
-        self.engine_override = engine_override
+        self.engine_override = int(os.environ.get("MAGNITE_ENGINE_OVERRIDE", engine_override))
         self._adapter_store: Optional[AdapterStore] = None
         self.active_adapter: Optional[AdapterRecord] = None
 
@@ -57,11 +65,11 @@ class InferenceSupervisor:
     def _preferred_engine_name(self) -> str:
         # Override meanings (kept in sync with the C++ Settings panel orders):
         #   0 Auto, 1 vLLM, 2 llama.cpp, 3 Hosted (handled elsewhere in Phase 7)
-        if self.engine_override == 1 and self.vllm_ok:
+        if self.engine_override == 1:
             return "vllm"
         if self.engine_override == 2:
             return "llamacpp"
-        if self.has_gpu and self.vllm_ok:
+        if self.has_gpu and self.vllm_ok and sys.platform != "darwin":
             return "vllm"
         if self.llamacpp_ok:
             return "llamacpp"
@@ -70,6 +78,8 @@ class InferenceSupervisor:
     def available_engines(self, model_ref: str | None = None) -> list[EngineInfo]:
         preferred = self._preferred_engine_name()
         engines = [
+            EngineInfo(name="ollama", available=True, selected=False,
+                       description="Local Ollama server", detail="Requires a running Ollama server"),
             EngineInfo(
                 name="vllm",
                 available=self.vllm_ok,
@@ -95,9 +105,15 @@ class InferenceSupervisor:
         return engines
 
     def make_engine(self, engine_name: str, model_ref: str) -> BaseEngine:
+        if engine_name == "torch":
+            return TorchPeftEngine(model_ref)
+        if engine_name == "ollama":
+            return OllamaEngine(model_ref)
         if engine_name == "vllm":
             gpu_util = 0.85 if self.has_gpu else 0.0
             return VllmEngine(model_ref, gpu_memory_utilization=gpu_util)
+        if engine_name != "llamacpp":
+            raise ValueError(f"Unsupported inference engine: {engine_name}")
         return LlamaCppEngine(
             model_ref,
             n_gpu_layers=20 if self.has_gpu and self.llamacpp_ok else 0,
@@ -106,6 +122,22 @@ class InferenceSupervisor:
     def _resolve_engine(self, requested: str | None, model_ref: str | None = None) -> tuple[str, str]:
         """Return (engine_name, model_ref). Picks sensible defaults."""
         ref = model_ref or self.model_ref
+        if requested and requested not in ("torch", "llamacpp", "vllm", "ollama"):
+            raise ValueError(f"Unsupported inference engine: {requested}")
+        if ref and ref.startswith(("huggingface:", "ollama:")):
+            from backend.routes.models import _get_registry
+            record = _get_registry().get_model(ref)
+            if record is None:
+                raise ValueError(f"Model is no longer registered: {ref}")
+            if record.source == "ollama":
+                if requested and requested != "ollama":
+                    raise ValueError("Ollama models must use Auto or the Ollama engine")
+                return "ollama", record.ref
+            ref = record.path if os.path.exists(record.path) else record.ref
+        if ref and os.path.isdir(ref) and not requested and not self.engine_override:
+            if any(Path(ref).rglob("*.gguf")):
+                return "llamacpp", ref
+            return ("vllm" if self.has_gpu and self.vllm_ok else "torch"), ref
         if requested:
             return requested, (ref or "")
         prefer = self._preferred_engine_name()
@@ -126,21 +158,37 @@ class InferenceSupervisor:
             active_adapter_id=self.active_adapter.id if self.active_adapter else None,
         )
 
-    def load_model(self, model_ref: str, engine_name: str | None = None) -> None:
+    def load_model(self, model_ref: str, engine_name: str | None = None, cancelled=None) -> None:
+        with self.operation():
+            self._load_model(model_ref, engine_name, cancelled)
+
+    def _load_model(self, model_ref: str, engine_name: str | None = None, cancelled=None) -> None:
         """Load (or swap) a model into the active engine. Clears any active adapter."""
         ename, mref = self._resolve_engine(engine_name, model_ref)
         if not mref:
             raise ValueError("No model selected for inference")
-        self.model_ref = mref
-
         # Unload any existing engine/model (also clears the active adapter).
-        self.unload()
+        self._unload()
 
         engine = self.make_engine(ename, mref)
-        engine.load()
+        try:
+            engine.cancel_load = cancelled
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("Model loading cancelled")
+            engine.load()
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("Model loading cancelled")
+        except Exception:
+            engine.unload()
+            raise
         self._engine = engine
+        self.model_ref = mref
 
-    def activate_adapter(self, adapter_id: str) -> AdapterRecord:
+    def activate_adapter(self, adapter_id: str, cancelled=None) -> AdapterRecord:
+        with self.operation():
+            return self._activate_adapter(adapter_id, cancelled)
+
+    def _activate_adapter(self, adapter_id: str, cancelled=None) -> AdapterRecord:
         """Activate a trained adapter for inference, restarting the engine.
 
         The adapter is loaded on top of its base model via transformers + PEFT
@@ -162,9 +210,17 @@ class InferenceSupervisor:
             )
         base = _resolve_base(rec.base_model)
 
-        self.unload()
+        self._unload()
         engine = TorchPeftEngine(base, rec.path)
-        engine.load()
+        try:
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("Adapter loading cancelled")
+            engine.load()
+            if cancelled is not None and cancelled.is_set():
+                raise RuntimeError("Adapter loading cancelled")
+        except Exception:
+            engine.unload()
+            raise
         self._engine = engine
         self.model_ref = base
         self.active_adapter = rec
@@ -175,16 +231,37 @@ class InferenceSupervisor:
         self.unload()
 
     def chat_stream(self, messages, **kwargs):
-        if self._engine is None:
-            raise RuntimeError("No inference engine loaded")
-        return self._engine.chat_stream(messages, **kwargs)
+        return self._stream("chat_stream", messages, **kwargs)
 
     def complete_stream(self, prompt, **kwargs):
-        if self._engine is None:
-            raise RuntimeError("No inference engine loaded")
-        return self._engine.complete_stream(prompt, **kwargs)
+        return self._stream("complete_stream", prompt, **kwargs)
+
+    @contextmanager
+    def operation(self):
+        if not self._operation.acquire(blocking=False):
+            raise RuntimeError("Inference is busy. Stop generation or wait for model loading to finish.")
+        try:
+            yield
+        finally:
+            self._operation.release()
+
+    async def _stream(self, method, data, **kwargs):
+        with self.operation():
+            if self._engine is None:
+                raise RuntimeError("No inference engine loaded. Load a model first.")
+            prepare = kwargs.pop("prepare", None)
+            if prepare:
+                with anyio.CancelScope(shield=True):
+                    data = await run_blocking(prepare, self._engine)
+            async with aclosing(getattr(self._engine, method)(data, **kwargs)) as stream:
+                async for text in stream:
+                    yield text
 
     def unload(self) -> None:
+        with self.operation():
+            self._unload()
+
+    def _unload(self) -> None:
         if self._engine is not None:
             try:
                 self._engine.unload()

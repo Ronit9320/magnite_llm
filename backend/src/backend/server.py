@@ -15,6 +15,15 @@ from backend.routes.training import (
 app = FastAPI(title="Magnite LLM Backend", version="0.1.0")
 
 
+@app.on_event("shutdown")
+async def shutdown():
+    import asyncio
+    from backend.inference.supervisor import get_supervisor
+    from backend.routes.training import _get_manager
+    await asyncio.to_thread(_get_manager().shutdown)
+    await asyncio.to_thread(get_supervisor().unload)
+
+
 @app.on_event("startup")
 async def startup():
     _registry_setup()

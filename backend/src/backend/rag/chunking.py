@@ -50,10 +50,10 @@ def _strip_html(text: str) -> str:
 
 
 def _strip_markdown(text: str) -> str:
-    # Remove fenced code blocks entirely (noise for embedding), keep the rest.
-    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
-    text = re.sub(r"`[^`]*`", " ", text)
-    text = re.sub(r"[#>*_~\-]", " ", text)
+    # Preserve code: technical documents often contain their answers there.
+    text = re.sub(r"^```[^\n]*$", "", text, flags=re.MULTILINE)
+    text = text.replace("`", "")
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     return text
@@ -81,6 +81,8 @@ def chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 64) -> lis
     needs no model download, so ingest never depends on the tokenizer. Chunks
     stay contiguous (each starts after ``chunk_size - chunk_overlap`` words).
     """
+    if chunk_size < 1 or chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError("Require positive chunk size and 0 <= overlap < chunk size")
     tokens = text.split()
     if not tokens:
         return []

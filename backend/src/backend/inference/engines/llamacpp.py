@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
+from contextlib import aclosing
 from typing import AsyncIterator
 
 from backend.inference.engines.base import BaseEngine
+from backend.inference.engines.streaming import threaded_stream
 
 _GUARD = threading.Lock()
 
@@ -41,6 +44,12 @@ class LlamaCppEngine(BaseEngine):
         """If model_ref is a local path, use it. Otherwise pull a GGUF from HF."""
         if os.path.isfile(self.model_ref):
             return self.model_ref
+
+        if os.path.isdir(self.model_ref):
+            files = sorted(Path(self.model_ref).rglob("*.gguf"), key=lambda p: p.stat().st_size)
+            if not files:
+                raise ValueError("This model has no GGUF weights. Select the torch engine or a GGUF model.")
+            return str(files[0])
 
         # model_ref is an HF repo id; download a gguf file from it.
         from huggingface_hub import hf_hub_download, list_repo_files
@@ -80,7 +89,7 @@ class LlamaCppEngine(BaseEngine):
             self.load()
         return self._llm
 
-    async def chat_stream(self, messages, **kwargs) -> AsyncIterator[str]:
+    def _chat(self, messages, stop, **kwargs) -> AsyncIterator[str]:
         llm = self._ensure()
         api_messages = [{"role": m.role.value, "content": m.content} for m in messages]
         stream = llm.create_chat_completion(
@@ -91,6 +100,8 @@ class LlamaCppEngine(BaseEngine):
             stream=True,
         )
         for chunk in stream:
+            if stop.is_set():
+                break
             choices = chunk.get("choices")
             if not choices:
                 continue
@@ -99,7 +110,7 @@ class LlamaCppEngine(BaseEngine):
             if text:
                 yield text
 
-    async def complete_stream(self, prompt, **kwargs) -> AsyncIterator[str]:
+    def _complete(self, prompt, stop, **kwargs) -> AsyncIterator[str]:
         llm = self._ensure()
         stream = llm.create_completion(
             prompt=prompt,
@@ -109,12 +120,30 @@ class LlamaCppEngine(BaseEngine):
             stream=True,
         )
         for chunk in stream:
+            if stop.is_set():
+                break
             choices = chunk.get("choices")
             if not choices:
                 continue
             text = choices[0].get("text")
             if text:
                 yield text
+
+    async def chat_stream(self, messages, **kwargs):
+        async with aclosing(threaded_stream(lambda stop: self._chat(messages, stop, **kwargs))) as stream:
+            async for text in stream:
+                yield text
+
+    async def complete_stream(self, prompt, **kwargs):
+        async with aclosing(threaded_stream(lambda stop: self._complete(prompt, stop, **kwargs))) as stream:
+            async for text in stream:
+                yield text
+
+    def count_tokens(self, text):
+        return len(self._llm.tokenize(text.encode("utf-8")))
+
+    def context_size(self):
+        return self.n_ctx
 
     def unload(self) -> None:
         super().unload()

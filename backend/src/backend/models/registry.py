@@ -167,15 +167,21 @@ class ModelRegistry:
 
     def _remove_hf(self, rec: ModelRecord) -> None:
         """Best-effort removal of the snapshot cache dir since HF has no CLI delete."""
-        import shutil
+        from pathlib import Path
+        from huggingface_hub import scan_cache_dir
 
-        if rec.path and os.path.isdir(rec.path):
-            # snapshot_download returns the revision snapshot dir; its parent
-            # holds the rest of the cache. Remove the snapshot and prune empty.
-            try:
-                shutil.rmtree(rec.path, ignore_errors=True)
-            except OSError:
-                pass
+        snapshot = Path(rec.path).absolute()
+        if not snapshot.exists():
+            return
+        if snapshot.parent.name != "snapshots":
+            raise ValueError("Model path is not a managed Hugging Face snapshot")
+        cache = scan_cache_dir(snapshot.parent.parent.parent)
+        for repo in cache.repos:
+            for revision in repo.revisions:
+                if revision.snapshot_path == snapshot:
+                    cache.delete_revisions(revision.commit_hash).execute()
+                    return
+        raise ValueError("Cannot safely identify cached model revision; files were not removed")
 
     # ---- Ollama --------------------------------------------------------
 
@@ -266,6 +272,9 @@ class ModelRegistry:
     def list_models(self, source: Optional[str] = None) -> list[ModelRecord]:
         return self._store.list(source=source)
 
+    def get_model(self, identifier: str) -> Optional[ModelRecord]:
+        return self._store.get(identifier)
+
     def list_synced(self, source: Optional[str] = None, q: str = "") -> list[ModelRecord]:
         """Return stored records, refreshing Ollama records first if useful."""
         if source in (None, "ollama"):
@@ -281,4 +290,8 @@ class ModelRegistry:
             return False
         if rec.source == "huggingface":
             self._remove_hf(rec)
+        elif rec.source == "ollama":
+            response = httpx.request("DELETE", f"{OLLAMA_HOST}/api/delete", json={"model": rec.ref}, timeout=30.0)
+            if response.status_code != 404:
+                response.raise_for_status()
         return self._store.delete(model_id)

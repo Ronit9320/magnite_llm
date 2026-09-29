@@ -33,3 +33,13 @@ class BaseEngine(ABC):
 
     def unload(self) -> None:
         self._loaded = False
+
+    def count_tokens(self, text: str) -> int:
+        # Conservative fallback for remote engines without a local tokenizer.
+        return len(text.encode("utf-8"))
+
+    def context_size(self) -> int:
+        return 2048
+
+    def count_messages(self, messages) -> int:
+        return 128 + sum(self.count_tokens(m.content) + 32 for m in messages)

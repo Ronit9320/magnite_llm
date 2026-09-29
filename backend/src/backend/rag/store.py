@@ -62,7 +62,7 @@ class RagStore:
         self._data_dir = data_dir
         os.makedirs(data_dir, exist_ok=True)
         self._db_path = os.path.join(data_dir, "rag.db")
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -96,6 +96,8 @@ class RagStore:
 
     def set_config(self, cfg: RagConfig) -> RagConfig:
         with self._lock, self._conn() as conn:
+            if conn.execute("SELECT 1 FROM rag_documents WHERE model != ? LIMIT 1", (cfg.model,)).fetchone():
+                raise ValueError("Clear and re-ingest documents before changing embedding models")
             for key, value in cfg.model_dump().items():
                 conn.execute(
                     "INSERT INTO rag_config (key, value) VALUES (?, ?) "
@@ -104,6 +106,11 @@ class RagStore:
                 )
             conn.commit()
         return self.get_config()
+
+    def update_config(self, changes: dict) -> RagConfig:
+        with self._lock:
+            cfg = RagConfig.model_validate({**self.get_config().model_dump(), **changes})
+            return self.set_config(cfg)
 
     # ---- documents ------------------------------------------------------
 
@@ -120,6 +127,8 @@ class RagStore:
         tokens = sum(len(c.split()) for c in chunks)
 
         with self._lock:
+            if model != self.get_config().model:
+                raise ValueError("Embedding model changed during ingestion; retry with the current configuration")
             dim = embeddings.shape[1]
             existing_dim = self._embedding_dim()
             if existing_dim is not None and existing_dim != dim:

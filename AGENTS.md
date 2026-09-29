@@ -18,7 +18,7 @@ cmake --build build -j
 
 ## Verify
 
-No pytest suite and no CI — verification is the binary's built-in tests:
+No CI yet. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
 
 ```bash
 ./build/magnite-app --theme-check                                  # token/QSS/font/icon audit; prints "0 failure(s)"
@@ -32,11 +32,11 @@ MAGNITE_SELFTEST_RAG=1       ./build/magnite-app --selftest        # ingest -> q
 
 Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; backend readiness takes ~13s. Pass prints `[selftest] PASS (0 failures)`.
 
-## Theme (Phase 5.5)
+## Theme (Studio 03; historical Phase 5.5 in design_doc.md)
 
 - Design tokens are inline functions in `app/src/theme.h`; `@token` placeholders in `app/resources/theme/theme.qss` are substituted at runtime by `Theme::qss()`. **Never hardcode hex values in widget code or QSS** — add a token to `theme.h` and extend `Theme::selfCheck()`.
 - Icons are Lucide-style SVGs requiring `stroke="currentColor"`; tint via `Theme::coloredIcon()`.
-- `design_doc.md` is the single source of truth for the theme spec — do not improvise beyond it.
+- `design_doc.md` §13 and refinements govern the active Studio theme; earlier Space sections are historical. Committed notes are in `design/studio-3/README.md`. Do not improvise beyond the active spec.
 
 ## Backend quirks
 

@@ -42,7 +42,8 @@ void BackendClient::send(const QString &method, const QString &path,
                          const QJsonObject &body, Callback onDone) {
     QNetworkRequest req(QUrl(m_baseUrl + path));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    req.setTransferTimeout(60000);
+    // Model initialization and embedding can outlast vLLM's 240s startup budget.
+    req.setTransferTimeout(600000);
 
     QNetworkReply *reply = nullptr;
     if (method == "GET") {
@@ -67,6 +68,9 @@ void BackendClient::send(const QString &method, const QString &path,
                 doc = QJsonDocument(QJsonObject{{"error", QString::fromUtf8(data)}});
             }
         }
+        if (reply->error() != QNetworkReply::NoError && doc.isNull())
+            doc = QJsonDocument(QJsonObject{{"detail", reply->errorString() +
+                ". Refresh status before retrying: server work may still be running."}});
         if (onDone) {
             onDone(status, doc);
         }
@@ -109,12 +113,18 @@ void BackendClient::streamPost(const QString &path, const QJsonObject &body,
         buf->append(reply->readAll());
         flushEvents();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, buf, flushEvents, onDone]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, buf, flushEvents, onEvent, onDone]() {
         buf->append(reply->readAll());
         flushEvents();
-        delete buf;
         if (m_streamReply == reply) m_streamReply = nullptr;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (onEvent && (status != 200 || reply->error() != QNetworkReply::NoError)) {
+            const QJsonObject error = QJsonDocument::fromJson(*buf).object();
+            QString detail = error.value("detail").toString();
+            if (detail.isEmpty()) detail = reply->errorString();
+            onEvent(QJsonObject{{"error", detail}});
+        }
+        delete buf;
         reply->deleteLater();
         if (onDone) onDone(status);
     });

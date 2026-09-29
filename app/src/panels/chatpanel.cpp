@@ -77,7 +77,7 @@ void ChatPanel::setupUi() {
     auto *fields = new QHBoxLayout();
     auto *engineField = new QVBoxLayout();
     m_engineCombo = new QComboBox(this);
-    m_engineCombo->addItems({"Auto (detect hardware)", "Local (vLLM)", "Local (llama.cpp)"});
+    m_engineCombo->addItems({"Auto (global setting)", "Local (vLLM)", "Local (llama.cpp)", "Local (torch)", "Local (Ollama)"});
     Surface::field(engineField, "Engine", m_engineCombo);
     fields->addLayout(engineField, 2);
     m_maxTokensSpin = new QSpinBox(this);
@@ -323,6 +323,8 @@ QString ChatPanel::currentEngineName() const {
     switch (m_engineCombo->currentIndex()) {
         case 1: return "vllm";
         case 2: return "llamacpp";
+        case 3: return "torch";
+        case 4: return "ollama";
         default: return QString();
     }
 }
@@ -360,6 +362,7 @@ void ChatPanel::onLoadModel() {
                                     ? doc.object()["detail"].toString()
                                     : QString("HTTP %1").arg(status);
             setStatus("Load failed: " + err, "error");
+            m_sendButton->setEnabled(true);
         }
     });
 }
@@ -398,6 +401,8 @@ void ChatPanel::onSend() {
     m_history.append(QJsonObject{{"role", "user"}, {"content", text}});
 
     m_pendingResponse.clear();
+    m_streamFailed = false;
+    const quint64 requestId = ++m_requestId;
     m_streaming = true;
     m_cursorVisible = false;
     m_cursorTimer->start();
@@ -420,7 +425,14 @@ void ChatPanel::onSend() {
         "/inference/chat",
         body,
         // onEvent
-        [this](const QJsonObject &event) {
+        [this, requestId](const QJsonObject &event) {
+            if (requestId != m_requestId) return;
+            if (event.contains("error")) {
+                m_streamFailed = true;
+                setStatus("Generation error: " + event.value("error").toString(), "error");
+                updateStreamingBubble(m_pendingResponse, false);
+                return;
+            }
             const QString delta = event.value("delta").toString();
             if (!delta.isEmpty()) {
                 m_pendingResponse += delta;
@@ -439,13 +451,15 @@ void ChatPanel::onSend() {
             }
         },
         // onDone
-        [this](int statusCode) {
-            if (statusCode == 0) return; // aborted
-            if (statusCode != 200) {
+        [this, requestId](int statusCode) {
+            if (requestId != m_requestId) return;
+            if (!m_streamFailed && statusCode != 200) {
                 const QString err = m_pendingResponse.isEmpty()
                                        ? QString("HTTP %1").arg(statusCode)
                                        : m_pendingResponse;
                 setStatus("Generation error: " + err, "error");
+            } else if (!m_streamFailed && m_streaming) {
+                setStatus("Generation ended unexpectedly. Check the backend and retry.", "error");
             }
             // If not already finalized by done event
             if (m_streaming) {
@@ -464,7 +478,9 @@ void ChatPanel::onSend() {
 
 void ChatPanel::onStop() {
     if (!m_streaming || !m_client) return;
+    ++m_requestId;
     m_client->abortStream();
+    updateStreamingBubble(m_pendingResponse, false);
     if (!m_pendingResponse.isEmpty()) {
         updateStreamingBubble(m_pendingResponse, false);
         m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});

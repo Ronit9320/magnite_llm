@@ -139,16 +139,18 @@ def _tokenize_jsonl(path: str, tokenizer, cfg: TrainingConfig, Dataset):
             if not line:
                 continue
             try:
-                samples.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+                sample = json.loads(line)
+                # Normalize before constructing Arrow columns: mixed text/chat rows
+                # otherwise acquire missing/null fields or lose columns entirely.
+                text = (_messages_to_text(tokenizer, sample["messages"])
+                        if sample.get("messages") else sample.get("text", ""))
+                samples.append({"text": text})
+            except json.JSONDecodeError as exc:
+                raise ValueError("Stored dataset contains invalid JSON") from exc
     raw = Dataset.from_list(samples)
 
     def _tok(ex):
-        if "messages" in ex:
-            text = _messages_to_text(tokenizer, ex["messages"])
-        else:
-            text = ex.get("text", "")
+        text = ex["text"]
         enc = tokenizer(text, truncation=True, max_length=cfg.max_length,
                         padding="max_length")
         enc["labels"] = list(enc["input_ids"])

@@ -42,6 +42,7 @@ private slots:
     void savePanelSettings();
 
 private:
+    void chatErrorSelfTest(std::shared_ptr<int> failures, std::function<void()> finish, int scenario = 0);
     void setupUi();
     void startBackend();
     void loadPanelSettings();

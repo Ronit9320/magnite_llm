@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import ValidationError
+from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
 from backend.rag.chunking import chunk_text, detect_kind, extract_text
 from backend.rag.schemas import (
     RagConfig,
+    RagConfigUpdate,
     RagDocument,
     RagIngestRequest,
     RagQueryRequest,
@@ -49,8 +53,14 @@ def get_config():
 
 
 @rag_router.post("/config", response_model=RagConfig)
-def set_config(cfg: RagConfig):
-    return _get_store().set_config(cfg)
+def set_config(cfg: RagConfigUpdate):
+    store = _get_store()
+    try:
+        return store.update_config(cfg.model_dump(exclude_none=True))
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ---- documents ----------------------------------------------------------
@@ -62,7 +72,14 @@ def list_documents():
 
 
 @rag_router.post("/documents", response_model=RagDocument, status_code=201)
-def ingest_document(body: RagIngestRequest):
+async def ingest_document(body: RagIngestRequest, request: Request):
+    try:
+        return await request_work(request, lambda cancelled: _ingest_document(body, cancelled))
+    except ClientDisconnected:
+        return Response(status_code=499)
+
+
+def _ingest_document(body: RagIngestRequest, cancelled=None):
     store = _get_store()
     if not body.path.strip() and not body.content.strip():
         raise HTTPException(status_code=400, detail="Provide either 'path' or 'content'")
@@ -94,12 +111,17 @@ def ingest_document(body: RagIngestRequest):
     chunk_size = body.chunk_size or cfg.chunk_size
     chunk_overlap = (body.chunk_overlap
                      if body.chunk_overlap is not None else cfg.chunk_overlap)
-    chunks = chunk_text(text, chunk_size, chunk_overlap)
+    try:
+        chunks = chunk_text(text, chunk_size, chunk_overlap)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not chunks:
         raise HTTPException(status_code=400, detail="Document contains no usable text")
 
     try:
         vecs = embeddings.embed_texts(chunks, cfg.model)
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("Document ingestion cancelled before registration")
         rec = store.add_document(
             name=body.name.strip() or os.path.splitext(os.path.basename(path))[0],
             kind=kind,
@@ -113,6 +135,8 @@ def ingest_document(body: RagIngestRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Document embedding failed: {exc}") from exc
     return rec
 
 

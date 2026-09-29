@@ -185,10 +185,26 @@ def _normalize_sample(obj: dict, row_num: int) -> Optional[dict]:
     if not isinstance(obj, dict):
         return None
     if "messages" in obj and isinstance(obj["messages"], list):
+        if not obj["messages"] or any(not isinstance(m, dict) or m.get("role") not in
+                ("system", "user", "assistant") or not isinstance(m.get("content"), str)
+                for m in obj["messages"]):
+            raise ValueError(f"Row {row_num}: invalid chat messages")
         return {"messages": obj["messages"]}
-    if "text" in obj and str(obj["text"]).strip():
-        return {"text": str(obj["text"])}
+    if "instruction" in obj and "output" in obj:
+        if not all(isinstance(obj.get(k, ""), str) for k in ("instruction", "input", "output")):
+            raise ValueError(f"Row {row_num}: instruction fields must be strings")
+        prompt = "\n".join(s for s in (obj["instruction"].strip(), obj.get("input", "").strip()) if s)
+        if not prompt or not obj["output"].strip():
+            raise ValueError(f"Row {row_num}: instruction and output are required")
+        return {"messages": [{"role": "user", "content": prompt},
+                             {"role": "assistant", "content": obj["output"]}]}
+    if "text" in obj:
+        if not isinstance(obj["text"], str):
+            raise ValueError(f"Row {row_num}: text must be a string")
+        return {"text": obj["text"]} if obj["text"].strip() else None
     if "prompt" in obj and "completion" in obj:
+        if not all(isinstance(obj[k], str) for k in ("prompt", "completion")):
+            raise ValueError(f"Row {row_num}: prompt and completion must be strings")
         text = f"{obj['prompt']}\n{obj['completion']}".strip()
         return {"text": text} if text else None
     for key in ("input", "instruction", "content"):
@@ -199,17 +215,19 @@ def _normalize_sample(obj: dict, row_num: int) -> Optional[dict]:
 
 def _normalize_jsonl(content: str) -> list[dict]:
     samples = []
-    for i, line in enumerate(content.splitlines()):
+    for i, line in enumerate(content.splitlines(), 1):
         line = line.strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Row {i}: invalid JSON: {exc.msg}") from exc
         s = _normalize_sample(obj, i)
         if s is not None:
             samples.append(s)
+        else:
+            raise ValueError(f"Row {i}: unsupported or empty training sample")
     return samples
 
 
@@ -220,7 +238,10 @@ def _normalize_csv(content: str) -> list[dict]:
         return samples
     cols = reader.fieldnames
     text_col = "text" if "text" in cols else None
-    for row in reader:
+    for row_num, row in enumerate(reader, 2):
+        if "instruction" in cols and "output" in cols:
+            samples.append(_normalize_sample(row, row_num))
+            continue
         if text_col and str(row.get(text_col, "")).strip():
             samples.append({"text": str(row[text_col])})
             continue

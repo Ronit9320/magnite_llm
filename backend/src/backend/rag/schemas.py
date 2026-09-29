@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RagConfig(BaseModel):
@@ -13,6 +13,22 @@ class RagConfig(BaseModel):
     top_k: int = Field(4, ge=1, le=20, description="Default chunks retrieved per query")
     min_score: float = Field(0.0, ge=0.0, le=1.0, description="Similarity threshold (0 = off)")
     model: str = Field("all-MiniLM-L6-v2", description="sentence-transformers model id")
+
+    @model_validator(mode="after")
+    def valid_overlap(self):
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("Chunk overlap must be smaller than chunk size")
+        if not self.model.strip():
+            raise ValueError("Embedding model is required")
+        return self
+
+
+class RagConfigUpdate(BaseModel):
+    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096)
+    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024)
+    top_k: Optional[int] = Field(default=None, ge=1, le=20)
+    min_score: Optional[float] = Field(default=None, ge=0, le=1)
+    model: Optional[str] = None
 
 
 class RagDocument(BaseModel):
@@ -31,8 +47,8 @@ class RagIngestRequest(BaseModel):
     content: str = Field(default="", description="Raw content (requires 'name')")
     kind: str = Field(default="", description="txt|md|html|pdf; detected from name/path when empty")
     name: str = Field(default="", description="Display name; default from filename")
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
+    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096)
+    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024)
 
 
 class RagQueryRequest(BaseModel):

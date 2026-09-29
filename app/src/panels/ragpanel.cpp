@@ -116,7 +116,7 @@ void RagPanel::setupUi() {
     m_chunkSizeSpin->setRange(64, 4096);
     m_chunkSizeSpin->setSingleStep(64);
     m_chunkSizeSpin->setValue(512);
-    form->addRow("Chunk size (tokens):", m_chunkSizeSpin);
+    form->addRow("Chunk size (words):", m_chunkSizeSpin);
 
     m_chunkOverlapSpin = new QSpinBox(this);
     m_chunkOverlapSpin->setRange(0, 1024);
@@ -393,7 +393,9 @@ void RagPanel::pushConfig() {
     body["chunk_size"] = m_chunkSizeSpin->value();
     body["chunk_overlap"] = m_chunkOverlapSpin->value();
     body["top_k"] = m_topKSpin->value();
-    m_client->post("/rag/config", body, [](int, const QJsonDocument &) {});
+    m_client->post("/rag/config", body, [this](int status, const QJsonDocument &doc) {
+        if (status != 200) setStatus("Configuration was not saved: " + doc.object()["detail"].toString());
+    });
 }
 
 void RagPanel::clearCards() {

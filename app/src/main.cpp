@@ -13,6 +13,13 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationDomain("magnite.local");
     QCoreApplication::setApplicationName("Magnite LLM");
 
+    const bool selftest = argc > 1 && QString(argv[1]) == "--selftest";
+    if (selftest) {
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                          QDir::tempPath() + "/magnite-selftest-" + QString::number(QCoreApplication::applicationPid()));
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+    }
+
     // Phase 5.5.0 infrastructure check: validates the theme tokens, the
     // embedded qrc assets (theme/fonts/icons) and the registered font
     // families, then exits. No window is shown.
@@ -36,12 +43,8 @@ int main(int argc, char *argv[]) {
         });
     }
 
-    if (argc > 1 && QString(argv[1]) == "--selftest") {
+    if (selftest) {
         window.setSelfTestMode(true);
-        // Redirect settings to a throwaway file so selftests never touch real config.
-        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                           QDir::tempPath());
-        QSettings::setDefaultFormat(QSettings::IniFormat);
         QTimer::singleShot(2000, &window, &MainWindow::runSelfTest);
     }
 

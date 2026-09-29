@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 namespace {
@@ -54,15 +55,19 @@ void SettingsPanel::setupUi() {
     auto *engineForm = new QFormLayout(engineBox);
     m_engineOverride = new QComboBox(this);
     for (const auto &e : kEngines) m_engineOverride->addItem(e);
+    auto *engineItems = qobject_cast<QStandardItemModel *>(m_engineOverride->model());
+    engineItems->item(3)->setEnabled(false);
+    engineItems->item(3)->setText("Hosted API (not implemented)");
     m_engineOverride->setToolTip(
         "Override automatic engine selection. 'Auto' picks vLLM if a GPU is present, "
-        "else llama.cpp (or a hosted API if configured).");
+        "else a compatible local engine. Applies to the next model load.");
     engineForm->addRow("Inference engine:", m_engineOverride);
     runtime->addWidget(engineBox);
 
     auto *dataBox = new QGroupBox("Storage", this);
     auto *dataForm = new QFormLayout(dataBox);
     m_dataDir = new QLineEdit(this);
+    m_dataDir->setToolTip("Applied on the next app start. MAGNITE_HOME takes precedence. Existing data is not moved.");
     auto *dirBtn = new QPushButton("Browse...", this);
     dirBtn->setObjectName("secondaryBtn");
     auto *dirRow = new QHBoxLayout();
@@ -80,6 +85,9 @@ void SettingsPanel::setupUi() {
     m_hostedKey = new QLineEdit(this);
     m_hostedKey->setEchoMode(QLineEdit::Password);
     m_hostedKey->setPlaceholderText("sk-...");
+    m_hostedEndpoint->setEnabled(false);
+    m_hostedKey->setEnabled(false);
+    hostedBox->setTitle("Hosted Inference — not implemented");
     hostedForm->addRow("API key:", m_hostedKey);
     runtime->addWidget(hostedBox);
     runtime->addStretch();
@@ -133,10 +141,11 @@ void SettingsPanel::setupUi() {
 
 void SettingsPanel::loadFromSettings() {
     QSettings s;
-    m_engineOverride->setCurrentIndex(s.value("engine/override", 0).toInt());
+    s.remove("hosted/apiKey");
+    m_engineOverride->setCurrentIndex(qBound(0, s.value("engine/override", 0).toInt(), 2));
     m_dataDir->setText(s.value("storage/dataDir").toString());
     m_hostedEndpoint->setText(s.value("hosted/endpoint").toString());
-    m_hostedKey->setText(s.value("hosted/apiKey").toString());
+    m_hostedKey->clear();
     m_telemetryOptIn->setChecked(s.value("privacy/telemetry", false).toBool());
     m_stars->setChecked(s.value("appearance/studio3Ambient",true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
@@ -155,13 +164,12 @@ void SettingsPanel::onSave() {
     QSettings s;
     s.setValue("engine/override", m_engineOverride->currentIndex());
     s.setValue("storage/dataDir", m_dataDir->text().trimmed());
-    s.setValue("hosted/endpoint", m_hostedEndpoint->text().trimmed());
-    s.setValue("hosted/apiKey", m_hostedKey->text().trimmed());
+    s.remove("hosted/apiKey"); // Do not retain credentials for an unavailable feature.
     s.setValue("privacy/telemetry", m_telemetryOptIn->isChecked());
     s.setValue("appearance/studio3Ambient",m_stars->isChecked());
     s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
     s.sync();
-    setStatus("Settings saved.");
+    setStatus("Settings saved. Storage changes apply after restarting the app; existing data is not moved.");
     emit settingsChanged();
 }
 

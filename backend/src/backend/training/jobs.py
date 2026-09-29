@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import math
+import sqlite3
+import queue
 import os
 import threading
 import time
@@ -18,11 +19,7 @@ def _now() -> str:
 
 
 class TrainingJobManager:
-    """Owns training jobs: queuing, live status, cancellation, history.
-
-    Jobs live in memory for the lifetime of the backend (persistence is a
-    Phase 9 concern). Each job is executed on its own daemon thread so the
-    HTTP event loop stays responsive."""
+    """Serialized training queue with durable terminal history and restart recovery."""
 
     def __init__(self, data_dir: str, adapter_store: AdapterStore,
                  dataset_store: DatasetStore):
@@ -34,6 +31,60 @@ class TrainingJobManager:
         self._lock = threading.Lock()
         self._jobs: dict[str, TrainingJob] = {}
         self._cancel: dict[str, threading.Event] = {}
+
+        self._db = os.path.join(data_dir, "training_jobs.db")
+        with sqlite3.connect(self._db) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            for (record,) in conn.execute("SELECT record FROM jobs"):
+                job = TrainingJob.model_validate_json(record)
+                if job.status in ("queued", "running"):
+                    job.status = "error"
+                    job.error = "Training interrupted by backend shutdown. Submit a new job to retry."
+                    job.message = job.error
+                    job.finished_at = _now()
+                self._jobs[job.id] = job
+        for job in self._jobs.values():
+            self._persist(job)
+        self._queue = queue.Queue()
+        self._closing = False
+        self._worker = threading.Thread(target=self._run_queue, daemon=True, name="training-queue")
+        self._worker.start()
+
+    def _persist(self, job):
+        with sqlite3.connect(self._db) as conn:
+            conn.execute("INSERT OR REPLACE INTO jobs VALUES (?, ?)", (job.id, job.model_dump_json()))
+
+    def _run_queue(self):
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            job, cfg, dataset_path, event = item
+            try:
+                if event.is_set():
+                    continue
+                run_training(job, cfg, dataset_path, self._adapter_dir, self._adapter_store, event)
+            except Exception as exc:
+                job.status = "error"
+                job.error = str(exc)
+                job.message = str(exc)
+                job.finished_at = _now()
+            finally:
+                self._persist(job)
+
+    def shutdown(self):
+        with self._lock:
+            self._closing = True
+            for job_id, event in self._cancel.items():
+                event.set()
+                job = self._jobs[job_id]
+                if job.status == "queued":
+                    job.status = "cancelled"
+                    job.message = "Cancelled during shutdown"
+                    job.finished_at = _now()
+                self._persist(job)
+            self._queue.put(None)
+        self._worker.join(timeout=2)
 
     def _validate(self, cfg: TrainingConfig) -> None:
         dataset = self._datasets.get(cfg.dataset_id)
@@ -48,6 +99,8 @@ class TrainingJobManager:
 
     def start(self, cfg: TrainingConfig) -> TrainingJob:
         with self._lock:
+            if self._closing:
+                raise RuntimeError("Training service is shutting down")
             self._validate(cfg)
 
             dataset = self._datasets.get(cfg.dataset_id)
@@ -69,14 +122,8 @@ class TrainingJobManager:
             event = threading.Event()
             self._cancel[job_id] = event
 
-            def _run() -> None:
-                run_training(job, job_cfg, dataset.path, self._adapter_dir,
-                             self._adapter_store, event)
-
-            thread = threading.Thread(
-                target=_run, name=f"train-{job_id}", daemon=True
-            )
-            thread.start()
+            self._persist(job)
+            self._queue.put((job, job_cfg, dataset.path, event))
             return job.model_copy()
 
     def get(self, job_id: str) -> Optional[TrainingJob]:
@@ -99,5 +146,6 @@ class TrainingJobManager:
                 job.status = "cancelled"
                 job.message = "Cancelled before start"
                 job.finished_at = _now()
+            self._persist(job)
             return True
         return False

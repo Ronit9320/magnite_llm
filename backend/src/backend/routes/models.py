@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import httpx
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -87,5 +88,25 @@ def pull_status(job_id: str):
 
 @router.delete("/{model_id}", status_code=204)
 def delete_model(model_id: str):
-    if not _get_registry().delete_model(model_id):
-        raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+    from backend.inference.supervisor import get_supervisor
+    from backend.routes.training import _manager
+    try:
+        registry = _get_registry()
+        record = registry.get_model(model_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+        references = {model_id, record.path, record.ref}
+        sup = get_supervisor()
+        with sup.operation():
+            if sup._engine is not None and sup.model_ref in references:
+                raise HTTPException(status_code=409, detail="Unload this model before deleting it")
+            if _manager and any(j.status in ("queued", "running") and j.base_model in references
+                                for j in _manager.list()):
+                raise HTTPException(status_code=409, detail="Cancel training jobs using this model before deleting it")
+            registry.delete_model(model_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (httpx.HTTPError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Deletion failed; model remains registered: {exc}") from exc
