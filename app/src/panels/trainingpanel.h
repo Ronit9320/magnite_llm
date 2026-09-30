@@ -75,7 +75,6 @@ private:
     QDoubleSpinBox *m_warmupSpin;
     QSpinBox *m_maxLengthSpin;
     QCheckBox *m_qloraCheck;
-    QCheckBox *m_cacheCheck;
     QPushButton *m_startButton;
     QPushButton *m_stopButton;
     QPlainTextEdit *m_log;
@@ -84,4 +83,6 @@ private:
     QLabel *m_metrics = nullptr;
     QProgressBar *m_progress = nullptr;
     Starfield *m_activity = nullptr;
+    QWidget *m_setup = nullptr;
+    QLabel *m_runHint = nullptr;
 };

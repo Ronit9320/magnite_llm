@@ -32,6 +32,7 @@ signals:
     void actionRequested(ModelCard *card);
 
 protected:
+    void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
 
 private:

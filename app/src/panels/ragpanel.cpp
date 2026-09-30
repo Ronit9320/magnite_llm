@@ -1,3 +1,6 @@
+#include "widgets/confirmation.h"
+#include <QTimer>
+#include <memory>
 #include <QSplitter>
 #include "panels/ragpanel.h"
 
@@ -38,8 +41,7 @@ RagPanel::RagPanel(QWidget *parent)
     , m_loadingConfig(false)
 {
     setHeaderSubtitle(
-        "Attach a local knowledge base: ingest documents, embed them, and inject "
-        "retrieved context during chat.");
+        "Add documents, find useful passages, and bring them into your conversations.");
     setupUi();
 }
 
@@ -82,6 +84,7 @@ void RagPanel::setupUi() {
     m_docLayout = new QVBoxLayout(m_docHost);
     m_docLayout->setContentsMargins(2, 2, 2, 2);
     m_docLayout->setSpacing(8);
+    m_docLayout->setAlignment(Qt::AlignTop);
     m_docScroll->setWidget(m_docHost);
     m_docScroll->setMinimumHeight(200);
     documents->addWidget(m_docScroll, 1);
@@ -133,23 +136,30 @@ void RagPanel::setupUi() {
 
     configLayout->addStretch();
     bench->addWidget(configCard);
-    auto *retrieval = Surface::card(this,"Query laboratory");
+    auto *retrieval = Surface::card(this,"Search your documents");
     bench->addWidget(retrieval->parentWidget(),1);
     // Test-retrieval row.
     auto *queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
     m_queryEdit->setPlaceholderText("Test a query against the ingested documents...");
     m_queryEdit->setClearButtonEnabled(true);
-    auto *searchButton = new QPushButton("Search", this);
+    m_queryEdit->setObjectName("documentQuery");
+    m_queryEdit->setAccessibleName("Search document contents");
+    auto *searchButton = m_queryButton = new QPushButton("Search", this);
     searchButton->setObjectName("secondaryBtn");
     queryRow->addWidget(m_queryEdit, 1);
     queryRow->addWidget(searchButton);
+    searchButton->setEnabled(false);
+    connect(m_queryEdit,&QLineEdit::textChanged,this,[this]() {
+        m_queryButton->setEnabled(!m_queryBusy && !m_mutating && !m_queryEdit->text().trimmed().isEmpty());
+    });
     retrieval->addLayout(queryRow);
 
     m_resultLabel = new QLabel(this);
     m_resultLabel->setObjectName("monoLabel");
     m_resultLabel->setWordWrap(true);
-    m_resultLabel->setText(" ");
+    m_resultLabel->setText("Search for a topic or ask a question to preview matching passages.");
+    m_resultLabel->setTextFormat(Qt::PlainText);
     retrieval->addWidget(m_resultLabel);
     retrieval->addStretch();
 
@@ -157,9 +167,14 @@ void RagPanel::setupUi() {
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
-    setStatus("RAG engine starting...");
+    setStatus("Add PDF, text, Markdown or HTML files to get started.");
+    m_configTimer = new QTimer(this);
+    m_configTimer->setSingleShot(true);
+    m_configTimer->setInterval(350);
+    connect(m_configTimer,&QTimer::timeout,this,&RagPanel::pushConfig);
 
     connect(m_addButton, &QPushButton::clicked, this, &RagPanel::onAddDocuments);
     connect(m_removeButton, &QPushButton::clicked, this, &RagPanel::onRemoveDocument);
@@ -183,13 +198,13 @@ void RagPanel::setBackendClient(BackendClient *client) {
     }
 }
 
-void RagPanel::refresh() {
+void RagPanel::refresh(bool preserveStatus) {
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.");
         return;
     }
 
-    m_client->get("/rag/status", [this](int status, const QJsonDocument &doc) {
+    m_client->get("/rag/status", [this,preserveStatus](int status, const QJsonDocument &doc) {
         if (status != 200) {
             setStatus(QString("RAG status unavailable (HTTP %1).").arg(status), "error");
             return;
@@ -199,12 +214,11 @@ void RagPanel::refresh() {
         const int docs = obj["documents"].toInt();
         const int chunks = obj["chunks"].toInt();
         const bool engineReady = obj["engine_ready"].toBool();
-        setStatus(engineReady
+        if (!preserveStatus) setStatus(engineReady
                       ? QString("%1 document(s) · %2 chunks · model %3")
                             .arg(docs).arg(chunks).arg(model)
                       : "Embeddings unavailable — RAG needs sentence-transformers "
                         "(backend[ml]).");
-        m_resultLabel->setText(" ");
     });
 
     m_client->get("/rag/config", [this](int status, const QJsonDocument &doc) {
@@ -212,6 +226,7 @@ void RagPanel::refresh() {
         const QJsonObject cfg = doc.object();
         m_loadingConfig = true;
         if (cfg.contains("chunk_size")) m_chunkSizeSpin->setValue(cfg["chunk_size"].toInt());
+        m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
         if (cfg.contains("chunk_overlap")) m_chunkOverlapSpin->setValue(cfg["chunk_overlap"].toInt());
         if (cfg.contains("top_k")) m_topKSpin->setValue(cfg["top_k"].toInt());
         m_loadingConfig = false;
@@ -238,6 +253,7 @@ void RagPanel::refresh() {
 }
 
 void RagPanel::onAddDocuments() {
+    if (m_mutating) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -250,26 +266,30 @@ void RagPanel::onAddDocuments() {
 
     setStatus(QString("Ingesting %1 document(s) — first use downloads the "
                       "embedding model...").arg(files.size()));
-    int *pending = new int(files.size());
+    m_mutating = true;
+    ++m_collectionRevision;
+    m_queryButton->setEnabled(false);
+    m_addButton->setEnabled(false);
+    m_removeButton->setEnabled(false);
+    m_clearButton->setEnabled(false);
+    auto pending = std::make_shared<int>(files.size());
+    auto failed = std::make_shared<QStringList>();
     for (const QString &f : files) {
-        QJsonObject body;
-        body["path"] = f;
-        m_client->post("/rag/documents", body,
-            [this, pending, filesSize = files.size()](int status, const QJsonDocument &doc) {
-                --(*pending);
-                if (status == 201) {
-                    setStatus(QString("%1/%2 ingested — embedding chunks...")
-                                  .arg(filesSize - *pending).arg(filesSize));
-                } else {
-                    const QString err = doc.object()["detail"].toString();
-                    setStatus(QString("Ingest failed: %1").arg(
-                                  err.isEmpty() ? QString("HTTP %1").arg(status) : err),
-                              "error");
+        m_client->post("/rag/documents", QJsonObject{{"path",f}},
+            [this,pending,failed,total=files.size()](int status,const QJsonDocument &doc) {
+                --*pending;
+                if (status != 201) failed->append(doc.object()["detail"].toString(QString("HTTP %1").arg(status)));
+                if (*pending > 0) {
+                    setStatus(QString("Processing documents · %1 of %2 finished").arg(total-*pending).arg(total));
+                    return;
                 }
-                if (*pending <= 0) {
-                    delete pending;
-                    refresh();
-                }
+                m_mutating = false;
+                m_addButton->setEnabled(true);
+                m_resultLabel->setText("Your document collection changed. Search again for updated results.");
+                refresh(true);
+                setStatus(failed->isEmpty() ? QString("Added %1 document(s). Ready to search.").arg(total)
+                    : QString("Added %1 of %2 documents. %3 failed: %4").arg(total-failed->size()).arg(total).arg(failed->size()).arg(failed->first()),
+                    failed->isEmpty() ? "ok" : "error");
             });
     }
 }
@@ -285,7 +305,7 @@ void RagPanel::onCardClicked(RagDocCard *card, bool ctrl) {
     } else {
         card->setSelected(!card->isCardSelected());
     }
-    m_removeButton->setEnabled(hasSelection());
+    m_removeButton->setEnabled(hasSelection() && !m_mutating);
 }
 
 bool RagPanel::hasSelection() const {
@@ -306,40 +326,65 @@ QString RagPanel::selectedIds() const {
 }
 
 void RagPanel::onRemoveDocument() {
+    if (m_mutating) return;
     if (!m_client || !m_client->isReady()) return;
     const QStringList ids = selectedIds().split(',', Qt::SkipEmptyParts);
     if (ids.isEmpty()) {
         setStatus("No documents selected.");
         return;
     }
-    int *pending = new int(ids.size());
+    if (!Ui::confirmRemoval(this,"Remove documents?",QString("Remove %1 selected document(s) from Knowledge? Your original files are kept.").arg(ids.size()),"Remove")) return;
+    m_mutating = true;
+    ++m_collectionRevision;
+    m_queryButton->setEnabled(false);
+    m_addButton->setEnabled(false);
+    m_removeButton->setEnabled(false);
+    m_clearButton->setEnabled(false);
+    auto pending = std::make_shared<int>(ids.size());
+    auto failed = std::make_shared<int>(0);
     for (const QString &id : ids) {
         m_client->remove("/rag/documents/" + id,
-            [this, pending](int status, const QJsonDocument &) {
-                --(*pending);
-                if (status != 204) setStatus("Failed to remove a document.", "error");
-                if (*pending <= 0) {
-                    delete pending;
-                    m_removeButton->setEnabled(false);
-                    refresh();
-                }
+            [this,pending,failed](int status,const QJsonDocument &) {
+                --*pending;
+                if (status != 204) ++*failed;
+                if (*pending) return;
+                m_mutating = false;
+                m_addButton->setEnabled(true);
+                m_resultLabel->setText("Your document collection changed. Search again for updated results.");
+                refresh(true);
+                setStatus(*failed ? QString("Could not remove %1 document(s). Try again.").arg(*failed) : "Selected documents removed.",
+                          *failed ? "error" : "ok");
             });
     }
 }
 
 void RagPanel::onClearAll() {
+    if (m_mutating) return;
     if (!m_client || !m_client->isReady()) return;
+    if (!Ui::confirmRemoval(this,"Clear Knowledge?","Remove all indexed documents from Knowledge? Your original files are kept.","Clear Knowledge")) return;
+    m_mutating = true;
+    ++m_collectionRevision;
+    m_queryButton->setEnabled(false);
+    m_addButton->setEnabled(false);
+    m_removeButton->setEnabled(false);
+    m_clearButton->setEnabled(false);
     m_client->post("/rag/clear", QJsonObject(), [this](int status, const QJsonDocument &) {
+        m_mutating = false;
+        m_addButton->setEnabled(true);
+        m_removeButton->setEnabled(hasSelection());
+        updateEmptyState();
         if (status != 204) {
             setStatus("Failed to clear the store.", "error");
             return;
         }
         clearCards();
+        m_resultLabel->setText("Add documents to start searching your knowledge.");
         setStatus("Cleared all documents.");
     });
 }
 
 void RagPanel::onTestQuery() {
+    if (m_queryBusy || m_mutating) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -349,10 +394,20 @@ void RagPanel::onTestQuery() {
     QJsonObject body;
     body["query"] = query;
     body["top_k"] = m_topKSpin->value();
-    setStatus("Embedding query...");
-    m_client->post("/rag/query", body, [this, query](int status, const QJsonDocument &doc) {
+    m_queryBusy = true;
+    m_queryButton->setEnabled(false);
+    m_queryButton->setText("Searching…");
+    m_resultLabel->setText("Finding relevant passages…");
+    setStatus("Searching your documents…");
+    const quint64 revision = m_collectionRevision;
+    m_client->post("/rag/query", body, [this, query,revision](int status, const QJsonDocument &doc) {
+        m_queryBusy = false;
+        m_queryButton->setText("Search");
+        m_queryButton->setEnabled(!m_mutating && !m_queryEdit->text().trimmed().isEmpty());
+        if (revision != m_collectionRevision) return;
         if (status != 200) {
             const QString err = doc.object()["detail"].toString();
+            m_resultLabel->setText("Search could not finish. Check the message below and try again.");
             setStatus(QString("Query failed: %1").arg(
                           err.isEmpty() ? QString("HTTP %1").arg(status) : err), "error");
             return;
@@ -384,7 +439,8 @@ void RagPanel::onTestQuery() {
 
 void RagPanel::onConfigChanged() {
     if (m_loadingConfig) return;
-    pushConfig();
+    m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
+    m_configTimer->start();
 }
 
 void RagPanel::pushConfig() {
@@ -414,6 +470,8 @@ void RagPanel::clearCards() {
 
 void RagPanel::updateEmptyState() {
     const bool hasDocs = !m_cards.isEmpty();
+    m_queryButton->setEnabled(!m_queryBusy && !m_mutating && !m_queryEdit->text().trimmed().isEmpty());
+    m_clearButton->setEnabled(hasDocs && !m_mutating);
     m_docScroll->setVisible(hasDocs);
     m_emptyState->setVisible(!hasDocs);
 }
@@ -439,6 +497,7 @@ void RagPanel::applySettingsJson(const QString &json) {
     m_loadingConfig = true;
     auto o = doc.object();
     if (o.contains("chunkSize")) m_chunkSizeSpin->setValue(o["chunkSize"].toInt());
+    m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
     if (o.contains("chunkOverlap")) m_chunkOverlapSpin->setValue(o["chunkOverlap"].toInt());
     if (o.contains("topK")) m_topKSpin->setValue(o["topK"].toInt());
     m_loadingConfig = false;

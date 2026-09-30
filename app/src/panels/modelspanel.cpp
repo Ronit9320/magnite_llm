@@ -1,3 +1,4 @@
+#include "widgets/confirmation.h"
 #include "panels/modelspanel.h"
 
 #include "backend_client.h"
@@ -169,6 +170,7 @@ void ModelsPanel::setupUi() {
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
@@ -224,7 +226,7 @@ void ModelsPanel::refresh() {
                 setStatus(QString("Failed to load models (HTTP %1).").arg(status), "error");
                 return;
             }
-            showLocalModels(doc.array());
+            if (isLocalView()) showLocalModels(doc.array());
         });
     }
 }
@@ -292,6 +294,7 @@ void ModelsPanel::showLocalModels(const QJsonArray &models) {
 }
 
 void ModelsPanel::onSearch() {
+    if (m_searching) return;
     const QString query = m_searchEdit->text().trimmed();
     if (query.isEmpty()) {
         setStatus("Enter a search term.");
@@ -301,14 +304,22 @@ void ModelsPanel::onSearch() {
         setStatus("Backend not connected.");
         return;
     }
+    m_searching = true;
+    m_searchButton->setText("Searching…");
+    m_searchButton->setEnabled(false);
     m_lastSearch = query;
     m_viewCombo->setCurrentIndex(1);
+    m_viewCombo->setEnabled(false);
     setStatus(QString("Searching Hub for \"%1\"...").arg(query));
     QUrlQuery q;
     q.addQueryItem("q", query);
     q.addQueryItem("limit", "25");
     m_client->get("/models/search?" + q.toString(QUrl::FullyEncoded),
                   [this](int status, const QJsonDocument &doc) {
+        m_searching = false;
+        m_searchButton->setText("Search");
+        m_searchButton->setEnabled(true);
+        m_viewCombo->setEnabled(true);
         if (status != 200) {
             setStatus(QString("Search failed (HTTP %1).").arg(status), "error");
             return;
@@ -338,8 +349,8 @@ void ModelsPanel::onCardClicked(ModelCard *card) {
 
 void ModelsPanel::updateActionButtons() {
     const bool hasSelection = m_selectedCard != nullptr;
-    m_downloadButton->setEnabled(hasSelection && !isLocalView());
-    m_deleteButton->setEnabled(hasSelection && isLocalView());
+    m_downloadButton->setEnabled(hasSelection && !isLocalView() && m_downloadingId.isEmpty());
+    m_deleteButton->setEnabled(hasSelection && isLocalView() && m_downloadingId.isEmpty());
 }
 
 QString ModelsPanel::selectedId() const {
@@ -354,7 +365,16 @@ ModelCard *ModelsPanel::cardById(const QString &id) const {
     return nullptr;
 }
 
+void ModelsPanel::resetDownload() {
+    m_pullTimer->stop();
+    m_pullJobId.clear();
+    if (auto *card = cardById(m_downloadingId)) card->setProgress(-1);
+    m_downloadingId.clear();
+    updateActionButtons();
+}
+
 void ModelsPanel::onDownload() {
+    if (!m_downloadingId.isEmpty()) { setStatus("A download is already in progress."); return; }
     const QString ref = selectedId();
     if (ref.isEmpty() || !m_client || !m_client->isReady()) return;
 
@@ -369,6 +389,7 @@ void ModelsPanel::onDownload() {
     body["source"] = "huggingface";
     m_client->post("/models/pull", body, [this](int status, const QJsonDocument &doc) {
         if (status != 202) {
+            resetDownload();
             setStatus(QString("Could not start download (HTTP %1).").arg(status), "error");
             return;
         }
@@ -384,7 +405,7 @@ void ModelsPanel::startPullPolling(const QString &jobId) {
 
 void ModelsPanel::onPullPoll() {
     if (m_pullJobId.isEmpty() || !m_client || !m_client->isReady()) {
-        m_pullTimer->stop();
+        resetDownload();
         return;
     }
     m_client->get("/models/pull/" + m_pullJobId,
@@ -392,6 +413,7 @@ void ModelsPanel::onPullPoll() {
         if (status != 200) {
             m_pullTimer->stop();
             m_pullJobId.clear();
+            resetDownload();
             setStatus(QString("Lost track of download job (HTTP %1).").arg(status), "error");
             return;
         }
@@ -415,6 +437,7 @@ void ModelsPanel::onPullPoll() {
             if (ModelCard *card = cardById(m_downloadingId))
                 card->setProgress(-1);
             m_downloadingId.clear();
+            resetDownload();
             setStatus("Download failed: " + job.value("error").toString(), "error");
         } else {
             if (ModelCard *card = cardById(m_downloadingId))
@@ -430,6 +453,7 @@ void ModelsPanel::onDeleteModel() {
     const QString id = selectedId();
     if (id.isEmpty() || !m_client || !m_client->isReady()) return;
 
+    if (!Ui::confirmRemoval(this,"Delete model?","Delete “"+id+"” from your local library? You will need to download it again to use it.")) return;
     m_client->remove("/models/" + id, [this](int status, const QJsonDocument &doc) {
         Q_UNUSED(doc);
         if (status == 204) {

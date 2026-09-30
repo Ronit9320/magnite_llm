@@ -6,6 +6,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -28,6 +29,9 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
 {
     setObjectName(QStringLiteral("ragDocCard"));
     setCursor(Qt::PointingHandCursor);
+    setFocusPolicy(Qt::StrongFocus);
+    setAccessibleName(m_id);
+    setAccessibleDescription("Press Space to select");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     const QString name = data.value("name").toString();
@@ -49,12 +53,18 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
     text->setSpacing(2);
     auto *nameLabel = new QLabel(name.isEmpty() ? m_id : name, this);
     nameLabel->setObjectName(QStringLiteral("bodyLabel"));
+    nameLabel->setWordWrap(true);
+    nameLabel->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    nameLabel->setToolTip(name);
     text->addWidget(nameLabel);
     const QString meta = m_path.isEmpty()
         ? QStringLiteral("uploaded · %1 chunk(s)").arg(chunks)
         : QStringLiteral("%1 · %2 chunk(s)").arg(m_path).arg(chunks);
     auto *pathLabel = new QLabel(meta, this);
     pathLabel->setObjectName(QStringLiteral("cardMeta"));
+    pathLabel->setWordWrap(true);
+    pathLabel->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    pathLabel->setToolTip(meta);
     text->addWidget(pathLabel);
     row->addLayout(text, 1);
 
@@ -62,17 +72,37 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
                                           : kind.toUpper(), this);
     tag->setObjectName(QStringLiteral("adapterPill"));
     row->addWidget(tag, 0, Qt::AlignVCenter);
+    for (auto *label : findChildren<QLabel *>()) {
+        label->setTextFormat(Qt::PlainText);
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
 }
 
 void RagDocCard::setSelected(bool selected) {
     if (m_selected == selected) return;
     m_selected = selected;
     setProperty("selected", selected);
+    setAccessibleDescription(selected ? "Selected. Press Space to select." : "Press Space to select.");
     style()->unpolish(this);
     style()->polish(this);
+    update();
 }
 
 void RagDocCard::mousePressEvent(QMouseEvent *event) {
-    emit cardClicked(this, (event->modifiers() & Qt::ControlModifier) != 0);
+    if (event->button() == Qt::LeftButton) {
+        setFocus(Qt::MouseFocusReason);
+        emit cardClicked(this, event->modifiers().testFlag(Qt::ControlModifier));
+        event->accept();
+        return;
+    }
     QFrame::mousePressEvent(event);
+}
+
+void RagDocCard::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Space || event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (!event->isAutoRepeat()) emit cardClicked(this, event->modifiers().testFlag(Qt::ControlModifier));
+        event->accept();
+        return;
+    }
+    QFrame::keyPressEvent(event);
 }

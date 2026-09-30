@@ -13,21 +13,18 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSettings>
-#include <QStandardItemModel>
+#include <QFileInfo>
 #include <QVBoxLayout>
 
 namespace {
 const QString kEngines[] = {"Auto (detect hardware)", "Local (vLLM)",
-                            "Local (llama.cpp)", "Hosted API"};
+                            "Local (llama.cpp)"};
 }
 
 SettingsPanel::SettingsPanel(QWidget *parent)
     : BasePanel("Settings", parent)
     , m_engineOverride(nullptr)
     , m_dataDir(nullptr)
-    , m_hostedEndpoint(nullptr)
-    , m_hostedKey(nullptr)
-    , m_telemetryOptIn(nullptr)
     , m_saveButton(nullptr)
     , m_statusLabel(nullptr)
 {
@@ -55,9 +52,7 @@ void SettingsPanel::setupUi() {
     auto *engineForm = new QFormLayout(engineBox);
     m_engineOverride = new QComboBox(this);
     for (const auto &e : kEngines) m_engineOverride->addItem(e);
-    auto *engineItems = qobject_cast<QStandardItemModel *>(m_engineOverride->model());
-    engineItems->item(3)->setEnabled(false);
-    engineItems->item(3)->setText("Hosted API (not implemented)");
+    m_engineOverride->setAccessibleName("Default inference engine");
     m_engineOverride->setToolTip(
         "Override automatic engine selection. 'Auto' picks vLLM if a GPU is present, "
         "else a compatible local engine. Applies to the next model load.");
@@ -67,6 +62,8 @@ void SettingsPanel::setupUi() {
     auto *dataBox = new QGroupBox("Storage", this);
     auto *dataForm = new QFormLayout(dataBox);
     m_dataDir = new QLineEdit(this);
+    m_dataDir->setAccessibleName("Data directory");
+    m_dataDir->setPlaceholderText(qEnvironmentVariable("MAGNITE_HOME", QDir::homePath()+"/.magnite"));
     m_dataDir->setToolTip("Applied on the next app start. MAGNITE_HOME takes precedence. Existing data is not moved.");
     auto *dirBtn = new QPushButton("Browse...", this);
     dirBtn->setObjectName("secondaryBtn");
@@ -77,28 +74,14 @@ void SettingsPanel::setupUi() {
     connect(dirBtn, &QPushButton::clicked, this, &SettingsPanel::onBrowseDataDir);
     storage->addWidget(dataBox);
 
-    auto *hostedBox = new QGroupBox("Hosted Inference", this);
-    auto *hostedForm = new QFormLayout(hostedBox);
-    m_hostedEndpoint = new QLineEdit(this);
-    m_hostedEndpoint->setPlaceholderText("https://api.openai.com/v1");
-    hostedForm->addRow("Endpoint (OpenAI-compatible):", m_hostedEndpoint);
-    m_hostedKey = new QLineEdit(this);
-    m_hostedKey->setEchoMode(QLineEdit::Password);
-    m_hostedKey->setPlaceholderText("sk-...");
-    m_hostedEndpoint->setEnabled(false);
-    m_hostedKey->setEnabled(false);
-    hostedBox->setTitle("Hosted Inference — not implemented");
-    hostedForm->addRow("API key:", m_hostedKey);
-    runtime->addWidget(hostedBox);
+    auto *engineHint = new QLabel("Auto chooses a compatible engine for your model and hardware. You can select torch or Ollama for an individual model in Playground → Model settings.",this);
+    engineHint->setObjectName("sectionHint");
+    engineHint->setWordWrap(true);
+    runtime->addWidget(engineHint);
     runtime->addStretch();
 
-    auto *privacyBox = new QGroupBox("Privacy", this);
-    auto *privacyForm = new QFormLayout(privacyBox);
-    m_telemetryOptIn = new QCheckBox("Send anonymous usage data", this);
-    m_telemetryOptIn->setToolTip("Local-first by default. Opt-in only.");
-    privacyForm->addRow("Telemetry:", m_telemetryOptIn);
     auto *appearance = Surface::card(this,"Appearance");
-    auto *theme = new QLabel("Studio · paper, charcoal & orange",this);
+    auto *theme = new QLabel("Magnite · paper, graphite & orange",this);
     theme->setObjectName("bodyLabel");
     appearance->addWidget(theme);
     m_stars = new QCheckBox("Instrument grid",this);
@@ -107,13 +90,13 @@ void SettingsPanel::setupUi() {
     m_reducedMotion->setObjectName("reducedMotionToggle");
     appearance->addWidget(m_stars);
     appearance->addWidget(m_reducedMotion);
-    auto *hint = new QLabel("Subtle workspace texture. Reduce motion keeps activity indicators still and disables click effects, blinking cursors and panel transitions.",this);
+    auto *hint = new QLabel("Changes apply immediately. Reduce motion keeps activity indicators still and disables click effects, blinking cursors and panel transitions.",this);
     hint->setWordWrap(true);
     hint->setObjectName("cardMeta");
     appearance->addWidget(hint);
     visual->addWidget(appearance->parentWidget());
     visual->addStretch();
-    storage->addWidget(privacyBox);
+
     auto *local = Surface::card(this,"Local by default");
     auto *copy = new QLabel("Models, adapters and documents stay in your local data directory.\n\nUse the Light / Dark switch in the top bar to change appearance.",this);
     copy->setWordWrap(true);
@@ -122,7 +105,7 @@ void SettingsPanel::setupUi() {
     storage->addStretch();
 
     auto *btnRow = new QHBoxLayout();
-    m_saveButton = new QPushButton("Save Settings", this);
+    m_saveButton = new QPushButton("Save changes", this);
     m_saveButton->setObjectName("primaryBtn");
     btnRow->addWidget(m_saveButton);
     btnRow->addStretch();
@@ -130,6 +113,8 @@ void SettingsPanel::setupUi() {
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setWordWrap(true);
+    m_statusLabel->setTextFormat(Qt::PlainText);
     layout->addWidget(m_statusLabel);
 
 
@@ -137,6 +122,18 @@ void SettingsPanel::setupUi() {
     connect(m_saveButton, &QPushButton::clicked, this, &SettingsPanel::onSave);
 
     loadFromSettings();
+    m_saveButton->setEnabled(false);
+    auto markDirty = [this]() { m_saveButton->setEnabled(true); setStatus("You have unsaved changes."); };
+    connect(m_dataDir,&QLineEdit::textChanged,this,markDirty);
+    connect(m_engineOverride,qOverload<int>(&QComboBox::currentIndexChanged),this,markDirty);
+    auto appearanceChanged = [this]() {
+        QSettings s;
+        s.setValue("appearance/studio3Ambient",m_stars->isChecked());
+        s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
+        emit settingsChanged();
+    };
+    connect(m_stars,&QCheckBox::toggled,this,appearanceChanged);
+    connect(m_reducedMotion,&QCheckBox::toggled,this,appearanceChanged);
 }
 
 void SettingsPanel::loadFromSettings() {
@@ -144,9 +141,7 @@ void SettingsPanel::loadFromSettings() {
     s.remove("hosted/apiKey");
     m_engineOverride->setCurrentIndex(qBound(0, s.value("engine/override", 0).toInt(), 2));
     m_dataDir->setText(s.value("storage/dataDir").toString());
-    m_hostedEndpoint->setText(s.value("hosted/endpoint").toString());
-    m_hostedKey->clear();
-    m_telemetryOptIn->setChecked(s.value("privacy/telemetry", false).toBool());
+    s.remove("hosted/endpoint");
     m_stars->setChecked(s.value("appearance/studio3Ambient",true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
 }
@@ -161,18 +156,27 @@ void SettingsPanel::onBrowseDataDir() {
 }
 
 void SettingsPanel::onSave() {
+    const QString path = m_dataDir->text().trimmed();
+    if (!path.isEmpty() && (!QDir::isAbsolutePath(path) || (QFileInfo::exists(path) && !QFileInfo(path).isDir()))) {
+        setStatus("Choose an absolute directory path, or leave it empty to use the default.");
+        applyStatusTone(m_statusLabel,"error");
+        m_dataDir->setFocus();
+        return;
+    }
     QSettings s;
     s.setValue("engine/override", m_engineOverride->currentIndex());
     s.setValue("storage/dataDir", m_dataDir->text().trimmed());
     s.remove("hosted/apiKey"); // Do not retain credentials for an unavailable feature.
-    s.setValue("privacy/telemetry", m_telemetryOptIn->isChecked());
     s.setValue("appearance/studio3Ambient",m_stars->isChecked());
     s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
     s.sync();
     setStatus("Settings saved. Storage changes apply after restarting the app; existing data is not moved.");
+    applyStatusTone(m_statusLabel,"ok");
+    m_saveButton->setEnabled(false);
     emit settingsChanged();
 }
 
 void SettingsPanel::setStatus(const QString &text) {
     m_statusLabel->setText(text);
+    applyStatusTone(m_statusLabel,QString());
 }

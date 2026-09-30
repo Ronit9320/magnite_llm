@@ -6,6 +6,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
+#include <QSaveFile>
+#include <memory>
 
 BackendClient::BackendClient(QObject *parent)
     : QObject(parent)
@@ -127,5 +129,34 @@ void BackendClient::streamPost(const QString &path, const QJsonObject &body,
         delete buf;
         reply->deleteLater();
         if (onDone) onDone(status);
+    });
+}
+
+void BackendClient::download(const QString &path, const QString &destination,
+                             std::function<void(const QString &)> onDone) {
+    auto file = std::make_shared<QSaveFile>(destination);
+    if (!file->open(QIODevice::WriteOnly)) { onDone(file->errorString()); return; }
+    QNetworkRequest request(QUrl(m_baseUrl + path));
+    request.setTransferTimeout(60000);
+    auto *reply = m_nam->get(request);
+    reply->setReadBufferSize(1024*1024);
+    auto error = std::make_shared<QString>();
+    auto drain = [reply,file,error]() {
+        const QByteArray bytes = reply->readAll();
+        if (error->isEmpty() && file->write(bytes) != bytes.size()) {
+            *error = file->errorString();
+            reply->abort();
+        }
+    };
+    connect(reply,&QNetworkReply::readyRead,this,drain);
+    connect(reply,&QNetworkReply::finished,this,[reply,file,error,drain,onDone]() {
+        drain();
+        if (error->isEmpty() && (reply->error() != QNetworkReply::NoError ||
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200))
+            *error = reply->errorString();
+        if (error->isEmpty() && !file->commit()) *error = file->errorString();
+        if (!error->isEmpty()) file->cancelWriting();
+        reply->deleteLater();
+        onDone(*error);
     });
 }

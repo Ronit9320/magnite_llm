@@ -3,6 +3,7 @@
 #include "panels/basepanel.h"
 
 #include <QList>
+class QTimer;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -23,7 +24,7 @@ public:
     explicit RagPanel(QWidget *parent = nullptr);
 
     void setBackendClient(BackendClient *client);
-    void refresh();
+    void refresh(bool preserveStatus = false);
 
     QString settingsJson() const override;
 
@@ -63,4 +64,9 @@ private:
     QLabel *m_statusLabel;
     QList<RagDocCard *> m_cards;
     bool m_loadingConfig;
+    bool m_mutating = false;
+    bool m_queryBusy = false;
+    quint64 m_collectionRevision = 0;
+    QPushButton *m_queryButton = nullptr;
+    QTimer *m_configTimer = nullptr;
 };

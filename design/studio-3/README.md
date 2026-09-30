@@ -37,7 +37,10 @@ Header polish: replace the backend-style badge with a quiet dot and Connecting /
 
 ## Contributor rules for the local release
 
-This is the active design; earlier design folders are historical references.
+The user-requested [Studio Motion refinement](../intuitive-motion/README.md)
+on `design/intuitive-motion` extends this foundation with a Konark-inspired wheel,
+consistent interaction states and release UI polish. Its notes supersede layout
+and logo details above; these contribution rules still apply.
 Use theme tokens in `app/src/theme.h` and the active QSS resource. Never add hex
 colors directly to widget code or QSS; extend Theme::selfCheck with new tokens.
 SVG icons use `stroke="currentColor"` and Theme::coloredIcon for tinting.

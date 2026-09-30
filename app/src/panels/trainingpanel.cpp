@@ -61,7 +61,6 @@ TrainingPanel::TrainingPanel(QWidget *parent)
     , m_warmupSpin(nullptr)
     , m_maxLengthSpin(nullptr)
     , m_qloraCheck(nullptr)
-    , m_cacheCheck(nullptr)
     , m_startButton(nullptr)
     , m_stopButton(nullptr)
     , m_log(nullptr)
@@ -93,6 +92,7 @@ void TrainingPanel::setupUi() {
     setupScroll->setMinimumWidth(290);
     setupScroll->setWidget(layout->parentWidget());
     columns->addWidget(setupScroll);
+    m_setup = setupScroll;
     auto *monitor = new QWidget(this);
     monitor->setLayout(right);
     columns->addWidget(monitor);
@@ -100,8 +100,10 @@ void TrainingPanel::setupUi() {
 
     m_modelCombo = new QComboBox(this);
     m_modelCombo->setEditable(true);
+    m_modelCombo->setMinimumContentsLength(12);
+    m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_modelCombo->setInsertPolicy(QComboBox::NoInsert);
-    m_modelCombo->setPlaceholderText("e.g. meta-llama/Llama-3.2-1B-Instruct");
+    m_modelCombo->lineEdit()->setPlaceholderText("Choose a model or enter its ID");
     Surface::field(layout, "Base model", m_modelCombo);
     auto *modelRow = new QHBoxLayout();
     auto *refreshBtn = new QPushButton("Refresh", this);
@@ -117,8 +119,10 @@ void TrainingPanel::setupUi() {
 
     m_datasetCombo = new QComboBox(this);
     m_datasetCombo->setEditable(true);
+    m_datasetCombo->setMinimumContentsLength(12);
+    m_datasetCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_datasetCombo->setInsertPolicy(QComboBox::NoInsert);
-    m_datasetCombo->setPlaceholderText("Select an ingested dataset");
+    m_datasetCombo->lineEdit()->setPlaceholderText("Choose an imported dataset");
     Surface::field(layout, "Dataset", m_datasetCombo);
     auto *datasetRow = new QHBoxLayout();
     auto *ingestBtn = new QPushButton("Import file...", this);
@@ -138,18 +142,22 @@ void TrainingPanel::setupUi() {
     layout->addWidget(m_hyperBox);
     m_hyperBox->hide();
     connect(advanced,&QPushButton::toggled,m_hyperBox,&QWidget::setVisible);
+    connect(advanced,&QPushButton::toggled,this,[advanced](bool expanded) {
+        advanced->setText(expanded ? "Hyperparameters ▴" : "Hyperparameters ▾");
+    });
     auto *defaults = new QLabel("LoRA rank 8 · alpha 16 · 3 epochs by default",this);
     defaults->setObjectName("cardMeta");
     defaults->setWordWrap(true);
     layout->addWidget(defaults);
 
-    m_qloraCheck = new QCheckBox("Use QLoRA (quantized base model)", this);
+    m_qloraCheck = new QCheckBox("Use 4-bit QLoRA", this);
     m_qloraCheck->setChecked(true);
+    m_qloraCheck->setToolTip("Uses 4-bit NF4 weights. Turn off to choose another precision in Hyperparameters.");
     layout->addWidget(m_qloraCheck);
 
-    m_cacheCheck = new QCheckBox("Cache trained adapter (for hot-switching)", this);
-    m_cacheCheck->setChecked(true);
-    layout->addWidget(m_cacheCheck);
+    auto *savedHint = new QLabel("Completed adapters appear in your Adapters workspace.",this);
+    savedHint->setObjectName("cardMeta"); savedHint->setWordWrap(true);
+    layout->addWidget(savedHint);
 
     connect(m_qloraCheck, &QCheckBox::toggled, this, &TrainingPanel::onQuantizationToggled);
     onQuantizationToggled();
@@ -171,9 +179,10 @@ void TrainingPanel::setupUi() {
     sessionCopy->setSpacing(8);
     sessionCopy->addStretch();
     sessionCopy->addWidget(m_progressLabel);
-    auto *guidance = new QLabel("Choose a model and dataset, then start your run. Follow progress here as your adapter learns.",this);
+    auto *guidance = m_runHint = new QLabel("Choose a model and dataset, then start your run. Follow progress here as your adapter learns.",this);
     guidance->setObjectName("cardMeta");
     guidance->setWordWrap(true);
+    guidance->setTextFormat(Qt::PlainText);
     sessionCopy->addWidget(guidance);
     sessionCopy->addStretch();
     session->addLayout(sessionCopy,1);
@@ -190,6 +199,8 @@ void TrainingPanel::setupUi() {
     m_startButton->setIcon(Theme::coloredIcon("play", QColor(Theme::accentText())));
     m_stopButton = new QPushButton("Stop", this);
     m_stopButton->setObjectName("destructiveBtn");
+    m_stopButton->setProperty("themeIcon","circle-stop");
+    m_stopButton->setProperty("themeIconTone","error");
     m_stopButton->setIcon(Theme::coloredIcon("circle-stop", QColor(Theme::statusError())));
     m_stopButton->setEnabled(false);
     btns->addWidget(m_startButton);
@@ -219,6 +230,7 @@ void TrainingPanel::setupUi() {
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     contentLayout()->addWidget(m_statusLabel);
     m_statusLabel->setText("Ready. Select a base model and an ingested dataset.");
@@ -234,8 +246,12 @@ void TrainingPanel::setupUi() {
 void TrainingPanel::setupHyperparameters(QWidget *parent) {
     auto *hyperBox = new QGroupBox("Hyperparameters", parent);
     auto *form = new QFormLayout(hyperBox);
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     m_targetModules = new QComboBox(hyperBox);
+    m_targetModules->setMinimumContentsLength(10);
+    m_targetModules->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_targetModules->addItems({"q_proj,v_proj", "q_proj,k_proj,v_proj,o_proj", "all-linear"});
     form->addRow("Target modules:", m_targetModules);
 
@@ -250,7 +266,7 @@ void TrainingPanel::setupHyperparameters(QWidget *parent) {
     form->addRow("LoRA alpha:", m_alphaSpin);
 
     m_quantCombo = new QComboBox(hyperBox);
-    m_quantCombo->addItems({"None", "4-bit (NF4)", "8-bit (FP8)"});
+    m_quantCombo->addItems({"None", "4-bit (NF4)", "8-bit (bitsandbytes)"});
     form->addRow("Quantization:", m_quantCombo);
 
     m_epochsSpin = new QSpinBox(hyperBox);
@@ -390,6 +406,7 @@ QString TrainingPanel::quantizationCode() const {
 }
 
 void TrainingPanel::onStart() {
+    if (!m_startButton->isEnabled()) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -423,6 +440,9 @@ void TrainingPanel::onStart() {
     body["max_length"] = m_maxLengthSpin->value();
 
     m_startButton->setEnabled(false);
+    m_setup->setEnabled(false);
+    m_progress->setValue(0);
+    m_log->clear();
     m_activity->setActivity(Starfield::Training);
     m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
     m_progressLabel->setText("Preparing your run…");
@@ -433,6 +453,7 @@ void TrainingPanel::onStart() {
             if (status != 202) {
                 m_activity->setActivity(Starfield::Idle);
                 m_activity->setMotionEnabled(false);
+                m_setup->setEnabled(true);
                 m_progressLabel->setText("Ready to retry");
                 m_startButton->setText("Start Training");
                 m_startButton->setEnabled(true);
@@ -458,12 +479,15 @@ void TrainingPanel::onStart() {
 
 void TrainingPanel::onStop() {
     if (m_jobId.isEmpty() || !m_client || !m_client->isReady()) return;
+    if (!m_stopButton->isEnabled()) return;
+    m_stopButton->setEnabled(false);
     m_log->appendPlainText("Cancelling training job...");
     m_client->post("/training/cancel/" + m_jobId, QJsonObject(),
         [this](int status, const QJsonDocument &) {
             if (status == 200) {
                 setStatus("Cancelling...");
             } else {
+                m_stopButton->setEnabled(true);
                 setStatus(QString("Cancel request failed (HTTP %1).").arg(status), "error");
             }
         });
@@ -472,7 +496,7 @@ void TrainingPanel::onStop() {
 void TrainingPanel::onPollStatus() {
     if (m_jobId.isEmpty() || !m_client || !m_client->isReady()) {
         m_pollTimer->stop();
-        m_activity->setMotionEnabled(false);
+        finishJob("Connection lost. Check the local service before starting another run.","error");
         return;
     }
     m_client->get("/training/status/" + m_jobId,
@@ -510,7 +534,7 @@ void TrainingPanel::onPollStatus() {
             if (st == "done" || st == "error" || st == "cancelled") {
                 m_pollTimer->stop();
                 m_log->appendPlainText(QString("[%1] %2").arg(st.toUpper()).arg(message));
-                finishJob(message, st == "done" ? "ok" : "error");
+                finishJob(message, st == "done" ? "ok" : st == "cancelled" ? "warn" : "error");
                 return;
             }
 
@@ -524,17 +548,20 @@ void TrainingPanel::onPollStatus() {
 void TrainingPanel::finishJob(const QString &message, const QString &tone) {
     m_activity->setActivity(Starfield::Idle);
     m_activity->setMotionEnabled(false);
+    m_setup->setEnabled(true);
+    m_progressLabel->setText(tone == "ok" ? "Training complete" : tone == "warn" ? "Training stopped" : "Training interrupted");
     m_startButton->setText("Start Training");
     m_jobId.clear();
     m_startButton->setEnabled(true);
     m_stopButton->setEnabled(false);
     setStatus(message, tone);
-    if (tone != "error")
+    if (tone == "ok")
         emit trainingCompleted();
 }
 
 void TrainingPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
+    if (m_runHint) m_runHint->setText(text);
     applyStatusTone(m_statusLabel, tone);
 }
 
@@ -574,4 +601,5 @@ void TrainingPanel::applySettingsJson(const QString &json) {
     if (o.contains("warmup")) m_warmupSpin->setValue(o["warmup"].toDouble());
     if (o.contains("maxLength")) m_maxLengthSpin->setValue(o["maxLength"].toInt());
     if (o.contains("qlora")) m_qloraCheck->setChecked(o["qlora"].toBool());
+    if (o.contains("quantization")) m_quantCombo->setCurrentText(o["quantization"].toString());
 }

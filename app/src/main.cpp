@@ -1,6 +1,7 @@
 #include <QApplication>
 #include "mainwindow.h"
 #include "theme.h"
+#include "testing/uicheck.h"
 
 #include <QDir>
 #include <QFont>
@@ -14,7 +15,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("Magnite LLM");
 
     const bool selftest = argc > 1 && QString(argv[1]) == "--selftest";
-    if (selftest) {
+    const bool uiCheck = argc > 1 && QString(argv[1]) == "--ui-check";
+    if (selftest || uiCheck) {
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                           QDir::tempPath() + "/magnite-selftest-" + QString::number(QCoreApplication::applicationPid()));
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -33,11 +35,14 @@ int main(int argc, char *argv[]) {
     appFont.setFamily(Theme::bodyFont());
     app.setFont(appFont);
 
+    if (uiCheck) return runUiCheck(argc > 2 ? QString::fromLocal8Bit(argv[2]) : QString());
+
     MainWindow window;
     window.show();
 
     // Dev tool: capture every panel to <dir>/panel-<n>.png, then exit.
     if (argc > 2 && QString(argv[1]) == "--screenshot") {
+        if (qEnvironmentVariableIsSet("MAGNITE_SCREENSHOT_COMPACT")) window.resize(1024,680);
         QTimer::singleShot(400, &window, [&window, dir = QString(argv[2])]() {
             window.captureScreenshots(dir);
         });

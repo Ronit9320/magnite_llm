@@ -26,6 +26,7 @@ inline QString accentIce()    { return QStringLiteral("#FF5C28"); }
 // light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
 inline QString accentHover()   { return QStringLiteral("#FF784E"); }
 inline QString accentActive()  { return QStringLiteral("#E1491B"); }
+inline QString accentLabel()   { return isDark() ? QStringLiteral("#FF784E") : QStringLiteral("#B83D16"); }
 inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
@@ -40,9 +41,9 @@ inline QString glassBorderActive()  { return QStringLiteral("#FF5C28"); }
 
 inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
 inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }
-inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : QStringLiteral("#74786F"); }
+inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : QStringLiteral("#62685F"); }
 
-inline QString statusSuccess() { return QStringLiteral("#FF5C28"); }
+inline QString statusSuccess() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
 inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
 inline QString statusInfo()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
@@ -57,8 +58,8 @@ QString monoFont();
 inline int fontH1()       { return 22; }
 inline int fontH2()       { return 15; }
 inline int fontH3()       { return 14; }
-inline int fontBody()     { return 12; }
-inline int fontBodySm()   { return 11; }
+inline int fontBody()     { return 13; }
+inline int fontBodySm()   { return 12; }
 inline int fontMono()     { return 11; }
 
 // Heading weights (design doc §3).

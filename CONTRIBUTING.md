@@ -19,7 +19,7 @@ update the client and [API documentation](docs/LOCAL_API.md) together.
 
 ## Theme rules
 
-Use the current Studio 03 design; earlier palettes are historical. Add colors to
+Use the Studio 03-based [Studio Motion design](design/intuitive-motion/README.md); earlier palettes are historical. Add colors to
 `app/src/theme.h`, extend Theme::selfCheck, and reference tokens in QSS. Do not
 hardcode hex colors in widgets/stylesheets. Icons use `stroke="currentColor"`
 and Theme::coloredIcon. Preserve keyboard focus, both themes, and reduced motion.
@@ -35,7 +35,13 @@ cmake -S app -B build
 cmake --build build -j2
 PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
 QT_QPA_PLATFORM=offscreen ./build/magnite-app --theme-check
+QT_QPA_PLATFORM=offscreen ./build/magnite-app --ui-check
+QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/magnite-app --ui-check
 ```
+
+The UI check uses a loopback fixture server and isolated settings, with no model
+downloads. Add an output directory after `--ui-check` to capture populated synthetic
+previews. It checks both themes, compact layouts, motion and interaction recovery.
 
 Use disposable data/settings for desktop checks:
 

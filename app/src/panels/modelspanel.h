@@ -57,6 +57,7 @@ private:
     void startPullPolling(const QString &jobId);
     void onCardClicked(ModelCard *card);
     void updateActionButtons();
+    void resetDownload();
     bool isLocalView() const;
     QString selectedId() const;
     ModelCard *cardById(const QString &id) const;
@@ -85,4 +86,5 @@ private:
     QString m_pullJobId;
     QString m_downloadingId;
     QString m_lastSearch;
+    bool m_searching = false;
 };

@@ -3,6 +3,12 @@
 #include <QFontMetrics>
 #include <QEvent>
 #include <QLabel>
+#include <QTextDocument>
+#include <QTextOption>
+#include <QApplication>
+#include <QClipboard>
+#include <QMenu>
+#include <cmath>
 
 namespace {
     // Keep these in sync with the bubble QSS (padding + 1px border each side).
@@ -30,7 +36,14 @@ ChatBubble::ChatBubble(Role role, const QString &text, QWidget *parent)
     m_content->setWordWrap(true);
     m_content->setTextFormat(Qt::PlainText);
     if (parent) parent->installEventFilter(this);
-    m_content->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_content->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    m_content->setAccessibleName(role == User ? "Your message" : "Model response");
+    m_content->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_content,&QWidget::customContextMenuRequested,this,[this](const QPoint &position) {
+        QMenu menu(this);
+        auto *copy = menu.addAction("Copy message");
+        if (menu.exec(m_content->mapToGlobal(position)) == copy) QApplication::clipboard()->setText(m_text);
+    });
     m_content->setMargin(0);
 
     if (!text.isEmpty())
@@ -46,10 +59,19 @@ QSize ChatBubble::measure(const QString &text) const {
 
     const int available = parentWidget() ? parentWidget()->width() - 48 : 680;
     const int innerWidth = qBound(kMinInner, available - 2 * kPadX - 2 * kFrame, kMaxInner);
-    const QRect bounds = fm.boundingRect(QRect(0, 0, innerWidth, 100000),
-                                        Qt::TextWordWrap | Qt::AlignLeft, text);
-    return QSize(qMin(innerWidth, qMax(kMinInner, bounds.width())) + 2 * kPadX + 2 * kFrame,
-                 bounds.height() + 2 * kPadY + 2 * kFrame);
+    int naturalWidth = kMinInner;
+    for (const QString &line : text.split('\n')) naturalWidth = qMax(naturalWidth,fm.horizontalAdvance(line));
+    const int wrapWidth = qMin(innerWidth,naturalWidth+1);
+    QTextDocument document;
+    document.setDocumentMargin(0);
+    document.setDefaultFont(m_content->font());
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    document.setDefaultTextOption(option);
+    document.setPlainText(text);
+    document.setTextWidth(wrapWidth);
+    return QSize(wrapWidth + 2*kPadX + 2*kFrame,
+                 int(std::ceil(document.size().height())) + 2*kPadY + 2*kFrame);
 
 }
 

@@ -38,6 +38,10 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
     content->setLayout(m_contentLayout);
     m_contentLayout->setContentsMargins(0,0,0,0);
     m_contentLayout->setSpacing(8);
+    if (title == "Chat") {
+        root->addWidget(content,1);
+        return;
+    }
     auto *scroll = new QScrollArea(this);
     scroll->setObjectName("cardScroll");
     scroll->setFrameShape(QFrame::NoFrame);

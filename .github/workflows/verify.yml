@@ -48,5 +48,7 @@ jobs:
           cmake --build build -j2
       - name: Theme audit
         run: ./build/magnite-app --theme-check
+      - name: UI interaction and layout checks
+        run: ./build/magnite-app --ui-check
       - name: Desktop and IPC selftest
         run: ./build/magnite-app --selftest

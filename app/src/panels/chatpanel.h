@@ -52,6 +52,7 @@ private:
     void setStatus(const QString &text, const QString &tone = QString());
     void updateStreamingBubble(const QString &text, bool showCursor);
     void scrollToBottom();
+    void updateActions();
     void ensureTrailingStretch();
     QString currentEngineName() const;
 
@@ -77,6 +78,9 @@ private:
     // Input row.
     QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
+    QPushButton *m_loadButton = nullptr;
+    bool m_loading = false;
+    bool m_followOutput = true;
     QPushButton *m_stopButton;
     QPushButton *m_clearButton;
     QLabel *m_statusLabel;

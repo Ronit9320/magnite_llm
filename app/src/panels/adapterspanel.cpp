@@ -1,3 +1,5 @@
+#include "widgets/confirmation.h"
+#include <QFileInfo>
 #include "panels/adapterspanel.h"
 
 #include "backend_client.h"
@@ -91,6 +93,7 @@ void AdaptersPanel::setupUi() {
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
     m_statusLabel->setText("No adapters yet. Train one in the Training panel.");
@@ -139,10 +142,10 @@ void AdaptersPanel::refresh() {
         if (!hasAdapter) {
             setStatus("No adapters yet. Train one in the Training panel.");
         } else if (m_activeAdapterId.isEmpty()) {
-            setStatus(QString("%1 adapter(s). Press Activate on one to serve Chat.")
+            setStatus(QString("%1 adapter(s). Activate an adapter to use it in Playground.")
                           .arg(arr.size()));
         } else {
-            setStatus(QString("%1 adapter(s). The glowing card serves Chat right now.")
+            setStatus(QString("%1 adapter(s). The marked adapter is active in Playground.")
                           .arg(arr.size()));
         }
     });
@@ -161,14 +164,16 @@ void AdaptersPanel::loadActiveAdapter() {
 }
 
 void AdaptersPanel::onActivate(AdapterCard *card) {
-    if (!card || !m_client || !m_client->isReady()) return;
+    if (!card || !m_client || !m_client->isReady() || !isEnabled()) return;
     const QString id = card->id();
     const bool willActivate = (id != m_activeAdapterId);
     QJsonObject body;
     body["adapter_id"] = willActivate ? id : "";
+    setEnabled(false);
     setStatus(willActivate ? "Activating adapter (loading base model + PEFT weights)..."
                            : "Clearing active adapter...");
     m_client->post("/inference/adapter", body, [this, id](int status, const QJsonDocument &doc) {
+        setEnabled(true);
         if (status == 200) {
             const QJsonObject obj = doc.object();
             m_activeAdapterId = obj["active_adapter_id"].toString();
@@ -189,6 +194,7 @@ void AdaptersPanel::onActivate(AdapterCard *card) {
 void AdaptersPanel::onDeleteAdapter(AdapterCard *card) {
     const QString id = card ? card->id() : QString();
     if (id.isEmpty() || !m_client || !m_client->isReady()) return;
+    if (!Ui::confirmRemoval(this,"Delete adapter?","Delete “"+id+"” and its local weights? Export a copy first if you want to keep it.")) return;
     m_client->remove("/adapters/" + id, [this, id](int status, const QJsonDocument &) {
         if (status == 204 || status == 404) {
             if (m_activeAdapterId == id) {
@@ -204,20 +210,27 @@ void AdaptersPanel::onDeleteAdapter(AdapterCard *card) {
 
 void AdaptersPanel::onExportAdapter(AdapterCard *card) {
     const QString id = card ? card->id() : QString();
-    if (id.isEmpty() || !m_client || !m_client->isReady()) return;
-    setStatus("Exporting adapter...");
+    if (id.isEmpty() || !m_client || !m_client->isReady() || !isEnabled()) return;
+    QString destination = QFileDialog::getSaveFileName(this,"Export adapter",
+        QFileInfo(id).fileName()+".zip","Adapter archive (*.zip)");
+    if (destination.isEmpty()) return;
+    setEnabled(false);
+    setStatus("Preparing adapter archive…");
     m_client->post(QString("/adapters/export/%1").arg(id), QJsonObject(),
-                   [this, id](int status, const QJsonDocument &doc) {
-        if (status == 200) {
-            const QJsonObject obj = doc.object();
-            const double size = obj["size_bytes"].toDouble() / 1024.0 / 1024.0;
-            setStatus(QString("Exported '%1' (%2 MB). Download at %3")
-                          .arg(id, QString::number(size, 'f', 2),
-                               obj["download_path"].toString()));
-        } else {
-            setStatus(QString("Export failed (HTTP %1).").arg(status), "error");
-        }
-    });
+        [this,destination](int status,const QJsonDocument &doc) {
+            if (status != 200) {
+                setEnabled(true);
+                setStatus(QString("Export failed (HTTP %1). Your destination file was not changed.").arg(status),"error");
+                return;
+            }
+            setStatus("Saving adapter archive…");
+            m_client->download(doc.object()["download_path"].toString(),destination,
+                [this,destination](const QString &error) {
+                    setEnabled(true);
+                    setStatus(error.isEmpty() ? "Adapter exported to "+destination : "Export failed: "+error,
+                              error.isEmpty() ? "ok" : "error");
+                });
+        });
 }
 
 void AdaptersPanel::onImportAdapter() {

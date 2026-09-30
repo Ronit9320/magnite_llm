@@ -25,6 +25,7 @@ signals:
     void cardClicked(RagDocCard *card, bool ctrl);
 
 protected:
+    void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
 
 private:

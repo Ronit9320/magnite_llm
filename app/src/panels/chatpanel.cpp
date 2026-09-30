@@ -64,7 +64,7 @@ void ChatPanel::setupUi() {
     m_modelCombo->setAccessibleName("Model");
     m_modelCombo->lineEdit()->setPlaceholderText("Choose a model or enter its ID");
     toolbar->addWidget(m_modelCombo, 1);
-    auto *loadBtn = new QPushButton("Load model", this);
+    auto *loadBtn = m_loadButton = new QPushButton("Load model", this);
     toolbar->addWidget(loadBtn);
     auto *optionsBtn = new QPushButton("Model settings", this);
     optionsBtn->setObjectName("chatSettingsToggle");
@@ -103,7 +103,9 @@ void ChatPanel::setupUi() {
     m_adapterPill = new QLabel("adapter: —", this);
     for (auto *pill : {m_enginePill, m_modelPill, m_adapterPill}) {
         pill->setObjectName("chatPill");
+        pill->setTextFormat(Qt::PlainText);
         pill->setWordWrap(true);
+        pill->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
         pills->addWidget(pill);
     }
     m_adapterPill->hide();
@@ -132,17 +134,21 @@ void ChatPanel::setupUi() {
     m_chatScroll->setFrameShape(QFrame::NoFrame);
     m_chatScroll->viewport()->setAutoFillBackground(false);
     m_chatScroll->setMinimumHeight(180);
+    connect(m_chatScroll->verticalScrollBar(),&QScrollBar::valueChanged,this,[this](int value) {
+        m_followOutput = value >= m_chatScroll->verticalScrollBar()->maximum()-24;
+    });
     m_chatHost = new QWidget(this);
     m_chatLayout = new QVBoxLayout(m_chatHost);
-    m_chatLayout->setContentsMargins(4, 20, 12, 20);
-    m_chatLayout->setSpacing(20);
+    m_chatLayout->setContentsMargins(4, 8, 12, 8);
+    m_chatLayout->setSpacing(14);
     m_welcome = new QWidget(m_chatHost);
     auto *welcome = new QVBoxLayout(m_welcome);
-    welcome->setSpacing(14);
+    welcome->setSpacing(8);
+    welcome->setContentsMargins(0,4,0,4);
     welcome->addStretch();
     auto *seal = new Starfield(m_welcome);
     seal->setProperty("kineticGlyph", true);
-    seal->setFixedSize(44, 44);
+    seal->setFixedSize(64, 64);
     welcome->addWidget(seal, 0, Qt::AlignHCenter);
     auto *eyebrow = new QLabel("THE MAGNITE WORKSPACE", m_welcome);
     eyebrow->setObjectName("chatEyebrow");
@@ -189,7 +195,6 @@ void ChatPanel::setupUi() {
             m_input->setFocus();
         });
     }
-    welcome->addSpacing(6);
     welcome->addLayout(suggestions);
     welcome->addStretch();
     m_chatLayout->addWidget(m_welcome, 1);
@@ -233,6 +238,7 @@ void ChatPanel::setupUi() {
     conversation->addWidget(shortcutHint);
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("statusLabel");
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     m_statusLabel->setAlignment(Qt::AlignCenter);
     conversation->addWidget(m_statusLabel);
@@ -251,6 +257,8 @@ void ChatPanel::setupUi() {
         m_cursorVisible = !m_cursorVisible;
         if (m_streamBubble) m_streamBubble->setCursorVisible(m_cursorVisible);
     });
+    connect(m_input,&QPlainTextEdit::textChanged,this,&ChatPanel::updateActions);
+    updateActions();
     setStatus("Choose and load a model to get started.");
 }
 
@@ -352,6 +360,7 @@ QString ChatPanel::currentEngineName() const {
 }
 
 void ChatPanel::onLoadModel() {
+    if (m_loading || m_streaming) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -366,17 +375,19 @@ void ChatPanel::onLoadModel() {
     body["model"] = modelRef;
     if (!engineName.isEmpty()) body["engine"] = engineName;
 
-    setStatus("Loading model (this may download the GGUF file)...");
-    m_sendButton->setEnabled(false);
+    m_loading = true;
+    updateActions();
+    setStatus("Loading model… First use may download model files.");
 
     m_client->post("/inference/load", body, [this](int status, const QJsonDocument &doc) {
+        m_loading = false;
+        updateActions();
         if (status == 200) {
             const QJsonObject obj = doc.object();
             const QJsonObject engine = obj["engine"].toObject();
             setStatus(QString("Loaded: %1 | %2")
                           .arg(engine["description"].toString(),
                                obj["loaded_model"].toString()));
-            m_sendButton->setEnabled(true);
             refreshEngineStatus();
             m_input->setFocus();
         } else {
@@ -384,7 +395,6 @@ void ChatPanel::onLoadModel() {
                                     ? doc.object()["detail"].toString()
                                     : QString("HTTP %1").arg(status);
             setStatus("Load failed: " + err, "error");
-            m_sendButton->setEnabled(true);
         }
     });
 }
@@ -400,6 +410,7 @@ void ChatPanel::ensureTrailingStretch() {
 }
 
 void ChatPanel::onSend() {
+    if (m_loading) return;
     const QString text = m_input->toPlainText().trimmed();
     if (text.isEmpty() || m_streaming) return;
     if (!m_client || !m_client->isReady()) {
@@ -407,6 +418,7 @@ void ChatPanel::onSend() {
         return;
     }
 
+    m_followOutput = true;
     m_welcome->hide();
     m_input->clear();
 
@@ -426,6 +438,7 @@ void ChatPanel::onSend() {
     m_streamFailed = false;
     const quint64 requestId = ++m_requestId;
     m_streaming = true;
+    updateActions();
     m_cursorVisible = false;
     m_activity->setActivity(Starfield::Chat);
     m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
@@ -473,7 +486,7 @@ void ChatPanel::onSend() {
                 m_sendButton->setText("Send  ↑");
                 m_cursorTimer->stop();
                 m_cursorVisible = false;
-                m_sendButton->setEnabled(true);
+                updateActions();
                 m_stopButton->setEnabled(false);
                 setStatus("Ready.");
             }
@@ -500,7 +513,7 @@ void ChatPanel::onSend() {
                 m_sendButton->setText("Send  ↑");
                 m_cursorTimer->stop();
                 m_cursorVisible = false;
-                m_sendButton->setEnabled(true);
+                updateActions();
                 m_stopButton->setEnabled(false);
             }
         });
@@ -521,7 +534,7 @@ void ChatPanel::onStop() {
     m_sendButton->setText("Send  ↑");
     m_cursorTimer->stop();
     m_cursorVisible = false;
-    m_sendButton->setEnabled(true);
+    updateActions();
     m_stopButton->setEnabled(false);
     setStatus("Generation stopped.");
 }
@@ -550,7 +563,7 @@ void ChatPanel::onClearChat() {
     m_chatLayout->addWidget(m_welcome, 1);
     m_chatLayout->invalidate();
     m_chatHost->updateGeometry();
-    m_sendButton->setEnabled(true);
+    updateActions();
     m_stopButton->setEnabled(false);
     setStatus("Chat cleared.");
 }
@@ -559,15 +572,28 @@ void ChatPanel::updateStreamingBubble(const QString &text, bool showCursor) {
     if (!m_streamBubble) return;
     m_streamBubble->setText(text);
     m_streamBubble->setCursorVisible(showCursor && !QSettings().value("appearance/studio3ReducedMotion",false).toBool());
+    const bool follow = m_followOutput;
     m_chatLayout->invalidate();
     m_chatLayout->activate();
     m_chatHost->updateGeometry();
-    scrollToBottom();
+    if (follow) scrollToBottom();
 }
 
 void ChatPanel::scrollToBottom() {
-    QScrollBar *sb = m_chatScroll->verticalScrollBar();
-    sb->setValue(sb->maximum());
+    QTimer::singleShot(0,this,[this]() {
+        auto *bar = m_chatScroll->verticalScrollBar();
+        bar->setValue(bar->maximum());
+        m_followOutput = true;
+    });
+}
+
+void ChatPanel::updateActions() {
+    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_input->toPlainText().trimmed().isEmpty());
+    m_loadButton->setEnabled(!m_streaming && !m_loading);
+    m_loadButton->setText(m_loading ? "Loading…" : "Load model");
+    m_modelCombo->setEnabled(!m_streaming && !m_loading);
+    m_engineCombo->setEnabled(!m_streaming && !m_loading);
+    m_clearButton->setEnabled(!m_loading);
 }
 
 void ChatPanel::setStatus(const QString &text, const QString &tone) {

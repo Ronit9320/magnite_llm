@@ -18,7 +18,7 @@ recorded demo, and remaining source changes are not claimed complete.
 
 ## Release scope
 
-Ship the existing native desktop workflow: acquire/manage models, train LoRA/QLoRA adapters locally, manage and activate adapters, serve local inference, and ingest/retrieve documents for RAG chat. Keep the current Studio 03 interface.
+Ship the existing native desktop workflow: acquire/manage models, train LoRA/QLoRA adapters locally, manage and activate adapters, serve local inference, and ingest/retrieve documents for RAG chat. Use the Studio 03-based Studio Motion interface; see the [UI polish verification](docs/release/UI_POLISH.md).
 
 Hosted inference, cloud training, provider billing, cloud credentials, and cloud job infrastructure are outside this release. Build-plan phases 7 and 8 are excluded; only the local portions of phases 9 and 10 apply.
 
@@ -41,7 +41,7 @@ Unchecked items below are work or evidence still required, not assertions that e
 
 ### 1. Freeze the local product surface
 
-- [ ] Remove the disabled Hosted API choice, endpoint/key controls, and hosted-only members from Settings. Preserve cleanup of legacy stored keys. Verify saved engine preferences still map correctly after UI changes.
+- [x] Remove the disabled Hosted API choice, endpoint/key controls, and hosted-only members from Settings. Preserve cleanup of legacy stored keys. Verified saved indices remain Auto=0, vLLM=1, llama.cpp=2; see UI_POLISH.md.
 - [x] Remove cloud/hosted promises from the public roadmap and release copy. Label historical audit/design material as historical where necessary; retain its evidence.
 - [x] Publish a feature/compatibility table: GGUF → llama.cpp; transformer weights → torch or separately installed vLLM; Ollama records → Ollama; trained PEFT adapters → torch. State that GGUF inference weights are not the ordinary PEFT training input.
 - [x] Document the existing serving endpoints, request examples, streaming terminal/error events, non-streaming responses, loopback binding, and lifecycle. Avoid advertising OpenAI compatibility beyond what the API actually implements.
@@ -87,11 +87,11 @@ Completion: no known data-loss, unauthorized local-file operation, orphan-proces
 - [x] Configure CI for offline backend regressions, CMake build, theme audit, and the bare desktop selftest with loopback access.
 - [ ] Run the workflow on GitHub and fix any hosted-environment issues; YAML validation and local passes do not establish hosted CI success.
 - [x] Verify the current baseline: 24 regressions, build, theme, bare desktop test, all five feature tests, and the combined real workflow pass; see docs/release/VERIFICATION.md.
-- [ ] Run all feature selftests on the release candidate with disposable MAGNITE_HOME and XDG_CONFIG_HOME: pull, inference, training, adapters, and RAG.
+- [x] Run all five feature selftests on the UI candidate with disposable MAGNITE_HOME and XDG_CONFIG_HOME: pull, inference, training, adapters, and RAG. Passed 2026-09-30; see docs/release/UI_POLISH.md. Rerun after subsequent functional changes.
 - [ ] Run `backend/tests/live_workflow.py` for the combined train → adapter → RAG chat → export/import workflow.
 - [ ] Test representative usable models and a mixed document corpus in addition to tiny random models. Record memory, latency, cancellation, retrieval relevance, and context-limit behavior; token delivery alone does not establish answer quality.
 - [ ] Verify live vLLM/Ollama if they are advertised as supported; otherwise label those integrations experimental and keep the supported path clear.
-- [ ] Smoke-test light/dark modes, keyboard navigation, reduced motion, display scaling, and long/error content across all six panels.
+- [x] Smoke-test light/dark modes, keyboard navigation, reduced motion, display scaling, and long/error content across all six panels. Offscreen checks passed at 1×/2×; native desktop and assistive-technology review remain separate.
 - [ ] Store a release verification report with commit, environment, commands, results, and known limitations. Temporary `/tmp` logs from previous work are not release evidence available to users.
 
 Completion: reproducible checks pass for the exact candidate commit and its advertised support matrix.
@@ -115,7 +115,7 @@ Completion: a user can understand, install, use, and troubleshoot the released p
 - [ ] Add independently managed download/ingestion jobs with visible stages, progress, cancel, and retry. Current cooperative cleanup waits for native calls to return; do not describe cancel as immediate.
 - [ ] Expose RAG similarity threshold and embedding-model state coherently; add a deliberate reindex flow for model changes. Current configuration guards should remain until safe reindexing exists.
 - [ ] Show retrieved passages and document sources alongside RAG answers so users can inspect grounding.
-- [ ] Correct the 8-bit training UI label: it says FP8, while the backend selects bitsandbytes 8-bit loading. Documented without source changes.
+- [x] Correct the 8-bit training UI label to “8-bit (bitsandbytes)”.
 - [ ] Correct RAG schema descriptions that call word-based chunk sizes “tokens”; review related counters/labels for the same mismatch.
 - [ ] Measure corpus limits and publish them; improve batching/retrieval scale only where measurements justify it.
 - [ ] Add dataset preview/validation feedback and a training summary users can inspect before starting expensive runs.
@@ -138,7 +138,7 @@ These are prioritized improvements, not a reason to restart implemented systems 
 - Public/LAN inference serving and a full OpenAI-compatible API.
 - Native vLLM multi-LoRA and llama.cpp adapter conversion/hot-switching.
 - A vector-database replacement without measured need.
-- UI redesign and unrelated new product features.
+- Unrelated new product features. The subsequently requested UI refinement is recorded in docs/release/UI_POLISH.md.
 
 ## Execution order and release gate
 

@@ -6,6 +6,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStyle>
@@ -31,6 +32,9 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     setMinimumWidth(230);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     setCursor(Qt::PointingHandCursor);
+    setFocusPolicy(Qt::StrongFocus);
+    setAccessibleName(m_id);
+    setAccessibleDescription("Press Space to select");
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 12, 12, 12);
@@ -42,12 +46,16 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     auto *name = new QLabel(m_id, this);
     name->setObjectName(QStringLiteral("cardTitle"));
     name->setWordWrap(true);
+    name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    name->setToolTip(m_id);
     nameRow->addWidget(name, 1);
     if (!isHub) {
         const QString arch = data.value("architecture").toString();
         if (!arch.isEmpty()) {
             auto *badge = new QLabel(arch, this);
             badge->setObjectName(QStringLiteral("archBadge"));
+            badge->setWordWrap(true);
+            badge->setMaximumWidth(110);
             nameRow->addWidget(badge, 0, Qt::AlignTop);
         }
     }
@@ -89,7 +97,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     auto *footRow = new QHBoxLayout();
     footRow->setSpacing(6);
     const QString license = data.value("license").toString();
-    auto *licenseLabel = new QLabel(license.isEmpty() ? QStringLiteral("Open") : license, this);
+    auto *licenseLabel = new QLabel(license.isEmpty() ? QStringLiteral("License not specified") : license, this);
     licenseLabel->setObjectName(QStringLiteral("cardMeta"));
     footRow->addWidget(licenseLabel);
     if (isHub) {
@@ -104,6 +112,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     footRow->addStretch(1);
     layout->addLayout(footRow);
 
+    licenseLabel->setWordWrap(true);
     appendProgressRow();
     auto *actions = new QHBoxLayout();
     auto *state = new QLabel(isHub ? "Available on the Hub" : "✓ Ready locally",this);
@@ -113,6 +122,11 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     action->setObjectName("primaryBtn");
     actions->addWidget(action);
     layout->addLayout(actions);
+    action->setAccessibleName((isHub ? "Download " : "Load ")+m_id);
+    for (auto *label : findChildren<QLabel *>()) {
+        label->setTextFormat(Qt::PlainText);
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
     connect(action,&QPushButton::clicked,this,[this]() { emit actionRequested(this); });
 }
 
@@ -153,12 +167,27 @@ void ModelCard::setSelected(bool selected) {
     if (m_selected == selected) return;
     m_selected = selected;
     setProperty("selected", selected);
+    setAccessibleDescription(selected ? "Selected. Press Space to select." : "Press Space to select.");
     style()->unpolish(this);
     style()->polish(this);
+    update();
 }
 
 void ModelCard::mousePressEvent(QMouseEvent *event) {
-    Q_UNUSED(event);
-    emit cardClicked(this);
+    if (event->button() == Qt::LeftButton) {
+        setFocus(Qt::MouseFocusReason);
+        emit cardClicked(this);
+        event->accept();
+        return;
+    }
     QFrame::mousePressEvent(event);
+}
+
+void ModelCard::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Space || event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (!event->isAutoRepeat()) emit cardClicked(this);
+        event->accept();
+        return;
+    }
+    QFrame::keyPressEvent(event);
 }

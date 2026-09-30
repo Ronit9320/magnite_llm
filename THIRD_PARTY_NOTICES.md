@@ -17,6 +17,11 @@ matching should be confirmed before a binary bundle is published.
 
 ## Icons and historical design assets
 
+The Konark-inspired Magnite wheel in `app/src/widgets/brandmark.cpp` is original
+code-generated vector geometry covered by the project license. Its PNG/SVG exports
+live in `design/intuitive-motion/brand/`. Reference photographs informed the
+architectural motif but were not copied or bundled; see the design notes for links.
+
 `app/resources/icons/` contains 24 SVG files described by the project as
 Lucide-style. Their SVGs do not carry origin/license notices. Styling or visual
 similarity alone is insufficient proof of upstream provenance. **Release gate:**

@@ -7,6 +7,7 @@
 
 class QPaintEvent;
 class QPushButton;
+class QLabel;
 
 // A glass card for a trained LoRA/QLoRA adapter (design doc §8). Shows the
 // adapter name (Space Grotesk), a base-model badge, rank, method pill
@@ -31,12 +32,9 @@ signals:
     void deleteRequested(AdapterCard *card);
     void importRequested();
 
-protected:
-    // Draws the accent rim-glow behind the QSS border when the card is active.
-    void paintEvent(QPaintEvent *event) override;
-
 private:
     QPushButton *m_activateButton;
+    QLabel *m_activeLabel = nullptr;
     QString m_id;
     bool m_active = false;
 };

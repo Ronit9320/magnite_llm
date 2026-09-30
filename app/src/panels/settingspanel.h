@@ -10,7 +10,7 @@ class QLabel;
 class QPushButton;
 
 // Settings panel: app-level configuration with persistence via QSettings.
-// This is the canonical owner of global settings (engine, data dirs, keys).
+// This is the canonical owner of global settings (engine, data directory, appearance).
 class SettingsPanel : public BasePanel {
     Q_OBJECT
 
@@ -31,9 +31,6 @@ private:
 
     QComboBox *m_engineOverride;
     QLineEdit *m_dataDir;
-    QLineEdit *m_hostedEndpoint;
-    QLineEdit *m_hostedKey;
-    QCheckBox *m_telemetryOptIn;
     QCheckBox *m_stars = nullptr;
     QCheckBox *m_reducedMotion = nullptr;
     QPushButton *m_saveButton;

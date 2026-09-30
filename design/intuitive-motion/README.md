@@ -1,47 +1,61 @@
 # Magnite — Studio Motion
 
-UI exploration on `design/intuitive-motion`, based on master’s Studio 03. This
-branch implements the user-requested redesign; Studio 03 remains the starting
-point for its paper, graphite and orange palette and native workspace navigation.
+The user-requested refinement on `design/intuitive-motion` builds on master's
+Studio 03 palette and native workspace navigation. The final polish pass covers
+Library, Training, Knowledge, Adapters, Playground and Settings.
 
-- A wider navigation rail gives labels room and introduces a persistent seal.
-- The existing radial logo gains two registration rings, 48 fine markings,
-  twelve rounded rays and a faceted core. Qt paints the mark at any size using
-  the current theme; there is no bitmap scaling or additional asset dependency.
-- Rounded surfaces, larger control targets and stronger headings carry across
-  Library, Training, Knowledge, Adapters, Playground and Settings.
-- Training opens with the run monitor and metrics. A scrollable setup inspector
-  keeps hyperparameters reachable in smaller windows. Preparing and Training
-  button labels follow actual request/job state; the seal rotates with an orbit
-  while a job is submitted and runs. Completion and failure stop its motion.
-- The conversation composer highlights on focus. A compact animated seal and
-  Responding label accompany generation. Completion, interruption, clearing
-  and request failures restore the send action and hide the activity indicator.
-- Mouse and keyboard button activation get a 320 ms ripple while native Qt
-  actions and focus remain intact. Existing panel fades remain in place.
+## Identity and motion
 
-Light/dark appearance and the existing Reduce motion preference remain available.
-Reduced motion freezes activity marks, suppresses ripples and blinking response
-cursors, and skips transitions. Animation timers stop when marks are hidden or
-the application is inactive. The sidebar mark stays static; ambient welcome
-marks retain their slow rotation. Idle training marks stay static.
+The original vector mark is inspired by the Konark Sun Temple wheel: eight
+sculpted principal spokes, eight alternating slender spokes, a beaded rim and
+concentric hub. Reference: [Konark wheel photograph](https://commons.wikimedia.org/wiki/File:Konark_ei2-15.jpg)
+and [UNESCO's temple description](https://whc.unesco.org/en/list/246).
+No photograph or traced asset is shipped. `BrandMark` draws the geometry natively
+with theme colors and simplifies it at small icon sizes.
 
-All colors come from `app/src/theme.h`; the stylesheet continues to use the
-existing theme resource alias. No backend or inference engine changes.
+![Konark-inspired Magnite wheel](brand/konark-wheel.png)
 
-## Review
+[Vector export](brand/konark-wheel.svg). The same geometry appears in the app icon,
+sidebar, training session and conversation welcome.
 
-Build and launch using the repository’s standard commands:
+Training and chat animate the wheel while work is active. Completion, cancellation
+and errors restore the idle state. Native buttons respond to mouse and keyboard
+activation with a short ripple. Reduced motion freezes the wheel, removes ripples,
+skips transitions and suppresses the response cursor blink. Hidden or inactive
+animations stop their timers; the sidebar and idle training mark stay static.
 
-```bash
-cmake -S app -B build
-cmake --build build -j4
-./build/magnite-app
-```
+## Interaction polish
 
-Static review captures in `previews/` show every workspace in both modes.
-Verification includes the theme audit, bare desktop selftest (including chat
-error recovery and activity reset), and a temporary Qt runtime probe that
-compares activity frames, checks static reduced-motion frames, and exercises
-mouse/keyboard clicks and ripple cleanup. Real-model training and generation
-were not run for this design pass.
+- Consistent typography, control targets, theme contrast, focus and disabled states.
+- Compact layouts with a pinned chat composer, wrapping metadata and a scrollable
+  training inspector; expanded hyperparameters fit without horizontal scrolling.
+- Keyboard-selectable model/document cards and clear destructive confirmations.
+- Training submission, cancellation and retry states; chat stream/load safeguards
+  and scroll position preservation while reading previous messages.
+- Clear download/query/ingestion failures and retry recovery. Adapter exports use
+  a Save dialog and atomic file writes that preserve an existing file on failure.
+- Local-only runtime settings, immediate appearance preferences and explicit save
+  feedback. Unsupported hosted controls and nonfunctional options are removed.
+
+Colors remain in `app/src/theme.h`; the token-based QSS preserves both themes.
+Backend route contracts and ML engines are unchanged.
+
+## Review and verification
+
+Build with `cmake -S app -B build` and `cmake --build build -j4`, then launch
+`./build/magnite-app`.
+
+- [Dark training](previews/dark/panel-1.png), [light Settings](previews/light/panel-5.png),
+  [compact Playground](previews/compact/panel-4.png).
+- [Running training](previews/states/training-running.png),
+  [expanded compact setup](previews/states/training-expanded-compact.png),
+  [conversation](previews/states/chat-conversation.png).
+
+Full-app captures show empty disposable workspaces at 1280×820 and 1024×680.
+The header can show Connecting because capture starts before backend readiness.
+Populated `states/` captures use synthetic fixture data, not model outputs.
+
+The build, theme audit, UI checks at normal and 2× scale, 24 backend regressions,
+bare desktop selftest and all five real-model feature selftests passed.
+See [dated evidence and limitations](../../docs/release/UI_POLISH.md).
+`--ui-check [capture-dir]` now provides repeatable interaction/layout checks in CI.

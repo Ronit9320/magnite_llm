@@ -35,6 +35,10 @@ public:
     void streamPost(const QString &path, const QJsonObject &body,
                     SseEvent onEvent, SseDone onDone);
 
+    // Stream an export into an atomic save file; an error leaves any existing file intact.
+    void download(const QString &path, const QString &destination,
+                  std::function<void(const QString &error)> onDone);
+
     void abortAll();
     void abortStream();
 

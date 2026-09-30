@@ -14,6 +14,8 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Svg)
 
 set(MAGNITE_SOURCES
+    src/testing/uicheck.cpp
+    src/testing/uicheck.h
     src/main.cpp
     src/mainwindow.cpp
     src/theme.cpp
@@ -26,10 +28,13 @@ set(MAGNITE_SOURCES
     src/widgets/flowlayout.cpp
     src/widgets/clickfeedback.cpp
     src/widgets/clickfeedback.h
+    src/widgets/brandmark.cpp
+    src/widgets/brandmark.h
     src/widgets/starfield.cpp
     src/widgets/starfield.h
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
+    src/widgets/confirmation.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp

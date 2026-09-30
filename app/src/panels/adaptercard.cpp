@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <QDateTime>
 
 AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     : QFrame(parent)
@@ -21,7 +22,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
 
     auto *row = new QHBoxLayout(this);
     row->setContentsMargins(16,14,16,14);
-    row->setSpacing(24);
+    row->setSpacing(16);
     auto *layout = new QVBoxLayout();
     row->addLayout(layout,1);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -30,20 +31,26 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     // Row 1: name (Space Grotesk) + base-model badge.
     auto *nameRow = new QHBoxLayout();
     nameRow->setSpacing(8);
-    auto *name = new QLabel(m_id, this);
+    auto *name = new QLabel(data.value("name").toString(m_id), this);
     name->setObjectName(QStringLiteral("cardTitle"));
     name->setWordWrap(true);
+    name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    name->setToolTip(m_id);
     nameRow->addWidget(name, 1);
+    m_activeLabel = new QLabel("Active in Playground",this);
+    m_activeLabel->setObjectName("activeBadge");
+    m_activeLabel->hide();
+    layout->addWidget(m_activeLabel);
+    layout->addLayout(nameRow);
     const QString baseModel = data.value("base_model").toString();
     if (!baseModel.isEmpty()) {
-        auto *badge = new QLabel(baseModel, this);
-        badge->setObjectName(QStringLiteral("archBadge"));
+        auto *badge = new QLabel("Base model · "+baseModel, this);
+        badge->setObjectName(QStringLiteral("cardMeta"));
         badge->setToolTip("Base model: " + baseModel);
         badge->setWordWrap(true);
-        badge->setMaximumWidth(240);
-        nameRow->addWidget(badge, 0, Qt::AlignTop);
+        badge->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        layout->addWidget(badge);
     }
-    layout->addLayout(nameRow);
 
     // Row 2: rank, method pill, size, trained date.
     auto *metaRow = new QHBoxLayout();
@@ -72,7 +79,9 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
         auto *dateDot = new QLabel(QStringLiteral("·"), this);
         dateDot->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(dateDot);
-        auto *date = new QLabel(trainedAt, this);
+        const auto timestamp = QDateTime::fromString(trainedAt,Qt::ISODate);
+        auto *date = new QLabel(timestamp.isValid() ? timestamp.date().toString("dd MMM yyyy") : trainedAt.left(10), this);
+        date->setToolTip(trainedAt);
         date->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(date);
     }
@@ -88,18 +97,14 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     auto *exportButton = new QPushButton(QStringLiteral("Export"), this);
     exportButton->setObjectName(QStringLiteral("cardBtn"));
     exportButton->setCursor(Qt::PointingHandCursor);
-    auto *importButton = new QPushButton(QStringLiteral("Import"), this);
-    importButton->setObjectName(QStringLiteral("cardBtn"));
-    importButton->setCursor(Qt::PointingHandCursor);
     auto *deleteButton = new QPushButton(QStringLiteral("Delete"), this);
     deleteButton->setObjectName(QStringLiteral("cardDanger"));
     deleteButton->setCursor(Qt::PointingHandCursor);
     btnRow->addWidget(m_activateButton);
     btnRow->addWidget(exportButton);
-    btnRow->addWidget(importButton);
     btnRow->addWidget(deleteButton);
     btnRow->addStretch(1);
-    row->addLayout(btnRow);
+    layout->addLayout(btnRow);
 
     connect(m_activateButton, &QPushButton::clicked, this, [this]() {
         emit activateRequested(this);
@@ -110,40 +115,21 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     connect(deleteButton, &QPushButton::clicked, this, [this]() {
         emit deleteRequested(this);
     });
-    connect(importButton, &QPushButton::clicked, this, &AdapterCard::importRequested);
+    for (auto *label : findChildren<QLabel *>()) label->setTextFormat(Qt::PlainText);
+    m_activateButton->setAccessibleName("Activate adapter "+m_id);
+    exportButton->setAccessibleName("Export adapter "+m_id);
+    deleteButton->setAccessibleName("Delete adapter "+m_id);
 }
 
 void AdapterCard::setActive(bool active) {
     if (m_active == active) return;
     m_active = active;
+    m_activeLabel->setVisible(active);
+    setAccessibleDescription(active ? "Active in Playground" : "Available adapter");
     setProperty("active", active);
     style()->unpolish(this);
     style()->polish(this);
     if (m_activateButton)
-        m_activateButton->setText(active ? QStringLiteral("Clear") : QStringLiteral("Activate"));
+        m_activateButton->setText(active ? QStringLiteral("Deactivate") : QStringLiteral("Activate"));
     update();
-}
-
-void AdapterCard::paintEvent(QPaintEvent *event) {
-    if (m_active) {
-        // Accent rim-glow: a radial blue gradient feathered toward the edge,
-        // painted before the QSS border so the active card visibly glows.
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        QPainterPath path;
-        path.addRoundedRect(QRectF(rect())
-                                .adjusted(0.5, 0.5, -0.5, -0.5),
-                            Theme::cornerRadius(), Theme::cornerRadius());
-        QRadialGradient glow(rect().center(), width() / 2.0);
-        auto accentAt = [](int alpha) {
-            QColor c(Theme::accentPrimary());
-            c.setAlpha(alpha);
-            return c;
-        };
-        glow.setColorAt(0.0, accentAt(16));
-        glow.setColorAt(0.65, accentAt(42));
-        glow.setColorAt(1.0, accentAt(92));
-        painter.fillPath(path, glow);
-    }
-    QFrame::paintEvent(event);
 }

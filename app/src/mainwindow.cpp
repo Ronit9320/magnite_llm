@@ -1,4 +1,5 @@
 #include "widgets/clickfeedback.h"
+#include "widgets/brandmark.h"
 #include <QShortcut>
 #include "mainwindow.h"
 #include "backend_manager.h"
@@ -61,7 +62,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_selfTest(QCoreApplication::arguments().contains("--selftest"))
 {
     setupUi();
-    setWindowTitle("Magnite — Studio Motion");
+    setWindowTitle("Magnite");
+    setWindowIcon(BrandMark::icon());
     resize(1280, 820);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
@@ -73,6 +75,8 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+    // Settle replies while the panels referenced by their callbacks still exist.
+    m_backendClient->abortAll();
     savePanelSettings();
 }
 
@@ -96,9 +100,10 @@ void MainWindow::setupUi() {
 
     auto *brandSeal = new Starfield(sidebar);
     brandSeal->setProperty("kineticGlyph", true);
-    brandSeal->setFixedSize(64, 64);
+    brandSeal->setFixedSize(76, 76);
     brandSeal->setMotionEnabled(false);
-    brandSeal->setAccessibleName("Magnite studio seal");
+    brandSeal->setAccessibleName("Magnite · Konark wheel");
+    brandSeal->setToolTip("Magnite · Inspired by the Konark wheel");
     brandRow->addWidget(brandSeal);
     auto *logoLabel = new QLabel("magnite", sidebar);
     logoLabel->setObjectName("logoLabel");
@@ -625,7 +630,7 @@ void MainWindow::chatErrorSelfTest(std::shared_ptr<int> failures,
         connect(timer, &QTimer::timeout, probe, [this, probe, timer, attempts, failures, finish, scenario]() {
             const QString status = probe->findChild<QLabel *>("statusLabel")->text();
             auto *send = probe->findChild<QPushButton *>("primaryBtn");
-            const bool ready = send->isEnabled() && status.startsWith("Generation ") && status != "Generating...";
+            const bool ready = probe->findChild<QWidget *>("chatActivity")->isHidden() && status.startsWith("Generation ") && status != "Generating...";
             if (!ready && ++*attempts < 100) return;
             timer->stop();
             const bool visible = scenario == 0 ? status.contains("audit SSE failure") :
@@ -633,7 +638,8 @@ void MainWindow::chatErrorSelfTest(std::shared_ptr<int> failures,
                                  scenario == 3 ? status.contains("unexpectedly") : status.contains("error");
             const bool activityStopped = probe->findChild<QWidget *>("chatActivity")->isHidden()
                 && send->text() == QStringLiteral("Send  ↑");
-            const bool ok = ready && visible && activityStopped;
+            probe->findChild<QPlainTextEdit *>("chatInput")->setPlainText("Retry message");
+            const bool ok = ready && visible && activityStopped && send->isEnabled();
             if (!ok) ++*failures;
             fprintf(stderr, "[selftest] %s chat error recovery scenario %d: %s\n",
                     ok ? "ok:" : "FAIL:", scenario, qUtf8Printable(status));

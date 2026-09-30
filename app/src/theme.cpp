@@ -20,6 +20,7 @@
 #include <QSettings>
 #include <QPalette>
 #include <QLabel>
+#include <QAbstractButton>
 
 #include <algorithm>
 #include <cstdio>
@@ -62,6 +63,7 @@ std::vector<Token> tokens() {
     return {
         {"@bgVoid",             Theme::bgVoid()},
         {"@bgDeep",             Theme::bgDeep()},
+        {"@accentLabel",        Theme::accentLabel()},
         {"@accentPrimary",      Theme::accentPrimary()},
         {"@accentBlue",         Theme::accentBlue()},
         {"@accentGlow",         Theme::accentGlow()},
@@ -177,6 +179,10 @@ void Theme::setDark(bool dark) {
             label && label->property("themeIcon").isValid())
             label->setPixmap(coloredIcon(label->property("themeIcon").toString(),
                                         QColor(textSecondary()),14).pixmap(14,14));
+        if (auto *button = qobject_cast<QAbstractButton *>(widget);
+            button && button->property("themeIcon").isValid())
+            button->setIcon(coloredIcon(button->property("themeIcon").toString(),
+                QColor(button->property("themeIconTone")=="error" ? statusError() : textSecondary())));
         widget->update();
     }
 }
@@ -210,6 +216,7 @@ int Theme::selfCheck() {
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
     check("bgVoid", Theme::bgVoid() == "#F1EFE7");
     check("bgDeep", Theme::bgDeep() == "#E9E6DC");
+    check("accentLabel", QColor(Theme::accentLabel()).isValid());
     check("accentPrimary", Theme::accentPrimary() == "#FF5C28");
     check("accentBlue", Theme::accentBlue() == "#5145B7");
     check("accentIce", Theme::accentIce() == "#FF5C28");
@@ -220,8 +227,8 @@ int Theme::selfCheck() {
     check("onDanger", Theme::onDanger() == "#301F19");
     check("textPrimary", Theme::textPrimary() == "#20221F");
     check("textSecondary", Theme::textSecondary() == "#555D54");
-    check("textMuted", Theme::textMuted() == "#74786F");
-    check("statusSuccess", Theme::statusSuccess() == "#FF5C28");
+    check("textMuted", Theme::textMuted() == "#62685F");
+    check("statusSuccess", Theme::statusSuccess() == "#276749");
     check("statusWarning", Theme::statusWarning() == "#855C14");
     check("statusError", Theme::statusError() == "#B13D24");
     check("statusInfo", Theme::statusInfo() == "#5145B7");
@@ -284,6 +291,24 @@ int Theme::selfCheck() {
     for (const auto &token : tokens())
         if (token.value.startsWith('#')) validDark &= QColor(token.value).isValid();
     check("dark color tokens valid", validDark);
+    // Verify actual text contrast in both appearances, including secondary copy.
+    auto luminance = [](const QString &value) {
+        const QColor c(value);
+        auto linear = [](qreal channel) { return channel <= 0.04045 ? channel/12.92 : std::pow((channel+0.055)/1.055,2.4); };
+        return 0.2126*linear(c.redF())+0.7152*linear(c.greenF())+0.0722*linear(c.blueF());
+    };
+    auto contrast = [&luminance](const QString &a,const QString &b) {
+        const qreal x=luminance(a),y=luminance(b);
+        return (qMax(x,y)+0.05)/(qMin(x,y)+0.05);
+    };
+    for (bool dark : {false,true}) {
+        setDark(dark);
+        bool readable=true;
+        for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel()})
+            for(const auto &surface:{bgVoid(),glassFill()}) readable &= contrast(ink,surface)>=4.5;
+        check(dark ? "dark text contrast >= 4.5" : "light text contrast >= 4.5",readable);
+        check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
+    }
     setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);
     return failures;
