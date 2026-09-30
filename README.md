@@ -1,184 +1,107 @@
 # Magnite LLM
 
-A native desktop app for the full open-source LLM workflow — download a model, fine-tune it (LoRA/QLoRA), attach RAG, switch LoRA adapters, and chat with it locally. Hosted inference is planned, not implemented. No browser, no Electron, no telemetry.
+Train adapters, run models, and chat with your documents on your own machine.
+Magnite is a native C++20/Qt 6 desktop app backed by a local Python service.
+The release scope is local training, inference, and RAG; hosted inference and
+cloud training are excluded.
 
-- **Client:** C++20 / Qt 6 Widgets application
-- **Backend:** Python FastAPI service (PyTorch, PEFT, bitsandbytes, llama.cpp, vLLM)
-- **Communication:** local HTTP/SSE on `127.0.0.1`, random port; the client spawns and supervises the backend
-- **Theme:** Studio 03 — graphite/orange dark and cream/orange light, centralized tokens; see [the committed design notes](design/studio-3/README.md).
+**Development preview:** source builds are available. Release verification and
+packaging are still in progress; see the [release checklist](RELEASE_CHECKLIST.md).
+Linux has development-test evidence. macOS and Windows are not yet verified.
 
----
+![Magnite conversation workspace](docs/images/panel-4.png)
 
-## Features
+Current preview with an empty workspace; [all panels and both themes](docs/release/SCREENSHOTS.md).
 
-### Implemented
+## What you can do
 
-- **Model registry & downloads** — pull GGUF / HF models via HuggingFace Hub, track local metadata (architecture, size, license) in `~/.magnite`
-- **Local fine-tuning** — LoRA / QLoRA jobs via PEFT (+ bitsandbytes), log/metric streaming, cancel and status polling
-- **Adapter store** — train, import/export, list, delete, and activate LoRA adapters using a restarted PEFT/torch engine
-- **Local inference** — llama.cpp (CPU/GPU), vLLM, or torch engines; streaming chat & completion over SSE with a blinking-cursor chat UI; engine auto-selected by hardware with manual override
-- **Studio UI** — global theme tokens, native controls, accessible navigation, chat bubbles, light/dark modes and reduced motion
+- Download and manage Hugging Face models; connect to an existing Ollama service.
+- Fine-tune transformer models with LoRA or QLoRA and track training jobs.
+- Export, import, and activate trained adapters through the PEFT/torch engine.
+- Run local streaming inference with llama.cpp, torch, or an optional vLLM installation.
+- Ingest PDF, text, Markdown, and HTML documents, test retrieval, and use RAG in chat.
+- Use the Studio 03 interface with light/dark themes and reduced motion.
 
-- **RAG** — PDF/TXT/Markdown/HTML extraction, sentence-transformer embeddings, persisted SQLite/NumPy cosine retrieval, configuration and chat-context injection. Requires `[ml]`; chunk sizes are word counts.
-- **Audit hardening** — validated adapter imports, registry-model resolution, cancellable worker-based token streaming, visible IPC errors, serialized training with durable job history, and offline regression tests.
+## Compatibility
 
-### Roadmap
+| Workflow | Input / dependency | Current status |
+| --- | --- | --- |
+| GGUF inference | GGUF weights, llama-cpp-python | Tiny-model checks recorded on Linux; hardware acceleration depends on the installed build |
+| Transformer inference | Compatible HF/local transformer weights, `[ml]` | torch path exercised with tiny models |
+| LoRA training | Transformer base weights and JSONL/CSV/text dataset, `[ml]` | Tiny-model workflow exercised |
+| QLoRA training | Supported GPU and bitsandbytes quantization, `[ml]` | Historical tiny-model check; not a promise of support on every device |
+| Trained adapter inference | PEFT adapter and matching base model, `[ml]` | Activation restarts torch; clearing unloads the model |
+| RAG | sentence-transformers; pypdf for PDF, both in `[ml]` | Local SQLite/NumPy retrieval; first use may download embedding weights |
+| vLLM / Ollama | Separately installed engine/service | Integrations exist; live release verification pending |
 
-- **Phase 6 hardening:** ingestion jobs/progress, retrieval controls and large-corpus scaling; the existing RAG panel is functional.
-- **Phase 7 — hosted inference:** OpenAI-compatible endpoints. Hosted controls are disabled until this exists.
-- **Phase 8 — cloud full fine-tuning:** mock dispatcher first, real provider later.
-- **Phases 9–10:** remaining persistence/UX, broader tests/CI and distributable packages.
+GGUF weights are for the inference path, not the ordinary PEFT training input.
+The local service uses a custom SSE protocol and is not a drop-in OpenAI API.
+See [API examples](docs/LOCAL_API.md) and [known limitations](docs/LIMITATIONS.md).
 
----
+## Build and run
 
-## Architecture
-
-```
-┌────────────────────────────── Magnite Desktop (C++/Qt6) ──────────────────────────────┐
-│                                                                                        │
-│   Models │ Training │ RAG │ Adapters │ Chat │ Settings      ← stacked panels            │
-│        ▲        ▲        ▲       ▲         ▲                                            │
-│        └────────┴────────┴───────┴─────────┴─── BackendClient (HTTP/SSE)                │
-│                                                 ▲                                       │
-│                                      BackendManager (spawn/supervise)                   │
-└──────────────────────────────────────────────────┼──────────────────────────────────────┘
-                                                   │ 127.0.0.1:<random port>
-                                      ┌────────────┴──────────────┐
-                                      │  Magnite Backend (Python) │
-                                      │  FastAPI + uvicorn        │
-                                      │  ├ /models   registry     │
-                                      │  ├ /training LoRA/QLoRA   │
-                                      │  ├ /adapters store        │
-                                      │  ├ /inference engines     │
-                                      │  └ /health                │
-                                      └────────────┬──────────────┘
-                                                   │
-                              HF Hub (downloads) · local model/vector caches · adapters
-```
-
-The C++ shell never performs ML work — it orchestrates, displays, and persists state.
-
----
-
-## Repo layout
-
-```
-app/                        Qt 6 desktop client (CMake)
-  src/theme.h|.cpp          design tokens + QSS compiler (single source of truth)
-  src/panels/               Models, Training, RAG, Adapters, Chat, Settings panels
-  src/widgets/              FlowLayout (card grids)
-  resources/theme/theme.qss   global stylesheet (@token placeholders)
-backend/                    Python ML backend (FastAPI)
-  src/backend/routes/       REST routers (models, training, adapters, inference, RAG, health)
-  src/backend/inference/    engine supervisor (llama.cpp / vLLM / torch)
-  src/backend/training/     LoRA/QLoRA job manager + trainer
-  src/backend/models/       model registry
-design_doc.md               space-theme UI spec (+ flagged amendments)
-BUILD_PLAN.md               phase plan + phase 5.5 delivery notes
-PHASE_5_5.md                UI redesign phase spec (5.5.0–5.5.7)
-app.md                      product & architecture overview
-```
-
----
-
-## Requirements
-
-| Component | Requirement |
-| --- | --- |
-| Compiler | C++20 (GCC / Clang, `-Wall -Wextra`) |
-| Qt | Qt 6 (Widgets, Network, Svg) — `find_package(Qt6 ...)` in `app/CMakeLists.txt` |
-| CMake | ≥ 3.20 |
-| Python | ≥ 3.10 |
-| ML deps | optional extras — `torch`, `transformers`, `peft`, `bitsandbytes`, `sentence-transformers`, `datasets`, `accelerate`, `safetensors` |
-
-System requirements table (VRAM per model tier) is in `app.md`.
-
----
-
-## Getting started
+Requires Python 3.10+, CMake 3.20+, a C++20 compiler, and Qt 6 Widgets, Network,
+and Svg development packages. Python dependencies may compile native code,
+including llama-cpp-python. See [installation details](docs/INSTALL.md).
 
 ```bash
-# 1. Clone
-git clone <this repo>
+git clone https://github.com/Ronit9320/magnite_llm.git
 cd magnite_llm
-
-# 2. Python backend (inside a venv)
-python -m venv .venv && source .venv/bin/activate
-pip install -e "backend[ml]"          # omit [ml] for CPU-only inference
-
-# 3. Build the desktop app
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e 'backend[ml]'
 cmake -S app -B build
-cmake --build build -j
-
-# 4. Run (the app starts its own backend on a random localhost port)
+cmake --build build -j2
 ./build/magnite-app
 ```
 
-> The backend installs a `magnite-backend` console script. You don't normally run it by
-> hand — the app spawns it — but you can for debugging:
-> `magnite-backend --port 0 --home ~/.magnite`
+For GGUF inference without training/RAG, install `-e backend` instead. Keep the
+binary in `build/` and the virtual environment in `.venv/`: backend discovery
+currently depends on this checkout layout. vLLM and Ollama are separate installs.
 
-Data lives in `~/.magnite` (`MAGNITE_HOME` overrides it).
+Start with the [workflow guide](docs/WORKFLOWS.md) and the small
+[example inputs](examples/README.md). For failures, use the
+[troubleshooting guide](docs/TROUBLESHOOTING.md).
 
----
+## Architecture and data
 
-## Developer / testing
-
-### CLI flags
-
-| Flag | What it does |
-| --- | --- |
-| `--theme-check` | Verify theme tokens, embedded QSS/fonts/icons; prints `0 failure(s)` or fails |
-| `--screenshot <dir>` | Capture each panel to `dir/panel-<n>.png`, then exit (works on Wayland; in-process grab) |
-| `--selftest` | Run the UI/integration self-test suite, then exit |
-
-### Selftests
-
-```bash
-./build/magnite-app --selftest                          # UI + settings round-trips
-MAGNITE_SELFTEST_PULL=1       ./build/magnite-app --selftest   # model pull e2e
-MAGNITE_SELFTEST_INFERENCE=1  ./build/magnite-app --selftest   # load → chat (llama.cpp) → unload
-MAGNITE_SELFTEST_TRAINING=1   ./build/magnite-app --selftest   # LoRA job e2e
-MAGNITE_SELFTEST_ADAPTER=1    ./build/magnite-app --selftest   # train + hot-switch adapter e2e
-MAGNITE_SELFTEST_RAG=1        ./build/magnite-app --selftest   # ingest -> query -> delete e2e
+```text
+Qt desktop: Models | Training | Knowledge | Adapters | Chat | Settings
+                         |
+                 BackendClient HTTP/SSE
+                         |
+           FastAPI on 127.0.0.1:<random port>
+       /models /datasets /training /adapters /inference /rag /health
+                         |
+       Local engines, SQLite stores, model and embedding caches
 ```
 
-Each prints `[selftest] PASS (0 failures)`. The backend is spawned automatically; the
-`INFERENCE`/`TRAINING`/`ADAPTER` runs download a small model/adapter toy set on first use.
+The client starts and supervises the backend; the C++ shell never performs ML.
+Application data defaults to `~/.magnite` on Linux. `MAGNITE_HOME` overrides it;
+model hub caches and Qt settings have separate locations. See
+[storage and privacy](docs/STORAGE_AND_PRIVACY.md) before moving or backing up data.
 
-### Offline backend regressions
+Training, inference, and document processing run locally. Model searches and
+weight downloads contact Hugging Face; Ollama uses its configured service URL.
+There is no application telemetry implementation. Cached weights are needed
+for offline work. The backend is intended for local desktop use and currently
+has no application authentication layer.
 
-```bash
-PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v
-```
+## Development and release
 
-Tests use temporary stores and simulated external services; ML downloads are not required. The optional real workflow test is `PYTHONPATH=backend/src .venv/bin/python backend/tests/live_workflow.py`; it uses temporary data and may download tiny model weights. Built-in feature selftests still exercise real tiny models. The bare selftest now requires backend readiness and tests SSE errors, HTTP errors, network disconnects and truncated streams.
+- [Contributing and verification](CONTRIBUTING.md)
+- [Current verification report](docs/release/VERIFICATION.md)
+- [Release checklist](RELEASE_CHECKLIST.md) and [draft release notes](docs/release/RELEASE_NOTES.md)
+- [Studio 03 design rules](design/studio-3/README.md)
+- [Security reporting](SECURITY.md)
 
-### Runtime settings
+The [September audit](AUDIT_2026-09-27.md) preserves historical defects and their
+subsequent repairs; its follow-up supersedes the original findings. It is not a
+promise that every engine or hardware configuration has been tested.
 
-Global engine selection applies to the next model load when Chat selects Auto. The data-directory setting applies on the next app start; `MAGNITE_HOME` takes precedence and existing data is not moved. HF downloads use the Hugging Face cache rather than the registry directory. Hosted API fields are disabled, and unused legacy plaintext API keys are removed from QSettings.
+## License
 
-Local inference accepts registered model IDs, compatible local paths and raw HF GGUF repository IDs. Auto chooses llama.cpp for local GGUFs, torch/vLLM for registered transformer weights, and Ollama for Ollama records. Adapters currently use a PEFT/torch restart; clearing an adapter unloads the engine. Native vLLM multi-LoRA and llama.cpp adapter conversion remain future work.
-
-The local IPC stream format is `data: {"delta": "..."}`, followed by `{"done": true}` or an explicit `{"error": "..."}`. `stream:false` returns an OpenAI-shaped JSON completion. This is not a drop-in OpenAI server.
-
-### Theme workflow
-
-All colors/fonts/radii are tokens (`@bgVoid`, `@accentPrimary`, …) defined in
-`app/src/theme.h` and substituted into `app/resources/theme/theme.qss` at runtime by
-`Theme::qss()`. **Do not hardcode hex values** in widget code or the QSS — add a token and
-extend `Theme::selfCheck()`. (Enforced by the Phase 5.5.7 centralization audit.)
-
----
-
-## Verification status
-
-See [the dated audit and appended follow-up](AUDIT_2026-09-27.md) for exact checks, defect resolution, and unverified hardware/services. Tiny-model passes do not establish large-model quality, memory capacity, or cross-platform support.
-
-The active Studio design is authorized by `design_doc.md` §13; the earlier blue Space specification is historical. Committed design notes live in `design/studio-3/README.md`.
-
----
-
-## Privacy
-
-Local-first by default. No telemetry, no data collection. Training, inference and document processing run locally. Downloading model or embedding weights contacts the configured model hub; Ollama requests go to the configured Ollama service. Hosted inference and cloud fine-tuning are not implemented.
+Magnite's original code, documentation, and example inputs are under the
+[MIT license](LICENSE). Third-party assets and dependencies retain their own
+terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Model and dataset licenses
+are separate from the app's license.

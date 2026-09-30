@@ -18,7 +18,7 @@ cmake --build build -j
 
 ## Verify
 
-No CI yet. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
+CI is configured in `.github/workflows/verify.yml` for the base backend, CMake build, theme audit, and bare desktop selftest; its first hosted run still needs verification. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
 
 ```bash
 ./build/magnite-app --theme-check                                  # token/QSS/font/icon audit; prints "0 failure(s)"
@@ -36,7 +36,7 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 - Design tokens are inline functions in `app/src/theme.h`; `@token` placeholders in `app/resources/theme/theme.qss` are substituted at runtime by `Theme::qss()`. **Never hardcode hex values in widget code or QSS** — add a token to `theme.h` and extend `Theme::selfCheck()`.
 - Icons are Lucide-style SVGs requiring `stroke="currentColor"`; tint via `Theme::coloredIcon()`.
-- `design_doc.md` §13 and refinements govern the active Studio theme; earlier Space sections are historical. Committed notes are in `design/studio-3/README.md`. Do not improvise beyond the active spec.
+- Committed rules in `design/studio-3/README.md` govern the active Studio theme and contribution workflow. Local `design_doc.md` §13 contains historical authorization/refinements; earlier Space sections are historical. Do not improvise beyond the active spec.
 
 ## Backend quirks
 
@@ -46,4 +46,4 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 ## Docs
 
-`app.md`, `BUILD_PLAN.md`, `design_doc.md`, `PHASE_5_5.md` are gitignored (local-only) — they won't exist in fresh clones. `README.md` is committed.
+`app.md`, `BUILD_PLAN.md`, `design_doc.md`, `PHASE_5_5.md` are gitignored (local-only) — they won't exist in fresh clones. Public instructions live in `README.md`, `CONTRIBUTING.md`, `docs/`, and `RELEASE_CHECKLIST.md`. The release scope excludes hosted inference and cloud training.

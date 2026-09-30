@@ -34,3 +34,15 @@ Centered conversation column with prompt starters, multiline input, Enter to sen
 Magnite-specific chat identity: “Your model. Your way.” with the studio seal and three functional workspace actions: test the model, ask ingested documents (enables Knowledge), and shape the response (opens model settings). Composer copy refers to the user's model; no generic assistant prompts or unconditional privacy claims.
 
 Header polish: replace the backend-style badge with a quiet dot and Connecting / Connected / Unavailable text. Connection details live in a tooltip; no extra bottom status bar appears on connection. Separate the understated theme switch with a fine divider.
+
+## Contributor rules for the local release
+
+This is the active design; earlier design folders are historical references.
+Use theme tokens in `app/src/theme.h` and the active QSS resource. Never add hex
+colors directly to widget code or QSS; extend Theme::selfCheck with new tokens.
+SVG icons use `stroke="currentColor"` and Theme::coloredIcon for tinting.
+Preserve light/dark themes, readable labels, focus states, keyboard operation,
+and reduced motion. Verify changes with `--theme-check`, the bare selftest,
+and screenshots of affected panels in both themes. New feature styling should
+follow existing components; propose unestablished patterns before redesigning.
+The public release covers local training, inference, adapters, and RAG only.
