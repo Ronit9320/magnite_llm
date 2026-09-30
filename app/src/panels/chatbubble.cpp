@@ -86,12 +86,6 @@ void ChatBubble::remeasure() {
     updateGeometry();
 }
 
-void ChatBubble::appendText(const QString &delta) {
-    m_text += delta;
-    m_content->setText(m_text);
-    remeasure();
-}
-
 void ChatBubble::setText(const QString &text) {
     m_text = text;
     m_content->setText(m_text);

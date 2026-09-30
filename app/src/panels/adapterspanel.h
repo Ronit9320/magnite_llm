@@ -7,14 +7,11 @@
 class QLabel;
 class QScrollArea;
 class QWidget;
-class QPushButton;
 class QVBoxLayout;
 class AdapterCard;
 class BackendClient;
 
-// Adapters panel: manage trained LoRA adapters as a glass card grid (Phase
-// 5.5.4, design doc §8). Each AdapterCard owns its Activate/Export/Import/
-// Delete buttons; activating hot-switches the adapter active in the Chat panel.
+// Adapter registry with per-row actions and a shared archive import toolbar.
 class AdaptersPanel : public BasePanel {
     Q_OBJECT
 
@@ -22,8 +19,6 @@ public:
     explicit AdaptersPanel(QWidget *parent = nullptr);
 
     void setBackendClient(BackendClient *client);
-
-    QString activeAdapterId() const { return m_activeAdapterId; }
 
 signals:
     // Emitted when the active adapter changes (activate/clear/delete).
@@ -48,7 +43,7 @@ private:
 
     BackendClient *m_client;
     QScrollArea *m_scrollArea;
-    QVBoxLayout *m_flowLayout;
+    QVBoxLayout *m_cardLayout;
     QWidget *m_cardHost;
     QWidget *m_emptyState;
     QLabel *m_statusLabel;

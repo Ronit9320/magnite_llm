@@ -10,7 +10,7 @@
         <file alias="fonts/DMSans-Regular.ttf">resources/fonts/DMSans-Regular.ttf</file>
         <file alias="fonts/DMSans-Medium.ttf">resources/fonts/DMSans-Medium.ttf</file>
 
-        <!-- Lucide-style line icons (MIT), stroke="currentColor", tinted by Theme::coloredIcon -->
+        <!-- Lucide-style line icons (provenance tracked in THIRD_PARTY_NOTICES.md), stroke="currentColor", tinted by Theme::coloredIcon -->
         <file alias="icons/box.svg">resources/icons/box.svg</file>
         <file alias="icons/check.svg">resources/icons/check.svg</file>
         <file alias="icons/check-white.svg">resources/icons/check-white.svg</file>

@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 import threading
 import time
-import uuid
-from typing import Optional
 
 from backend.adapters.schemas import AdapterRecord
 from backend.adapters.store import AdapterStore

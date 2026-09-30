@@ -47,7 +47,6 @@ private slots:
 private:
     void setupUi();
     void setupHyperparameters(QWidget *parent);
-    QLabel* addField(QWidget *editor, const QString &label);
     void refreshModels();
     void refreshDatasets(const QString &selectId = QString());
     QString quantizationCode() const;

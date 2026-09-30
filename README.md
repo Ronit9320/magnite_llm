@@ -9,7 +9,7 @@ cloud training are excluded.
 packaging are still in progress; see the [release checklist](RELEASE_CHECKLIST.md).
 Linux has development-test evidence. macOS and Windows are not yet verified.
 
-![Magnite conversation workspace](docs/images/panel-4.png)
+![Magnite conversation workspace](design/intuitive-motion/previews/dark/panel-4.png)
 
 Current preview with an empty workspace; [all panels and both themes](docs/release/SCREENSHOTS.md).
 

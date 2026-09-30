@@ -20,7 +20,6 @@ inline QString bgDeep()        { return isDark() ? QStringLiteral("#111214") : Q
 // Keep existing semantic names for consumers; the secondary accent is lavender.
 inline QString accentPrimary() { return QStringLiteral("#FF5C28"); }
 inline QString accentBlue()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
-inline QString accentGlow()    { return QStringLiteral("rgba(255, 92, 40, 0.18)"); }
 inline QString accentIce()    { return QStringLiteral("#FF5C28"); }
 // Derived accent shades used by QSS interaction states (hover/pressed) and the
 // light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
@@ -30,14 +29,12 @@ inline QString accentLabel()   { return isDark() ? QStringLiteral("#FF784E") : Q
 inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
-inline QString onDanger()      { return QStringLiteral("#301F19"); }
 
 inline QString glassFill()          { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
 inline QString glassFillHover()     { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
 inline QString glassFillActive()    { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
 inline QString glassBorder()        { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
 inline QString glassBorderHover()   { return QStringLiteral("#FF784E"); }
-inline QString glassBorderActive()  { return QStringLiteral("#FF5C28"); }
 
 inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
 inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }
@@ -46,7 +43,6 @@ inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : Q
 inline QString statusSuccess() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
 inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
-inline QString statusInfo()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
@@ -54,28 +50,11 @@ inline QString bodyFont()    { return QStringLiteral("DM Sans"); }
 // Mono is a system-family fallback resolved at runtime (nothing bundled).
 QString monoFont();
 
-// Font pixel sizes (design doc §3 scale).
-inline int fontH1()       { return 22; }
-inline int fontH2()       { return 15; }
-inline int fontH3()       { return 14; }
-inline int fontBody()     { return 13; }
-inline int fontBodySm()   { return 12; }
-inline int fontMono()     { return 11; }
-
-// Heading weights (design doc §3).
-inline QString fontWeightSemibold() { return QStringLiteral("600"); }
-inline QString fontWeightMedium()    { return QStringLiteral("500"); }
-
 // ---- Layout & spacing (design doc §4) ----
 inline int spacingBase()           { return 6; }
 inline int panelPadding()          { return 16; }
-inline int sectionGap()            { return 10; }
-inline int formGap()               { return 8; }
-inline int sidebarWidthExpanded()  { return 240; }
-inline int sidebarWidthCollapsed() { return 64; }
 inline int minWindowWidth()        { return 1024; }
 inline int minWindowHeight()       { return 680; }
-inline int cornerRadius()          { return 12; }
 inline int cornerRadiusSmall()     { return 8; }
 
 // ---- Runtime helpers ----
@@ -86,8 +65,7 @@ inline int cornerRadiusSmall()     { return 8; }
 QString qss();
 
 // Load the bundled OFL fonts into QFontDatabase (silent no-op if a file is
-// missing), then install qss() as the app-wide stylesheet. Called once from
-// main() in Phase 5.5.1; not part of Phase 5.5.0's visible scope.
+// missing), then install qss() as the app-wide stylesheet. Called from main().
 void setupApplicationTheme();
 
 // Load the bundled OFL fonts (design doc §3 typography). Safe to call twice.
@@ -98,7 +76,7 @@ void loadFonts();
 // source icon works for every state (accent-primary active / text-secondary idle).
 QIcon coloredIcon(const QString &lucideName, const QColor &color, int size = 18);
 
-// Phase 5.5.0 verification: prints every design token, the embedded qrc assets
+// Theme verification: checks active design tokens, the embedded qrc assets
 // and the registered font families to stderr. Returns the number of failures
 // (0 = the infrastructure is sound). Exits via main()'s --theme-check flag.
 int selfCheck();

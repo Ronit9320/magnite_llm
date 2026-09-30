@@ -34,7 +34,7 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 ## Theme (Studio 03; historical Phase 5.5 in design_doc.md)
 
-- Design tokens are inline functions in `app/src/theme.h`; `@token` placeholders in `app/resources/theme/theme.qss` are substituted at runtime by `Theme::qss()`. **Never hardcode hex values in widget code or QSS** — add a token to `theme.h` and extend `Theme::selfCheck()`.
+- Design tokens are inline functions in `app/src/theme.h`; `@token` placeholders in `app/resources/theme/console.qss` (embedded as `:/theme/theme.qss`) are substituted at runtime by `Theme::qss()`. **Never hardcode hex values in widget code or QSS** — add a token to `theme.h` and extend `Theme::selfCheck()`.
 - Icons are Lucide-style SVGs requiring `stroke="currentColor"`; tint via `Theme::coloredIcon()`.
 - Committed rules in `design/studio-3/README.md` govern the active Studio theme and contribution workflow. Local `design_doc.md` §13 contains historical authorization/refinements; earlier Space sections are historical. Do not improvise beyond the active spec.
 

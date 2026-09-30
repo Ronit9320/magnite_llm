@@ -4,8 +4,6 @@
 
 #include <QApplication>
 #include <QPainter>
-#include <QWindow>
-#include <QPainterPath>
 #include <cmath>
 
 Starfield::Starfield(QWidget *parent) : QWidget(parent) {

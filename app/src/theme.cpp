@@ -1,21 +1,16 @@
 #include "theme.h"
 
-#include <QBrush>
 #include <QColor>
 #include <QFile>
 #include <QFont>
 #include <QFontDatabase>
-#include <QFontInfo>
 #include <QIcon>
-#include <QLinearGradient>
 #include <QPainter>
 #include <QPixmap>
-#include <QRadialGradient>
 #include <QSvgRenderer>
 #include <QWidget>
 
 #include <QApplication>
-#include <QScreen>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QPalette>
@@ -66,26 +61,22 @@ std::vector<Token> tokens() {
         {"@accentLabel",        Theme::accentLabel()},
         {"@accentPrimary",      Theme::accentPrimary()},
         {"@accentBlue",         Theme::accentBlue()},
-        {"@accentGlow",         Theme::accentGlow()},
         {"@accentIce",         Theme::accentIce()},
         {"@accentHover",        Theme::accentHover()},
         {"@accentActive",       Theme::accentActive()},
         {"@accentText",         Theme::accentText()},
         {"@dangerHover",        Theme::dangerHover()},
-        {"@onDanger",           Theme::onDanger()},
         {"@glassFill",          Theme::glassFill()},
         {"@glassFillHover",     Theme::glassFillHover()},
         {"@glassFillActive",    Theme::glassFillActive()},
         {"@glassBorder",        Theme::glassBorder()},
         {"@glassBorderHover",   Theme::glassBorderHover()},
-        {"@glassBorderActive",  Theme::glassBorderActive()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
         {"@statusSuccess",      Theme::statusSuccess()},
         {"@statusWarning",      Theme::statusWarning()},
         {"@statusError",        Theme::statusError()},
-        {"@statusInfo",         Theme::statusInfo()},
         {"@headingFont",        Theme::headingFont()},
         {"@bodyFont",           Theme::bodyFont()},
         {"@monoFont",           Theme::monoFont()},
@@ -224,14 +215,12 @@ int Theme::selfCheck() {
     check("accentActive", Theme::accentActive() == "#E1491B");
     check("accentText", Theme::accentText() == "#201D18");
     check("dangerHover", Theme::dangerHover() == "#FFD0BD");
-    check("onDanger", Theme::onDanger() == "#301F19");
     check("textPrimary", Theme::textPrimary() == "#20221F");
     check("textSecondary", Theme::textSecondary() == "#555D54");
     check("textMuted", Theme::textMuted() == "#62685F");
     check("statusSuccess", Theme::statusSuccess() == "#276749");
     check("statusWarning", Theme::statusWarning() == "#855C14");
     check("statusError", Theme::statusError() == "#B13D24");
-    check("statusInfo", Theme::statusInfo() == "#5145B7");
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());

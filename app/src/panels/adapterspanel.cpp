@@ -4,7 +4,6 @@
 
 #include "backend_client.h"
 #include "panels/adaptercard.h"
-#include "widgets/flowlayout.h"
 
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -20,7 +19,7 @@ AdaptersPanel::AdaptersPanel(QWidget *parent)
     : BasePanel("Adapters", parent)
     , m_client(nullptr)
     , m_scrollArea(nullptr)
-    , m_flowLayout(nullptr)
+    , m_cardLayout(nullptr)
     , m_cardHost(nullptr)
     , m_emptyState(nullptr)
     , m_statusLabel(nullptr)
@@ -33,11 +32,11 @@ AdaptersPanel::AdaptersPanel(QWidget *parent)
 
 QWidget *AdaptersPanel::makeCardHost() {
     m_cardHost = new QWidget(this);
-    m_flowLayout = new QVBoxLayout(m_cardHost);
-    m_flowLayout->setContentsMargins(2, 2, 2, 2);
-    m_flowLayout->setAlignment(Qt::AlignTop);
-    m_flowLayout->setSpacing(8);
-    m_cardHost->setLayout(m_flowLayout);
+    m_cardLayout = new QVBoxLayout(m_cardHost);
+    m_cardLayout->setContentsMargins(2, 2, 2, 2);
+    m_cardLayout->setAlignment(Qt::AlignTop);
+    m_cardLayout->setSpacing(8);
+    m_cardHost->setLayout(m_cardLayout);
     return m_cardHost;
 }
 
@@ -128,12 +127,11 @@ void AdaptersPanel::refresh() {
             connect(card, &AdapterCard::activateRequested, this, &AdaptersPanel::onActivate);
             connect(card, &AdapterCard::exportRequested, this, &AdaptersPanel::onExportAdapter);
             connect(card, &AdapterCard::deleteRequested, this, &AdaptersPanel::onDeleteAdapter);
-            connect(card, &AdapterCard::importRequested, this, &AdaptersPanel::onImportAdapter);
             card->setActive(card->id() == m_activeAdapterId);
-            m_flowLayout->addWidget(card);
+            m_cardLayout->addWidget(card);
             m_cards.append(card);
         }
-        m_flowLayout->invalidate();
+        m_cardLayout->invalidate();
         m_cardHost->updateGeometry();
 
         const bool hasAdapter = !arr.isEmpty();
@@ -255,7 +253,7 @@ void AdaptersPanel::onImportAdapter() {
 }
 
 void AdaptersPanel::clearCards() {
-    while (QLayoutItem *item = m_flowLayout->takeAt(0)) {
+    while (QLayoutItem *item = m_cardLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) {
             w->hide();             // stop painting immediately
             w->setParent(nullptr); // detach from host so it can't overlap new cards
@@ -264,7 +262,7 @@ void AdaptersPanel::clearCards() {
         delete item;
     }
     m_cards.clear();
-    m_flowLayout->invalidate();
+    m_cardLayout->invalidate();
     m_cardHost->updateGeometry();
 }
 

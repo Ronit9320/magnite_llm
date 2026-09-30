@@ -4,7 +4,6 @@ import json
 import os
 import sqlite3
 import threading
-import time
 from typing import Optional
 
 from backend.models.schemas import ModelRecord

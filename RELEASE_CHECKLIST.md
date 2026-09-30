@@ -53,7 +53,7 @@ Completion: every visible release feature is local, implemented, and described a
 - [x] Add the owner-selected MIT project LICENSE; third-party material retains separate terms.
 - [ ] Inventory third-party code, fonts, icons, and dependencies; add applicable notices and asset provenance. Font OFL files already exist. Record redistribution requirements before bundling binaries.
 - [ ] Review tracked files and git history for credentials, private datasets/documents, model weights, personal paths, and internal-only material. The current review did not scan history for secrets.
-- [ ] Decide which historical design artifacts belong in the public repository; remove irrelevant release clutter only after review.
+- [x] Review and remove superseded Midnight and Studio 1/2 exports, duplicate fonts, unused stylesheets and stale preview copies (2026-10-01). Retain the active Studio 03 foundation and Studio Motion design notes; history preserves earlier artifacts.
 - [x] Add CONTRIBUTING.md with setup, architecture, theme rules, verification commands, and PR expectations.
 - [x] Add a draft SECURITY.md and bug/feature/PR templates requesting versions and sanitized logs.
 - [ ] Replace the security-contact placeholder (owner will supply it later), confirm a monitored private channel, and finalize supported versions before publication.

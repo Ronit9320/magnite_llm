@@ -1,11 +1,8 @@
 #include "panels/adaptercard.h"
 
-#include "theme.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPainter>
-#include <QPainterPath>
 #include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -88,7 +85,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     metaRow->addStretch(1);
     layout->addLayout(metaRow);
 
-    // Row 3: action buttons (Activate primary; Export/Import/Delete secondary).
+    // Row 3: activation, export and deletion actions.
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(6);
     m_activateButton = new QPushButton(QStringLiteral("Activate"), this);

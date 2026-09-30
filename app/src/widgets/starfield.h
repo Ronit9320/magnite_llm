@@ -4,8 +4,8 @@
 #include <QTimer>
 #include <QElapsedTimer>
 
-// Studio 02 registration grid or kinetic hero graphic (kineticGlyph property).
-// Existing API names keep callers compatible; motion respects app visibility.
+// Workspace registration grid or animated brand mark (kineticGlyph property).
+// Motion respects reduced-motion preferences and application visibility.
 class Starfield : public QWidget {
 public:
     explicit Starfield(QWidget *parent = nullptr);

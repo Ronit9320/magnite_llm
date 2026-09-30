@@ -21,7 +21,6 @@ public:
     Role role() const { return m_role; }
     QString text() const { return m_text; }
 
-    void appendText(const QString &delta);
     void setText(const QString &text);
     void setCursorVisible(bool show);
 

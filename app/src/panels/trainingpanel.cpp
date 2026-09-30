@@ -70,15 +70,6 @@ TrainingPanel::TrainingPanel(QWidget *parent)
     setupUi();
 }
 
-QLabel* TrainingPanel::addField(QWidget *editor, const QString &label) {
-    auto *lab = new QLabel(label, this);
-    auto *row = new QHBoxLayout();
-    row->addWidget(lab);
-    row->addWidget(editor, 1);
-    contentLayout()->addLayout(row);
-    return lab;
-}
-
 void TrainingPanel::setupUi() {
     auto *columns = new QSplitter(Qt::Horizontal,this);
     columns->setChildrenCollapsible(false);

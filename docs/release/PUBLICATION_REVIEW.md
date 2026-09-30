@@ -41,3 +41,17 @@ release gates. No remote history was fetched for this check.
 - Complete final history/content review and enable the chosen repository protections.
 - Run the added CI workflow on GitHub; local checks do not establish hosted CI success.
 - Re-run candidate checks after source changes and use the exact release commit/tag.
+
+## Cleanup follow-up — 2026-10-01
+
+The user requested removal of repository leftovers. Superseded Midnight and
+Studio 1/2 artifacts, duplicate font copies, unused stylesheets and outdated
+preview copies were removed. Current documentation links to Studio Motion
+previews. Historical observations above describe the earlier snapshot; removed
+artifacts remain in Git history.
+
+Cleanup verification passed: CMake build, theme audit (0 failures), UI interaction
+check (0 failures), 24 backend regressions and bare desktop selftest (0 failures).
+Tracked Markdown links resolve, and `git diff --check` is clean. Loopback-dependent
+checks ran outside the restricted sandbox. Real-model feature checks were not
+repeated for this removal-only pass; see UI_POLISH.md for the prior results.

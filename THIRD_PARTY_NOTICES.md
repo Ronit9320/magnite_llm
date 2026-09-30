@@ -11,7 +11,6 @@ inspected; it is not a completed binary redistribution review.
 | DM Sans | Copyright 2014 The DM Sans Project Authors | [SIL OFL 1.1](app/resources/fonts/OFL-DMSans.txt) |
 | Space Grotesk | Copyright 2020 The Space Grotesk Project Authors | [SIL OFL 1.1](app/resources/fonts/OFL-SpaceGrotesk.txt) |
 
-Copies of these fonts and OFL notices also appear under `design/midnight/fonts/`.
 Keep the notices with redistributed font assets. Exact font provenance/version
 matching should be confirmed before a binary bundle is published.
 
@@ -29,9 +28,9 @@ confirm which icons were copied or adapted from upstream and include the exact
 required attribution/license; identify original icons separately. No unverified
 upstream license has been assigned to these files by this documentation pass.
 
-Historical design material under `design/midnight/` includes SVG/PNG previews,
-fonts, HTML, and a ZIP archive. It has been retained, not deleted or relicensed.
-Review its provenance and whether it belongs in the public release.
+Superseded Midnight and Studio 1/2 design exports, duplicate fonts and the
+Midnight ZIP were removed during repository cleanup on 2026-10-01. They remain
+available in Git history; the active design is under `design/intuitive-motion/`.
 
 ## Linked and installed dependencies
 

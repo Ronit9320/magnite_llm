@@ -1,4 +1,3 @@
-import uvicorn
 from fastapi import FastAPI
 
 from backend.routes.adapters import router as adapters_router, _adapter_setup

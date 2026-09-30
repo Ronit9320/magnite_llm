@@ -16,7 +16,6 @@ public:
     explicit RagDocCard(const QJsonObject &data, QWidget *parent = nullptr);
 
     QString id() const { return m_id; }
-    QString filePath() const { return m_path; }
     bool isCardSelected() const { return m_selected; }
 
     void setSelected(bool selected);

@@ -2,7 +2,6 @@
 #include <QFrame>
 #include <QLabel>
 #include <QVBoxLayout>
-#include "theme.h"
 
 namespace Surface {
 inline QVBoxLayout *card(QWidget *parent, const QString &title = {}) {

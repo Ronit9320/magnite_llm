@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from backend.rag.embeddings import embed_texts, is_available
-from backend.rag.store import RagStore, get_rag_store
+from backend.rag.store import get_rag_store
 
 
 def injectable_context(query: str, top_k: Optional[int] = None,

@@ -37,9 +37,7 @@ modules do not exist; inspect the resulting run rather than assuming a specific
 architecture's module names work everywhere.
 
 QLoRA requires a working quantization backend and compatible hardware. The
-current UI calls its 8-bit option “FP8”; the backend selects bitsandbytes 8-bit
-loading, so do not interpret that label as a verified FP8 training mode. Correcting
-that label is tracked for the source-code pass.
+“8-bit (bitsandbytes)” option selects bitsandbytes 8-bit loading.
 
 ## Use, export, and import adapters
 
