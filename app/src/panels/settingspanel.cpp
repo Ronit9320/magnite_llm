@@ -107,7 +107,7 @@ void SettingsPanel::setupUi() {
     m_reducedMotion->setObjectName("reducedMotionToggle");
     appearance->addWidget(m_stars);
     appearance->addWidget(m_reducedMotion);
-    auto *hint = new QLabel("Subtle workspace texture. Reduce motion freezes the studio seal and disables panel transitions.",this);
+    auto *hint = new QLabel("Subtle workspace texture. Reduce motion keeps activity indicators still and disables click effects, blinking cursors and panel transitions.",this);
     hint->setWordWrap(true);
     hint->setObjectName("cardMeta");
     appearance->addWidget(hint);

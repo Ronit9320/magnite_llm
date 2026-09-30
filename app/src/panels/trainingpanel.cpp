@@ -4,7 +4,11 @@
 
 #include "backend_client.h"
 #include "widgets/surface.h"
+#include "widgets/starfield.h"
+#include "theme.h"
 #include <QProgressBar>
+#include <QSettings>
+#include <QScrollArea>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -81,10 +85,14 @@ void TrainingPanel::setupUi() {
     columns->setChildrenCollapsible(false);
     columns->setHandleWidth(4);
     contentLayout()->addWidget(columns,1);
-    auto *layout = Surface::card(this,"01 / Run setup");
+    auto *layout = Surface::card(this,"Build your adapter");
     auto *right = new QVBoxLayout();
     right->setSpacing(8);
-    columns->addWidget(layout->parentWidget());
+    auto *setupScroll = new QScrollArea(this);
+    setupScroll->setWidgetResizable(true);
+    setupScroll->setMinimumWidth(290);
+    setupScroll->setWidget(layout->parentWidget());
+    columns->addWidget(setupScroll);
     auto *monitor = new QWidget(this);
     monitor->setLayout(right);
     columns->addWidget(monitor);
@@ -147,21 +155,42 @@ void TrainingPanel::setupUi() {
     onQuantizationToggled();
 
     layout->addStretch();
-    auto *run = Surface::card(this,"02 / Run monitor");
+    auto *run = Surface::card(this,"Training session");
     right->addWidget(run->parentWidget());
     m_progressLabel = new QLabel("Ready to train",this);
     m_progressLabel->setObjectName("metricValue");
-    run->addWidget(m_progressLabel);
+    auto *session = new QHBoxLayout();
+    m_activity = new Starfield(this);
+    m_activity->setProperty("kineticGlyph", true);
+    m_activity->setProperty("activityIndicator",true);
+    m_activity->setObjectName("trainingActivity");
+    m_activity->setFixedSize(112,112);
+    m_activity->setMotionEnabled(false);
+    session->addWidget(m_activity);
+    auto *sessionCopy = new QVBoxLayout();
+    sessionCopy->setSpacing(8);
+    sessionCopy->addStretch();
+    sessionCopy->addWidget(m_progressLabel);
+    auto *guidance = new QLabel("Choose a model and dataset, then start your run. Follow progress here as your adapter learns.",this);
+    guidance->setObjectName("cardMeta");
+    guidance->setWordWrap(true);
+    sessionCopy->addWidget(guidance);
+    sessionCopy->addStretch();
+    session->addLayout(sessionCopy,1);
+    run->addLayout(session);
     m_progress = new QProgressBar(this);
     m_progress->setRange(0,100);
     m_progress->setValue(0);
     m_progress->setTextVisible(false);
+    m_progress->setFixedHeight(8);
     run->addWidget(m_progress);
     auto *btns = new QHBoxLayout();
     m_startButton = new QPushButton("Start Training", this);
     m_startButton->setObjectName("primaryBtn");
+    m_startButton->setIcon(Theme::coloredIcon("play", QColor(Theme::accentText())));
     m_stopButton = new QPushButton("Stop", this);
     m_stopButton->setObjectName("destructiveBtn");
+    m_stopButton->setIcon(Theme::coloredIcon("circle-stop", QColor(Theme::statusError())));
     m_stopButton->setEnabled(false);
     btns->addWidget(m_startButton);
     btns->addWidget(m_stopButton);
@@ -179,7 +208,7 @@ void TrainingPanel::setupUi() {
     telemetry->addTab(metrics->parentWidget(),"Metrics");
     auto *logs = Surface::card(this,"Training log");
     telemetry->addTab(logs->parentWidget(),"Event log");
-    telemetry->setCurrentIndex(1);
+    telemetry->setCurrentIndex(0);
     m_log = new QPlainTextEdit(this);
     m_log->setReadOnly(true);
     m_log->setPlaceholderText("Training log will appear here.");
@@ -394,10 +423,18 @@ void TrainingPanel::onStart() {
     body["max_length"] = m_maxLengthSpin->value();
 
     m_startButton->setEnabled(false);
+    m_activity->setActivity(Starfield::Training);
+    m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
+    m_progressLabel->setText("Preparing your run…");
+    m_startButton->setText("Preparing…");
     setStatus("Submitting training job...");
     m_client->post("/training/start", body,
         [this](int status, const QJsonDocument &doc) {
             if (status != 202) {
+                m_activity->setActivity(Starfield::Idle);
+                m_activity->setMotionEnabled(false);
+                m_progressLabel->setText("Ready to retry");
+                m_startButton->setText("Start Training");
                 m_startButton->setEnabled(true);
                 const QString msg = doc.object().value("detail").isString()
                     ? doc.object()["detail"].toString()
@@ -405,6 +442,7 @@ void TrainingPanel::onStart() {
                 setStatus("Could not start training: " + msg, "error");
                 return;
             }
+            m_startButton->setText("Training…");
             m_jobId = doc.object()["id"].toString();
             m_lastLoggedStep = -1;
             m_lastMessage.clear();
@@ -434,6 +472,7 @@ void TrainingPanel::onStop() {
 void TrainingPanel::onPollStatus() {
     if (m_jobId.isEmpty() || !m_client || !m_client->isReady()) {
         m_pollTimer->stop();
+        m_activity->setMotionEnabled(false);
         return;
     }
     m_client->get("/training/status/" + m_jobId,
@@ -483,6 +522,9 @@ void TrainingPanel::onPollStatus() {
 }
 
 void TrainingPanel::finishJob(const QString &message, const QString &tone) {
+    m_activity->setActivity(Starfield::Idle);
+    m_activity->setMotionEnabled(false);
+    m_startButton->setText("Start Training");
     m_jobId.clear();
     m_startButton->setEnabled(true);
     m_stopButton->setEnabled(false);

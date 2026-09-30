@@ -24,6 +24,8 @@ set(MAGNITE_SOURCES
     src/panels/modelcard.cpp
     src/panels/adaptercard.cpp
     src/widgets/flowlayout.cpp
+    src/widgets/clickfeedback.cpp
+    src/widgets/clickfeedback.h
     src/widgets/starfield.cpp
     src/widgets/starfield.h
     src/widgets/overviewtile.cpp

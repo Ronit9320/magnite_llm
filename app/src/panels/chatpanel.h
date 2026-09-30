@@ -5,6 +5,7 @@
 #include <QList>
 #include <QJsonObject>
 
+class Starfield;
 class QComboBox;
 class QPlainTextEdit;
 class QPushButton;
@@ -79,6 +80,7 @@ private:
     QPushButton *m_stopButton;
     QPushButton *m_clearButton;
     QLabel *m_statusLabel;
+    Starfield *m_activity = nullptr;
 
     // Streaming state (presentation only — plumbing untouched).
     QList<QJsonObject> m_history;

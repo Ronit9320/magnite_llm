@@ -2,6 +2,7 @@
 
 #include "panels/basepanel.h"
 
+class Starfield;
 class QComboBox;
 class QGroupBox;
 class QLineEdit;
@@ -82,4 +83,5 @@ private:
     QLabel *m_progressLabel = nullptr;
     QLabel *m_metrics = nullptr;
     QProgressBar *m_progress = nullptr;
+    Starfield *m_activity = nullptr;
 };

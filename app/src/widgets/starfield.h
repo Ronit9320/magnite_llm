@@ -9,6 +9,8 @@
 class Starfield : public QWidget {
 public:
     explicit Starfield(QWidget *parent = nullptr);
+    enum Activity { Idle, Training, Chat };
+    void setActivity(Activity activity);
     void setMotionEnabled(bool enabled);
     void setStarsVisible(bool visible);
 protected:
@@ -19,6 +21,7 @@ private:
     void updateTimer();
     QTimer m_timer;
     QElapsedTimer m_clock;
+    Activity m_activity = Idle;
     bool m_motion = true;
     bool m_stars = true;
 };

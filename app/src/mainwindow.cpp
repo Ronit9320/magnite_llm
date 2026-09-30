@@ -1,3 +1,4 @@
+#include "widgets/clickfeedback.h"
 #include <QShortcut>
 #include "mainwindow.h"
 #include "backend_manager.h"
@@ -60,7 +61,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_selfTest(QCoreApplication::arguments().contains("--selftest"))
 {
     setupUi();
-    setWindowTitle("Magnite — Studio 03");
+    setWindowTitle("Magnite — Studio Motion");
     resize(1280, 820);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
@@ -86,13 +87,19 @@ void MainWindow::setupUi() {
     // ---- Horizontal masthead (design doc §12) ----
     auto *sidebar = new QWidget();
     sidebar->setObjectName("sidebar");
-    sidebar->setFixedWidth(128);
+    sidebar->setFixedWidth(176);
     auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(8, 14, 8, 10);
+    sidebarLayout->setContentsMargins(14, 20, 14, 16);
     sidebarLayout->setSpacing(6);
     auto *brandRow = new QVBoxLayout();
     sidebarLayout->addLayout(brandRow);
 
+    auto *brandSeal = new Starfield(sidebar);
+    brandSeal->setProperty("kineticGlyph", true);
+    brandSeal->setFixedSize(64, 64);
+    brandSeal->setMotionEnabled(false);
+    brandSeal->setAccessibleName("Magnite studio seal");
+    brandRow->addWidget(brandSeal);
     auto *logoLabel = new QLabel("magnite", sidebar);
     logoLabel->setObjectName("logoLabel");
     brandRow->addWidget(logoLabel);
@@ -114,6 +121,10 @@ void MainWindow::setupUi() {
         refreshNavIcons();
     });
 
+    sidebarLayout->addSpacing(24);
+    auto *workspaceLabel = new QLabel("WORKSPACES", sidebar);
+    workspaceLabel->setObjectName("studioTag");
+    sidebarLayout->addWidget(workspaceLabel);
     auto *navigation = new QVBoxLayout();
     navigation->setSpacing(8);
     sidebarLayout->addLayout(navigation,1);
@@ -223,7 +234,7 @@ void MainWindow::setupUi() {
     workspaceLayout->setSpacing(0);
     auto *bar = new QFrame(workspace);
     bar->setObjectName("workspaceBar");
-    bar->setFixedHeight(44);
+    bar->setFixedHeight(52);
     auto *barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(16,0,16,0);
     auto *breadcrumb = new QLabel("LOCAL WORKSPACE   /   Intelligence, on your terms.",bar);
@@ -257,6 +268,7 @@ void MainWindow::setupUi() {
     applyAppearance();
 
     setCentralWidget(central);
+    new ClickFeedback(this);
 
     refreshNavIcons();
 }
@@ -619,7 +631,9 @@ void MainWindow::chatErrorSelfTest(std::shared_ptr<int> failures,
             const bool visible = scenario == 0 ? status.contains("audit SSE failure") :
                                  scenario == 1 ? status.contains("audit HTTP failure") :
                                  scenario == 3 ? status.contains("unexpectedly") : status.contains("error");
-            const bool ok = ready && visible;
+            const bool activityStopped = probe->findChild<QWidget *>("chatActivity")->isHidden()
+                && send->text() == QStringLiteral("Send  ↑");
+            const bool ok = ready && visible && activityStopped;
             if (!ok) ++*failures;
             fprintf(stderr, "[selftest] %s chat error recovery scenario %d: %s\n",
                     ok ? "ok:" : "FAIL:", scenario, qUtf8Printable(status));

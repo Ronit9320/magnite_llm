@@ -8,6 +8,8 @@
 #include "widgets/starfield.h"
 #include "panels/chatbubble.h"
 
+#include <QSettings>
+#include <QStyle>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -209,6 +211,13 @@ void ChatPanel::setupUi() {
     m_ragCheck = new QCheckBox("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
+    m_activity = new Starfield(this);
+    m_activity->setProperty("kineticGlyph",true);
+    m_activity->setProperty("activityIndicator",true);
+    m_activity->setObjectName("chatActivity");
+    m_activity->setFixedSize(32,32);
+    m_activity->hide();
+    actions->addWidget(m_activity);
     actions->addStretch();
     m_stopButton = new QPushButton("Stop", this);
     m_stopButton->setEnabled(false);
@@ -233,6 +242,12 @@ void ChatPanel::setupUi() {
     m_cursorTimer = new QTimer(this);
     m_cursorTimer->setInterval(500);
     connect(m_cursorTimer, &QTimer::timeout, this, [this]() {
+        if (QSettings().value("appearance/studio3ReducedMotion",false).toBool()) {
+            m_cursorTimer->stop();
+            m_cursorVisible = false;
+            if (m_streamBubble) m_streamBubble->setCursorVisible(false);
+            return;
+        }
         m_cursorVisible = !m_cursorVisible;
         if (m_streamBubble) m_streamBubble->setCursorVisible(m_cursorVisible);
     });
@@ -240,6 +255,13 @@ void ChatPanel::setupUi() {
 }
 
 bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_input && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+        auto *composer = m_input->parentWidget();
+        composer->setProperty("focused",event->type() == QEvent::FocusIn);
+        composer->style()->unpolish(composer);
+        composer->style()->polish(composer);
+        composer->update();
+    }
     if (watched == m_input && event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
@@ -405,7 +427,11 @@ void ChatPanel::onSend() {
     const quint64 requestId = ++m_requestId;
     m_streaming = true;
     m_cursorVisible = false;
-    m_cursorTimer->start();
+    m_activity->setActivity(Starfield::Chat);
+    m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
+    m_activity->show();
+    m_sendButton->setText("Responding…");
+    if (!QSettings().value("appearance/studio3ReducedMotion",false).toBool()) m_cursorTimer->start();
     m_sendButton->setEnabled(false);
     m_stopButton->setEnabled(true);
 
@@ -443,6 +469,8 @@ void ChatPanel::onSend() {
                 m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
                 m_streamBubble = nullptr;
                 m_streaming = false;
+                m_activity->hide();
+                m_sendButton->setText("Send  ↑");
                 m_cursorTimer->stop();
                 m_cursorVisible = false;
                 m_sendButton->setEnabled(true);
@@ -468,6 +496,8 @@ void ChatPanel::onSend() {
                     m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
                 m_streamBubble = nullptr;
                 m_streaming = false;
+                m_activity->hide();
+                m_sendButton->setText("Send  ↑");
                 m_cursorTimer->stop();
                 m_cursorVisible = false;
                 m_sendButton->setEnabled(true);
@@ -487,6 +517,8 @@ void ChatPanel::onStop() {
     }
     m_streamBubble = nullptr;
     m_streaming = false;
+    m_activity->hide();
+    m_sendButton->setText("Send  ↑");
     m_cursorTimer->stop();
     m_cursorVisible = false;
     m_sendButton->setEnabled(true);
@@ -499,6 +531,8 @@ void ChatPanel::onClearChat() {
     m_history.clear();
     // Tear down streaming state.
     m_streaming = false;
+    m_activity->hide();
+    m_sendButton->setText("Send  ↑");
     m_cursorTimer->stop();
     m_cursorVisible = false;
     m_streamBubble = nullptr;
@@ -524,7 +558,7 @@ void ChatPanel::onClearChat() {
 void ChatPanel::updateStreamingBubble(const QString &text, bool showCursor) {
     if (!m_streamBubble) return;
     m_streamBubble->setText(text);
-    m_streamBubble->setCursorVisible(showCursor);
+    m_streamBubble->setCursorVisible(showCursor && !QSettings().value("appearance/studio3ReducedMotion",false).toBool());
     m_chatLayout->invalidate();
     m_chatLayout->activate();
     m_chatHost->updateGeometry();
