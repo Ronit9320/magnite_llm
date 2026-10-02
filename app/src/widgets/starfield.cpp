@@ -50,14 +50,15 @@ void Starfield::paintEvent(QPaintEvent *) {
     if (property("kineticGlyph").toBool()) {
         const qreal seconds = m_motion && (m_activity != Idle || !property("activityIndicator").toBool())
             ? m_clock.elapsed()/1000.0 : 0;
-        const qreal angle = seconds * (m_activity == Training ? 12 : m_activity == Chat ? 6 : 1.5);
+        // Slow rotation conveys ongoing work without competing with the content.
+        const qreal angle = seconds * (m_activity == Training ? 4 : m_activity == Chat ? 2 : 0.5);
         const qreal side = qMin(width(),height());
         const QRectF bounds((width()-side)/2.0,(height()-side)/2.0,side,side);
         BrandMark::paint(painter,bounds,QColor(Theme::accentPrimary()),angle);
         if (m_activity != Idle) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(QColor(Theme::accentPrimary()),qMax(1.5,side/90.0),Qt::SolidLine,Qt::RoundCap));
-            painter.drawArc(bounds.adjusted(2,2,-2,-2),int(-std::fmod(seconds*80,360.0)*16),55*16);
+            painter.drawArc(bounds.adjusted(2,2,-2,-2),int(-std::fmod(seconds*20,360.0)*16),55*16);
         }
         return;
     }

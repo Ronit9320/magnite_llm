@@ -8,7 +8,7 @@
 #include "widgets/surface.h"
 #include "widgets/starfield.h"
 
-#include <QComboBox>
+#include "widgets/combobox.h"
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -136,7 +136,7 @@ void ModelsPanel::setupUi() {
     layout->addLayout(discovery);
 
     auto *viewRow = new QHBoxLayout();
-    m_viewCombo = new QComboBox(this);
+    m_viewCombo = new ComboBox(this);
     m_viewCombo->addItems({"Local Models", "Hub Search Results"});
     m_downloadButton = new QPushButton("Download", this);
     m_downloadButton->setObjectName("primaryBtn");

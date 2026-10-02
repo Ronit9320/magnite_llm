@@ -24,9 +24,23 @@ activation with a short ripple. Reduced motion freezes the wheel, removes ripple
 skips transitions and suppresses the response cursor blink. Hidden or inactive
 animations stop their timers; the sidebar and idle training mark stay static.
 
+Motion pacing: the training wheel turns at 4 degrees/second, the chat wheel at
+2 degrees/second, and the ambient seal at 0.5 degrees/second. The activity arc
+turns at 20 degrees/second (one revolution in 18 seconds), with the existing
+smooth refresh cadence and reduced-motion behavior preserved.
+Sidebar workspace changes use a 600 ms sine-eased fade and matching click ripple
+so navigation settles gradually. Reduced motion skips both effects.
+
+Dropdowns share a native combo-box wrapper with theme-tinted chevrons, a quiet
+arrow area, padded list rows and an explicit selected state. Editable combos
+use a single outer border. Menus retain keyboard selection and Escape dismissal
+and show up to eight rows before scrolling.
+
 ## Interaction polish
 
 - Consistent typography, control targets, theme contrast, focus and disabled states.
+- Rounded tabs across Settings and Training, with matching rounded badges,
+  checkbox indicators, tooltips and outer number-stepper corners throughout.
 - Compact layouts with a pinned chat composer, wrapping metadata and a scrollable
   training inspector; expanded hyperparameters fit without horizontal scrolling.
 - Keyboard-selectable model/document cards and clear destructive confirmations.

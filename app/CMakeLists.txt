@@ -26,6 +26,8 @@ set(MAGNITE_SOURCES
     src/panels/modelcard.cpp
     src/panels/adaptercard.cpp
     src/widgets/flowlayout.cpp
+    src/widgets/combobox.cpp
+    src/widgets/combobox.h
     src/widgets/clickfeedback.cpp
     src/widgets/clickfeedback.h
     src/widgets/brandmark.cpp

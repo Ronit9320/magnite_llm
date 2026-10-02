@@ -2,7 +2,7 @@
 #include "panels/settingspanel.h"
 
 #include <QCheckBox>
-#include <QComboBox>
+#include "widgets/combobox.h"
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -50,7 +50,7 @@ void SettingsPanel::setupUi() {
 
     auto *engineBox = new QGroupBox("Engine", this);
     auto *engineForm = new QFormLayout(engineBox);
-    m_engineOverride = new QComboBox(this);
+    m_engineOverride = new ComboBox(this);
     for (const auto &e : kEngines) m_engineOverride->addItem(e);
     m_engineOverride->setAccessibleName("Default inference engine");
     m_engineOverride->setToolTip(

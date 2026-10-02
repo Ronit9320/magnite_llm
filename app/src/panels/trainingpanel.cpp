@@ -11,7 +11,7 @@
 #include <QScrollArea>
 
 #include <QCheckBox>
-#include <QComboBox>
+#include "widgets/combobox.h"
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -89,7 +89,7 @@ void TrainingPanel::setupUi() {
     columns->addWidget(monitor);
     columns->setSizes({350,750});
 
-    m_modelCombo = new QComboBox(this);
+    m_modelCombo = new ComboBox(this);
     m_modelCombo->setEditable(true);
     m_modelCombo->setMinimumContentsLength(12);
     m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -108,7 +108,7 @@ void TrainingPanel::setupUi() {
     connect(refreshBtn, &QPushButton::clicked, this, &TrainingPanel::refreshOptions);
     connect(folderBtn, &QPushButton::clicked, this, &TrainingPanel::onBrowseBaseModel);
 
-    m_datasetCombo = new QComboBox(this);
+    m_datasetCombo = new ComboBox(this);
     m_datasetCombo->setEditable(true);
     m_datasetCombo->setMinimumContentsLength(12);
     m_datasetCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -240,7 +240,7 @@ void TrainingPanel::setupHyperparameters(QWidget *parent) {
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
-    m_targetModules = new QComboBox(hyperBox);
+    m_targetModules = new ComboBox(hyperBox);
     m_targetModules->setMinimumContentsLength(10);
     m_targetModules->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_targetModules->addItems({"q_proj,v_proj", "q_proj,k_proj,v_proj,o_proj", "all-linear"});
@@ -256,7 +256,7 @@ void TrainingPanel::setupHyperparameters(QWidget *parent) {
     m_alphaSpin->setValue(16);
     form->addRow("LoRA alpha:", m_alphaSpin);
 
-    m_quantCombo = new QComboBox(hyperBox);
+    m_quantCombo = new ComboBox(hyperBox);
     m_quantCombo->addItems({"None", "4-bit (NF4)", "8-bit (bitsandbytes)"});
     form->addRow("Quantization:", m_quantCombo);
 

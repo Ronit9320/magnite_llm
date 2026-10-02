@@ -303,7 +303,7 @@ void MainWindow::refreshNavIcons() {
 }
 
 void MainWindow::startPanelFade() {
-    // 150ms fade-in of the destination panel (design doc §6). Skipped in
+    // Gentle 600ms fade-in of the destination panel. Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
     if (m_selfTest || m_skipFade || QSettings().value("appearance/studio3ReducedMotion", false).toBool())
@@ -321,10 +321,10 @@ void MainWindow::startPanelFade() {
     effect->setOpacity(0.0);
 
     m_crossfade = new QPropertyAnimation(effect, "opacity", this);
-    m_crossfade->setDuration(220);
+    m_crossfade->setDuration(600);
     m_crossfade->setStartValue(0.0);
     m_crossfade->setEndValue(1.0);
-    m_crossfade->setEasingCurve(QEasingCurve::OutCubic);
+    m_crossfade->setEasingCurve(QEasingCurve::InOutSine);
     connect(m_crossfade, &QPropertyAnimation::finished, this, [this]() {
         if (m_crossfade) {
             m_crossfade->deleteLater();

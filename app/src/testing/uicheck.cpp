@@ -15,6 +15,7 @@
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -145,6 +146,39 @@ int runUiCheck(const QString &captures) {
                 check(panel->width() <= width && panel->height() <= 628 && (!scroll || scroll->horizontalScrollBar()->maximum()==0),
                       QString("%1 fits %2px in %3 mode").arg(name).arg(width).arg(dark?"dark":"light"));
                 capture(panel,QString("%1-%2-%3").arg(dark?"dark":"light").arg(width).arg(name));
+                if (name == "settings") {
+                    auto *tabs = settings.findChild<QTabWidget *>();
+                    for (int tab = 1; tab < tabs->count(); ++tab) {
+                        tabs->setCurrentIndex(tab); pump();
+                        capture(panel, QString("%1-%2-settings-tab-%3")
+                                .arg(dark?"dark":"light").arg(width).arg(tab));
+                    }
+                    tabs->setCurrentIndex(0); pump();
+                }
+                if (width == 848 && (name == "settings" || name == "training")) {
+                    auto *combo = panel->findChild<QComboBox *>();
+                    const int previous = combo->currentIndex();
+                    combo->setFocus();
+                    key(combo, Qt::Key_Down, Qt::AltModifier);
+                    pump();
+                    check(combo->view()->isVisible(), name + " dropdown opens with keyboard");
+                    check(combo->view()->sizeHintForRow(0) >= 32,
+                          name + " dropdown has readable row spacing");
+                    capture(combo->view()->window(), QString("%1-%2-dropdown")
+                            .arg(dark?"dark":"light").arg(name));
+                    key(combo->view(), Qt::Key_Escape);
+                    check(!combo->view()->isVisible() && combo->currentIndex() == previous,
+                          name + " dropdown Escape preserves selection");
+                    if (combo->count() > 1) {
+                        combo->setCurrentIndex(0);
+                        combo->showPopup(); pump();
+                        key(combo->view(), Qt::Key_Down);
+                        key(combo->view(), Qt::Key_Return);
+                        check(combo->currentIndex() == 1 && !combo->view()->isVisible(),
+                              name + " dropdown supports keyboard selection");
+                        combo->setCurrentIndex(previous);
+                    }
+                }
                 panel->hide();
             }
         }

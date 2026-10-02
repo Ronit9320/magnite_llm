@@ -19,10 +19,11 @@ public:
         setAttribute(Qt::WA_NoSystemBackground);
         setGeometry(button->rect());
         auto *animation = new QVariantAnimation(this);
-        animation->setDuration(320);
+        const bool sidebar = button->objectName() == "navBtn";
+        animation->setDuration(sidebar ? 600 : 320);
         animation->setStartValue(0.0);
         animation->setEndValue(1.0);
-        animation->setEasingCurve(QEasingCurve::OutCubic);
+        animation->setEasingCurve(sidebar ? QEasingCurve::InOutSine : QEasingCurve::OutCubic);
         connect(animation, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
             m_progress = value.toReal(); update();
         });

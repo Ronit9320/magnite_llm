@@ -11,7 +11,7 @@
 #include <QSettings>
 #include <QStyle>
 #include <QCheckBox>
-#include <QComboBox>
+#include "widgets/combobox.h"
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -57,7 +57,7 @@ ChatPanel::ChatPanel(QWidget *parent)
 void ChatPanel::setupUi() {
     auto *layout = contentLayout();
     auto *toolbar = new QHBoxLayout();
-    m_modelCombo = new QComboBox(this);
+    m_modelCombo = new ComboBox(this);
     m_modelCombo->setEditable(true);
     m_modelCombo->setMinimumContentsLength(22);
     m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -78,7 +78,7 @@ void ChatPanel::setupUi() {
     controls->parentWidget()->setObjectName("chatSettings");
     auto *fields = new QHBoxLayout();
     auto *engineField = new QVBoxLayout();
-    m_engineCombo = new QComboBox(this);
+    m_engineCombo = new ComboBox(this);
     m_engineCombo->addItems({"Auto (global setting)", "Local (vLLM)", "Local (llama.cpp)", "Local (torch)", "Local (Ollama)"});
     Surface::field(engineField, "Engine", m_engineCombo);
     fields->addLayout(engineField, 2);
