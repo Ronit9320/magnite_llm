@@ -3,17 +3,17 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QNetworkReply>
 #include <QRegularExpression>
+#include <QTcpSocket>
 #include <QTimer>
-#include <QUrl>
 #include <QSettings>
+
+#include <memory>
 
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
     , m_process(new QProcess(this))
     , m_port(0)
-    , m_nam(new QNetworkAccessManager(this))
     , m_started(false)
     , m_stopping(false)
 {
@@ -149,25 +149,58 @@ void BackendManager::waitForBackend() {
         if (m_started || !isRunning()) {
             return;
         }
-        auto *reply = m_nam->get(QNetworkRequest(QUrl(baseUrl() + "/health")));
-        connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-            reply->deleteLater();
-            if (m_started) {
-                return;
-            }
-            if (reply->error() == QNetworkReply::NoError) {
-                m_started = true;
-                fprintf(stderr, "[magnite] backend health OK (%s)\n",
-                        qUtf8Printable(baseUrl()));
-                emit started();
-            } else if (isRunning()) {
-                qWarning() << "Backend health check failed:" << reply->errorString()
-                           << "- retrying";
-                QTimer::singleShot(500, this, &BackendManager::waitForBackend);
-            }
-        });
+        checkHealth();
     });
     timer->start(500);
+}
+
+// Probes /health over a raw loopback socket. QNetworkAccessManager never sent
+// this request on macOS (the app's GET stalled before reaching the backend),
+// so readiness no longer depends on it.
+void BackendManager::checkHealth() {
+    auto *socket = new QTcpSocket(this);
+    auto response = std::make_shared<QByteArray>();
+    auto settled = std::make_shared<bool>(false);
+    auto settle = [this, socket, settled](bool ok) {
+        if (*settled) {
+            return;
+        }
+        *settled = true;
+        socket->abort();
+        socket->deleteLater();
+        if (m_started) {
+            return;
+        }
+        if (ok) {
+            m_started = true;
+            fprintf(stderr, "[magnite] backend health OK (%s)\n", qUtf8Printable(baseUrl()));
+            emit started();
+        } else if (isRunning()) {
+            qWarning() << "Backend health check failed - retrying";
+            QTimer::singleShot(500, this, &BackendManager::waitForBackend);
+        }
+    };
+
+    connect(socket, &QTcpSocket::connected, socket, [socket]() {
+        socket->write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    });
+    connect(socket, &QTcpSocket::readyRead, socket, [socket, response]() {
+        response->append(socket->readAll());
+    });
+    connect(socket, &QTcpSocket::disconnected, socket, [response, settle]() {
+        settle(response->startsWith("HTTP/1.1 200"));
+    });
+    connect(socket, &QTcpSocket::errorOccurred, socket,
+            [settle](QAbstractSocket::SocketError error) {
+        // A graceful close also reports RemoteHostClosedError; the disconnected
+        // handler decides the result for that case.
+        if (error != QAbstractSocket::RemoteHostClosedError) {
+            settle(false);
+        }
+    });
+    QTimer::singleShot(3000, socket, [settle]() { settle(false); });
+
+    socket->connectToHost(QStringLiteral("127.0.0.1"), m_port);
 }
 
 void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
