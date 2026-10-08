@@ -56,6 +56,9 @@ struct Token {
 
 std::vector<Token> tokens() {
     return {
+        {"@brandOrange", Theme::brandOrange()},
+        {"@brandInk", Theme::brandInk()},
+        {"@brandText", Theme::brandText()},
         {"@bgVoid",             Theme::bgVoid()},
         {"@bgDeep",             Theme::bgDeep()},
         {"@accentLabel",        Theme::accentLabel()},
@@ -224,6 +227,10 @@ int Theme::selfCheck() {
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());
+
+    check("brand orange", Theme::brandOrange() == "#FF4A0E");
+    check("brand ink", Theme::brandInk() == "#201411");
+    check("brand text valid", QColor(Theme::brandText()).isValid());
 
     // 2. QSS compiles: non-empty output with no leftover @tokens. Every
     // "@..." in theme.qss must be substituted; a surviving token would be

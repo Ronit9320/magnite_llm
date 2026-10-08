@@ -10,6 +10,7 @@ Starfield::Starfield(QWidget *parent) : QWidget(parent) {
     m_clock.start();
     m_timer.setInterval(33); // Smooth activity feedback without a continuously running render loop.
     connect(&m_timer, &QTimer::timeout, this, qOverload<>(&QWidget::update));
+    connect(&m_logo, &QMovie::frameChanged, this, [this](int) { update(); });
     connect(qApp, &QGuiApplication::applicationStateChanged, this,
             [this](Qt::ApplicationState) { updateTimer(); });
 }
@@ -38,7 +39,16 @@ void Starfield::updateTimer() {
     const bool animate = property("kineticGlyph").toBool() && m_motion && m_stars
         && (m_activity != Idle || !property("activityIndicator").toBool()) && isVisible()
         && qApp->applicationState() == Qt::ApplicationActive;
-    if (animate) m_timer.start(); else m_timer.stop();
+    if (animate) {
+        if (m_logo.fileName().isEmpty())
+            m_logo.setFileName(":/brand/animated-symbol.gif");
+        if (m_logo.state() == QMovie::Paused) m_logo.setPaused(false);
+        else if (m_logo.state() != QMovie::Running) m_logo.start();
+    } else if (m_logo.state() == QMovie::Running) {
+        m_logo.setPaused(true);
+    }
+    // The clip drives logo repaints; only the activity arc needs a timer.
+    if (animate && m_activity != Idle) m_timer.start(); else m_timer.stop();
 }
 
 void Starfield::showEvent(QShowEvent *event) { QWidget::showEvent(event); updateTimer(); }
@@ -50,11 +60,17 @@ void Starfield::paintEvent(QPaintEvent *) {
     if (property("kineticGlyph").toBool()) {
         const qreal seconds = m_motion && (m_activity != Idle || !property("activityIndicator").toBool())
             ? m_clock.elapsed()/1000.0 : 0;
-        // Slow rotation conveys ongoing work without competing with the content.
-        const qreal angle = seconds * (m_activity == Training ? 4 : m_activity == Chat ? 2 : 0.5);
         const qreal side = qMin(width(),height());
         const QRectF bounds((width()-side)/2.0,(height()-side)/2.0,side,side);
-        BrandMark::paint(painter,bounds,QColor(Theme::accentPrimary()),angle);
+        const bool playLogo = m_motion && m_stars
+            && (m_activity != Idle || !property("activityIndicator").toBool());
+        const QPixmap frame = m_logo.currentPixmap();
+        if (playLogo && !frame.isNull()) {
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawPixmap(bounds, frame, QRectF(frame.rect()));
+        } else {
+            BrandMark::paint(painter,bounds,QColor(Theme::accentPrimary()));
+        }
         if (m_activity != Idle) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(QColor(Theme::accentPrimary()),qMax(1.5,side/90.0),Qt::SolidLine,Qt::RoundCap));

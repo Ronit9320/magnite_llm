@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QMovie>
 
 // Workspace registration grid or animated brand mark (kineticGlyph property).
 // Motion respects reduced-motion preferences and application visibility.
@@ -21,6 +22,7 @@ private:
     void updateTimer();
     QTimer m_timer;
     QElapsedTimer m_clock;
+    QMovie m_logo;
     Activity m_activity = Idle;
     bool m_motion = true;
     bool m_stars = true;

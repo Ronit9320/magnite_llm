@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.models.registry import ModelRegistry
 from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, PullRequest
+from backend.paths import app_home
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -25,18 +26,12 @@ def _registry_setup() -> None:
     """Called once from server startup."""
     global _registry
 
-    app_dir = os.environ.get("MAGNITE_HOME")
-    if not app_dir:
-        app_dir = os.path.join(os.path.expanduser("~"), ".magnite")
-        if os.name == "nt":
-            app_dir = os.path.join(os.environ.get("APPDATA") or app_dir, "Magnite")
-    db_path = os.path.join(app_dir, "models.db")
-    hf_cache = os.environ.get("HF_HOME") or None
+    db_path = os.path.join(app_home(), "models.db")
 
     from backend.models.store import ModelStore
 
     store = ModelStore(db_path)
-    _registry = ModelRegistry(store, hf_cache=hf_cache)
+    _registry = ModelRegistry(store)
 
 
 @router.get("", response_model=list[ModelRecord])

@@ -37,6 +37,8 @@ Current preview with an empty workspace; [all panels and both themes](docs/relea
 GGUF weights are for the inference path, not the ordinary PEFT training input.
 The local service uses a custom SSE protocol and is not a drop-in OpenAI API.
 See [API examples](docs/LOCAL_API.md) and [known limitations](docs/LIMITATIONS.md).
+The [backend process map](docs/development/BACKEND_PROCESS.md) traces startup and service calls;
+the [backend audit](docs/development/BACKEND_AUDIT.md) records findings, tests, and remaining gaps.
 
 ## Build and run
 
@@ -95,7 +97,7 @@ has no application authentication layer.
 - [Studio 03 design rules](design/studio-3/README.md)
 - [Security reporting](SECURITY.md)
 
-The [September audit](AUDIT_2026-09-27.md) preserves historical defects and their
+The [September audit](docs/development/AUDIT_2026-09-27.md) preserves historical defects and their
 subsequent repairs; its follow-up supersedes the original findings. It is not a
 promise that every engine or hardware configuration has been tested.
 

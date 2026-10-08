@@ -266,6 +266,14 @@ int runUiCheck(const QString &captures) {
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
     settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
+    QMovie logo(":/brand/animated-symbol.gif");
+    check(logo.isValid() && logo.jumpToFrame(0),"bundled logo animation decodes");
+    const auto firstLogoFrame = logo.currentImage();
+    bool advanced = true;
+    for (int i=0;i<25;++i) advanced = logo.jumpToNextFrame() && advanced;
+    check(advanced && firstLogoFrame != logo.currentImage(),"supplied logo changes frames");
+    check(!firstLogoFrame.isNull() && firstLogoFrame.pixelColor(0,0).alpha()==0,
+          "logo background is transparent");
     Starfield wheel; wheel.setProperty("kineticGlyph",true); wheel.setProperty("activityIndicator",true);
     wheel.resize(210,210); wheel.show(); wheel.activateWindow(); pump();
     for(auto activity:{Starfield::Training,Starfield::Chat}) {

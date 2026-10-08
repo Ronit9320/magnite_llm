@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+from pathlib import Path
 import threading
 import time
 import uuid
 from typing import Optional
 
 import httpx
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi, snapshot_download, scan_cache_dir
+from huggingface_hub.constants import HF_HUB_CACHE
+from huggingface_hub.errors import CacheNotFound
 from tqdm import tqdm
 
 from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, model_id
 from backend.models.store import ModelStore
 
 OLLAMA_HOST = os.environ.get("MAGNITE_OLLAMA_URL", "http://127.0.0.1:11434")
+logger = logging.getLogger(__name__)
 
 
 class _ProgressTqdm(tqdm):
@@ -43,7 +48,8 @@ class ModelRegistry:
     def __init__(self, store: ModelStore, hf_cache: Optional[str] = None):
         self._store = store
         self._api = HfApi()
-        self._hf_cache = hf_cache
+        self._hf_cache = hf_cache if hf_cache is not None else HF_HUB_CACHE
+        self._sync_lock = threading.RLock()
         self._jobs: dict[str, PullJob] = {}
 
     # ---- Job management ------------------------------------------------
@@ -101,7 +107,7 @@ class ModelRegistry:
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            archs = cfg.get("architectures", [])
+            archs = cfg.get("architectures", []) if isinstance(cfg, dict) else []
             if archs:
                 architecture = archs[0] if isinstance(archs, list) else str(archs)
         except (OSError, json.JSONDecodeError):
@@ -116,6 +122,77 @@ class ModelRegistry:
                 except OSError:
                     pass
         return architecture, round(total / (1024 * 1024), 1)
+
+    @staticmethod
+    def _has_model_weights(path: Path) -> bool:
+        """Recognize local base weights without downloading or importing ML.
+
+        A Hub snapshot can contain only a tokenizer, an adapter, or one shard.
+        This is a file-presence check, not validation of model compatibility.
+        """
+        if any(p.is_file() and p.stat().st_size > 0 for p in path.rglob("*.gguf")):
+            return True
+        if not (path / "config.json").is_file():
+            return False
+        for name in ("model.safetensors", "pytorch_model.bin"):
+            weight = path / name
+            if weight.is_file() and weight.stat().st_size > 0:
+                return True
+        for name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
+            try:
+                index = json.loads((path / name).read_text(encoding="utf-8"))
+                shards = set(index["weight_map"].values())
+                if shards and all(
+                    not Path(shard).is_absolute() and ".." not in Path(shard).parts
+                    for shard in shards
+                ) and all((path / shard).is_file() and (path / shard).stat().st_size > 0
+                          for shard in shards):
+                    return True
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+        return False
+
+    def _record_hf_models(self) -> None:
+        """Discover externally downloaded models; never mutate the shared cache."""
+        if not Path(self._hf_cache).expanduser().exists():
+            return
+        try:
+            cache = scan_cache_dir(self._hf_cache)
+        except (OSError, ValueError, CacheNotFound) as exc:
+            logger.warning("Cannot scan Hugging Face cache: %s", exc)
+            return
+        for warning in cache.warnings:
+            logger.warning("Hugging Face cache: %s", warning)
+        for repo in sorted(cache.repos, key=lambda r: r.repo_id):
+            if repo.repo_type != "model":
+                continue
+            identifier = model_id("huggingface", repo.repo_id)
+            existing = self._store.get(identifier)
+            try:
+                revisions = [r for r in repo.revisions if self._has_model_weights(r.snapshot_path)]
+                if not revisions:
+                    continue
+                # Keep an explicitly registered revision; otherwise prefer main.
+                revision = max(revisions, key=lambda r: (
+                    bool(existing and Path(existing.path) == r.snapshot_path),
+                    "main" in r.refs, r.last_modified, r.commit_hash,
+                ))
+                architecture, size_mb = self._inspect_hf(str(revision.snapshot_path))
+                rec = ModelRecord(
+                    id=identifier, name=existing.name if existing else repo.repo_id.rsplit("/", 1)[-1],
+                    source="huggingface", ref=repo.repo_id, path=str(revision.snapshot_path),
+                    architecture=architecture, size_mb=size_mb,
+                    license=existing.license if existing else "",
+                    meta={**(existing.meta if existing else {}), "cache_revision": revision.commit_hash},
+                    downloaded_at=(existing.downloaded_at if existing else "") or
+                        time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(revision.last_modified)),
+                    status="ready",
+                )
+                if existing != rec:
+                    self._store.upsert(rec)
+            except (OSError, ValueError) as exc:
+                # A concurrent external download/deletion must not break the list.
+                logger.warning("Cannot inspect cached model %s: %s", repo.repo_id, exc)
 
     def pull_hf(self, repo_id: str) -> str:
         job_id = self._create_job(repo_id, "huggingface")
@@ -276,7 +353,10 @@ class ModelRegistry:
         return self._store.get(identifier)
 
     def list_synced(self, source: Optional[str] = None, q: str = "") -> list[ModelRecord]:
-        """Return stored records, refreshing Ollama records first if useful."""
+        """Refresh local HF snapshots and Ollama before applying list filters."""
+        if source in (None, "huggingface"):
+            with self._sync_lock:
+                self._record_hf_models()
         if source in (None, "ollama"):
             try:
                 self._record_ollama_models()
@@ -285,6 +365,10 @@ class ModelRegistry:
         return self._store.list(source=source, q=q)
 
     def delete_model(self, model_id: str) -> bool:
+        with self._sync_lock:
+            return self._delete_model(model_id)
+
+    def _delete_model(self, model_id: str) -> bool:
         rec = self._store.get(model_id)
         if rec is None:
             return False

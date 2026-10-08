@@ -32,11 +32,11 @@ MAGNITE_SELFTEST_RAG=1       ./build/magnite-app --selftest        # ingest -> q
 
 Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; backend readiness takes ~13s. Pass prints `[selftest] PASS (0 failures)`.
 
-## Theme (Studio 03; historical Phase 5.5 in design_doc.md)
+## Theme (Studio 03; historical Phase 5.5 in docs/development/design_doc.md)
 
 - Design tokens are inline functions in `app/src/theme.h`; `@token` placeholders in `app/resources/theme/console.qss` (embedded as `:/theme/theme.qss`) are substituted at runtime by `Theme::qss()`. **Never hardcode hex values in widget code or QSS** — add a token to `theme.h` and extend `Theme::selfCheck()`.
 - Icons are Lucide-style SVGs requiring `stroke="currentColor"`; tint via `Theme::coloredIcon()`.
-- Committed rules in `design/studio-3/README.md` govern the active Studio theme and contribution workflow. Local `design_doc.md` §13 contains historical authorization/refinements; earlier Space sections are historical. Do not improvise beyond the active spec.
+- Committed rules in `design/studio-3/README.md` govern the active Studio theme and contribution workflow. Local `docs/development/design_doc.md` §13 contains historical authorization/refinements; earlier Space sections are historical. Do not improvise beyond the active spec.
 
 ## Backend quirks
 
@@ -46,4 +46,4 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 ## Docs
 
-`app.md`, `BUILD_PLAN.md`, `design_doc.md`, `PHASE_5_5.md` are gitignored (local-only) — they won't exist in fresh clones. Public instructions live in `README.md`, `CONTRIBUTING.md`, `docs/`, and `RELEASE_CHECKLIST.md`. The release scope excludes hosted inference and cloud training.
+Architecture, implementation plans, process maps, and analysis reports live in `docs/development/`. Within that directory, `app.md`, `BUILD_PLAN.md`, `design_doc.md`, and `PHASE_5_5.md` remain gitignored (local-only) — they won't exist in fresh clones. Public instructions live in `README.md`, `CONTRIBUTING.md`, `docs/`, and `RELEASE_CHECKLIST.md`. The release scope excludes hosted inference and cloud training.

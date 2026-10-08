@@ -32,7 +32,7 @@ Proposed release shape: a source-first preview on a verified platform, with expl
 - LoRA/QLoRA training has a serialized queue, cancellation, durable history, and adapter registration.
 - Adapter import/export and activation exist. Activation uses a PEFT/torch restart; clearing an adapter unloads inference.
 - RAG uses sentence-transformers with SQLite/NumPy retrieval, not ChromaDB/FAISS. Extraction, configuration, retrieval, and chat-context budgeting exist.
-- The [audit follow-up](AUDIT_2026-09-27.md#follow-up-audit--2026-09-28--dev) records repairs for F1–F16, 24 passing offline tests, desktop feature checks, and a combined real-model workflow. These are historical results to rerun for the release candidate.
+- The [audit follow-up](docs/development/AUDIT_2026-09-27.md#follow-up-audit--2026-09-28--dev) records repairs for F1–F16, 24 passing offline tests, desktop feature checks, and a combined real-model workflow. These are historical results to rerun for the release candidate.
 - Live vLLM/Ollama, larger-model/OOM behavior, macOS/Windows, and forced-process-death coverage remain unverified in that record.
 
 Unchecked items below are work or evidence still required, not assertions that every corresponding feature is broken.

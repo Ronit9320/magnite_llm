@@ -18,6 +18,9 @@ void setDark(bool dark); // Apply immediately; persistence is owned by the switc
 inline QString bgVoid()        { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
 inline QString bgDeep()        { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
 // Keep existing semantic names for consumers; the secondary accent is lavender.
+inline QString brandOrange() { return QStringLiteral("#FF4A0E"); }
+inline QString brandInk() { return QStringLiteral("#201411"); }
+inline QString brandText() { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#1B1311"); }
 inline QString accentPrimary() { return QStringLiteral("#FF5C28"); }
 inline QString accentBlue()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
 inline QString accentIce()    { return QStringLiteral("#FF5C28"); }

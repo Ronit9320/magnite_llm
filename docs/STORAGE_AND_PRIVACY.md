@@ -15,9 +15,12 @@
 | Qt preferences | QSettings under organization Magnite, application Magnite LLM; on Linux normally under XDG_CONFIG_HOME or `~/.config` |
 | Chat | Current conversation is in memory; durable chat save/restore is not implemented |
 
-HF_HOME is passed directly as the registry download cache directory in the current
-implementation; other hub consumers use their own library/environment defaults.
-Do not assume all model and embedding caches share one relocated directory.
+The registry uses the Hub library's cache location: `HF_HUB_CACHE` (exact path),
+then legacy `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then
+`XDG_CACHE_HOME/huggingface/hub` or `~/.cache/huggingface/hub`. Set environment
+variables before starting the app. Refreshing the model library discovers
+existing base-model snapshots without downloading them. See the
+[backend process map](development/BACKEND_PROCESS.md) for selection and completeness rules.
 The code has a Windows APPDATA path branch, but Windows behavior is not verified.
 
 ## Network activity
@@ -42,7 +45,9 @@ or error text. Inspect and redact them before sharing.
 ## Deletion and backup
 
 Deleting a Hugging Face registry model uses cache-aware revision deletion; shared
-blobs may remain because another revision references them. Deleting an Ollama
+blobs may remain because another revision references them. This also applies to
+models automatically discovered from other applications' downloads: deletion
+removes the selected shared-cache revision, not just the Magnite listing. Deleting an Ollama
 model requests deletion from Ollama, not merely hiding it in Magnite. Active
 inference/training references can block model deletion.
 

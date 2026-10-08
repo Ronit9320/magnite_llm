@@ -10,6 +10,7 @@
 | Quantization/CUDA failure | Confirm torch and bitsandbytes support the installed GPU/runtime. Try unquantized LoRA only if the model fits; a smaller model may be needed. |
 | Out of memory | Unload inference before training; use smaller weights, batch size, sequence/context length, or supported quantization. GPU sharing is not yet release-verified. |
 | Download denied or offline | Check repository spelling, network access, model license/access approval, and HF authentication. Confirm required weights are cached before offline use. |
+| Cached HF models missing | Restart after updating, then refresh the local library. Verify `HF_HUB_CACHE` or `HF_HOME/hub` in the desktop's environment. Adapter-only, tokenizer-only and incomplete snapshots are not base models. See [discovery rules](development/BACKEND_PROCESS.md#4-model-library-discovery-pulls-and-deletion). |
 | RAG unavailable | Install ML extras; allow the first embedding-model download or prepopulate the cache. PDF parsing also needs pypdf. |
 | No usable PDF text | Scanned/image-only PDF OCR is not implemented; supply extracted text. |
 | No retrieved matches | Confirm documents are indexed; test the query in Knowledge; review similarity threshold and embedding model. |

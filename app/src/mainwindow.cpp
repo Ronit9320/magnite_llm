@@ -101,11 +101,10 @@ void MainWindow::setupUi() {
     auto *brandSeal = new Starfield(sidebar);
     brandSeal->setProperty("kineticGlyph", true);
     brandSeal->setFixedSize(76, 76);
-    brandSeal->setMotionEnabled(false);
-    brandSeal->setAccessibleName("Magnite · Konark wheel");
-    brandSeal->setToolTip("Magnite · Inspired by the Konark wheel");
+    brandSeal->setAccessibleName("Magnite logo");
+    brandSeal->setToolTip("Magnite · Intelligence on your own terms");
     brandRow->addWidget(brandSeal);
-    auto *logoLabel = new QLabel("magnite", sidebar);
+    auto *logoLabel = new BrandWordmark(sidebar);
     logoLabel->setObjectName("logoLabel");
     brandRow->addWidget(logoLabel);
     auto *edition = new QLabel("LOCAL STUDIO", sidebar);
@@ -260,8 +259,9 @@ void MainWindow::setupUi() {
     starLayout->addWidget(m_stack);
     workspaceLayout->addWidget(m_background,1);
     mainLayout->addWidget(workspace, 1);
-    auto applyAppearance = [this]() {
+    auto applyAppearance = [this, brandSeal]() {
         QSettings settings;
+        brandSeal->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         m_background->setStarsVisible(settings.value("appearance/studio3Ambient",true).toBool());
         m_background->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         for (auto *widget : m_stack->findChildren<QWidget *>()) {

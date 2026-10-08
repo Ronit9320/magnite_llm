@@ -11,6 +11,10 @@ curl --fail-with-body "$MAGNITE_API/health"
 curl --fail-with-body "$MAGNITE_API/models"
 ```
 
+`GET /models` refreshes existing Hugging Face cache snapshots and Ollama models.
+Use `?source=huggingface` for offline Hub-cache discovery without an Ollama probe.
+See [cache discovery rules and paths](development/BACKEND_PROCESS.md#4-model-library-discovery-pulls-and-deletion).
+
 The examples contain deliberate placeholders for values from your own backend.
 Do not expose this service through port forwarding or a public proxy: it has no
 application authentication and provides local-path and mutation operations.

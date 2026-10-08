@@ -2,11 +2,18 @@
 #include <QColor>
 #include <QIcon>
 #include <QRectF>
+#include <QWidget>
 class QPainter;
 
 namespace BrandMark {
-// Original vector interpretation of the Konark chariot wheel. Fine ornament
-// is omitted at icon sizes; the eight principal spokes remain recognizable.
+// Supplied Magnite artwork, shared by the app icon and animated activity marks.
 void paint(QPainter &painter, const QRectF &bounds, const QColor &color, qreal rotation = 0);
 QIcon icon();
 }
+
+class BrandWordmark : public QWidget {
+public:
+    explicit BrandWordmark(QWidget *parent = nullptr);
+protected:
+    void paintEvent(QPaintEvent *) override;
+};

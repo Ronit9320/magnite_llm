@@ -322,7 +322,9 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         job.message = "Saving adapter"
         job.progress = 95.0
 
-        work_dir = os.path.join(adapter_dir_root, cfg.name or f"adapter-{job.id[:6]}")
+        # Names are display text, never filesystem paths. Each job owns its
+        # weights even when two jobs use the same name.
+        work_dir = os.path.join(adapter_dir_root, f"adapter-{job.id}")
         os.makedirs(work_dir, exist_ok=True)
         model.save_pretrained(work_dir)
         try:
