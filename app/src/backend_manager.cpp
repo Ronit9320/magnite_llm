@@ -101,11 +101,34 @@ void BackendManager::launchBackend() {
 #endif
     QString python = QFileInfo::exists(venvPython) ? venvPython : QString("python3");
 
+    // Test packages carry a relocatable Python installation beside the client.
+    // Use isolated mode so a user's PYTHONPATH/site-packages cannot replace the
+    // packaged backend. Never silently fall back when a package is incomplete.
+    const QString runtimeDir = appDir + "/runtime";
+    const bool packaged = QDir(runtimeDir).exists();
+    if (packaged) {
+#ifdef Q_OS_WIN
+        python = runtimeDir + "/python/python.exe";
+#else
+        python = runtimeDir + "/python/bin/python3";
+        // Native Python extensions also need the bundled C++/OpenMP libraries.
+        QString libraryPath = QDir(appDir + "/../lib").absolutePath();
+        const QString existingLibraries = env.value("LD_LIBRARY_PATH");
+        if (!existingLibraries.isEmpty()) libraryPath += ":" + existingLibraries;
+        env.insert("LD_LIBRARY_PATH", libraryPath);
+#endif
+        args.prepend("-I");
+        args.prepend("-B");
+        env.remove("PYTHONPATH");
+        env.remove("PYTHONHOME");
+        env.insert("MAGNITE_PACKAGED", "1");
+    }
+
     m_process->setProcessEnvironment(env);
     m_process->setWorkingDirectory(appDir);
     m_process->start(python, args);
 
-    if (!m_process->waitForStarted(5000) && python != "python3") {
+    if (!m_process->waitForStarted(5000) && !packaged && python != "python3") {
         m_process->start("python3", args);
         m_process->waitForStarted(5000);
     }

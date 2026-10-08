@@ -13,6 +13,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("Magnite");
     QCoreApplication::setOrganizationDomain("magnite.local");
     QCoreApplication::setApplicationName("Magnite LLM");
+    QCoreApplication::setApplicationVersion(QStringLiteral(MAGNITE_BUILD_LABEL));
 
     const bool selftest = argc > 1 && QString(argv[1]) == "--selftest";
     const bool uiCheck = argc > 1 && QString(argv[1]) == "--ui-check";

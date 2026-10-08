@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Magnite (Testing)
+Comment=Local model inference, training and document chat
+Exec=magnite-app
+Icon=magnite
+Categories=Development;Science;
+Terminal=false

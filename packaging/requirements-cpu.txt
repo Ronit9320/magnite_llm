@@ -1,0 +1,20 @@
+# Test-build runtime. Model weights, CUDA, vLLM and Ollama are not bundled.
+# Full resolved versions are recorded in each package's build-info directory.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1
+pydantic==2.13.5
+huggingface_hub==1.30.0
+llama-cpp-python==0.3.35
+tqdm==4.70.0
+anyio==4.15.0
+numpy==2.5.2
+torch==2.14.0
+transformers==5.16.1
+peft==0.20.0
+bitsandbytes==0.50.2
+sentence-transformers==6.0.1
+datasets==5.0.1
+accelerate==1.14.0
+safetensors==0.8.0
+pypdf==6.19.0

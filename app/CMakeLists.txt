@@ -50,6 +50,14 @@ set(MAGNITE_SOURCES
 
 add_executable(magnite-app ${MAGNITE_SOURCES})
 
+set(MAGNITE_BUILD_LABEL "${PROJECT_VERSION}" CACHE STRING "Version displayed by this build")
+target_compile_definitions(magnite-app PRIVATE MAGNITE_BUILD_LABEL="${MAGNITE_BUILD_LABEL}")
+if(WIN32)
+    set_target_properties(magnite-app PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+install(TARGETS magnite-app RUNTIME DESTINATION bin)
+
 target_include_directories(magnite-app PRIVATE src)
 
 target_link_libraries(magnite-app PRIVATE

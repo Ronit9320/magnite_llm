@@ -12,7 +12,7 @@ cmake --build build -j
 ```
 
 - New C++ files must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt` (explicit list, AUTOMOC/AUTORCC on). Qt6 Widgets + Network + Svg; `-Wall -Wextra`.
-- The binary looks up the repo from its own location: it must live at `<repo>/build/magnite-app` for `backend/src` and `.venv` to resolve. It launches `.venv/bin/python -m backend.main --port 0` with `PYTHONPATH=backend/src`.
+- Source builds look up the repo from the binary's location: use `<repo>/build/magnite-app` for `backend/src` and `.venv` to resolve. Packaged builds instead use the isolated Python under `runtime/python` beside the executable. See `packaging/README.md` for the test AppImage recipe and checks.
 - Backend data lives in `~/.magnite` (override `MAGNITE_HOME`). Run it standalone for debugging: `magnite-backend --port 0 --home ~/.magnite`.
 - `shared/` is an empty placeholder; the IPC contract lives in `backend/src/backend/routes/` and the C++ `BackendClient`.
 
