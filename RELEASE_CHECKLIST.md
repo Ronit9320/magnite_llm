@@ -26,6 +26,8 @@ Hosted inference, cloud training, provider billing, cloud credentials, and cloud
 
 Proposed release shape: a source-first preview on a verified platform, with explicit hardware/engine limits. Linux is the first candidate based on the existing evidence. Binary packages and additional operating systems have separate gates below; do not claim support before verifying it.
 
+Testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages remain to be built. These are testing artifacts for the unfinished app; public release gates remain open.
+
 ## Existing baseline — preserve, do not rebuild
 
 - Model registry, Hugging Face downloads, Ollama integration, and local inference engines exist.
@@ -127,10 +129,33 @@ These are prioritized improvements, not a reason to restart implemented systems 
 
 ## Binary distribution — required only for each advertised package
 
-- [ ] Make backend/Python/resource discovery work outside the repository layout; add installation/package rules (current CMake only builds the executable).
-- [ ] Choose a first Linux package format and test it on a clean machine, including Qt plugins, Python/native libraries, ML dependency strategy, icons, desktop integration, and uninstall behavior.
+### Linux AppImage — test build completed
+
+- [x] Make backend/Python/resource discovery work outside the repository layout and add CMake installation/AppImage packaging rules. The Linux package uses an adjacent isolated Python runtime; see [packaging instructions](packaging/README.md).
+- [x] Build `dist/Magnite-0.1.0-test.1-x86_64.AppImage` with Qt, Python and CPU inference/LoRA/RAG dependencies. Built 2026-10-08 on `release/v0.1-testing`, commit `6c83de5`; approximately 418 MiB. Model weights download separately.
+- [x] Verify relocated startup, theme/UI checks, GGUF inference and the combined CPU LoRA/adapter/RAG workflow. Record checksums, resolved dependencies and build provenance locally. See [Linux test-build verification](docs/release/V0_1_LINUX_TESTING.md).
+- [ ] Test on a clean second Linux machine, including native desktop integration, Qt plugins, backend process cleanup and removal behavior. Current build requires x86-64 and glibc 2.43+; build on an older distribution and verify separately before advertising broader compatibility.
+
+### Windows .exe — pending
+
+- [ ] Prepare a Windows x64 build environment and compile the Qt client; bundle Qt DLLs/plugins, standalone Windows Python, the backend and tested CPU ML dependencies.
+- [ ] Produce a v0.1 testing installer `.exe`, with application shortcuts and uninstall support. Record exact source/dependency versions and a SHA-256 checksum.
+- [ ] Verify installation and launch on a clean Windows machine without a developer checkout or system Python. Test inference, CPU LoRA, adapters, RAG, backend process cleanup, upgrade and uninstall while preserving user data.
+- [ ] Complete signing and installer verification for public distribution; identify unsigned testing builds explicitly.
+
+### macOS .dmg — pending
+
+- [ ] Select and document the initial architecture (Apple Silicon and/or Intel) and minimum macOS version; prepare a native macOS build environment.
+- [ ] Build a self-contained `.app` containing Qt frameworks/plugins, Python, the backend and platform-compatible ML dependencies; package it as a v0.1 testing `.dmg`. Record exact source/dependency versions and a SHA-256 checksum.
+- [ ] Verify installation and launch on a clean Mac without a developer checkout or system Python. Test supported inference/training/RAG paths, backend process cleanup, upgrade and removal while preserving user data. Record Metal/MPS and quantization limits separately.
+- [ ] Complete Developer ID signing, notarization and Gatekeeper verification before public distribution.
+
+### Shared publication gates
+
 - [ ] Publish package checksums, build provenance, third-party notices, and a documented upgrade/rollback path that preserves user data.
-- [ ] Gate macOS and Windows separately on native build/runtime verification, process cleanup, engine support, packaging, and signing where applicable. Three-platform installers are not a prerequisite for a Linux source preview.
+- [ ] Publish only verified platform packages as release assets, with installation instructions and explicit OS/hardware/engine limits. Link download-page buttons to those assets if a website is added.
+
+Gate each platform separately. Completing a local test package does not establish public-release readiness, and three-platform installers are not a prerequisite for a Linux source preview.
 
 ## Explicitly deferred
 
