@@ -19,10 +19,12 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       HF_HUB_OFFLINE: '1'
-      MAGNITE_HOME: ${{ runner.temp }}/magnite-data
-      XDG_CONFIG_HOME: ${{ runner.temp }}/magnite-config
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
     steps:
+      - name: Configure isolated test storage
+        run: |
+          echo "MAGNITE_HOME=$RUNNER_TEMP/magnite-data" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/magnite-config" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
