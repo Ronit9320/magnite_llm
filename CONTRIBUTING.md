@@ -10,7 +10,17 @@ and [AGENTS.md](AGENTS.md).
 - `app/`: C++20/Qt 6 Widgets client. BackendClient handles HTTP/SSE; BackendManager supervises Python.
 - `backend/src/backend/`: FastAPI routes and local model, training, inference, adapter, and RAG services.
 - `backend/tests/`: offline regressions and the opt-in live workflow.
-- `app/resources/` and `design/studio-3/`: current theme resources and committed design rules.
+- `app/resources/`: current theme, fonts, icons, and brand assets.
+
+## Branch workflow
+
+Create a new branch from `dev` for every change, including fixes and cleanup.
+Merge completed work into `dev` for integration testing. Promote tested changes
+from `dev` to `master`. Do not develop directly on `dev` or `master`, or merge
+feature branches directly into `master`.
+
+Delete completed feature branches after their commits are merged into `dev`.
+Check for unmerged commits before deleting a branch; preserve ongoing work.
 
 Keep ML work in Python and heavyweight imports lazy. New C++ files must be added
 to MAGNITE_SOURCES in app/CMakeLists.txt. Preserve explicit error reporting,
@@ -19,12 +29,14 @@ update the client and [API documentation](docs/LOCAL_API.md) together.
 
 ## Theme rules
 
-Use the Studio 03-based [Studio Motion design](design/intuitive-motion/README.md); earlier palettes are historical. Add colors to
+The current interface is finalized; follow the existing components. Add colors to
 `app/src/theme.h`, extend Theme::selfCheck, and reference tokens in QSS. Do not
 hardcode hex colors in widgets/stylesheets. Icons use `stroke="currentColor"`
 and Theme::coloredIcon. Preserve keyboard focus, both themes, and reduced motion.
-The [committed design notes](design/studio-3/README.md) are available in fresh clones;
-ignored local planning files are not required contribution references.
+The implementation in `app/src/theme.h`, `app/resources/theme/console.qss`, and
+`app/resources/brand/` defines the current design. Keep new feature styling
+consistent with it. Local planning files and retired design experiments are
+not contribution references.
 
 ## Verification
 

@@ -73,7 +73,7 @@ The implementation assumes a single desktop-oriented backend process. Module-lev
 | [`backend/src/backend/request_work.py`](../../backend/src/backend/request_work.py) | Disconnect-aware ownership of long-running worker-thread operations |
 | [`backend/tests/`](../../backend/tests/) | Offline regressions and live workflow verification |
 | [`app/src/testing/`](../../app/src/testing/) | UI interaction and layout checks |
-| [`docs/`](../), [`design/`](../../design/) | Public usage/release documentation and committed design rules |
+| [`docs/`](../), [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | Public usage/release documentation and current theme rules |
 | `shared/` | Placeholder; no generated cross-language API schema is implemented here |
 
 The HTTP contract is expressed in Python routes/Pydantic models and manually consumed by C++ JSON code. There is no generated typed C++ client. Changes to payload names therefore require coordinated edits on both sides.
@@ -134,7 +134,7 @@ Chat keeps message history in `ChatPanel::m_history` and sends that history with
 
 Colors and other design tokens are centralized in `theme.h`. `Theme::qss()` substitutes `@token` placeholders in `app/resources/theme/console.qss`, embedded through the `:/theme/theme.qss` resource alias. `Theme::coloredIcon()` tints SVGs using `currentColor`. Fonts and icons are bundled through Qt resources.
 
-Shared widgets implement surfaces, cards, flow layout, click feedback, branding and ambient animation. Light/dark selection and reduced-motion preferences are persisted. The active contribution rules are in [Studio 03](../../design/studio-3/README.md), with subsequent layout/motion refinements in [Studio Motion](../../design/intuitive-motion/README.md). Historical phase names in comments do not supersede these rules.
+Shared widgets implement surfaces, cards, flow layout, click feedback, branding and ambient animation. Light/dark selection and reduced-motion preferences are persisted. The finalized theme and brand assets are implemented in `app/src/theme.h`, `app/resources/theme/console.qss`, and `app/resources/brand/`; see the [contribution rules](../../CONTRIBUTING.md). Historical phase names in comments do not supersede these rules.
 
 ## Backend composition and API
 

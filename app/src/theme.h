@@ -5,7 +5,7 @@
 
 class QIcon;
 
-// Studio 03 design tokens (design doc §13). This is the single source of
+// Current design tokens. This is the single source of
 // truth for every color, font, radius and spacing value in the UI. Panels and
 // the global QSS (Theme::qss) read tokens from here — never hardcode hex
 // literals in widget code.

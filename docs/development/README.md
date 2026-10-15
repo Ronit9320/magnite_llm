@@ -13,10 +13,10 @@ repository root unless stated otherwise.
 | [Backend audit](BACKEND_AUDIT.md) | Findings, fixes, verification results, and remaining gaps |
 | [September audit](AUDIT_2026-09-27.md) | Historical review and follow-up findings |
 
-Local-only planning documents also live here when present: `app.md`,
-`BUILD_PLAN.md`, `design_doc.md`, and `PHASE_5_5.md`. They remain gitignored and
-are not available in fresh clones. Historical design plans do not supersede the
-active [Studio 03 contribution rules](../../design/studio-3/README.md).
+Local-only planning documents also live here when present: `app.md` and
+`BUILD_PLAN.md`. They remain gitignored and are not available in fresh clones.
+The [contribution rules](../../CONTRIBUTING.md) describe the finalized theme and
+the feature branch → `dev` → `master` workflow.
 
 For setup and contribution instructions, see [installation](../INSTALL.md) and
 [CONTRIBUTING.md](../../CONTRIBUTING.md).

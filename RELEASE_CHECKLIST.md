@@ -55,7 +55,7 @@ Completion: every visible release feature is local, implemented, and described a
 - [x] Add the owner-selected MIT project LICENSE; third-party material retains separate terms.
 - [ ] Inventory third-party code, fonts, icons, and dependencies; add applicable notices and asset provenance. Font OFL files already exist. Record redistribution requirements before bundling binaries.
 - [ ] Review tracked files and git history for credentials, private datasets/documents, model weights, personal paths, and internal-only material. The current review did not scan history for secrets.
-- [x] Review and remove superseded Midnight and Studio 1/2 exports, duplicate fonts, unused stylesheets and stale preview copies (2026-10-01). Retain the active Studio 03 foundation and Studio Motion design notes; history preserves earlier artifacts.
+- [x] Remove superseded design exports, duplicate fonts, unused stylesheets, and stale preview copies. The finalized theme and brand assets live in `app/src/theme.h` and `app/resources/`; contribution rules live in `CONTRIBUTING.md`.
 - [x] Add CONTRIBUTING.md with setup, architecture, theme rules, verification commands, and PR expectations.
 - [x] Add a draft SECURITY.md and bug/feature/PR templates requesting versions and sanitized logs.
 - [ ] Replace the security-contact placeholder (owner will supply it later), confirm a monitored private channel, and finalize supported versions before publication.
@@ -101,7 +101,7 @@ Completion: reproducible checks pass for the exact candidate commit and its adve
 ### 6. Finish release content
 
 - [x] Rewrite the README around the local product, accurate verification-status matrix, real clone URL, source-build quickstart, data locations, and limitations. Clean-install verification remains open separately. Include RAG in the architecture diagram.
-- [x] Replace references requiring ignored app.md, BUILD_PLAN.md, design_doc.md, or PHASE_5_5.md with committed user/developer documentation. Preserve sufficient Studio 03 rules for contributors without the private design spec.
+- [x] Use committed user/developer documentation for contribution instructions; local planning files are not required. Current theme rules are in `CONTRIBUTING.md`.
 - [x] Add concise walkthroughs for model download/load/chat, dataset preparation/training, adapter activation/export/import, and document ingestion/query/RAG chat. Include small redistributable sample inputs with provenance.
 - [x] Add troubleshooting for backend startup, engine/model mismatch, CUDA/quantization installation, memory limits, embedding downloads, empty retrieval, and cooperative cancellation.
 - [x] Document storage/deletion/backup behavior, settings restart requirements, retained histories, and current chat persistence limits. Describe actual outbound connections without implying downloads are offline.

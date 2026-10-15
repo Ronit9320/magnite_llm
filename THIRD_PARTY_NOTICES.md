@@ -14,12 +14,12 @@ inspected; it is not a completed binary redistribution review.
 Keep the notices with redistributed font assets. Exact font provenance/version
 matching should be confirmed before a binary bundle is published.
 
-## Icons and historical design assets
+## Icons and brand assets
 
-The Konark-inspired Magnite wheel in `app/src/widgets/brandmark.cpp` is original
-code-generated vector geometry covered by the project license. Its PNG/SVG exports
-live in `design/intuitive-motion/brand/`. Reference photographs informed the
-architectural motif but were not copied or bundled; see the design notes for links.
+The current Magnite symbol, wordmark, and animated symbol are bundled in
+`app/resources/brand/` and rendered by `app/src/widgets/brandmark.cpp`.
+They replace the earlier generated wheel identity. Confirm the supplied artwork's
+provenance and redistribution terms before publishing a binary bundle.
 
 `app/resources/icons/` contains 24 SVG files described by the project as
 Lucide-style. Their SVGs do not carry origin/license notices. Styling or visual
@@ -27,10 +27,6 @@ similarity alone is insufficient proof of upstream provenance. **Release gate:**
 confirm which icons were copied or adapted from upstream and include the exact
 required attribution/license; identify original icons separately. No unverified
 upstream license has been assigned to these files by this documentation pass.
-
-Superseded Midnight and Studio 1/2 design exports, duplicate fonts and the
-Midnight ZIP were removed during repository cleanup on 2026-10-01. They remain
-available in Git history; the active design is under `design/intuitive-motion/`.
 
 ## Linked and installed dependencies
 

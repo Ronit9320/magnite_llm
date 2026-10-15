@@ -21,8 +21,9 @@ Keep adapter option are removed. Existing engine preference indices remain
 Auto=0, vLLM=1 and llama.cpp=2; legacy hosted credential cleanup remains.
 The incorrect FP8 label now reads “8-bit (bitsandbytes)”.
 
-See [design notes, brand exports and screenshots](../../design/intuitive-motion/README.md).
-The mark is original code-generated geometry; no reference photograph is bundled.
+The design notes, wheel exports, and previews from this historical pass have
+been retired. The current supplied brand assets supersede the wheel identity;
+see [current theme rules](../../CONTRIBUTING.md) and [screenshot instructions](SCREENSHOTS.md).
 Populated previews use synthetic UI fixtures. Empty full-app previews use disposable
 stores and may show Connecting during initial backend startup.
 

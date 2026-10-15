@@ -9,9 +9,7 @@ cloud training are excluded.
 packaging are still in progress; see the [release checklist](RELEASE_CHECKLIST.md).
 Linux has development-test evidence. macOS and Windows are not yet verified.
 
-![Magnite conversation workspace](design/intuitive-motion/previews/dark/panel-4.png)
-
-Current preview with an empty workspace; [all panels and both themes](docs/release/SCREENSHOTS.md).
+Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
 
 ## What you can do
 
@@ -94,7 +92,7 @@ has no application authentication layer.
 - [Contributing and verification](CONTRIBUTING.md)
 - [Current verification report](docs/release/VERIFICATION.md)
 - [Release checklist](RELEASE_CHECKLIST.md) and [draft release notes](docs/release/RELEASE_NOTES.md)
-- [Studio 03 design rules](design/studio-3/README.md)
+- [Current theme rules and branch workflow](CONTRIBUTING.md)
 - [Security reporting](SECURITY.md)
 
 The [September audit](docs/development/AUDIT_2026-09-27.md) preserves historical defects and their
