@@ -31,6 +31,9 @@ choose an explicit compatible engine or reset Settings to Auto.
 Supported JSONL records include `{"text":"..."}`, valid role/content message
 lists under `messages`, and `instruction`/`input`/`output` records. CSV supports
 text and instruction fields. Plain text is normalized into training examples.
+UTF-8 BOMs are accepted. Missing or non-string sample values are rejected with row details.
+CSV fields are limited to 131,072 characters; larger fields return an import error.
+Datasets referenced by queued or running jobs cannot be deleted.
 Malformed JSONL is rejected. Review dataset contents and rights before training.
 The current automatic target-module fallback may choose `all-linear` when named
 modules do not exist; inspect the resulting run rather than assuming a specific
@@ -52,6 +55,11 @@ QLoRA requires a working quantization backend and compatible hardware. The
 Exported adapters do not include the full base model. The matching model must
 remain accessible. Keep a copy of the export before deleting the adapter; do
 not delete your only working copy merely to try the import flow.
+
+Adapter imports require a valid LoRA configuration and `adapter_model.safetensors`.
+Pickle (`adapter_model.bin`) imports are rejected. Exports validate the source files
+and produce a new immutable download URL each time. Adapter metadata retains the
+resolved base snapshot path; that snapshot must remain accessible for activation.
 
 ## Add documents and use RAG
 

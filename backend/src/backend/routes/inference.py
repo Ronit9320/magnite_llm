@@ -176,7 +176,18 @@ async def _response(gen, stream, model, chat_response=True, request=None):
     if not stream:
         try:
             async with aclosing(gen):
-                text = (first or "") + "".join([delta async for delta in gen])
+                parts = [first or ""]
+                while True:
+                    delta = (await _first_token(gen, request) if request is not None
+                             else await anext(gen, None))
+                    if delta is None:
+                        break
+                    parts.append(delta)
+                text = "".join(parts)
+        except asyncio.CancelledError:
+            with anyio.CancelScope(shield=True):
+                await gen.aclose()
+            return Response(status_code=499)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         choice = {"index": 0, "finish_reason": "stop"}
@@ -198,12 +209,27 @@ async def _response(gen, stream, model, chat_response=True, request=None):
     return InferenceStreamResponse(events(), gen)
 
 
+def _validate_model(requested, sup):
+    if not requested or requested == sup.model_ref:
+        return
+    from backend.models.resolution import resolve_base, registered_model
+    resolved = (registered_model(requested).ref if requested.startswith("ollama:")
+                else resolve_base(requested))
+    if resolved != sup.model_ref:
+        raise ValueError(f"Requested model '{requested}' is not the loaded model '{sup.model_ref}'")
+
+
+def _prepare_chat(req, sup, engine):
+    _validate_model(req.model, sup)
+    return _with_rag_context(req, engine)
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest, request: Request):
     sup = get_supervisor()
     gen = sup.chat_stream(req.messages, max_tokens=req.max_tokens,
                           temperature=req.temperature, top_p=req.top_p,
-                          prepare=lambda engine: _with_rag_context(req, engine))
+                          prepare=lambda engine: _prepare_chat(req, sup, engine))
     return await _response(gen, req.stream, sup.model_ref, request=request)
 
 
@@ -211,6 +237,7 @@ async def chat(req: ChatRequest, request: Request):
 async def completion(req: CompletionRequest, request: Request):
     sup = get_supervisor()
     def prepare(engine):
+        _validate_model(req.model, sup)
         if engine.count_tokens(req.prompt) + req.max_tokens > engine.context_size():
             raise ValueError("Prompt and requested output exceed the model context window")
         return req.prompt

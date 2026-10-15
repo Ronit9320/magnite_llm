@@ -16,7 +16,7 @@ namespace {
 // as distinct document types without shipping four SVG assets.
 QColor typeColor(const QString &kind) {
     Q_UNUSED(kind);
-    return QColor(Theme::accentIce());
+    return QColor(Theme::accentPrimary());
 }
 
 }  // namespace

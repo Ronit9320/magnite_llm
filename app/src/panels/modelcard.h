@@ -9,7 +9,7 @@ class QLabel;
 class QProgressBar;
 class QWidget;
 
-// A clickable glass card for a model entry (design doc §8). Renders either a
+// A clickable surface card for a model entry (design doc §8). Renders either a
 // local model (name, source, architecture soft-pill, size, license) or a Hub
 // search hit (name, source, downloads, likes, license). A thin gradient
 // progress bar + mono % appear while the model is being pulled.

@@ -87,8 +87,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         rec = dict(id='adapter:test', name='test', base_model='test/base', path='ignored')
         with zipfile.ZipFile(path, 'w') as z:
             z.writestr('record.json', json.dumps(rec if record is None else record))
-            z.writestr('weights/adapter_config.json', '{"peft_type":"LORA"}')
-            z.writestr('weights/adapter_model.safetensors', 'test weights')
+            z.writestr('weights/adapter_config.json', json.dumps(dict(peft_type='LORA', r=2, lora_alpha=4, target_modules=['q_proj'])))
+            from safetensors.numpy import save
+            z.writestr('weights/adapter_model.safetensors', save({'lora_A.weight': np.zeros((2, 2), dtype=np.float32)}))
             for name, value in (entries or {}).items():
                 z.writestr(name, value)
         return path
@@ -110,7 +111,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 409)
         response = await self.client.post('/adapters/export/adapter:test')
         self.assertEqual(response.status_code, 200)
-        exported = self.root/'adapters/exports/adapter-test.zip'
+        exported = self.root/'adapters/exports'/Path(response.json()['download_path']).name
         self.assertTrue(exported.exists())
         self.assertEqual((await self.client.delete('/adapters/adapter:test')).status_code, 204)
         self.assertFalse(Path(rec['path']).exists())

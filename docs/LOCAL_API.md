@@ -90,3 +90,20 @@ Training example body after dataset ingestion:
 These APIs accept server-local paths, not multipart browser uploads. Use paths
 accessible to the backend process. Check HTTP status and returned details rather
 than treating a completed request as successful work.
+
+### Import and lifecycle validation
+
+- Deleting a dataset used by queued or running training returns 409.
+- Dataset CSV fields allow up to 131,072 characters; malformed/oversized fields
+  and invalid sample values return 400 with row details. UTF-8 BOMs are accepted.
+- Adapter imports require valid LoRA configuration and safetensors weights.
+  Pickle weights are unsupported. Missing/corrupt source files make export fail;
+  successful exports each have their own immutable download URL.
+- Optional inference `model` must match the loaded model (registered IDs resolve
+  to their local snapshot); mismatches return 400 before generation begins.
+  Disconnect monitoring applies to both streaming and non-streaming requests.
+- Raw HTML/Markdown uses the same text extraction as file ingestion. PDFs require
+  a file path; corrupt, encrypted, or textless PDFs return 400.
+- Training cancellation remains available during saving. Cancellation accepted
+  before adapter publication discards the saved output; after publication the
+  job is terminal and cancellation is rejected.

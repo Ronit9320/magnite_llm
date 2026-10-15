@@ -12,7 +12,7 @@
 #include "panels/chatpanel.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
-#include "widgets/starfield.h"
+#include "widgets/studiocanvas.h"
 
 #include <QApplication>
 #include <QCursor>
@@ -98,8 +98,8 @@ void MainWindow::setupUi() {
     auto *brandRow = new QVBoxLayout();
     sidebarLayout->addLayout(brandRow);
 
-    auto *brandSeal = new Starfield(sidebar);
-    brandSeal->setProperty("kineticGlyph", true);
+    auto *brandSeal = new StudioCanvas(sidebar);
+    brandSeal->setProperty("brandMark", true);
     brandSeal->setFixedSize(76, 76);
     brandSeal->setAccessibleName("Magnite logo");
     brandSeal->setToolTip("Magnite · Intelligence on your own terms");
@@ -253,19 +253,19 @@ void MainWindow::setupUi() {
     barLayout->addWidget(separator);
     barLayout->addWidget(mode);
     workspaceLayout->addWidget(bar);
-    m_background = new Starfield(workspace);
-    auto *starLayout = new QVBoxLayout(m_background);
-    starLayout->setContentsMargins(0,0,0,0);
-    starLayout->addWidget(m_stack);
+    m_background = new StudioCanvas(workspace);
+    auto *canvasLayout = new QVBoxLayout(m_background);
+    canvasLayout->setContentsMargins(0,0,0,0);
+    canvasLayout->addWidget(m_stack);
     workspaceLayout->addWidget(m_background,1);
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this, brandSeal]() {
         QSettings settings;
         brandSeal->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
-        m_background->setStarsVisible(settings.value("appearance/studio3Ambient",true).toBool());
+        m_background->setGridVisible(settings.value("appearance/studio3Ambient",true).toBool());
         m_background->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         for (auto *widget : m_stack->findChildren<QWidget *>()) {
-            if (auto *canvas = dynamic_cast<Starfield *>(widget))
+            if (auto *canvas = dynamic_cast<StudioCanvas *>(widget))
                 canvas->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         }
     };

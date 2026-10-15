@@ -18,7 +18,7 @@ class OverviewTile;
 class BackendClient;
 
 // Models panel: browse local models, search HuggingFace, download, and delete.
-// Phase 5.5.3: the old QTableWidget is a scrollable grid of glass ModelCards.
+// Phase 5.5.3: the old QTableWidget is a scrollable grid of model cards.
 class ModelsPanel : public BasePanel {
     Q_OBJECT
 

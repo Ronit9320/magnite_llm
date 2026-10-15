@@ -4,7 +4,7 @@
 
 #include "backend_client.h"
 #include "widgets/surface.h"
-#include "widgets/starfield.h"
+#include "widgets/studiocanvas.h"
 #include "theme.h"
 #include <QProgressBar>
 #include <QSettings>
@@ -159,8 +159,8 @@ void TrainingPanel::setupUi() {
     m_progressLabel = new QLabel("Ready to train",this);
     m_progressLabel->setObjectName("metricValue");
     auto *session = new QHBoxLayout();
-    m_activity = new Starfield(this);
-    m_activity->setProperty("kineticGlyph", true);
+    m_activity = new StudioCanvas(this);
+    m_activity->setProperty("brandMark", true);
     m_activity->setProperty("activityIndicator",true);
     m_activity->setObjectName("trainingActivity");
     m_activity->setFixedSize(112,112);
@@ -434,7 +434,7 @@ void TrainingPanel::onStart() {
     m_setup->setEnabled(false);
     m_progress->setValue(0);
     m_log->clear();
-    m_activity->setActivity(Starfield::Training);
+    m_activity->setActivity(StudioCanvas::Training);
     m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
     m_progressLabel->setText("Preparing your run…");
     m_startButton->setText("Preparing…");
@@ -442,7 +442,7 @@ void TrainingPanel::onStart() {
     m_client->post("/training/start", body,
         [this](int status, const QJsonDocument &doc) {
             if (status != 202) {
-                m_activity->setActivity(Starfield::Idle);
+                m_activity->setActivity(StudioCanvas::Idle);
                 m_activity->setMotionEnabled(false);
                 m_setup->setEnabled(true);
                 m_progressLabel->setText("Ready to retry");
@@ -537,7 +537,7 @@ void TrainingPanel::onPollStatus() {
 }
 
 void TrainingPanel::finishJob(const QString &message, const QString &tone) {
-    m_activity->setActivity(Starfield::Idle);
+    m_activity->setActivity(StudioCanvas::Idle);
     m_activity->setMotionEnabled(false);
     m_setup->setEnabled(true);
     m_progressLabel->setText(tone == "ok" ? "Training complete" : tone == "warn" ? "Training stopped" : "Training interrupted");

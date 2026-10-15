@@ -84,11 +84,11 @@ void SettingsPanel::setupUi() {
     auto *theme = new QLabel("Magnite · paper, graphite & orange",this);
     theme->setObjectName("bodyLabel");
     appearance->addWidget(theme);
-    m_stars = new QCheckBox("Instrument grid",this);
-    m_stars->setObjectName("starsToggle");
+    m_grid = new QCheckBox("Instrument grid",this);
+    m_grid->setObjectName("gridToggle");
     m_reducedMotion = new QCheckBox("Reduce motion",this);
     m_reducedMotion->setObjectName("reducedMotionToggle");
-    appearance->addWidget(m_stars);
+    appearance->addWidget(m_grid);
     appearance->addWidget(m_reducedMotion);
     auto *hint = new QLabel("Changes apply immediately. Reduce motion keeps activity indicators still and disables click effects, blinking cursors and panel transitions.",this);
     hint->setWordWrap(true);
@@ -128,11 +128,11 @@ void SettingsPanel::setupUi() {
     connect(m_engineOverride,qOverload<int>(&QComboBox::currentIndexChanged),this,markDirty);
     auto appearanceChanged = [this]() {
         QSettings s;
-        s.setValue("appearance/studio3Ambient",m_stars->isChecked());
+        s.setValue("appearance/studio3Ambient",m_grid->isChecked());
         s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
         emit settingsChanged();
     };
-    connect(m_stars,&QCheckBox::toggled,this,appearanceChanged);
+    connect(m_grid,&QCheckBox::toggled,this,appearanceChanged);
     connect(m_reducedMotion,&QCheckBox::toggled,this,appearanceChanged);
 }
 
@@ -142,7 +142,7 @@ void SettingsPanel::loadFromSettings() {
     m_engineOverride->setCurrentIndex(qBound(0, s.value("engine/override", 0).toInt(), 2));
     m_dataDir->setText(s.value("storage/dataDir").toString());
     s.remove("hosted/endpoint");
-    m_stars->setChecked(s.value("appearance/studio3Ambient",true).toBool());
+    m_grid->setChecked(s.value("appearance/studio3Ambient",true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
 }
 
@@ -167,7 +167,7 @@ void SettingsPanel::onSave() {
     s.setValue("engine/override", m_engineOverride->currentIndex());
     s.setValue("storage/dataDir", m_dataDir->text().trimmed());
     s.remove("hosted/apiKey"); // Do not retain credentials for an unavailable feature.
-    s.setValue("appearance/studio3Ambient",m_stars->isChecked());
+    s.setValue("appearance/studio3Ambient",m_grid->isChecked());
     s.setValue("appearance/studio3ReducedMotion",m_reducedMotion->isChecked());
     s.sync();
     setStatus("Settings saved. Storage changes apply after restarting the app; existing data is not moved.");

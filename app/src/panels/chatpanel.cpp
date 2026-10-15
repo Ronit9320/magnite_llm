@@ -5,7 +5,7 @@
 
 #include "backend_client.h"
 #include "widgets/surface.h"
-#include "widgets/starfield.h"
+#include "widgets/studiocanvas.h"
 #include "panels/chatbubble.h"
 
 #include <QSettings>
@@ -146,8 +146,8 @@ void ChatPanel::setupUi() {
     welcome->setSpacing(8);
     welcome->setContentsMargins(0,4,0,4);
     welcome->addStretch();
-    auto *seal = new Starfield(m_welcome);
-    seal->setProperty("kineticGlyph", true);
+    auto *seal = new StudioCanvas(m_welcome);
+    seal->setProperty("brandMark", true);
     seal->setFixedSize(64, 64);
     welcome->addWidget(seal, 0, Qt::AlignHCenter);
     auto *eyebrow = new QLabel("THE MAGNITE WORKSPACE", m_welcome);
@@ -216,8 +216,8 @@ void ChatPanel::setupUi() {
     m_ragCheck = new QCheckBox("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
-    m_activity = new Starfield(this);
-    m_activity->setProperty("kineticGlyph",true);
+    m_activity = new StudioCanvas(this);
+    m_activity->setProperty("brandMark",true);
     m_activity->setProperty("activityIndicator",true);
     m_activity->setObjectName("chatActivity");
     m_activity->setFixedSize(32,32);
@@ -440,7 +440,7 @@ void ChatPanel::onSend() {
     m_streaming = true;
     updateActions();
     m_cursorVisible = false;
-    m_activity->setActivity(Starfield::Chat);
+    m_activity->setActivity(StudioCanvas::Chat);
     m_activity->setMotionEnabled(!QSettings().value("appearance/studio3ReducedMotion",false).toBool());
     m_activity->show();
     m_sendButton->setText("Responding…");

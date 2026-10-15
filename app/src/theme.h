@@ -14,16 +14,14 @@ namespace Theme {
 bool isDark();
 void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
 
-// ---- Paper, ink, orange and violet palette ----
-inline QString bgVoid()        { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
-inline QString bgDeep()        { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
-// Keep existing semantic names for consumers; the secondary accent is lavender.
+// ---- Paper, graphite and orange palette ----
+inline QString canvasBackground()    { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
+inline QString insetBackground()     { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
+// Supplied brand colors.
 inline QString brandOrange() { return QStringLiteral("#FF4A0E"); }
 inline QString brandInk() { return QStringLiteral("#201411"); }
 inline QString brandText() { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#1B1311"); }
 inline QString accentPrimary() { return QStringLiteral("#FF5C28"); }
-inline QString accentBlue()    { return isDark() ? QStringLiteral("#B4A7FF") : QStringLiteral("#5145B7"); }
-inline QString accentIce()    { return QStringLiteral("#FF5C28"); }
 // Derived accent shades used by QSS interaction states (hover/pressed) and the
 // light-on-accent text/thumb fill. Centralized so the QSS never hardcodes hex.
 inline QString accentHover()   { return QStringLiteral("#FF784E"); }
@@ -33,11 +31,11 @@ inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
 
-inline QString glassFill()          { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
-inline QString glassFillHover()     { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
-inline QString glassFillActive()    { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
-inline QString glassBorder()        { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
-inline QString glassBorderHover()   { return QStringLiteral("#FF784E"); }
+inline QString surfaceFill()         { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
+inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
+inline QString surfaceBorderHover()  { return QStringLiteral("#FF784E"); }
 
 inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
 inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }

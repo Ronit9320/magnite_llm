@@ -37,7 +37,8 @@ class DatasetStore:
         self._data_dir = data_dir
         self._db_path = db_path
         os.makedirs(data_dir, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._users: dict[str, int] = {}
         self._init_db()
 
     def _init_db(self) -> None:
@@ -58,7 +59,7 @@ class DatasetStore:
             raise ValueError(f"Dataset file not found: {path}")
         fmt = fmt or _detect_format(path)
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8-sig") as f:
                 content = f.read()
         except UnicodeDecodeError as exc:
             raise ValueError("Dataset file must be UTF-8 encoded text "
@@ -68,6 +69,7 @@ class DatasetStore:
 
     def ingest_content(self, name: str, content: str, fmt: str = "text",
                        source: str = "") -> DatasetRecord:
+        content = content.removeprefix("\ufeff")
         fmt = fmt.lower()
         if fmt not in ("jsonl", "csv", "text"):
             raise ValueError(f"Unsupported dataset format '{fmt}'")
@@ -118,17 +120,32 @@ class DatasetStore:
             ).fetchall()
         return [self._from_row(r) for r in rows]
 
+    def acquire(self, dataset_id: str) -> DatasetRecord:
+        with self._lock:
+            rec = self.get(dataset_id)
+            if rec is None:
+                raise ValueError(f"Unknown dataset '{dataset_id}'")
+            self._users[dataset_id] = self._users.get(dataset_id, 0) + 1
+            return rec
+
+    def release(self, dataset_id: str) -> None:
+        with self._lock:
+            count = self._users.get(dataset_id, 0)
+            if count <= 1:
+                self._users.pop(dataset_id, None)
+            else:
+                self._users[dataset_id] = count - 1
+
     def delete(self, dataset_id: str) -> bool:
-        rec = self.get(dataset_id)
-        with self._lock, self._conn() as conn:
-            cur = conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
-            conn.commit()
-        if cur.rowcount > 0 and rec and rec.path and os.path.isfile(rec.path):
-            try:
+        with self._lock:
+            if self._users.get(dataset_id):
+                raise RuntimeError("Dataset is in use by a queued or running training job")
+            rec = self.get(dataset_id)
+            with self._conn() as conn:
+                cur = conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+            if cur.rowcount > 0 and rec and rec.path and os.path.isfile(rec.path):
                 os.remove(rec.path)
-            except OSError:
-                pass
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     # ---- internals ------------------------------------------------------
 
@@ -208,8 +225,10 @@ def _normalize_sample(obj: dict, row_num: int) -> Optional[dict]:
         text = f"{obj['prompt']}\n{obj['completion']}".strip()
         return {"text": text} if text else None
     for key in ("input", "instruction", "content"):
-        if key in obj and str(obj[key]).strip():
-            return {"text": str(obj[key])}
+        if key in obj:
+            if not isinstance(obj[key], str) or not obj[key].strip():
+                raise ValueError(f"Row {row_num}: {key} must be a nonempty string")
+            return {"text": obj[key]}
     return None
 
 
@@ -231,30 +250,31 @@ def _normalize_jsonl(content: str) -> list[dict]:
     return samples
 
 
+# Explicit per-field limit in characters; parser failures are user input errors.
+CSV_FIELD_LIMIT = 128 * 1024
+csv.field_size_limit(CSV_FIELD_LIMIT)
+
+
 def _normalize_csv(content: str) -> list[dict]:
     samples = []
-    reader = csv.DictReader(io.StringIO(content))
-    if not reader.fieldnames:
-        return samples
-    cols = reader.fieldnames
-    text_col = "text" if "text" in cols else None
-    for row_num, row in enumerate(reader, 2):
-        if "instruction" in cols and "output" in cols:
-            samples.append(_normalize_sample(row, row_num))
-            continue
-        if text_col and str(row.get(text_col, "")).strip():
-            samples.append({"text": str(row[text_col])})
-            continue
-        if "prompt" in cols and "completion" in cols:
-            text = f"{row.get('prompt', '')}\n{row.get('completion', '')}".strip()
-            if text:
-                samples.append({"text": text})
-                continue
-        # Fall back to the first column that has content.
-        for c in cols:
-            if str(row.get(c, "")).strip():
-                samples.append({"text": str(row[c])})
-                break
+    reader = csv.DictReader(io.StringIO(content), strict=True)
+    try:
+        cols = reader.fieldnames
+        if not cols:
+            return samples
+        for row_num, row in enumerate(reader, 2):
+            if None in row or any(value is None for value in row.values()):
+                raise ValueError(f"Row {row_num}: missing or extra CSV fields")
+            if any(key in cols for key in ("text", "instruction", "prompt", "content", "input")):
+                sample = _normalize_sample(row, row_num)
+            else:
+                text = next((row[c] for c in cols if row[c].strip()), "")
+                sample = {"text": text} if text else None
+            if sample is None:
+                raise ValueError(f"Row {row_num}: unsupported or empty training sample")
+            samples.append(sample)
+    except csv.Error as exc:
+        raise ValueError(f"Row {reader.line_num}: invalid CSV ({exc}); maximum field size is {CSV_FIELD_LIMIT} characters") from exc
     return samples
 
 

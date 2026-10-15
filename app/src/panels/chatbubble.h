@@ -7,8 +7,8 @@
 
 class QLabel;
 
-// A single chat bubble — user (right-aligned, glass-fill-hover) or assistant
-// (left-aligned, glass-fill + 2px accent-primary left border). The streaming
+// A single chat bubble — user (right-aligned, surface-fill-hover) or assistant
+// (left-aligned, surface-fill + 2px accent-primary left border). The streaming
 // cursor is toggled externally via setCursorVisible().
 class ChatBubble : public QFrame {
     Q_OBJECT

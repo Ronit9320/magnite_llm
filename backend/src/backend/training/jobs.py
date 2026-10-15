@@ -11,7 +11,7 @@ from typing import Optional
 from backend.adapters.store import AdapterStore
 from backend.training.datasets import DatasetStore
 from backend.training.schemas import TrainingConfig, TrainingJob
-from backend.training.trainer import run_training
+from backend.training.trainer import run_training, TrainingCancellation
 
 
 def _now() -> str:
@@ -70,6 +70,7 @@ class TrainingJobManager:
                 job.message = str(exc)
                 job.finished_at = _now()
             finally:
+                self._datasets.release(cfg.dataset_id)
                 self._persist(job)
 
     def shutdown(self):
@@ -103,7 +104,6 @@ class TrainingJobManager:
                 raise RuntimeError("Training service is shutting down")
             self._validate(cfg)
 
-            dataset = self._datasets.get(cfg.dataset_id)
             job_id = uuid.uuid4().hex[:12]
             name = (cfg.name or "").strip() or f"adapter-{job_id[:6]}"
             job_cfg = cfg.model_copy(update={"name": name})
@@ -118,12 +118,19 @@ class TrainingJobManager:
                 message="Queued",
                 created_at=_now(),
             )
+            dataset = self._datasets.acquire(cfg.dataset_id)
             self._jobs[job_id] = job
-            event = threading.Event()
+            event = TrainingCancellation()
             self._cancel[job_id] = event
 
-            self._persist(job)
-            self._queue.put((job, job_cfg, dataset.path, event))
+            try:
+                self._persist(job)
+                self._queue.put((job, job_cfg, dataset.path, event))
+            except Exception:
+                self._datasets.release(cfg.dataset_id)
+                self._jobs.pop(job_id, None)
+                self._cancel.pop(job_id, None)
+                raise
             return job.model_copy()
 
     def get(self, job_id: str) -> Optional[TrainingJob]:
@@ -136,6 +143,13 @@ class TrainingJobManager:
         return [j.model_copy() for j in jobs]
 
     def cancel(self, job_id: str) -> bool:
+        event = self._cancel.get(job_id)
+        if event is None:
+            return False
+        with event.publication_lock:
+            return self._cancel_job(job_id)
+
+    def _cancel_job(self, job_id: str) -> bool:
         event = self._cancel.get(job_id)
         job = self._jobs.get(job_id)
         if event is None or job is None:

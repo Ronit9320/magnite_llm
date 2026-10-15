@@ -32,8 +32,8 @@ set(MAGNITE_SOURCES
     src/widgets/clickfeedback.h
     src/widgets/brandmark.cpp
     src/widgets/brandmark.h
-    src/widgets/starfield.cpp
-    src/widgets/starfield.h
+    src/widgets/studiocanvas.cpp
+    src/widgets/studiocanvas.h
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
     src/widgets/confirmation.h

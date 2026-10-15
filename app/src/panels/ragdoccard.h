@@ -5,7 +5,7 @@
 #include <QJsonObject>
 #include <QString>
 
-// A full-width glass card for one ingested RAG document (design doc §8).
+// A full-width surface card for one ingested RAG document (design doc §8).
 // Shows a type icon (file-text tinted by kind: pdf/txt/md/html), the document
 // name, its source path and chunk count. Clicking selects the card so the
 // panel's "Remove Selected" can delete it.

@@ -11,7 +11,7 @@
 #include "panels/chatpanel.h"
 #include "panels/chatbubble.h"
 #include "panels/settingspanel.h"
-#include "widgets/starfield.h"
+#include "widgets/studiocanvas.h"
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
 #include <QApplication>
@@ -274,15 +274,15 @@ int runUiCheck(const QString &captures) {
     check(advanced && firstLogoFrame != logo.currentImage(),"supplied logo changes frames");
     check(!firstLogoFrame.isNull() && firstLogoFrame.pixelColor(0,0).alpha()==0,
           "logo background is transparent");
-    Starfield wheel; wheel.setProperty("kineticGlyph",true); wheel.setProperty("activityIndicator",true);
+    StudioCanvas wheel; wheel.setProperty("brandMark",true); wheel.setProperty("activityIndicator",true);
     wheel.resize(210,210); wheel.show(); wheel.activateWindow(); pump();
-    for(auto activity:{Starfield::Training,Starfield::Chat}) {
+    for(auto activity:{StudioCanvas::Training,StudioCanvas::Chat}) {
         wheel.setActivity(activity); wheel.setMotionEnabled(true);
         auto image=wheel.grab().toImage(); pump(180); check(image!=wheel.grab().toImage(),"activity wheel animates");
         wheel.setMotionEnabled(false); image=wheel.grab().toImage(); pump(180);
         check(image==wheel.grab().toImage(),"reduced motion wheel stays still");
     }
-    wheel.setActivity(Starfield::Idle); wheel.setMotionEnabled(true);
+    wheel.setActivity(StudioCanvas::Idle); wheel.setMotionEnabled(true);
     auto image=wheel.grab().toImage(); pump(180); check(image==wheel.grab().toImage(),"idle training wheel stays still");
     capture(&wheel,"konark-wheel"); wheel.hide();
     if(!captures.isEmpty()) {

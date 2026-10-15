@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 import shutil
 import zipfile
 import json
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError
 
 from backend.adapters.schemas import AdapterRecord
+from backend.adapters.validation import validate_weights
 from backend.adapters.store import AdapterStore
 from backend.inference.supervisor import get_supervisor
 from backend.paths import app_home
@@ -76,19 +78,33 @@ def export_adapter(adapter_id: str):
     rec = _get_store().get(adapter_id)
     if rec is None:
         raise HTTPException(status_code=404, detail=f"No adapter '{adapter_id}'")
-    safe = rec.id.replace(":", "-").replace("/", "_")
-    zip_path = os.path.join(_exports_dir(), f"{safe}.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("record.json", rec.model_dump_json(indent=2))
-        if rec.path and os.path.isdir(rec.path):
+    # Each result is immutable, including repeated exports of the same adapter.
+    filename = f"{uuid.uuid4().hex}.zip"
+    exports = _exports_dir()
+    zip_path = os.path.join(exports, filename)
+    temporary = None
+    try:
+        validate_weights(rec.path)
+        fd, temporary = tempfile.mkstemp(prefix=".export-", dir=exports)
+        os.close(fd)
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("record.json", rec.model_dump_json(indent=2))
             for root, _dirs, files in os.walk(rec.path):
                 for name in files:
                     full = os.path.join(root, name)
                     rel = os.path.relpath(full, rec.path)
                     zf.write(full, os.path.join("weights", rel))
+            if not {"weights/adapter_config.json", "weights/adapter_model.safetensors"}.issubset(zf.namelist()):
+                raise ValueError("Adapter files disappeared during export")
+        os.replace(temporary, zip_path)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=f"Cannot export adapter: {exc}") from exc
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
     return AdapterExportResult(
         id=rec.id,
-        download_path=f"/adapters/export/{safe}.zip",
+        download_path=f"/adapters/export/{filename}",
         size_bytes=os.path.getsize(zip_path),
     )
 
@@ -170,6 +186,7 @@ def _import_adapter(body: AdapterImportRequest):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(entry) as fsrc, target.open("xb") as fdest:
                     shutil.copyfileobj(fsrc, fdest)
+            validate_weights(dest)
             rec.path = str(dest)
             rec.status = "ready"
             _get_store().upsert(rec)

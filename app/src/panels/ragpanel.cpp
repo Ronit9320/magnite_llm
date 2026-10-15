@@ -102,7 +102,7 @@ void RagPanel::setupUi() {
     m_emptyState->setLayout(emptyLayout);
     documents->addWidget(m_emptyState, 1);
 
-    // Retrieval config as a glass card (design doc §4/§8).
+    // Retrieval config as a surface card (design doc §4/§8).
     auto *configCard = new QFrame(this);
     configCard->setObjectName("ragConfigCard");
     auto *configLayout = new QVBoxLayout(configCard);

@@ -133,7 +133,8 @@ class InferenceSupervisor:
                 if requested and requested != "ollama":
                     raise ValueError("Ollama models must use Auto or the Ollama engine")
                 return "ollama", record.ref
-            ref = record.path if os.path.exists(record.path) else record.ref
+            from backend.models.resolution import local_model_path
+            ref = local_model_path(record)
         if ref and os.path.isdir(ref) and not requested and not self.engine_override:
             if any(Path(ref).rglob("*.gguf")):
                 return "llamacpp", ref
@@ -208,7 +209,9 @@ class InferenceSupervisor:
                 "Adapter inference needs transformers + peft. Install with "
                 "'uv pip install --python .venv/bin/python -e 'backend[ml]''."
             )
-        base = _resolve_base(rec.base_model)
+        base = rec.meta.get("resolved_base_model") or _resolve_base(rec.base_model)
+        if os.path.isabs(base) and not os.path.isdir(base):
+            raise ValueError(f"Adapter base snapshot is unavailable: {base}")
 
         self._unload()
         engine = TorchPeftEngine(base, rec.path)

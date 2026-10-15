@@ -6,7 +6,7 @@
 #include "widgets/flowlayout.h"
 #include "widgets/overviewtile.h"
 #include "widgets/surface.h"
-#include "widgets/starfield.h"
+#include "widgets/studiocanvas.h"
 
 #include "widgets/combobox.h"
 #include <QHBoxLayout>
@@ -65,8 +65,8 @@ void ModelsPanel::setupUi() {
     note->setObjectName("studioNote");
     auto *noteRow = new QHBoxLayout(note);
     noteRow->setContentsMargins(12,8,12,8);
-    auto *mark = new Starfield(note);
-    mark->setProperty("kineticGlyph",true);
+    auto *mark = new StudioCanvas(note);
+    mark->setProperty("brandMark",true);
     mark->setFixedSize(34,34);
     noteRow->addWidget(mark);
     auto *noteTitle = new QLabel("Independent thinking.",note);

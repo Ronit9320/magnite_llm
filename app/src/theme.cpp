@@ -59,21 +59,19 @@ std::vector<Token> tokens() {
         {"@brandOrange", Theme::brandOrange()},
         {"@brandInk", Theme::brandInk()},
         {"@brandText", Theme::brandText()},
-        {"@bgVoid",             Theme::bgVoid()},
-        {"@bgDeep",             Theme::bgDeep()},
+        {"@canvasBackground",     Theme::canvasBackground()},
+        {"@insetBackground",      Theme::insetBackground()},
         {"@accentLabel",        Theme::accentLabel()},
         {"@accentPrimary",      Theme::accentPrimary()},
-        {"@accentBlue",         Theme::accentBlue()},
-        {"@accentIce",         Theme::accentIce()},
         {"@accentHover",        Theme::accentHover()},
         {"@accentActive",       Theme::accentActive()},
         {"@accentText",         Theme::accentText()},
         {"@dangerHover",        Theme::dangerHover()},
-        {"@glassFill",          Theme::glassFill()},
-        {"@glassFillHover",     Theme::glassFillHover()},
-        {"@glassFillActive",    Theme::glassFillActive()},
-        {"@glassBorder",        Theme::glassBorder()},
-        {"@glassBorderHover",   Theme::glassBorderHover()},
+        {"@surfaceFill",          Theme::surfaceFill()},
+        {"@surfaceFillHover",     Theme::surfaceFillHover()},
+        {"@surfaceFillActive",    Theme::surfaceFillActive()},
+        {"@surfaceBorder",        Theme::surfaceBorder()},
+        {"@surfaceBorderHover",   Theme::surfaceBorderHover()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
@@ -157,10 +155,10 @@ bool Theme::isDark() { return darkMode; }
 void Theme::setDark(bool dark) {
     darkMode = dark;
     QPalette palette = qApp->palette();
-    palette.setColor(QPalette::Window, QColor(bgVoid()));
-    palette.setColor(QPalette::Base, QColor(glassFill()));
-    palette.setColor(QPalette::AlternateBase, QColor(bgDeep()));
-    palette.setColor(QPalette::Button, QColor(glassFill()));
+    palette.setColor(QPalette::Window, QColor(canvasBackground()));
+    palette.setColor(QPalette::Base, QColor(surfaceFill()));
+    palette.setColor(QPalette::AlternateBase, QColor(insetBackground()));
+    palette.setColor(QPalette::Button, QColor(surfaceFill()));
     for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
         palette.setColor(role, QColor(textPrimary()));
     palette.setColor(QPalette::PlaceholderText, QColor(textMuted()));
@@ -184,8 +182,8 @@ void Theme::setDark(bool dark) {
 QString Theme::qss() {
     QString tpl = loadText(QStringLiteral(":/theme/theme.qss"));
     if (tpl.isEmpty()) return QString();
-    // Replace longer token names first so @glassFill is not consumed inside
-    // @glassFillHover or @glassFillActive.
+    // Replace longer token names first so @surfaceFill is not consumed inside
+    // @surfaceFillHover or @surfaceFillActive.
     auto replacements = tokens();
     std::sort(replacements.begin(), replacements.end(), [](const Token &a, const Token &b) {
         return a.name.size() > b.name.size();
@@ -208,12 +206,10 @@ int Theme::selfCheck() {
     };
 
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
-    check("bgVoid", Theme::bgVoid() == "#F1EFE7");
-    check("bgDeep", Theme::bgDeep() == "#E9E6DC");
+    check("canvasBackground", Theme::canvasBackground() == "#F1EFE7");
+    check("insetBackground", Theme::insetBackground() == "#E9E6DC");
     check("accentLabel", QColor(Theme::accentLabel()).isValid());
     check("accentPrimary", Theme::accentPrimary() == "#FF5C28");
-    check("accentBlue", Theme::accentBlue() == "#5145B7");
-    check("accentIce", Theme::accentIce() == "#FF5C28");
     check("accentHover", Theme::accentHover() == "#FF784E");
     check("accentActive", Theme::accentActive() == "#E1491B");
     check("accentText", Theme::accentText() == "#201D18");
@@ -277,10 +273,10 @@ int Theme::selfCheck() {
 
     const bool originalDark = isDark();
     setDark(true);
-    check("refined dark canvas", bgVoid() == "#161719");
-    check("refined dark surface", glassFill() == "#202225");
-    check("refined dark border", glassBorder() == "#383C42");
-    check("dark palette uses dark surfaces", QColor(bgVoid()).lightness() < 40);
+    check("refined dark canvas", canvasBackground() == "#161719");
+    check("refined dark surface", surfaceFill() == "#202225");
+    check("refined dark border", surfaceBorder() == "#383C42");
+    check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() < 40);
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);
     check("dark stylesheet tokens substituted", !qss().contains('@'));
     bool validDark = true;
@@ -301,7 +297,7 @@ int Theme::selfCheck() {
         setDark(dark);
         bool readable=true;
         for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel()})
-            for(const auto &surface:{bgVoid(),glassFill()}) readable &= contrast(ink,surface)>=4.5;
+            for(const auto &surface:{canvasBackground(),surfaceFill()}) readable &= contrast(ink,surface)>=4.5;
         check(dark ? "dark text contrast >= 4.5" : "light text contrast >= 4.5",readable);
         check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
     }

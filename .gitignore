@@ -3,6 +3,7 @@ app.md
 BUILD_PLAN.md
 design_doc.md
 PHASE_5_5.md
+design/
 
 # Python
 __pycache__/

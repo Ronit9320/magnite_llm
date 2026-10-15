@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
-from backend.rag.chunking import chunk_text, detect_kind, extract_text
+from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content
 from backend.rag.schemas import (
     RagConfig,
     RagConfigUpdate,
@@ -93,9 +93,12 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
         if not body.name.strip():
             raise HTTPException(status_code=400, detail="'name' is required when sending raw content")
         kind = detect_kind(body.name, body.kind)
-        text = body.content
+        try:
+            text = extract_content(body.content, kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         path = ""
-        size_kb = len(text.encode("utf-8", "replace")) / 1024.0
+        size_kb = len(body.content.encode("utf-8", "replace")) / 1024.0
     else:
         path = os.path.abspath(body.path)
         if not os.path.isfile(path):

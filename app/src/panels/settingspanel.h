@@ -30,7 +30,7 @@ private:
 
     QComboBox *m_engineOverride;
     QLineEdit *m_dataDir;
-    QCheckBox *m_stars = nullptr;
+    QCheckBox *m_grid = nullptr;
     QCheckBox *m_reducedMotion = nullptr;
     QPushButton *m_saveButton;
     QLabel *m_statusLabel;

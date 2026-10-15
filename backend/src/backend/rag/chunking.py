@@ -20,7 +20,12 @@ def extract_text(path: str, kind: str) -> str:
     """Extract plain text from a supported document file."""
     if kind == "pdf":
         return _extract_pdf(path)
-    text = _read_text(path)
+    return extract_content(_read_text(path), kind)
+
+
+def extract_content(text: str, kind: str) -> str:
+    if kind == "pdf":
+        raise ValueError("Raw PDF content is unsupported; provide a PDF file path")
     if kind == "html":
         return _strip_html(text)
     if kind == "md":
@@ -29,7 +34,7 @@ def extract_text(path: str, kind: str) -> str:
 
 
 def _read_text(path: str) -> str:
-    for enc in ("utf-8", "utf-8-sig", "latin-1"):
+    for enc in ("utf-8-sig", "latin-1"):
         try:
             with open(path, "r", encoding=enc) as f:
                 return f.read()
@@ -67,8 +72,13 @@ def _extract_pdf(path: str) -> str:
             "PDF extraction needs 'pypdf'. Install with "
             "'uv pip install --python .venv/bin/python pypdf'."
         )
-    reader = PdfReader(path)
-    pages = [page.extract_text() or "" for page in reader.pages]
+    try:
+        reader = PdfReader(path)
+        if reader.is_encrypted:
+            raise ValueError("Encrypted PDFs are unsupported; provide an unencrypted copy")
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except Exception as exc:
+        raise ValueError(f"Cannot extract PDF (corrupt, encrypted, or unsupported): {exc}") from exc
     if not any(pages):
         raise ValueError(f"No text extracted from PDF: {path}")
     return "\n\n".join(pages)

@@ -123,5 +123,9 @@ def get_dataset(dataset_id: str):
 
 @datasets_router.delete("/{dataset_id}", status_code=204)
 def delete_dataset(dataset_id: str):
-    if not _get_datasets().delete(dataset_id):
+    try:
+        deleted = _get_datasets().delete(dataset_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")

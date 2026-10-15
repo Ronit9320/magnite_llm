@@ -10,7 +10,7 @@ from backend.adapters.store import AdapterStore
 from backend.models.registry import ModelRegistry
 from backend.models.store import ModelStore
 from backend.training.schemas import TrainingConfig, TrainingJob
-from backend.training.trainer import run_training
+from backend.training.trainer import run_training, TrainingCancellation
 
 
 class PullJobTests(unittest.TestCase):
@@ -67,7 +67,10 @@ class TrainingOutputTests(unittest.TestCase):
             output.mkdir()
             model = MagicMock()
             model.config.architectures = ['TestModel']
+            cancel = TrainingCancellation()
             def save(path):
+                if Path(path).name == 'adapter-4':
+                    cancel.set()
                 Path(path, 'adapter_model.safetensors').write_text(Path(path).name)
             model.save_pretrained.side_effect = save
             trainer = MagicMock()
@@ -87,11 +90,16 @@ class TrainingOutputTests(unittest.TestCase):
             with patch('backend.training.trainer._require_ml', return_value=ml), \
                  patch('backend.training.trainer._tokenize_jsonl', return_value=[{'input_ids': [1]}]), \
                  patch.dict('sys.modules', {'peft': peft, 'datasets': datasets}):
-                for i, name in enumerate(('../escaped', str(root / 'absolute'), 'same', 'same')):
+                for i, name in enumerate(('../escaped', str(root / 'absolute'), 'same', 'same', 'cancel-during-save')):
                     cfg = TrainingConfig(base_model='test/base', dataset_id='data', name=name,
                                          max_steps=1, target_modules='all-linear')
                     job = TrainingJob(id=str(i), name=name, status='queued', base_model='test/base', dataset_id='data')
-                    run_training(job, cfg, 'unused.jsonl', str(output), store, threading.Event())
+                    run_training(job, cfg, 'unused.jsonl', str(output), store, cancel)
+                    if i == 4:
+                        self.assertEqual(job.status, 'cancelled', job.error)
+                        self.assertIsNone(store.get('adapter:4'))
+                        self.assertFalse((output/'adapter-4').exists())
+                        continue
                     self.assertEqual(job.status, 'done', job.error)
                     rec = store.get(job.adapter_id)
                     self.assertEqual(rec.name, name)

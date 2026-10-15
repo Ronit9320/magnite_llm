@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+from contextlib import nullcontext
 import threading
 import time
 
@@ -50,19 +52,19 @@ class _CancelHandler:
 
 
 def _resolve_base(ref: str) -> str:
-    """Map a user-provided model reference to an HF repo id or local path."""
-    ref = (ref or "").strip()
-    if not ref:
-        raise ValueError("base_model is required")
-    if os.path.isdir(ref):
-        return ref
-    if ref.startswith("huggingface:"):
-        return ref[len("huggingface:"):].replace("--", "/")
-    if ref.startswith("ollama:"):
-        raise ValueError("Ollama models are GGUF files and cannot be LoRA fine-tuned locally.")
-    if ref.startswith("hf|"):
-        return ref[len("hf|"):]
-    return ref
+    from backend.models.resolution import resolve_base
+    return resolve_base(ref)
+
+
+class TrainingCancellation(threading.Event):
+    """Serialize accepted cancellation with adapter publication."""
+    def __init__(self):
+        super().__init__()
+        self.publication_lock = threading.RLock()
+
+    def set(self):
+        with self.publication_lock:
+            super().set()
 
 
 def _quantized(cfg: TrainingConfig) -> bool:
@@ -356,17 +358,21 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
             size_mb=size_mb,
             training_job_id=job.id,
             trained_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            meta={"current_step": train_result.global_step, "total_steps": total_steps},
+            meta={"current_step": train_result.global_step, "total_steps": total_steps,
+                  "resolved_base_model": base},
             status="ready",
         )
-        adapter_store.upsert(rec)
-        job.adapter_id = adapter_id
+        with getattr(cancel_event, "publication_lock", nullcontext()):
+            if cancel_event.is_set():
+                raise _Cancelled()
+            adapter_store.upsert(rec)
+            job.adapter_id = adapter_id
 
-        job.status = "done"
-        job.progress = 100.0
-        job.loss = train_result.training_loss
-        job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        job.message = (f"Done — adapter '{rec.name}' saved ({size_mb} MB)")
+            job.status = "done"
+            job.progress = 100.0
+            job.loss = train_result.training_loss
+            job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            job.message = (f"Done — adapter '{rec.name}' saved ({size_mb} MB)")
     except _Cancelled:
         job.status = "cancelled"
         job.error = None
@@ -378,6 +384,8 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         job.message = f"Failed: {exc}"
         job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     finally:
+        if work_dir and job.status == "cancelled":
+            shutil.rmtree(work_dir, ignore_errors=True)
         if work_dir and _is_empty(work_dir):
             try:
                 os.rmdir(work_dir)
