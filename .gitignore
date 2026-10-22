@@ -51,3 +51,8 @@ desktop.ini
 
 # Logs
 *.log
+
+# macOS packaging (release/v0.1-macos)
+build-macos/
+.venv-macos/
+*.dmg
