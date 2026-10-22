@@ -3,7 +3,7 @@
 #include <QWidget>
 #include <QTimer>
 #include <QElapsedTimer>
-#include <QMovie>
+#include "widgets/logoanimation.h"
 
 // Workspace registration grid or animated brand mark (brandMark property).
 // Motion respects reduced-motion preferences and application visibility.
@@ -22,7 +22,9 @@ private:
     void updateTimer();
     QTimer m_timer;
     QElapsedTimer m_clock;
-    QMovie m_logo;
+    LogoAnimation m_logo;
+    QElapsedTimer m_playbackClock;
+    qint64 m_playbackMs = 0;
     Activity m_activity = Idle;
     bool m_motion = true;
     bool m_grid = true;

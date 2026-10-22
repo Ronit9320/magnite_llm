@@ -34,6 +34,8 @@ set(MAGNITE_SOURCES
     src/widgets/brandmark.h
     src/widgets/studiocanvas.cpp
     src/widgets/studiocanvas.h
+    src/widgets/logoanimation.cpp
+    src/widgets/logoanimation.h
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
     src/widgets/confirmation.h

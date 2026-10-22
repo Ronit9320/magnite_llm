@@ -266,14 +266,29 @@ int runUiCheck(const QString &captures) {
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
     settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
-    QMovie logo(":/brand/animated-symbol.gif");
-    check(logo.isValid() && logo.jumpToFrame(0),"bundled logo animation decodes");
-    const auto firstLogoFrame = logo.currentImage();
-    bool advanced = true;
-    for (int i=0;i<25;++i) advanced = logo.jumpToNextFrame() && advanced;
-    check(advanced && firstLogoFrame != logo.currentImage(),"supplied logo changes frames");
-    check(!firstLogoFrame.isNull() && firstLogoFrame.pixelColor(0,0).alpha()==0,
+    LogoAnimation logo;
+    check(logo.frameCount()==540 && logo.framesPerSecond()==30,"restored logo has 540 frames at 30 fps");
+    auto renderLogo = [&logo](qint64 ms, int size = 420) {
+        QImage image(size,size,QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        logo.paint(painter,QRectF(0,0,size,size),ms);
+        return image;
+    };
+    const auto firstLogoFrame = renderLogo(0);
+    check(firstLogoFrame != renderLogo(1000),"restored logo changes frames");
+    check(firstLogoFrame == renderLogo(18000),"restored logo loops after 18 seconds");
+    bool allFrames = true;
+    for (int i=0;i<540;++i) {
+        QImage image(32,32,QImage::Format_ARGB32_Premultiplied); image.fill(Qt::transparent);
+        QPainter painter(&image);
+        allFrames = logo.paint(painter,QRectF(0,0,32,32),(i*1000+29)/30) && allFrames;
+    }
+    check(allFrames,"all restored vector frames decode");
+    check(firstLogoFrame.pixelColor(210,210).alpha()>0 && firstLogoFrame.pixelColor(0,0).alpha()==0,
           "logo background is transparent");
+    check(renderLogo(0,840).pixelColor(420,420).alpha()>0,"restored logo renders at high DPI");
+    if (!captures.isEmpty()) renderLogo(0,840).save(captures+"/restored-logo.png");
     StudioCanvas wheel; wheel.setProperty("brandMark",true); wheel.setProperty("activityIndicator",true);
     wheel.resize(210,210); wheel.show(); wheel.activateWindow(); pump();
     for(auto activity:{StudioCanvas::Training,StudioCanvas::Chat}) {

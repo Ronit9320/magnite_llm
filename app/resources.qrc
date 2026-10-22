@@ -5,7 +5,7 @@
 
         <file alias="brand/symbol.svg">resources/brand/symbol.svg</file>
         <file alias="brand/wordmark.svg">resources/brand/wordmark.svg</file>
-        <file alias="brand/animated-symbol.gif">resources/brand/animated-symbol.gif</file>
+        <file alias="brand/animated-symbol.mgl" compress="0">resources/brand/animated-symbol.mgl</file>
 
         <!-- Bundled OFL fonts (SIL OFL, see resources/fonts/OFL-*.txt) -->
         <file alias="fonts/SpaceGrotesk-Regular.ttf">resources/fonts/SpaceGrotesk-Regular.ttf</file>
