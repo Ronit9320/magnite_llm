@@ -216,3 +216,58 @@ key); no cairosvg fallback written.
 **Not verified / not claimed:** that the bundle launches (needs Phase 5); Windows/Linux CMake behaviour (the
 non-bundle path was checked on macOS only — the guard is `if(APPLE AND ...)`, so it is unreachable elsewhere, but
 that is reasoning, not a Linux/Windows run).
+
+---
+
+## 2026-10-23 15:36 IST — Phase 3: relocatable Python runtime + pinned dependencies
+
+Logs: `build/packaging/phase3-*.log` (gitignored). Branch `release/v0.1-macos` at `540a7a4` + uncommitted Phase 3 edits.
+
+**New files:** `packaging/macos/requirements-macos-arm64.txt`, `requirements-macos-quantization.txt`, `prepare_runtime.sh`,
+`scan_macho.py`; `docs/release/macos/runtime-packages-macos.txt` (81-package list).
+**Shared-file edits:** `packaging/prepare_runtime.py`, `packaging/record_build.py` (darwin-guarded; see `DECISIONS.md`).
+
+**1. Linux behaviour unchanged (proved, not assumed).** Loaded the original (`git show HEAD:packaging/prepare_runtime.py`) and the patched
+script, simulated `sys.platform == "linux"`, stubbed `run()`/`record_build`, fixed the destination path, and compared every command and the
+env vars they would receive: **`linux: original == patched -> True`**. Same harness under `darwin` shows: no `--torch-backend`,
+`CMAKE_ARGS=-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DLLAMA_CURL=OFF
+-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0`, `MACOSX_DEPLOYMENT_TARGET=14.0`, parallelism 4. (My first
+harness reported `False` only because each run used a different random temp dir in the `--python` path; fixed, not waved away.)
+Harness: `build/packaging/macos/linux-equivalence/` (gitignored, throwaway).
+
+**2. Runtime build** — `bash packaging/macos/prepare_runtime.sh` → `exit=0`, ~2 minutes, log ends
+`runtime imports OK` / `Runtime staged at …/Contents/Resources/runtime/python`. Installed into
+`build/packaging/macos/stage/Magnite.app/Contents/Resources/`: `runtime/`, `build-info/{build.json,python-packages.txt}`,
+`licenses/{LICENSE,THIRD_PARTY_NOTICES.md,OFL-DMSans.txt,OFL-SpaceGrotesk.txt}`, `magnite.icns`. No `TESTING.md` yet (macOS one is
+a Phase 12 deliverable; the script prints a note instead of copying the Linux AppImage text).
+
+**3. Acceptance check, in a clean environment** (`env -i`, `-I -B`):
+| Item | Result |
+|---|---|
+| Python | **3.12.12** arm64 (the pinned python-build-standalone, not 3.12.13) |
+| torch | **2.14.0**, `mps_available True`, `mps_built True`, `torch.version.cuda None` |
+| llama-cpp-python | **0.3.35** (pinned), `llama_supports_gpu_offload() True`; embedded Metal library loaded in **10.292 s**; GPU `Apple M1`, `MTLGPUFamilyApple7`, unified memory |
+| transformers / peft / sentence-transformers / datasets / huggingface_hub / numpy | 5.16.1 / 0.20.0 / 6.0.1 / 5.0.1 / 1.30.0 / 2.5.2 |
+| Pins | **17/17 match** installed versions; 81 packages in total; `bitsandbytes` **not** installed (as intended) |
+| `backend` | real installed copy under `site-packages/backend/`, not the repo; repo not on `sys.path`; `python3 -I -B -m backend.main --help` works with `PYTHONHOME`/`PYTHONPATH` poisoned |
+| Size | runtime **1.1 GB**; uv cache 1.7 GB; python-download 50 MB; **21 GiB free** (ISSUE-004 stays open) |
+
+**4. Early Mach-O scan** (`packaging/macos/scan_macho.py`, 372 files): all minos ≤ **14.0** (11.0×85, 12.0×107, 14.0×180), **0** above — this
+validates ADR 0002 on real data. **3 files are x86_64+arm64** (`uvloop`, `charset_normalizer` ×2). Also **31 console scripts** with a
+build-host shebang, and build-host paths in `_sysconfigdata` and `direct_url.json`. All recorded as **ISSUE-006**, assigned to Phase 5.
+
+**5. Shared-edit re-verification:** `run_regressions.sh` → **53 tests OK**; plain `cmake --build build -j4` → 0;
+`./build/magnite-app --theme-check` → `0 failure(s)`.
+
+**6. Idempotency:** re-running the wrapper (existing runtime → `--resume`) took **12 s**, re-built/reinstalled only the `magnite-backend`
+wheel, and ended `runtime imports OK`.
+
+**7. Provenance caveat:** `build.json` says `"working_tree_modified": true` (built on uncommitted edits) at commit `540a7a4`. Accurate,
+but the package for testers must be built from a clean committed tree.
+
+**Plan corrections made this phase** (in `PLAN.md`): Phase 4's recipe ran `--selftest` from the installed bundle, which cannot launch before
+Phase 5 (same flaw found in Phase 2); it now uses `build-macos/Magnite.app` with an APFS-cloned runtime and a red/green step. Phase 5 gained
+the ISSUE-006 work items.
+
+**Not claimed:** that the *app* starts this runtime (Phase 4); anything about `.app` self-containment, signing, torch MPS *behaviour* under
+training/inference, or quantization (Phases 5–6). `mps_available True` shows MPS is present, not that LoRA training works on it.

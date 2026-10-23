@@ -4,30 +4,39 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 15:12 IST
+- Last updated: 2026-10-23 15:36 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 3 — Relocatable Python runtime + pinned deps** (TODO)
-- Last completed: **Phase 2 — `MAGNITE_MACOS_BUNDLE` CMake option; `Magnite.app` builds; plist/icon verified; plain build + 53 regressions unchanged**
-- Suggested model for the next phase: **Sonnet** (switch to Opus if llama.cpp Metal fails twice)
+- Current phase: **Phase 4 — Bundle path discovery** (TODO) — **shared file `app/src/backend_manager.cpp`**
+- Last completed: **Phase 3 — isolated Python 3.12.12 + 17 pinned deps staged (torch 2.14.0 MPS ✔, llama.cpp 0.3.35 Metal ✔); Linux behaviour of the shared script proved unchanged**
+- Suggested model for the next phase: **Opus** (C++ path-discovery design judgment, per the plan)
 
-## Next exact commands (Phase 3 — full detail in `PLAN.md`)
+## Next exact commands (Phase 4 — the corrected recipe is in `PLAN.md`; read it, do not use the old text)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
 export MAGNITE_QT_ROOT=/Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
-# 1. write packaging/macos/requirements-macos-arm64.txt (fork packaging/requirements-cpu.txt; bitsandbytes -> its own file)
-# 2. write packaging/macos/prepare_runtime.sh and make a small sys.platform=="darwin" guarded edit to
-#    packaging/prepare_runtime.py (macOS CMAKE_ARGS; no --torch-backend cpu)   <- SHARED FILE: log in DECISIONS.md,
-#    then run bash packaging/macos/run_regressions.sh and re-run the plain CMake build, results in LOG.md
-# 3. stage the runtime into the Phase 2 install tree
-bash packaging/macos/prepare_runtime.sh --destination build/packaging/macos/stage/Magnite.app/Contents/Resources
-R=build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3
-"$R" -I -B -c "import backend.server, llama_cpp, torch, transformers, peft, sentence_transformers, datasets; print(torch.__version__, torch.backends.mps.is_available())"
-du -sh build/packaging/macos/stage/Magnite.app
+# Prerequisites (recreate if missing):
+#   build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime   <- bash packaging/macos/prepare_runtime.sh
+#   build-macos/Magnite.app                                             <- Phase 2 configure/build (-DMAGNITE_MACOS_BUNDLE=ON)
+rm -rf build-macos/Magnite.app/Contents/Resources/runtime
+cp -c -R build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime build-macos/Magnite.app/Contents/Resources/runtime   # APFS clone
+# 1. RED: run the selftest BEFORE editing (expected to fail: client looks for <MacOS>/runtime and falls back to bare python3)
+# 2. edit app/src/backend_manager.cpp inside #ifdef Q_OS_MAC; 3. cmake --build build-macos -j4; 4. GREEN selftest with poisoned env
+# 5. bash packaging/macos/run_regressions.sh ; cmake --build build -j4 && ./build/magnite-app --theme-check
 ```
 
-If `build/packaging/macos/stage` is missing, recreate it: `bash packaging/macos/make_icon.sh`, then configure/build/install as
-in `LOG.md` Phase 2 (`-DMAGNITE_MACOS_BUNDLE=ON`). Python 3.12.12 is the pinned runtime (verified downloadable for macos-aarch64).
+Key design facts for Phase 4: `launchBackend()` currently checks `QDir(appDir + "/runtime")` (the Linux layout), then the dev `.venv`, then
+`python3`. On macOS add `appDir + "/../Resources/runtime"` as the first probe, keep the `-I -B` / `MAGNITE_PACKAGED=1` / "never fall back"
+contract, and skip the Linux-only `LD_LIBRARY_PATH` block. Do **not** touch `backend/src/backend/main.py` (ISSUE-001 is Phase 9's to measure).
+
+## Things learned in Phase 3 that later phases must respect
+
+- The staged runtime is **not yet clean** (ISSUE-006): 3 universal `.so` files, 31 console scripts with a build-host shebang, build-host
+  paths in `_sysconfigdata`/`direct_url.json`. **Phase 5 fixes these before signing**; do not sign before thinning/scrubbing.
+- `prepare_runtime.sh` is idempotent (resumes in ~12 s); `--fresh` wipes the runtime for a clean retry.
+- Metal costs ~10.3 s at first load (ISSUE-002); MPS being *available* is not proof that training works on it (Phase 6).
+- Every Mach-O in the runtime is minos ≤ 14.0 — ADR 0002 stands.
+- Build from a **clean committed tree** for the tester package (`build.json` records `working_tree_modified`).
 
 ## Things learned in Phase 2 that later phases must respect
 
@@ -57,8 +66,8 @@ in `LOG.md` Phase 2 (`-DMAGNITE_MACOS_BUNDLE=ON`). Python 3.12.12 is the pinned 
   Team ID, and a `notarytool store-credentials` profile. See `adr/0005-signing-approach.md`.
 - **Phase 10 needs a second macOS user account** on this M1 (the agreed clean-install
   proxy). Its name must be supplied, or the maintainer runs `CLEAN_INSTALL.md` there.
-- Open, non-blocking issues: ISSUE-001 (no macOS parent-death signal; verify in Phase 9),
-  ISSUE-004 (disk headroom, 23 GiB free), ISSUE-005 (test/`_remove_hf` symlink handling).
+- Open, non-blocking issues: ISSUE-001 (no macOS parent-death signal; verify in Phase 9), ISSUE-004 (disk, 21 GiB free),
+  ISSUE-005 (test/`_remove_hf` symlink handling), ISSUE-006 (runtime hygiene; fixed in Phase 5).
 
 ## Standing rules for every session
 

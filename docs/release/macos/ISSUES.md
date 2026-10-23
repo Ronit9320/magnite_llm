@@ -45,7 +45,7 @@ if a cleaner solution is wanted.
 
 ## ISSUE-002 — No Metal shader compiler on the build host
 
-- Status: **LARGELY MITIGATED — confirmed in Phase 1; remaining questions go to Phase 3/6**
+- Status: **RESOLVED for build; load-time cost remains a documented limitation (measure in Phase 6)**
 - Found: 2026-10-23
 - Severity: build-time constraint
 
@@ -77,6 +77,13 @@ Two things this does **not** establish, deliberately left for later phases:
    pause ~10 s before the first token. Phase 6 should measure it on the packaged
    runtime and `TESTING.md` should say so; whether it is cached across launches
    is unknown.
+
+**Phase 3 update (2026-10-23, measured):** the *pinned* `llama-cpp-python==0.3.35`, built from sdist through
+`packaging/prepare_runtime.py` with `-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_NATIVE=OFF`, reports
+`llama_supports_gpu_offload() == True` in the isolated runtime. The embedded Metal library took **10.3 s** to load
+(`ggml_metal_library_init: loaded in 10.292 sec`) — consistent with Phase 1's 10.2 s on 0.3.36, so a first GGUF load on
+macOS pauses ~10 s. Whether it is cached across launches is still unknown; Phase 6 measures it. The CPU-only fallback was
+not needed.
 
 ---
 
@@ -161,3 +168,31 @@ Phases that re-run the suite after shared-file edits must use the same prefix.
 `Path(tempfile.mkdtemp()).resolve()`; in `_remove_hf` use `.resolve()` instead of
 `.absolute()` (and confirm it still refuses paths outside a managed `snapshots` dir).
 Linux CI is unaffected, which is why this was not caught earlier.
+
+---
+
+## ISSUE-006 — The staged runtime is not yet relocatable/clean (found in Phase 3)
+
+- Status: **OPEN — assigned to Phase 5 (`build_app.sh` + `verify_bundle.py`)**
+- Found: 2026-10-23, by scanning the staged runtime after the Phase 3 build
+- Severity: hygiene/relocatability; none affects the app today because it only runs `bin/python3 -m backend.main`
+- Evidence: `LOG.md` Phase 3 §4; helper `packaging/macos/scan_macho.py`
+
+Three separate findings, all consequences of staging a stock uv/PyPI install:
+
+1. **3 universal (x86_64+arm64) extension modules** ship in arm64-only bundle: `uvloop/loop.cpython-312-darwin.so`,
+   `charset_normalizer/cd.cpython-312-darwin.so`, `charset_normalizer/md.cpython-312-darwin.so`. They violate ADR 0001's
+   "no non-arm64 slice" rule. Fix: `lipo -thin arm64` them (Phase 5), then re-sign.
+2. **31 console scripts in `runtime/python/bin` carry a build-host shebang**, e.g.
+   `#!/Users/architbhuta/magnite_llm/build/packaging/macos/stage/Magnite.app/…/python3`. They break as soon as the bundle
+   moves and leak a developer path. The app never calls them. Fix: delete everything in `bin/` except `python`, `python3`,
+   `python3.12`.
+3. **Informational build-host paths** in `lib/python3.12/_sysconfigdata__darwin_darwin.py` (uv stamps its install dir) and
+   `site-packages/magnite_backend-0.1.0.dist-info/direct_url.json`. Harmless at runtime. Fix: scrub the prefix so
+   `verify_bundle.py` can fail on *any* `/Users/` text hit without an allowlist.
+
+Also: `build-info/build.json` recorded `"working_tree_modified": true` because Phase 3 ran on uncommitted edits. That is
+accurate, but a package intended for testers should be built from a clean committed tree (Phase 5/12).
+
+Positive result from the same scan, relevant to ADR 0002: of **372 Mach-O files**, **none** has `minos` above 14.0 (histogram:
+11.0×85, 12.0×107, 14.0×180). The 14.0 floor is real (torch + llama.cpp), not an artefact.

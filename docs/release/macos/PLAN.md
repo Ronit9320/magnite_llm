@@ -161,7 +161,7 @@ executable is `Contents/MacOS/Magnite` (not `magnite-app`). The plain build keep
 
 ---
 
-### Phase 3 — Relocatable Python runtime + pinned deps · model: Sonnet (Opus if llama.cpp fights back) · **status: TODO**
+### Phase 3 — Relocatable Python runtime + pinned deps · model: Sonnet (Opus if llama.cpp fights back) · **status: DONE** (2026-10-23)
 **Goal:** stage an isolated arm64 Python 3.12.12 with the backend wheel and pinned ML deps, importable with `-I`.
 
 New: `packaging/macos/requirements-macos-arm64.txt` (fork of
@@ -186,6 +186,9 @@ imports; `build-info/python-packages.txt` and `build.json` exist under
 **Idempotent:** `--resume` re-runs the dependency install; a clean retry is
 `rm -rf .../Contents/Resources/runtime` (and `rm -rf build/packaging/uv-cache` if deps are suspect).
 **Rollback:** delete the staged runtime; revert `prepare_runtime.py`.
+**Result (2026-10-23):** Python 3.12.12, torch 2.14.0 (`mps_available True`), llama-cpp-python 0.3.35 built from sdist with
+Metal (`gpu_offload True`); 17/17 pins match; runtime 1.1 GB; build 'imports OK'; wrapper re-run is idempotent (12 s). Metal worked first time,
+so the CPU-only fallback was not needed. Evidence + findings in `LOG.md`; hygiene findings → ISSUE-006 (handled in Phase 5).
 **Depends on:** Phase 2. **If Metal fails twice:** stop, log in `ISSUES.md`, retry with
 `-DGGML_METAL=OFF` and record CPU-only llama.cpp as the shipped configuration.
 
@@ -204,16 +207,31 @@ imports; `build-info/python-packages.txt` and `build.json` exist under
 `backend/src/backend/main.py` — **no change in this phase.** The missing macOS
 parent-death signal (R8) is recorded in `ISSUES.md` and only fixed if the user approves.
 
+**Plan correction (2026-10-23):** the original recipe ran `--selftest` from the *installed* bundle in `stage/`. That cannot launch
+until Phase 5 (`cmake --install` strips the dev-Qt rpath; no `Contents/Frameworks` before `macdeployqt`). Use the launchable
+**build-tree** bundle `build-macos/Magnite.app` and give it the Phase 3 runtime as an APFS clone (instant, no extra disk):
+
 ```sh
-cmake --build build-macos -j4 && cmake --install build-macos --prefix build/packaging/macos/stage
-env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent \
-    MAGNITE_HOME="$TMPDIR/magnite-phase4" QT_QPA_PLATFORM=offscreen \
-    build/packaging/macos/stage/Magnite.app/Contents/MacOS/Magnite --selftest
+cd /Users/architbhuta/magnite_llm
+export MAGNITE_QT_ROOT=/Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
+# fixture: runtime inside the launchable bundle (gitignored, under build-macos/)
+rm -rf build-macos/Magnite.app/Contents/Resources/runtime
+cp -c -R build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime build-macos/Magnite.app/Contents/Resources/runtime
+SELFTEST='env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent
+          MAGNITE_HOME="$TMPDIR/magnite-phase4" QT_QPA_PLATFORM=offscreen
+          build-macos/Magnite.app/Contents/MacOS/Magnite --selftest'
+# RED (before editing): the client looks for <MacOS>/runtime, finds nothing, and falls back to bare `python3`
+eval "$SELFTEST"   # expected to FAIL; save the log as evidence of the bug being fixed
+# edit app/src/backend_manager.cpp (Q_OS_MAC block), then GREEN:
+cmake --build build-macos -j4
+eval "$SELFTEST"   # expected: [selftest] PASS (0 failures) and "backend health OK"
 bash packaging/macos/run_regressions.sh   # sets a resolved TMPDIR; see ISSUE-005
-cmake --build build -j4   # Linux-shaped non-bundle build still fine
+cmake --build build -j4 && QT_QPA_PLATFORM=offscreen ./build/magnite-app --theme-check   # plain build still fine
 ```
-**Acceptance:** the `--selftest` run prints `[selftest] PASS (0 failures)` **with a broken
-host Python environment**, and the log contains `backend health OK`; regressions still pass.
+**Acceptance:** RED run fails and GREEN run prints `[selftest] PASS (0 failures)` **with a broken host Python environment**
+(`PYTHONHOME`/`PYTHONPATH` poisoned, `PATH` without Homebrew/uv), the log contains `backend health OK` and shows the backend
+was started from `.../Contents/Resources/runtime/python/bin/python3` (check `ps` or the backend log), no `backend.main` is
+left running afterwards, regressions still pass, and the plain build still passes `--theme-check`.
 **Idempotent:** yes. **Rollback:** `git checkout -- app/src/backend_manager.cpp`.
 **Depends on:** Phase 3. **Log in `DECISIONS.md`:** shared-file edit + re-run evidence.
 
@@ -232,7 +250,18 @@ New `packaging/macos/build_app.sh` — ordering matters:
 6. `codesign --force --timestamp=none -s -` over inner Mach-O files first, then the bundle
 7. `packaging/macos/verify_bundle.py` — the real gate
 
-`verify_bundle.py` fails on: any Mach-O with a non-arm64 slice; any `otool -L` entry
+**Findings from Phase 3 that this phase must handle (ISSUE-006):**
+- **Thin the 3 fat extension modules** that arrive as universal wheels: `uvloop/loop.cpython-312-darwin.so`,
+  `charset_normalizer/cd.cpython-312-darwin.so`, `charset_normalizer/md.cpython-312-darwin.so`. `lipo -thin arm64` the
+  runtime too, not only Qt (re-scan: `packaging/macos/scan_macho.py` is the prototype to build `verify_bundle.py`).
+- **Remove the 31 console scripts** in `runtime/python/bin` whose shebang is the build-host path; keep only `python`,
+  `python3`, `python3.12`. The app only runs `bin/python3 -m backend.main`.
+- **Scrub the build-host path** from `lib/python3.12/_sysconfigdata__darwin_darwin.py` and
+  `site-packages/magnite_backend-0.1.0.dist-info/direct_url.json` (informational only) so the check below can be zero-tolerance.
+- **Build from a clean, committed tree.** `build.json` records `working_tree_modified`; Phase 3's run recorded `true`.
+- Sign **after** thinning and scrubbing (any edit invalidates an ad-hoc signature).
+
+`verify_bundle.py` fails on: any Mach-O with a non-arm64 slice; any text file containing the build-host path (`/Users/`); any `otool -L` entry
 pointing at `/opt/homebrew`, `/usr/local`, `$MAGNITE_QT_ROOT` or `/Users/`; any
 `LC_BUILD_VERSION` minos above 14.0 in the client or Qt frameworks; a missing
 `Contents/Resources/runtime/python/bin/python3`; `codesign --verify --deep --strict` failure.

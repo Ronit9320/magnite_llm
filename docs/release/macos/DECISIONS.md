@@ -25,12 +25,13 @@ the plain CMake build, with the result recorded in `LOG.md`.
 |---|---|---|---|---|---|
 | 2026-10-23 | `.gitignore` | appended `build-macos/`, `.venv-macos/`, `*.dmg` | n/a (additive ignore rules) | keep macOS build dirs and artifacts out of commits; `build/` and `dist/` were already ignored | not applicable — no code or build behaviour changes |
 | 2026-10-23 | `app/CMakeLists.txt` | added `option(MAGNITE_MACOS_BUNDLE OFF)`; under it: `OUTPUT_NAME Magnite`, `MACOSX_BUNDLE`, Info.plist template, icon, `install(... BUNDLE DESTINATION .)`; the original `install(... RUNTIME DESTINATION bin)` moved into the `else()` branch | `if(APPLE AND MAGNITE_MACOS_BUNDLE)` | ADR 0007: produce `Magnite.app` for packaging without changing `./build/magnite-app` | 53 regressions OK; plain `build/` rebuilt OK; fresh-cache default configure installs `bin/magnite-app`; `--theme-check` 0 failure(s) on both binaries (LOG.md) |
+| 2026-10-23 | `packaging/prepare_runtime.py` | new `--requirements` arg (default = the old Linux file); `sys.platform == "darwin"` branch for llama.cpp `CMAKE_ARGS` (Metal embedded, arm64, deployment target 14.0, `MACOSX_DEPLOYMENT_TARGET`), parallelism 4, no `--torch-backend cpu`; tester-doc copy picks `packaging/macos/TESTING.md` on macOS | `sys.platform == "darwin"`; non-darwin branch is the original code verbatim | Phase 3: stage an arm64 runtime with Metal using the same script as Linux | **Proved Linux-identical**: original (`git show HEAD:`) vs patched run under simulated `linux` with `run()` stubbed → identical commands and env (`True`); then 53 regressions OK; plain `build/` rebuilt, `--theme-check` 0 failure(s) |
+| 2026-10-23 | `packaging/record_build.py` | `build.json` `runtime` description text differs on darwin (says CPU/MPS torch, Metal llama.cpp, no bitsandbytes) | `sys.platform == "darwin"` | the Linux string "CPU torch and llama.cpp" would be false provenance on macOS | covered by the same run as above |
 
 Planned (not yet made):
 
 | Phase | File | Change | Guard |
 |---|---|---|---|
-| 3 | `packaging/prepare_runtime.py` | macOS `CMAKE_ARGS`; drop `--torch-backend cpu` | `sys.platform == "darwin"` |
 | 4 | `app/src/backend_manager.cpp` | probe `Contents/Resources/runtime`; skip the `LD_LIBRARY_PATH` hop | `#ifdef Q_OS_MAC` |
 | 12 | `packaging/README.md`, `README.md`, `RELEASE_CHECKLIST.md` | macOS sections; macOS checklist lines only | n/a |
 
@@ -62,3 +63,17 @@ Planned (not yet made):
   paper tile. No colour is duplicated in the script. No cairosvg fallback was written: `qlmanage` works, and an unused
   fallback would be untested code.
 - **Phase 2 acceptance corrected** (installed bundle cannot launch before `macdeployqt`); see `PLAN.md`.
+
+## Decisions made during Phase 3 (small; no separate ADR)
+
+- **Printed Linux output preserved.** My first patch changed `'CPU runtime imports OK'`; reverted so only macOS differs
+  (`runtime imports OK`), because "Linux behaviour unchanged" includes its log text.
+- **`--requirements` is a new argument, not a macOS fork of the script.** One script serves both platforms; the macOS
+  wrapper passes `packaging/macos/requirements-macos-arm64.txt`.
+- **`bitsandbytes` is excluded from the runtime** (separate `requirements-macos-quantization.txt`), per ADR 0004; confirmed
+  not installed. Phase 6 decides whether it may ever be added.
+- **Parallelism 4 on macOS** (vs 2 on Linux): the M1 has 8 cores and llama.cpp's compile footprint is small; the build took
+  about 2 minutes.
+- **The package list is committed** as `docs/release/macos/runtime-packages-macos.txt` (81 packages) — small text provenance.
+- **Build/staging stays under `build/`** (gitignored). `scan_macho.py` was promoted to `packaging/macos/` because the plan
+  references it.

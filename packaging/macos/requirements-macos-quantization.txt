@@ -1,0 +1,5 @@
+# OPTIONAL and NOT installed into the shipped runtime by default.
+# A macosx_14_0_arm64 wheel exists for this pin (PyPI, checked 2026-10-23), but 4/8-bit
+# quantization on Apple silicon is unproven. Phase 6 (docs/release/macos/PLAN.md) probes it;
+# only install it into the runtime if that probe passes.
+bitsandbytes==0.50.2
