@@ -24,12 +24,12 @@ the plain CMake build, with the result recorded in `LOG.md`.
 | Date | File | Change | Guard | Reason | Re-verified |
 |---|---|---|---|---|---|
 | 2026-10-23 | `.gitignore` | appended `build-macos/`, `.venv-macos/`, `*.dmg` | n/a (additive ignore rules) | keep macOS build dirs and artifacts out of commits; `build/` and `dist/` were already ignored | not applicable — no code or build behaviour changes |
+| 2026-10-23 | `app/CMakeLists.txt` | added `option(MAGNITE_MACOS_BUNDLE OFF)`; under it: `OUTPUT_NAME Magnite`, `MACOSX_BUNDLE`, Info.plist template, icon, `install(... BUNDLE DESTINATION .)`; the original `install(... RUNTIME DESTINATION bin)` moved into the `else()` branch | `if(APPLE AND MAGNITE_MACOS_BUNDLE)` | ADR 0007: produce `Magnite.app` for packaging without changing `./build/magnite-app` | 53 regressions OK; plain `build/` rebuilt OK; fresh-cache default configure installs `bin/magnite-app`; `--theme-check` 0 failure(s) on both binaries (LOG.md) |
 
 Planned (not yet made):
 
 | Phase | File | Change | Guard |
 |---|---|---|---|
-| 2 | `app/CMakeLists.txt` | bundle target, `Info.plist`, `.icns`, `BUNDLE DESTINATION` | `if(APPLE)` + `option(MAGNITE_MACOS_BUNDLE OFF)` |
 | 3 | `packaging/prepare_runtime.py` | macOS `CMAKE_ARGS`; drop `--torch-backend cpu` | `sys.platform == "darwin"` |
 | 4 | `app/src/backend_manager.cpp` | probe `Contents/Resources/runtime`; skip the `LD_LIBRARY_PATH` hop | `#ifdef Q_OS_MAC` |
 | 12 | `packaging/README.md`, `README.md`, `RELEASE_CHECKLIST.md` | macOS sections; macOS checklist lines only | n/a |
@@ -47,3 +47,18 @@ Planned (not yet made):
   ad-hoc terminal commands.
 - Functional bugs found along the way go to `ISSUES.md`; they are not silently
   fixed inside packaging work.
+
+## Decisions made during Phase 2 (small; no separate ADR)
+
+- **Executable is `Magnite` inside the bundle.** CMake names `<OUTPUT_NAME>.app`, so `Magnite.app` requires
+  `OUTPUT_NAME Magnite`, which also renames the inner executable. Nothing depended on the old name except the plain
+  build (CI, AppImage recipe), which is unaffected because the rename applies only in bundle mode. Phases 4/5/8 use
+  `Contents/MacOS/Magnite`.
+- **`CFBundleShortVersionString` = `0.1.0` (`PROJECT_VERSION`), not the build label.** `0.1.0-test.1` is not a valid
+  short-version string (digits and periods only). The label is kept in a custom `MagniteBuildLabel` plist key. This
+  deviates from the plan's wording ("short version from MAGNITE_BUILD_LABEL").
+- **Icon is generated, not committed.** `make_icon.sh` resolves the `@brandInk`/`@brandOrange` tokens from
+  `app/src/theme.h` (the SVG is not valid standalone; rasterized raw it is a solid black blob) and composes a rounded
+  paper tile. No colour is duplicated in the script. No cairosvg fallback was written: `qlmanage` works, and an unused
+  fallback would be untested code.
+- **Phase 2 acceptance corrected** (installed bundle cannot launch before `macdeployqt`); see `PLAN.md`.

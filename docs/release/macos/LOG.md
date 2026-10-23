@@ -169,3 +169,50 @@ documented) ✔ · `--theme-check` 0 failure(s) ✔ · `minos 14.0` ✔ · versi
 
 **Not claimed:** anything about the packaged runtime, `.app` bundle, pinned dependency
 set, macOS 14/15 behaviour, MPS, or training/RAG/adapter paths.
+
+---
+
+## 2026-10-23 15:12 IST — Phase 2: bundle-aware CMake (shared file `app/CMakeLists.txt`)
+
+Logs: `build/packaging/phase2-*.log` (gitignored).
+
+**New files:** `packaging/macos/make_icon.sh`, `packaging/macos/Info.plist.in`.
+**Shared-file edit:** `app/CMakeLists.txt` — additive; everything under
+`if(APPLE AND MAGNITE_MACOS_BUNDLE)`, option default `OFF`; the original
+`install(TARGETS magnite-app RUNTIME DESTINATION bin)` is kept verbatim in the `else()` branch.
+
+**1. Icon** — `bash packaging/macos/make_icon.sh` → `build/packaging/macos/magnite.icns`, 267,678 bytes, `file`:
+"Mac OS X icon". Tokens read from `theme.h`: ink `#201411`, orange `#FF4A0E`, paper `#F1EFE7`.
+Finding: `app/resources/brand/symbol.svg` uses `@brandInk`/`@brandOrange` placeholders, so `qlmanage` on the raw file
+renders a **solid black blob** (checked visually); the script substitutes them first. The 1024 px master has an alpha
+channel and was inspected visually: orange symbol with ink dots on a rounded paper tile.
+
+**2. Bundle build** (`-DMAGNITE_MACOS_BUNDLE=ON`, arm64, deployment target 14.0, label `0.1.0-test.1`):
+configure 0, build 0 (links `Magnite.app/Contents/MacOS/Magnite`), `cmake --install` 0.
+Installed tree: `Magnite.app/Contents/{Info.plist, MacOS/Magnite, Resources/magnite.icns}`; icon `cmp`-identical to source.
+`plutil -lint` OK. `plutil -p`: `CFBundleIdentifier=com.magnite.magnite-llm`, `LSMinimumSystemVersion=14.0`,
+`CFBundleShortVersionString=0.1.0`, `MagniteBuildLabel=0.1.0-test.1`, `NSHighResolutionCapable=true`,
+`CFBundleExecutable=Magnite`, `CFBundleIconFile=magnite.icns`. Binary: Mach-O arm64, `minos 14.0`.
+
+**3. Theme check** — `build-macos/Magnite.app/Contents/MacOS/Magnite --theme-check` → **`0 failure(s)`**.
+**The installed bundle does not launch yet**: dyld cannot find `QtWidgets.framework`. Mechanism verified with
+`otool -l`: the build-tree binary has `LC_RPATH` → the developer Qt; the installed binary has none (`cmake --install`
+strips it, which is correct), and there is no `Contents/Frameworks` until `macdeployqt` (Phase 5). The plan's
+acceptance text asked the installed bundle to run `--theme-check`; that was unachievable by design, so it was
+**corrected in PLAN.md** and the installed-bundle launch check moved to Phase 5. Not a defect, but not hidden either.
+
+**4. Non-bundle regression** (the point of the opt-in design):
+- `cmake -S app -B build ...` + `cmake --build build -j4` → 0/0; cache shows `MAGNITE_MACOS_BUNDLE:BOOL=OFF`;
+  `./build/magnite-app --theme-check` → `0 failure(s)`.
+- Fresh-cache default configure in a throwaway dir + build + install → only `bin/magnite-app` installed, i.e. the
+  layout the Linux AppImage recipe relies on is unchanged.
+
+**5. Offline regressions** after the shared edit: `bash packaging/macos/run_regressions.sh` → **53 tests, OK** (exit 0).
+
+**Deviations from the plan, all in `DECISIONS.md`:** executable is `Magnite` in bundle mode (needed for `Magnite.app`);
+`CFBundleShortVersionString` is `0.1.0` rather than the label (label is not a valid short-version; kept in a custom
+key); no cairosvg fallback written.
+
+**Not verified / not claimed:** that the bundle launches (needs Phase 5); Windows/Linux CMake behaviour (the
+non-bundle path was checked on macOS only — the guard is `if(APPLE AND ...)`, so it is unreachable elsewhere, but
+that is reasoning, not a Linux/Windows run).

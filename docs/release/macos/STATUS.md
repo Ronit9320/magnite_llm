@@ -4,31 +4,38 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 15:04 IST
+- Last updated: 2026-10-23 15:12 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 2 — Bundle-aware CMake (shared file, APPLE-guarded)** (TODO)
-- Last completed: **Phase 1 — `mac` fix merged; 53 regressions OK; theme-check 0 failures; `minos 14.0`; selftest PASS + `backend health OK`**
-- Suggested model for the next phase: **Sonnet** (mechanical)
+- Current phase: **Phase 3 — Relocatable Python runtime + pinned deps** (TODO)
+- Last completed: **Phase 2 — `MAGNITE_MACOS_BUNDLE` CMake option; `Magnite.app` builds; plist/icon verified; plain build + 53 regressions unchanged**
+- Suggested model for the next phase: **Sonnet** (switch to Opus if llama.cpp Metal fails twice)
 
-## Next exact commands (Phase 2 — full detail in `PLAN.md`)
+## Next exact commands (Phase 3 — full detail in `PLAN.md`)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
 export MAGNITE_QT_ROOT=/Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
-# if .venv-macos is missing: uv venv --python 3.12 .venv-macos && uv pip install --python .venv-macos -e backend "pypdf==6.19.0"
-bash packaging/macos/make_icon.sh        # to be written this phase -> build/packaging/macos/magnite.icns
-# edit app/CMakeLists.txt (if(APPLE) + option(MAGNITE_MACOS_BUNDLE OFF)), add packaging/macos/Info.plist.in
-cmake -S app -B build-macos -DCMAKE_PREFIX_PATH="$MAGNITE_QT_ROOT" -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
-      -DMAGNITE_MACOS_BUNDLE=ON -DMAGNITE_BUILD_LABEL=0.1.0-test.1
-cmake --build build-macos -j4
-cmake --install build-macos --prefix build/packaging/macos/stage
-cmake -S app -B build -DCMAKE_PREFIX_PATH="$MAGNITE_QT_ROOT" && cmake --build build -j4   # non-bundle build must still work
-bash packaging/macos/run_regressions.sh     # shared-file edit => re-run + log in LOG.md
+# 1. write packaging/macos/requirements-macos-arm64.txt (fork packaging/requirements-cpu.txt; bitsandbytes -> its own file)
+# 2. write packaging/macos/prepare_runtime.sh and make a small sys.platform=="darwin" guarded edit to
+#    packaging/prepare_runtime.py (macOS CMAKE_ARGS; no --torch-backend cpu)   <- SHARED FILE: log in DECISIONS.md,
+#    then run bash packaging/macos/run_regressions.sh and re-run the plain CMake build, results in LOG.md
+# 3. stage the runtime into the Phase 2 install tree
+bash packaging/macos/prepare_runtime.sh --destination build/packaging/macos/stage/Magnite.app/Contents/Resources
+R=build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3
+"$R" -I -B -c "import backend.server, llama_cpp, torch, transformers, peft, sentence_transformers, datasets; print(torch.__version__, torch.backends.mps.is_available())"
+du -sh build/packaging/macos/stage/Magnite.app
 ```
 
-Phase 2 is a **shared-file edit** (`app/CMakeLists.txt`): additive, `if(APPLE)`-guarded,
-log it in `DECISIONS.md`, and record the regression + plain-build results in `LOG.md`.
+If `build/packaging/macos/stage` is missing, recreate it: `bash packaging/macos/make_icon.sh`, then configure/build/install as
+in `LOG.md` Phase 2 (`-DMAGNITE_MACOS_BUNDLE=ON`). Python 3.12.12 is the pinned runtime (verified downloadable for macos-aarch64).
+
+## Things learned in Phase 2 that later phases must respect
+
+- In bundle mode the executable is **`Magnite.app/Contents/MacOS/Magnite`** (not `magnite-app`); the plain build keeps `magnite-app`.
+- The **installed bundle cannot run until Phase 5** (`macdeployqt` adds `Contents/Frameworks`; install strips the dev rpath). Until
+  then run checks on `build-macos/Magnite.app` (build-tree, keeps the dev-Qt rpath).
+- `symbol.svg` has `@brandInk`/`@brandOrange` tokens — never rasterize it raw. Use `packaging/macos/make_icon.sh`.
+- `CFBundleShortVersionString` is `0.1.0`; the label `0.1.0-test.1` lives in the `MagniteBuildLabel` plist key.
 
 ## Things learned in Phase 1 that later phases must respect
 

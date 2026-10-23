@@ -20,7 +20,7 @@ The bundle itself needs a layout decision too. Target:
 ```
 Magnite.app/Contents/
   Info.plist                  LSMinimumSystemVersion 14.0, id com.magnite.magnite-llm
-  MacOS/magnite-app           the only executable here
+  MacOS/Magnite               the only executable here (OUTPUT_NAME Magnite in bundle mode; plain build stays magnite-app)
   Frameworks/Qt*.framework    macdeployqt output, thinned to arm64
   PlugIns/                    Qt platform/style/image plugins
   Resources/magnite.icns

@@ -58,7 +58,33 @@ if(WIN32)
     set_target_properties(magnite-app PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
-install(TARGETS magnite-app RUNTIME DESTINATION bin)
+# macOS packaging only: produce Magnite.app. Off by default so the documented
+# ./build/magnite-app dev/CI workflow is unchanged. See docs/release/macos/adr/0007.
+option(MAGNITE_MACOS_BUNDLE "Build a Magnite.app bundle (macOS packaging only)" OFF)
+if(APPLE AND MAGNITE_MACOS_BUNDLE)
+    set(MAGNITE_MACOS_MIN_VERSION "14.0" CACHE STRING "LSMinimumSystemVersion written to Info.plist")
+    set(MAGNITE_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../build/packaging/macos/magnite.icns"
+        CACHE FILEPATH "Bundle icon; create it with packaging/macos/make_icon.sh")
+    if(NOT EXISTS "${MAGNITE_MACOS_ICON}")
+        message(FATAL_ERROR "Missing ${MAGNITE_MACOS_ICON}: run packaging/macos/make_icon.sh first")
+    endif()
+    get_filename_component(MAGNITE_MACOS_ICON_NAME "${MAGNITE_MACOS_ICON}" NAME)
+    set_source_files_properties("${MAGNITE_MACOS_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(magnite-app PRIVATE "${MAGNITE_MACOS_ICON}")
+    set_target_properties(magnite-app PROPERTIES
+        OUTPUT_NAME Magnite   # bundle directory and executable become Magnite.app / Magnite
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/macos/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "Magnite"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.magnite.magnite-llm"
+        MACOSX_BUNDLE_ICON_FILE "${MAGNITE_MACOS_ICON_NAME}"
+        # CFBundleShortVersionString must be numeric; the full label goes in MagniteBuildLabel.
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+    install(TARGETS magnite-app BUNDLE DESTINATION .)
+else()
+    install(TARGETS magnite-app RUNTIME DESTINATION bin)
+endif()
 
 target_include_directories(magnite-app PRIVATE src)
 

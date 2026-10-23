@@ -119,7 +119,7 @@ dev workflow) is untouched. Add `build-macos/` to `.gitignore` if not already co
 
 ---
 
-### Phase 2 — Bundle-aware CMake (shared file, APPLE-guarded) · model: Sonnet · **status: TODO**
+### Phase 2 — Bundle-aware CMake (shared file, APPLE-guarded) · model: Sonnet · **status: DONE** (2026-10-23)
 **Goal:** teach `app/CMakeLists.txt` to produce and install a `.app` **only** when asked, leaving Linux and the macOS dev workflow unchanged.
 
 Changes to `app/CMakeLists.txt`, all inside `if(APPLE)` and behind
@@ -145,10 +145,16 @@ cmake --install build-macos --prefix build/packaging/macos/stage
 # regression: the non-bundle build must still work
 cmake -S app -B build -DCMAKE_PREFIX_PATH="$MAGNITE_QT_ROOT" && cmake --build build -j4
 ```
-**Acceptance:** `build/packaging/macos/stage/Magnite.app/Contents/MacOS/magnite-app --theme-check`
-prints `0 failure(s)`; `plutil -p .../Contents/Info.plist` shows the identifier and
-`LSMinimumSystemVersion 14.0`; the plain `./build/magnite-app` build still succeeds;
-offline regressions re-run and logged (shared-file edit rule).
+**Acceptance (corrected 2026-10-23):** `build-macos/Magnite.app/Contents/MacOS/Magnite --theme-check`
+prints `0 failure(s)` (run on the **build-tree** bundle; see note); `plutil -p .../Contents/Info.plist` shows the
+identifier and `LSMinimumSystemVersion 14.0`; the plain `./build/magnite-app` build still succeeds and a fresh
+default configure still installs `bin/magnite-app`; offline regressions re-run and logged (shared-file edit rule).
+**Correction:** the original text asked the *installed* bundle to run `--theme-check`. It cannot yet: `cmake --install`
+strips the build rpath (correct — a shipped bundle must not reference the developer's Qt) and `Contents/Frameworks`
+does not exist until `macdeployqt` runs in Phase 5. The installed-bundle launch check therefore moves to Phase 5.
+**Naming:** under `MAGNITE_MACOS_BUNDLE` the target gets `OUTPUT_NAME Magnite`, so the bundle is `Magnite.app` and the
+executable is `Contents/MacOS/Magnite` (not `magnite-app`). The plain build keeps `magnite-app`.
+**Result (2026-10-23):** all of the above passed; 53 regressions OK. Evidence in `LOG.md`.
 **Idempotent:** yes. Retry: `rm -rf build-macos build/packaging/macos/stage`.
 **Rollback:** `git checkout -- app/CMakeLists.txt`; the option defaults OFF so nothing else regresses.
 **Depends on:** Phase 1. **Log in `DECISIONS.md`:** shared-file edit to `app/CMakeLists.txt`.
@@ -202,7 +208,7 @@ parent-death signal (R8) is recorded in `ISSUES.md` and only fixed if the user a
 cmake --build build-macos -j4 && cmake --install build-macos --prefix build/packaging/macos/stage
 env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent \
     MAGNITE_HOME="$TMPDIR/magnite-phase4" QT_QPA_PLATFORM=offscreen \
-    build/packaging/macos/stage/Magnite.app/Contents/MacOS/magnite-app --selftest
+    build/packaging/macos/stage/Magnite.app/Contents/MacOS/Magnite --selftest
 bash packaging/macos/run_regressions.sh   # sets a resolved TMPDIR; see ISSUE-005
 cmake --build build -j4   # Linux-shaped non-bundle build still fine
 ```
@@ -238,7 +244,7 @@ codesign --verify --deep --strict --verbose=2 build/packaging/macos/stage/Magnit
 du -sh build/packaging/macos/stage/Magnite.app
 ```
 **Acceptance:** `verify_bundle.py` exits 0 and prints a zero-failure summary; `codesign --verify`
-passes; the bundle launches `--theme-check` from a path outside the checkout.
+passes; the bundle launches `--theme-check` from a path outside the checkout (this is the installed-bundle launch check moved from Phase 2).
 **Idempotent:** the script rebuilds the bundle from scratch except the Python runtime,
 which it reuses unless `--fresh-runtime` is passed. Clean retry: `rm -rf build/packaging/macos`.
 **Rollback:** delete the staging dir; no tracked file changes beyond the new scripts.
@@ -297,7 +303,7 @@ SHA-256 appended to `dist/SHA256SUMS` and recorded in `LOG.md`.
 ```sh
 hdiutil attach dist/Magnite-0.1.0-test.1-arm64.dmg
 cp -R /Volumes/Magnite*/Magnite.app "$TMPDIR/Magnite-verify.app" && hdiutil detach /Volumes/Magnite*
-A="$TMPDIR/Magnite-verify.app/Contents/MacOS/magnite-app"
+A="$TMPDIR/Magnite-verify.app/Contents/MacOS/Magnite"
 export MAGNITE_HOME="$TMPDIR/magnite-verify-home" HF_HOME=build/packaging/macos/test-cache
 "$A" --theme-check && "$A" --ui-check && "$A" --selftest
 MAGNITE_SELFTEST_PULL=1      "$A" --selftest
