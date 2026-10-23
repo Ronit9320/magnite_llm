@@ -80,7 +80,10 @@ if(APPLE AND MAGNITE_MACOS_BUNDLE)
         MACOSX_BUNDLE_ICON_FILE "${MAGNITE_MACOS_ICON_NAME}"
         # CFBundleShortVersionString must be numeric; the full label goes in MagniteBuildLabel.
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        # The installed bundle loads Qt from Contents/Frameworks (filled by macdeployqt,
+        # which only rewrites existing rpaths and adds none of its own).
+        INSTALL_RPATH "@executable_path/../Frameworks")
     install(TARGETS magnite-app BUNDLE DESTINATION .)
 else()
     install(TARGETS magnite-app RUNTIME DESTINATION bin)

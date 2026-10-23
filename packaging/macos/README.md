@@ -4,8 +4,18 @@ Scripts here build a self-contained `Magnite.app` for **Apple Silicon (arm64)**
 and wrap it in a testing `.dmg`. They are re-runnable from scratch and do not
 touch the Linux packaging, the developer virtualenv or `~/.magnite`.
 
-Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3); the rest are added phase by phase. The plan,
-current status and evidence live in [`docs/release/macos/`](../../docs/release/macos/):
+Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3), `build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh` (5); the rest are added phase by phase.
+
+Build and check a bundle (about 1–3 minutes; `--fresh-runtime` rebuilds Python deps and llama.cpp):
+
+```sh
+export MAGNITE_QT_ROOT=/path/to/Qt/6.8.3/macos
+bash packaging/macos/build_app.sh            # ends with verify_bundle.py: "0 failure(s)"
+ditto build/packaging/macos/stage/Magnite.app "$TMPDIR/try/Magnite.app"
+bash packaging/macos/smoke_bundle.sh "$TMPDIR/try/Magnite.app"
+```
+
+The plan, current status and evidence live in [`docs/release/macos/`](../../docs/release/macos/):
 read `STATUS.md` first, then the current phase of `PLAN.md`.
 
 Planned contents:
@@ -17,10 +27,12 @@ Planned contents:
 | `make_icon.sh` | 2 ✔ | resolves the `@brand*` tokens from `theme.h`, `symbol.svg` → rounded tile → `magnite.icns` |
 | `requirements-macos-arm64.txt` | 3 ✔ | pinned arm64 runtime dependencies |
 | `requirements-macos-quantization.txt` | 3 ✔ | optional `bitsandbytes`, kept separate on purpose |
-| `prepare_runtime.sh` | 3 ✔ | stage the isolated Python runtime with macOS build flags |
-| `build_app.sh` | 5 | build → `macdeployqt` → thin → stage runtime → notices → ad-hoc sign |
+| `prepare_runtime.sh` | 3 ✔ | build the isolated Python runtime (in `build/packaging/macos/runtime`) with macOS build flags |
+| `build_app.sh` | 5 ✔ | build → `macdeployqt` (+ `offscreen`) → clone runtime → finalize → verify |
+| `finalize_bundle.py` | 5 ✔ | clean runtime, fix install ids/rpaths, thin to arm64, ad-hoc sign (in that order) |
 | `scan_macho.py` | 3 ✔ | prototype scan: minos and architectures of every Mach-O (feeds `verify_bundle.py`) |
-| `verify_bundle.py` | 5 | reject non-arm64 slices, host paths, wrong `minos`, bad signatures |
+| `verify_bundle.py` | 5 ✔ | reject non-arm64 slices, `minos` > 14.0, absolute links/rpaths, unresolved deps, host paths, bad symlinks, bad signatures |
+| `smoke_bundle.sh` | 5 ✔ | run a bundle anywhere with a poisoned host env: theme-check, selftest, interpreter, orphans, signature before/after |
 | `ml_matrix.py` | 6 | measure CPU/MPS/Metal/quantization support |
 | `build_dmg.sh` | 7 | `hdiutil` UDZO image with a drag-to-Applications layout |
 | `TESTING.md` | 12 | tester instructions, including the Gatekeeper steps |

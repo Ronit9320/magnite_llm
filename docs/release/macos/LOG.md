@@ -314,3 +314,103 @@ mid-run and showed the same bundled interpreter, so this was a harness bug, not 
 **Not verified / not claimed:** the *installed* bundle (`stage/`) launching — still Phase 5, after `macdeployqt`; Linux/Windows
 compilation of the edited file (the Linux branch is the same code with an added `#ifndef Q_OS_MAC`, which is false there, but that
 is reasoning, not a Linux build); App Translocation or a quarantined bundle path (Phase 8/10).
+
+---
+
+## 2026-10-23 18:05 IST — Phase 5: `.app` assembly, macdeployqt, thinning, ad-hoc signing
+
+Logs: `build/packaging/phase5-{build1,build2,build3,regressions}.log`; smoke logs under `$TMPDIR/magnite phase5/logs` (all
+untracked). Branch `release/v0.1-macos` at `e73c714` + Phase 5 edits.
+
+**New:** `packaging/macos/build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh`. **Shared-file edits:**
+`app/CMakeLists.txt` (bundle `INSTALL_RPATH`), `packaging/prepare_runtime.py` (darwin: `LLAMA_OPENSSL=OFF`, `-ffile-prefix-map`).
+**Changed:** `prepare_runtime.sh` (default destination `build/packaging/macos/runtime`; `--fresh` also cleans uv's llama-cpp-python wheel).
+
+**1. Trial `macdeployqt` on a bare bundle (before writing the script).**
+- `cmake --install` leaves the executable with **no `LC_RPATH`**, and Qt 6.8.3 `macdeployqt` only *rewrites* rpaths, so the deployed app died:
+  `dyld: Library not loaded: @rpath/QtWidgets.framework/…`.
+- Fix: bundle-only `INSTALL_RPATH "@executable_path/../Frameworks"`. The build tree keeps the dev-Qt rpath; the installed bundle gets the
+  relative one.
+- Next run: exit **137** (SIGKILL), because macdeployqt's install-name edits invalidated the signatures. `codesign --force --deep -s -`
+  on the trial copy then gave `--theme-check` `0 failure(s)` with cocoa.
+- `QT_QPA_PLATFORM=offscreen` → `Available platform plugins are: cocoa.` macdeployqt deploys only cocoa, so `libqoffscreen` is now copied in.
+
+**2. First full build (`build1`)** → `verify_bundle.py` **2 failures**, both real:
+- `linkage`: 60 problems.
+  - **`libllama-common` links `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib` + `libcrypto.3.dylib`.** This is the host's Homebrew; a
+    clean Mac would not load it.
+  - 51 sklearn + 3 scipy absolute rpaths (`/Users/runner/micromamba/envs/build/lib`, `/opt/homebrew/Cellar/gcc@13/…`).
+- `host-paths`: 44 binaries with this host's path.
+  - `libpython3.12.dylib` has an absolute install id (uv). `bin/python3.12` itself links `@rpath/libpython3.12.dylib` via
+    `@executable_path/../lib`, so it was not broken, only leaking.
+  - The llama.cpp dylibs contain `__FILE__` strings under `build/packaging/uv-cache/sdists-v9/…`.
+- New `resolve` check: only the stray `site-packages/lib/libllama-common*` failed to resolve. That copy has no rpath; `llama_cpp` loads
+  from `llama_cpp/lib` (`llama_cpp.py:37-43`, `mtmd_cpp.py:48-55`).
+- Fixes: darwin `-DLLAMA_OPENSSL=OFF` + `-ffile-prefix-map=<repo>=.`; finalize removes the llama.cpp dev install
+  (`site-packages/lib`, `include`), resets the libpython id, and deletes absolute rpaths only after proving nothing needs them.
+
+**3. Full build with `--fresh-runtime` (`build2`)**, 3 min 08 s, exit 0:
+- Clean step:
+  - removed 42 `bin/` entries (kept `python`, `python3`, `python3.12`)
+  - `_sysconfigdata` prefix → `/install`
+  - removed `direct_url.json` ×2 (backend, pip)
+  - removed `site-packages/lib` + `include`
+  - removed 17 `__pycache__` directories
+- Relink: libpython id → `@rpath/…`; **54 absolute rpaths deleted** ("every dependency still resolves").
+- Thin: **21** universal files → arm64.
+- Sign: 361 Mach-O, 6 frameworks, then the bundle.
+- `verify_bundle.py`:
+
+| Check | Result |
+|---|---|
+| layout | PASS |
+| arch | PASS — 368 Mach-O, all arm64 |
+| minos | PASS — 11.0×85, 12.0×125, 14.0×158 |
+| linkage | PASS — only relative and system references |
+| resolve | PASS — every relative dependency found in the bundle |
+| host-paths | PASS — none of `/Users/architbhuta`, the checkout, `MAGNITE_QT_ROOT` |
+| symlinks | PASS |
+| signature | PASS — `codesign --verify --deep --strict` |
+| **total** | **0 failure(s)** |
+
+Size **1.1 GB**: runtime 1.0 GB, Qt `Frameworks` 22 MB (thinned; ~62 MB fat at source), `PlugIns` 2.7 MB, `MacOS` 4.4 MB; 29,885 files.
+
+**4. Acceptance: run from outside the checkout.**
+- `ditto` to `$TMPDIR/magnite phase5/Magnite.app` (path contains a space), then `bash packaging/macos/smoke_bundle.sh`. Host env:
+  `env -i`, `PATH=/usr/bin:/bin`, `PYTHONHOME`/`PYTHONPATH=/nonexistent`.
+- Results:
+  - `PASS signature before run`
+  - `PASS --theme-check: 0 failure(s)`
+  - `PASS --selftest: [selftest] PASS (0 failures), backend health OK`
+  - `PASS backend interpreter: bundled python3 -B -I`
+  - `PASS no backend left running`
+  - `PASS signature after run (bundle unmodified)`
+  - **0 failure(s).**
+- First attempt reported the interpreter as "not seen". Harness bug: the backend is a grandchild of a backgrounded shell function. The
+  harness now matches on the bundle's runtime path.
+- Same copy, bundled interpreter under the poisoned env: `3.12.12 llama_cpp 0.3.35 gpu_offload True torch 2.14.0 mps True`. So
+  `LLAMA_OPENSSL=OFF` kept Metal. No `ssl` in any `llama_cpp/lib` dylib. Signature still valid afterwards.
+
+**5. Idempotency.** `build_app.sh` re-run without `--fresh-runtime` (`build3`): **72 s**, same clean/relink/thin/sign counts,
+**0 failure(s)**.
+
+**6. Shared-edit re-verification.**
+- `run_regressions.sh` → **53 tests OK**.
+- Plain `cmake --build build -j4` → OK; `./build/magnite-app --theme-check` → `0 failure(s)`. The 5 `-Wunused-lambda-capture` warnings in
+  `mainwindow.cpp` predate this branch.
+- Fresh default configure (no bundle option) → installs only `bin/magnite-app`, **no rpath** (unchanged).
+- Linux equivalence harness re-run against `git show HEAD:packaging/prepare_runtime.py`: **`linux: original == patched -> True`**;
+  Linux `CFLAGS`/`CXXFLAGS`/`OBJCFLAGS` stay unset; darwin shows `-DLLAMA_OPENSSL=OFF` and the prefix map.
+
+**7. Findings.**
+- ISSUE-006 resolved, plus §4–6 found by the stricter gate.
+- **ISSUE-008**: `certifi` drifted 2026.10.19 → 2026.10.23 between Phase 3 and this rebuild, because transitive deps are unpinned.
+  `runtime-packages-macos.txt` is updated to this build.
+- **ISSUE-009**: no Qt license texts exist to bundle.
+- `build.json` says `working_tree_modified: true` for these builds. The clean-tree rebuild is recorded below once committed.
+
+**Not verified / not claimed:**
+- Gatekeeper/quarantine behaviour, App Translocation and `/Applications` (Phases 7–10).
+- Another Mac or user account (Phase 10).
+- Model loading/inference/training through the bundled app (Phases 6, 9).
+- Linux/Windows compilation of the CMake change. It sits inside `if(APPLE AND MAGNITE_MACOS_BUNDLE)`; that is reasoning, not a run.

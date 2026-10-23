@@ -173,7 +173,7 @@ Linux CI is unaffected, which is why this was not caught earlier.
 
 ## ISSUE-006 — The staged runtime is not yet relocatable/clean (found in Phase 3)
 
-- Status: **OPEN — assigned to Phase 5 (`build_app.sh` + `verify_bundle.py`)**
+- Status: **RESOLVED in Phase 5** (2026-10-23) — `finalize_bundle.py` fixes all three; `verify_bundle.py` enforces them (see the resolution note at the end of this issue)
 - Found: 2026-10-23, by scanning the staged runtime after the Phase 3 build
 - Severity: hygiene/relocatability; none affects the app today because it only runs `bin/python3 -m backend.main`
 - Evidence: `LOG.md` Phase 3 §4; helper `packaging/macos/scan_macho.py`
@@ -197,6 +197,23 @@ accurate, but a package intended for testers should be built from a clean commit
 Positive result from the same scan, relevant to ADR 0002: of **372 Mach-O files**, **none** has `minos` above 14.0 (histogram:
 11.0×85, 12.0×107, 14.0×180). The 14.0 floor is real (torch + llama.cpp), not an artefact.
 
+**Resolution (Phase 5).** `finalize_bundle.py` thins every universal Mach-O (21: the 3 above plus 17 Qt frameworks/plugins and
+`libqoffscreen`), deletes 42 `bin/` entries (keeps `python`, `python3`, `python3.12`), restores the `/install` prefix in
+`_sysconfigdata`, and removes `direct_url.json` (backend **and** pip's). The stricter gate then found more, all fixed the same phase:
+
+4. **llama.cpp linked Homebrew OpenSSL.** `libllama-common` (in the stray `site-packages/lib/` copy) referenced
+   `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib` / `libcrypto.3.dylib`: `LLAMA_OPENSSL` defaults ON and CMake found the host's
+   Homebrew. Not loaded by `llama_cpp` today (it uses `llama_cpp/lib`), so the Phase 3 import check could not see it, but it would
+   fail on any Mac without Homebrew. Fixed at source (`-DLLAMA_OPENSSL=OFF`, darwin only) **and** by removing llama-cpp-python's
+   CMake development install (`site-packages/lib`, `site-packages/include`: duplicate dylibs, headers, cmake/pkgconfig; 27 MB).
+5. **Build-host paths inside binaries.** `libpython3.12.dylib`'s install id was the absolute download path (uv rewrites it) →
+   reset to `@rpath/libpython3.12.dylib`; llama.cpp dylibs carried `__FILE__` paths from the uv cache → rebuilt with
+   `-ffile-prefix-map=<repo>=.`. (My Phase 5 pre-scan said "no binaries" — that grep pipeline was wrong; the gate was right.)
+6. **Absolute `LC_RPATH`s from upstream wheel CI**: 51 in scikit-learn (`/Users/runner/micromamba/envs/build/lib`), 3 in scipy
+   `_fblas` (`/opt/homebrew/Cellar/gcc@13/...`). `/opt/homebrew` is user-writable, so with ad-hoc signing (no library
+   validation) a dylib planted there could be loaded first. Deleted (54) — only after `finalize_bundle.py` proved every
+   dependency of each file still resolves inside the bundle without them.
+
 ---
 
 ## ISSUE-007 — Pinned `huggingface_hub` 1.30.0 warns on a cache written by a newer hub (found in Phase 4)
@@ -215,3 +232,32 @@ does not warn on the same cache. Not caused by the Phase 4 edit.
 Open question for Phase 6/9: whether models whose files live in the shared `hub/blobs` store are listed, sized and deleted
 correctly by 1.30.0 (cf. `test_hf_cache_deletion_preserves_shared_blobs`). A tester whose cache was written by newer HF tools
 would hit the same path. Options if it matters: raise the pin on both platforms (a Linux-affecting decision), or document it.
+
+---
+
+## ISSUE-008 — Transitive Python dependencies are not pinned; the runtime is not reproducible (found in Phase 5)
+
+- Status: **OPEN — decide before the tester build (Phase 7/12)**; affects Linux the same way
+- Found: 2026-10-23, Phase 5 `--fresh-runtime` rebuild vs the Phase 3 package list
+- Severity: reproducibility/provenance; no functional failure observed
+- Evidence: `build-info/python-packages.txt` vs `docs/release/macos/runtime-packages-macos.txt`: `certifi==2026.10.19` →
+  `certifi==2026.10.23` within ~4 hours; the 17 direct pins held
+
+`requirements-macos-arm64.txt` (like Linux's `requirements-cpu.txt`) pins only the 17 direct dependencies; the other ~64 resolve to
+whatever is newest at build time. Two builds of the same commit can therefore ship different code. Options: generate a full lock
+(`uv pip compile` → a constraints file committed next to the requirements) for macOS, or for both platforms. The Linux side is a
+shared decision, so not changed here. `runtime-packages-macos.txt` now records the Phase 5 set.
+
+---
+
+## ISSUE-009 — No Qt license texts are bundled (found in Phase 5)
+
+- Status: **OPEN — release/licensing review (Phase 12)**; not a packaging fix
+- Found: 2026-10-23, preparing Phase 5 notices
+- Severity: licensing compliance for distribution; nothing functional
+
+The bundle ships 6 Qt frameworks and 12 plugins (LGPLv3 for Qt Base/Svg under the open-source terms), but the pinned Qt install at
+`MAGNITE_QT_ROOT` contains **no** `Licenses/` directory or license files (`find … -iname '*licen*'` → nothing). The Linux recipe copies
+Arch's `/usr/share/licenses/qt6-*`; macOS has no equivalent. `THIRD_PARTY_NOTICES.md` already says Qt notices must be preserved
+"before shipping a binary". Fix belongs to the release review: obtain the Qt 6.8.3 license texts from the Qt source/installer and
+bundle them under `Contents/Resources/licenses/qt/` (plus the LGPL relinking note). Not invented here.

@@ -60,12 +60,17 @@ def main():
         # Apple silicon: Metal with the shader library embedded (no Metal compiler is
         # needed to build; shaders compile at load). Pin the deployment target so the
         # compiled libraries never require a newer macOS than the app declares.
+        # LLAMA_OPENSSL=OFF: otherwise CMake links whatever OpenSSL the build host has
+        # (Homebrew's), which a user's Mac will not. Python downloads use huggingface_hub.
         env["CMAKE_ARGS"] = (
             "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_NATIVE=OFF "
-            "-DGGML_CUDA=OFF -DLLAMA_CURL=OFF "
+            "-DGGML_CUDA=OFF -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF "
             "-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0"
         )
         env["MACOSX_DEPLOYMENT_TARGET"] = "14.0"
+        # Keep the build host's paths out of __FILE__ strings in the shipped libraries.
+        for flags in ("CFLAGS", "CXXFLAGS", "OBJCFLAGS"):
+            env[flags] = f"-ffile-prefix-map={REPO}=. {env.get(flags, '')}".strip()
         env["CMAKE_BUILD_PARALLEL_LEVEL"] = "4"
     else:
         env["CMAKE_ARGS"] = (

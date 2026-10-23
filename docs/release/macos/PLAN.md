@@ -238,7 +238,7 @@ left running afterwards, regressions still pass, and the plain build still passe
 
 ---
 
-### Phase 5 — `.app` assembly, macdeployqt, thinning, ad-hoc signing · model: Sonnet · **status: TODO**
+### Phase 5 — `.app` assembly, macdeployqt, thinning, ad-hoc signing · model: Sonnet · **status: DONE** (2026-10-23)
 **Goal:** one re-runnable script that produces a complete, self-contained, ad-hoc-signed `Magnite.app`.
 
 New `packaging/macos/build_app.sh` — ordering matters:
@@ -279,6 +279,19 @@ passes; the bundle launches `--theme-check` from a path outside the checkout (th
 which it reuses unless `--fresh-runtime` is passed. Clean retry: `rm -rf build/packaging/macos`.
 **Rollback:** delete the staging dir; no tracked file changes beyond the new scripts.
 **Depends on:** Phases 2–4.
+**Result (2026-10-23):** `build_app.sh` → `verify_bundle.py` **0 failure(s)** (368 Mach-O all arm64; minos 11.0×85 12.0×125 14.0×158;
+linkage/resolve/host-paths/symlinks/signature PASS); bundle 1.1 GB (Qt 22 MB thinned, runtime 1.0 GB); `smoke_bundle.sh` on a copy in
+`$TMPDIR/magnite phase5/` (outside the checkout, path with a space, poisoned host env) → 6/6 PASS: signature before, `--theme-check` 0 failure(s),
+`--selftest` PASS + health OK, backend = bundled `python3 -B -I`, no orphan, signature still valid after the run. Re-run without
+`--fresh-runtime`: 72 s, 0 failure(s). Evidence in `LOG.md`; findings → ISSUE-006 (resolved, §4–6), ISSUE-008, ISSUE-009.
+**Corrections made while executing:**
+- New script `finalize_bundle.py` (clean → relink → thin → sign) and `smoke_bundle.sh`; `build_app.sh` calls them.
+- The runtime lives in `build/packaging/macos/runtime` (outside the bundle) and is cloned in; the bundle is rebuilt from scratch.
+- The `/Users/` text rule became "this host's home / checkout / Qt path in any file, text or binary" (see `DECISIONS.md`).
+- `app/CMakeLists.txt` needed `INSTALL_RPATH @executable_path/../Frameworks` (macdeployqt adds none); `prepare_runtime.py` (darwin) needed
+  `-DLLAMA_OPENSSL=OFF` and `-ffile-prefix-map`. Both shared-file edits are logged and re-verified.
+- `libqoffscreen` is deployed explicitly; llama-cpp-python's root `lib/`/`include/` and 54 absolute upstream rpaths are removed.
+- Nothing is copied for `TESTING.md` yet (Phase 12); Qt license texts are missing upstream (ISSUE-009).
 
 ---
 
