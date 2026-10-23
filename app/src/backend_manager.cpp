@@ -104,18 +104,26 @@ void BackendManager::launchBackend() {
     // Test packages carry a relocatable Python installation beside the client.
     // Use isolated mode so a user's PYTHONPATH/site-packages cannot replace the
     // packaged backend. Never silently fall back when a package is incomplete.
-    const QString runtimeDir = appDir + "/runtime";
+    QString runtimeDir = appDir + "/runtime";
+#ifdef Q_OS_MAC
+    // A macOS .app keeps the runtime in Contents/Resources, beside Contents/MacOS.
+    const QString bundleRuntimeDir = QDir::cleanPath(appDir + "/../Resources/runtime");
+    if (QDir(bundleRuntimeDir).exists()) runtimeDir = bundleRuntimeDir;
+#endif
     const bool packaged = QDir(runtimeDir).exists();
     if (packaged) {
 #ifdef Q_OS_WIN
         python = runtimeDir + "/python/python.exe";
 #else
         python = runtimeDir + "/python/bin/python3";
+#ifndef Q_OS_MAC
         // Native Python extensions also need the bundled C++/OpenMP libraries.
+        // (macOS wheels resolve their dylibs through @loader_path instead.)
         QString libraryPath = QDir(appDir + "/../lib").absolutePath();
         const QString existingLibraries = env.value("LD_LIBRARY_PATH");
         if (!existingLibraries.isEmpty()) libraryPath += ":" + existingLibraries;
         env.insert("LD_LIBRARY_PATH", libraryPath);
+#endif
 #endif
         args.prepend("-I");
         args.prepend("-B");

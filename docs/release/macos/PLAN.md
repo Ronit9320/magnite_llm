@@ -194,7 +194,7 @@ so the CPU-only fallback was not needed. Evidence + findings in `LOG.md`; hygien
 
 ---
 
-### Phase 4 — Bundle path discovery (shared file, `Q_OS_MAC`-guarded) · model: Opus · **status: TODO**
+### Phase 4 — Bundle path discovery (shared file, `Q_OS_MAC`-guarded) · model: Opus · **status: DONE** (2026-10-23)
 **Goal:** make the client find the bundled runtime at `Contents/Resources/runtime` and never fall back to a system Python.
 
 `app/src/backend_manager.cpp` — inside `#ifdef Q_OS_MAC`, additive only:
@@ -234,6 +234,7 @@ was started from `.../Contents/Resources/runtime/python/bin/python3` (check `ps`
 left running afterwards, regressions still pass, and the plain build still passes `--theme-check`.
 **Idempotent:** yes. **Rollback:** `git checkout -- app/src/backend_manager.cpp`.
 **Depends on:** Phase 3. **Log in `DECISIONS.md`:** shared-file edit + re-run evidence.
+**Result (2026-10-23):** RED failed as predicted (fell back to CLT `python3` 3.9, died on the poisoned `PYTHONHOME`); GREEN `[selftest] PASS (0 failures)` + `backend health OK`, backend spawned as `Contents/Resources/runtime/python/bin/python3 -B -I`; no orphan; 53 regressions OK; plain build `--theme-check` 0 failure(s); plain dev `--selftest` PASS on the repo `.venv`. New ISSUE-007 (HF hub pin vs shared-blobs cache). Evidence in `LOG.md`.
 
 ---
 

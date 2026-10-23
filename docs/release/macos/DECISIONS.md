@@ -27,12 +27,12 @@ the plain CMake build, with the result recorded in `LOG.md`.
 | 2026-10-23 | `app/CMakeLists.txt` | added `option(MAGNITE_MACOS_BUNDLE OFF)`; under it: `OUTPUT_NAME Magnite`, `MACOSX_BUNDLE`, Info.plist template, icon, `install(... BUNDLE DESTINATION .)`; the original `install(... RUNTIME DESTINATION bin)` moved into the `else()` branch | `if(APPLE AND MAGNITE_MACOS_BUNDLE)` | ADR 0007: produce `Magnite.app` for packaging without changing `./build/magnite-app` | 53 regressions OK; plain `build/` rebuilt OK; fresh-cache default configure installs `bin/magnite-app`; `--theme-check` 0 failure(s) on both binaries (LOG.md) |
 | 2026-10-23 | `packaging/prepare_runtime.py` | new `--requirements` arg (default = the old Linux file); `sys.platform == "darwin"` branch for llama.cpp `CMAKE_ARGS` (Metal embedded, arm64, deployment target 14.0, `MACOSX_DEPLOYMENT_TARGET`), parallelism 4, no `--torch-backend cpu`; tester-doc copy picks `packaging/macos/TESTING.md` on macOS | `sys.platform == "darwin"`; non-darwin branch is the original code verbatim | Phase 3: stage an arm64 runtime with Metal using the same script as Linux | **Proved Linux-identical**: original (`git show HEAD:`) vs patched run under simulated `linux` with `run()` stubbed → identical commands and env (`True`); then 53 regressions OK; plain `build/` rebuilt, `--theme-check` 0 failure(s) |
 | 2026-10-23 | `packaging/record_build.py` | `build.json` `runtime` description text differs on darwin (says CPU/MPS torch, Metal llama.cpp, no bitsandbytes) | `sys.platform == "darwin"` | the Linux string "CPU torch and llama.cpp" would be false provenance on macOS | covered by the same run as above |
+| 2026-10-23 | `app/src/backend_manager.cpp` | `runtimeDir` probes `appDir/../Resources/runtime` first (cleaned path), falls back to the existing `appDir/runtime`; the Linux `LD_LIBRARY_PATH` hop is skipped on macOS | `#ifdef Q_OS_MAC` / `#ifndef Q_OS_MAC` | ADR 0003 puts the runtime in `Contents/Resources`; without this the bundle falls back to the host `python3` (RED run) | RED→GREEN selftest under a poisoned env; 53 regressions OK; plain `build/` rebuilt, `--theme-check` 0 failure(s); plain dev `--selftest` PASS on the repo `.venv` (LOG.md) |
 
 Planned (not yet made):
 
 | Phase | File | Change | Guard |
 |---|---|---|---|
-| 4 | `app/src/backend_manager.cpp` | probe `Contents/Resources/runtime`; skip the `LD_LIBRARY_PATH` hop | `#ifdef Q_OS_MAC` |
 | 12 | `packaging/README.md`, `README.md`, `RELEASE_CHECKLIST.md` | macOS sections; macOS checklist lines only | n/a |
 
 ## Process decisions
@@ -77,3 +77,13 @@ Planned (not yet made):
 - **The package list is committed** as `docs/release/macos/runtime-packages-macos.txt` (81 packages) — small text provenance.
 - **Build/staging stays under `build/`** (gitignored). `scan_macho.py` was promoted to `packaging/macos/` because the plan
   references it.
+
+## Decisions made during Phase 4 (small; no separate ADR)
+
+- **Bundle runtime first, Linux layout second, on macOS only.** If `Contents/Resources/runtime` is missing, the old
+  `<MacOS>/runtime` probe still applies, so a non-bundle macOS layout keeps the original behaviour. No new fallback was added: when a
+  runtime is found, the "never fall back to a host Python" contract is unchanged.
+- **`LD_LIBRARY_PATH` skipped on macOS** rather than renamed to `DYLD_LIBRARY_PATH`: dyld ignores `LD_LIBRARY_PATH`, the wheels
+  resolve their dylibs via `@loader_path`/`@rpath` (the GREEN backend started and served `/models`; loading torch/llama.cpp *under the app* is measured in Phase 6/9),
+  and `DYLD_*` variables are stripped for hardened-runtime binaries anyway.
+- **`backend/src/backend/main.py` not touched** (ISSUE-001 stays with Phase 9, as planned).

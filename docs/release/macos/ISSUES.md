@@ -196,3 +196,22 @@ accurate, but a package intended for testers should be built from a clean commit
 
 Positive result from the same scan, relevant to ADR 0002: of **372 Mach-O files**, **none** has `minos` above 14.0 (histogram:
 11.0×85, 12.0×107, 14.0×180). The 14.0 floor is real (torch + llama.cpp), not an artefact.
+
+---
+
+## ISSUE-007 — Pinned `huggingface_hub` 1.30.0 warns on a cache written by a newer hub (found in Phase 4)
+
+- Status: **OPEN — assess in Phase 6 (ML matrix) / Phase 9 (functional pass)**; no change made
+- Found: 2026-10-23, in the Phase 4 GREEN selftest (`build/packaging/phase4-green.log`, 6 occurrences)
+- Severity: cosmetic on this host (selftest PASS, `GET /models` 200, 6 models); possible model-listing gap on testers' machines
+- Evidence: `Hugging Face cache: Repo path is not a valid HuggingFace cache directory: ~/.cache/huggingface/hub/blobs`,
+  logged from `backend/src/backend/models/registry.py:165` (`scan_cache_dir` warnings)
+
+Root cause: `~/.cache/huggingface/hub/blobs/` (with a `.huggingface-shared-blobs` marker) is a shared-blobs layout created on
+2026-10-02 by the dev `.venv`'s **huggingface_hub 1.33.0**. The bundled runtime pins **1.30.0** (`requirements-macos-arm64.txt`,
+same pin as Linux), whose `scan_cache_dir` does not know that top-level directory and reports it. The plain dev build (1.33.0)
+does not warn on the same cache. Not caused by the Phase 4 edit.
+
+Open question for Phase 6/9: whether models whose files live in the shared `hub/blobs` store are listed, sized and deleted
+correctly by 1.30.0 (cf. `test_hf_cache_deletion_preserves_shared_blobs`). A tester whose cache was written by newer HF tools
+would hit the same path. Options if it matters: raise the pin on both platforms (a Linux-affecting decision), or document it.

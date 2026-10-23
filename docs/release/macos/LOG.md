@@ -271,3 +271,46 @@ the ISSUE-006 work items.
 
 **Not claimed:** that the *app* starts this runtime (Phase 4); anything about `.app` self-containment, signing, torch MPS *behaviour* under
 training/inference, or quantization (Phases 5–6). `mps_available True` shows MPS is present, not that LoRA training works on it.
+
+---
+
+## 2026-10-23 15:58 IST — Phase 4: bundle path discovery (`app/src/backend_manager.cpp`)
+
+Logs: `build/packaging/phase4-{red,green,plain-selftest,regressions}.log`; harness `build/packaging/macos/phase4-selftest.sh`
+(all gitignored). Branch `release/v0.1-macos` at `0632eb7` + the Phase 4 edit.
+
+**Fixture:** `build-tree` bundle `build-macos/Magnite.app` (Phase 2 configure: arm64, 14.0, `MAGNITE_MACOS_BUNDLE=ON`) with the Phase 3
+runtime APFS-cloned into `Contents/Resources/runtime` (`cp -c -R`). Every selftest ran under `env -i` with `PATH=/usr/bin:/bin`,
+`PYTHONHOME=/nonexistent`, `PYTHONPATH=/nonexistent`, `QT_QPA_PLATFORM=offscreen`, and a fresh `MAGNITE_HOME` under `$TMPDIR`.
+
+**1. RED (before the edit)** → `[selftest] FAIL (1 failures)`, `backend process died during startup`. The client did not see
+`Contents/Resources/runtime`, used the bare `python3` fallback (`/Library/Developer/CommandLineTools/usr/bin/python3`, 3.9, `isolated = 0`),
+which honoured the poisoned `PYTHONHOME` and died with `ModuleNotFoundError: No module named 'encodings'`. That is the bug Phase 4 fixes
+(and shows the old path would also have run the user's Python on any real Mac).
+
+**2. Edit** (additive, guarded; see `DECISIONS.md`): under `#ifdef Q_OS_MAC`, prefer `QDir::cleanPath(appDir + "/../Resources/runtime")`
+when it exists, else keep `appDir + "/runtime"`; the `LD_LIBRARY_PATH` block is now `#ifndef Q_OS_MAC` inside the existing non-Windows
+branch. `-I -B`, removal of `PYTHONPATH`/`PYTHONHOME`, `MAGNITE_PACKAGED=1` and the "no fallback when packaged" rule are untouched.
+
+**3. GREEN** (`cmake --build build-macos -j4`, then the same harness) → `[selftest] PASS (0 failures)`, `backend health OK`, harness exit 0.
+The harness recorded the backend child's command line:
+`…/build-macos/Magnite.app/Contents/Resources/runtime/python/bin/python3 -B -I -m backend.main --port 0`.
+After exit: `backend.main still running after exit: none` (normal-exit cleanup only; the kill -9 case is ISSUE-001, Phase 9).
+Client binary still `minos 14.0`.
+
+**4. Shared-edit re-verification:** `run_regressions.sh` → **53 tests OK**; plain `cmake --build build -j4` → 0;
+`./build/magnite-app --theme-check` → `0 failure(s)`. Extra: bare `--selftest` of the plain dev binary → **PASS**, backend spawned as
+the repo `.venv` interpreter (`…/Python.framework/Versions/3.13/…/Python -m backend.main --port 0`, no `-I -B`) — the dev discovery path
+is unchanged, and no orphan afterwards.
+
+**5. Finding:** the GREEN run logs 6× `Hugging Face cache: Repo path is not a valid HuggingFace cache directory: …/hub/blobs`. The
+plain dev run on the same cache logs 0. Cause: pinned huggingface_hub 1.30.0 vs a shared-blobs dir written by the dev venv's 1.33.0.
+Recorded as **ISSUE-007**; not fixed.
+
+**Harness note:** the first two GREEN runs did not capture the child's command line: `ps` truncated it (fixed with `-ww`), then the app's
+`>` redirect overwrote the harness's appended line (fixed by opening the log with `>>`). The process table was also checked by hand
+mid-run and showed the same bundled interpreter, so this was a harness bug, not an app one.
+
+**Not verified / not claimed:** the *installed* bundle (`stage/`) launching — still Phase 5, after `macdeployqt`; Linux/Windows
+compilation of the edited file (the Linux branch is the same code with an added `#ifndef Q_OS_MAC`, which is false there, but that
+is reasoning, not a Linux build); App Translocation or a quarantined bundle path (Phase 8/10).
