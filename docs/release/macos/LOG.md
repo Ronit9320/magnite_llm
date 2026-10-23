@@ -484,3 +484,50 @@ Logs: `build/packaging/macos/ml-matrix/{results.json,logs/}`, `build/packaging/m
 - macOS 14/15; any Mac other than this M1 8 GB.
 - The HTTP/UI paths for these features (Phase 8 selftests).
 - The cold Metal compile on a fresh user (Phase 10).
+
+---
+
+## 2026-10-23 19:12 IST — Phase 7: `.dmg` creation
+
+Logs: `build/packaging/phase7-{dmg-trial,build-app,build-dmg,check-dmg}.log`, `build/packaging/phase7-dmg-check-logs/` (untracked).
+**New:** `packaging/macos/build_dmg.sh`, `packaging/macos/check_dmg.sh` (committed `5a04358`). No shared-file edits.
+
+**1. Trial** (bundle of `3edf65d`).
+- `build_dmg.sh` → the `verify_bundle.py` gate showed `0 failure(s)`; `hdiutil create` UDZO/HFS+ took 54 s → **320 MB** image (bundle 1.1 GB);
+  `hdiutil verify` VALID.
+- macOS 27 prints `hdiutil: WARNING: 'hdiutil create -volname -format ...' is deprecated. Please use 'diskutil image create from/blank …'`
+  (and the same for `attach`). Kept `hdiutil`; see `DECISIONS.md`.
+- First `check_dmg.sh` run: 9 PASS, 1 FAIL, `volume is not read-only`. Cause: a harness bug. `mount` reports
+  `/private/var/folders/…` while `mktemp` returned the `/var/…` symlink (the ISSUE-005 quirk again). `touch` on the volume gives
+  `Read-only file system`. Fixed with `cd -P`; re-run 10/10 PASS.
+
+**2. Final artifact from a clean tree.**
+- `build_app.sh` at `5a04358` → `verify_bundle.py` `0 failure(s)`; `build.json`: `"commit": "5a043588b3fd…"`, `"working_tree_modified": false`.
+- `build_dmg.sh` → `dist/Magnite-0.1.0-test.1-arm64.dmg`, **321 MB**, `hdiutil verify` VALID.
+- `dist/SHA256SUMS-macos`:
+  `f72686db72243f7945b9c3f1568f03dde567044656b51d4d4e02208b72d3ab43  Magnite-0.1.0-test.1-arm64.dmg`
+- `check_dmg.sh` (app run **inside the read-only mounted volume**, poisoned host env):
+
+| Check | Result |
+|---|---|
+| hdiutil verify | PASS |
+| volume contents | PASS — `Applications Magnite.app` |
+| `Applications` link | PASS — `-> /Applications` |
+| mounted read-only | PASS |
+| signature before run | PASS |
+| `--theme-check` | PASS — 0 failure(s) |
+| `--selftest` | PASS — `[selftest] PASS (0 failures)`, backend health OK |
+| backend interpreter | PASS — bundled `python3 -B -I` |
+| no backend left running | PASS |
+| signature after run | PASS — bundle unmodified |
+| **total** | **0 failure(s)** |
+
+- `hdiutil info` shows no leftover mount.
+- `dist/` is gitignored; nothing under it is committed.
+- The volume has no `TESTING.md` yet (Phase 12); `build_dmg.sh` prints a note.
+
+**Not verified / not claimed:**
+- Gatekeeper / quarantine on a downloaded `.dmg`, drag-install to `/Applications`, App Translocation (Phases 8–10).
+- The `MAGNITE_SELFTEST_*` workloads from the dmg copy (Phase 8).
+- Any other Mac or account.
+- No custom Finder window layout (deliberate).

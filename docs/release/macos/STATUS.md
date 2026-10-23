@@ -4,12 +4,12 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 19:05 IST
+- Last updated: 2026-10-23 19:12 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 7 — `.dmg` creation** (IN-PROGRESS)
-- Last completed: **Phase 6 — ML matrix: 17 cells measured (13 PASS / 4 FAIL); Metal, MPS inference, LoRA on MPS, embeddings supported;
-  QLoRA not supported — and the UI defaults to it (ISSUE-010)**
-- Suggested model for the next phase: **Sonnet** (scripting; per the plan)
+- Current phase: **Phase 8 — Functional verification of the installed app** (TODO)
+- Last completed: **Phase 7 — `dist/Magnite-0.1.0-test.1-arm64.dmg` (321 MB, clean commit `5a04358`, SHA-256 `f72686db…d3ab43`
+  in `dist/SHA256SUMS-macos`); `check_dmg.sh` 10/10 PASS from the read-only volume**
+- Suggested model for the next phase: **Sonnet** (running and recording; per the plan)
 
 ## ⚠ Decisions needed from the maintainer (not blocking Phase 7)
 
@@ -19,24 +19,32 @@ unless the current phase names a specific section.
 2. **ISSUE-007.** Raise the `huggingface_hub` pin to ≥ 1.33 (both platforms), or document the disk leak on delete.
 3. **ISSUE-008.** Lock the transitive Python deps before the tester build (affects Linux too).
 
-## Next exact commands (Phase 7 — read its section in `PLAN.md`)
+## Next exact commands (Phase 8 — read its section in `PLAN.md`)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
-export MAGNITE_QT_ROOT=/Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
-# Bundle present and from a clean tree? else: bash packaging/macos/build_app.sh
-# write packaging/macos/build_dmg.sh (hdiutil only), then:
-bash packaging/macos/build_dmg.sh
-hdiutil verify dist/Magnite-0.1.0-test.1-arm64.dmg
-# mount, copy Magnite.app OUT of the volume, run: bash packaging/macos/smoke_bundle.sh <copy>; also --theme-check from the volume itself
+D=dist/Magnite-0.1.0-test.1-arm64.dmg; (cd dist && shasum -a 256 -c SHA256SUMS-macos)   # expect: OK
+M=$(mktemp -d); hdiutil attach "$D" -readonly -nobrowse -mountpoint "$M"
+ditto "$M/Magnite.app" "$TMPDIR/Magnite-verify.app"; hdiutil detach "$M"
+A="$TMPDIR/Magnite-verify.app/Contents/MacOS/Magnite"
+export MAGNITE_HOME="$TMPDIR/magnite-verify-home" HF_HOME="$PWD/build/packaging/macos/test-cache" QT_QPA_PLATFORM=offscreen
+# then the plan's list: --theme-check, --ui-check, --selftest, the five MAGNITE_SELFTEST_* runs, live_workflow.py, --screenshot
 ```
 
-Phase 7 cautions:
-- **Do not `tee -a dist/SHA256SUMS`** as the plan says. That file belongs to the Linux AppImage (`build_appimage.sh` rewrites it with `>`),
-  and the Linux `dist/` is read-only for this work. Write `dist/SHA256SUMS-macos` instead, and correct the plan text.
-- `packaging/macos/TESTING.md` does not exist yet (Phase 12). Stage a placeholder or skip it, and say which in `LOG.md`. Until ISSUE-010
-  is fixed, `TESTING.md` must tell testers to untick "Use 4-bit QLoRA".
-- A mounted `.dmg` is read-only, so `smoke_bundle.sh` on the mounted copy also proves the app never writes into its bundle.
+Phase 8 cautions:
+- **Expected failures until ISSUE-010 is decided:** `MAGNITE_SELFTEST_TRAINING` and `MAGNITE_SELFTEST_ADAPTER` send `quantization: "4bit"`,
+  and that fails ("requires bitsandbytes") — already reproduced on the bundle in Phase 6. Record them as ISSUE-010, not as new bugs. If the
+  maintainer approves a fix first, rebuild (`build_app.sh` → `build_dmg.sh`) before Phase 8.
+- Use `HF_HOME=build/packaging/macos/test-cache` so the selftests never touch the real `~/.cache/huggingface` (ISSUE-007).
+- Run each selftest with a fresh `MAGNITE_HOME` and a time guard (macOS has no `timeout`; see `smoke_bundle.sh`).
+- `backend/tests/live_workflow.py` exists; run it with the bundled interpreter `-I -B` as the plan says, and check what it needs first.
+
+## Things learned in Phase 7 that later phases must respect
+
+- `bash packaging/macos/check_dmg.sh <dmg>` is the standard dmg check (mount read-only → layout → `smoke_bundle.sh` → detach).
+- Compare mount paths with `cd -P` / `/private/var`: `TMPDIR` is under the `/var` symlink (ISSUE-005 again).
+- `hdiutil` is deprecated on macOS 27 but works; warnings are expected in logs.
+- Build the tester image only from a clean commit: `build_app.sh` then `build_dmg.sh` (it warns on a modified tree).
 
 ## Things learned in Phase 6 that later phases must respect
 

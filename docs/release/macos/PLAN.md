@@ -324,7 +324,7 @@ rows, embeddings, and `probe_hf_cache.py` for ISSUE-007.
 
 ---
 
-### Phase 7 — `.dmg` creation · model: Sonnet · **status: IN-PROGRESS**
+### Phase 7 — `.dmg` creation · model: Sonnet · **status: DONE** (2026-10-23)
 **Goal:** a compressed, checksummed `.dmg` with a drag-to-Applications layout, using only `hdiutil` (no Homebrew `create-dmg` dependency).
 
 New `packaging/macos/build_dmg.sh`: stage `Magnite.app` + an `Applications` symlink +
@@ -344,6 +344,8 @@ SHA-256 appended to `dist/SHA256SUMS` and recorded in `LOG.md`.
 **Idempotent:** yes (`-ov` overwrites). Retry: `rm -f dist/Magnite-*-arm64.dmg` and re-run.
 **Rollback:** delete the artifact. **`dist/` stays untracked — never commit the `.dmg`.**
 **Depends on:** Phase 5 (Phase 6 only gates what the README may claim).
+**Result (2026-10-23):** `dist/Magnite-0.1.0-test.1-arm64.dmg` (321 MB, from clean commit `5a04358`), `hdiutil verify` VALID,
+SHA-256 `f72686db…d3ab43` in `dist/SHA256SUMS-macos`; `check_dmg.sh` 10/10 PASS with the app running inside the read-only volume.
 
 ---
 
