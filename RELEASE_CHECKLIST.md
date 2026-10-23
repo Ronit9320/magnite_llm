@@ -2,6 +2,11 @@
 
 Prepared 2026-09-29 from AGENTS.md, the local BUILD_PLAN.md, README, the dated audit and its follow-up, and targeted source review. This is a release plan, not a new full code audit or a fresh test certification.
 
+Roadmap updated 2026-10-22: v0.1 targets open-source previews for Windows,
+macOS, and Linux. Subsequent milestones build toward a stable v1.0 local AI
+workbench. The roadmap below records planned work, not completed features or
+new platform verification.
+
 ## Documentation/repository pass — 2026-09-29
 
 Completed without application-source, build-configuration, or dependency changes:
@@ -24,9 +29,127 @@ Hosted inference, cloud training, provider billing, cloud credentials, and cloud
 
 “Serving” here means the existing loopback FastAPI service and desktop inference. The custom SSE protocol is not a drop-in OpenAI API. Network serving and `/v1` compatibility would be separate product work, not prerequisites for releasing the app as it is.
 
-Proposed release shape: a source-first preview on a verified platform, with explicit hardware/engine limits. Linux is the first candidate based on the existing evidence. Binary packages and additional operating systems have separate gates below; do not claim support before verifying it.
+Release shape: v0.1 is an open-source preview series for Windows, macOS, and
+Linux, including the client, backend, and base workflows. Each platform ships
+when its own verification and packaging gates pass, with explicit hardware and
+engine limits. A Linux source preview may ship first; the full v0.1 platform
+rollout remains open until all three previews are available. Platform targets
+are not claims of current support.
 
 Testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages remain to be built. These are testing artifacts for the unfinished app; public release gates remain open.
+
+## v0.1 — open-source desktop previews
+
+Purpose: publish a usable foundation for learning and building with local AI,
+make the engineering inspectable for job opportunities, build visibility on
+social platforms, and provide a concrete product for conversations with users,
+collaborators, and potential investors. Commercial exploration can follow user
+feedback; v0.1's base features remain open source under the project license.
+Model weights, datasets, and third-party dependencies retain their own terms.
+
+Initial audiences: learners and independent builders, with researchers able to
+inspect and experiment with the app. Research-grade reproducibility and advanced
+experiment tooling are later milestones, not v0.1 promises.
+
+### Base feature acceptance — required for each platform preview
+
+- [ ] Hardware detection: show CPU, RAM, GPU/accelerator and available memory
+  where supported; distinguish detected hardware from a verified usable runtime.
+  Explain unavailable capabilities and the supported CPU/GPU fallback.
+- [ ] Model acquisition and management: download or select compatible base
+  weights, explain engine/model compatibility, and show actionable failures.
+- [ ] Local training: validate/import a small dataset, run LoRA training, show
+  progress, cancel, retain job results, and register the resulting adapter.
+  Gate QLoRA on a separately verified hardware/dependency configuration.
+- [ ] Local inference and adapters: load a supported model, stream chat, stop
+  generation, unload, activate a matching trained adapter, and export/import it.
+  Document that current activation restarts torch and clearing unloads inference.
+- [ ] RAG: ingest supported documents, inspect retrieval results, use retrieved
+  context in chat, and delete documents. Document embedding downloads and limits.
+- [ ] Complete and record the combined train → activate adapter → chat → RAG
+  workflow on each platform using disposable data and declared hardware.
+- [ ] Publish the application source, build instructions, examples, license,
+  third-party notices, known limitations, and verification for the preview.
+
+### Platform rollout
+
+| Preview | Planned artifact | Release condition |
+| --- | --- | --- |
+| Windows | x64 installer `.exe` | Base features, clean-machine installation, process cleanup, and Windows package gates pass |
+| macOS | `.app` in `.dmg`; initial architecture explicitly selected | Base features, clean-machine installation, accelerator limits, and macOS package gates pass |
+| Linux | Source build and x86-64 AppImage | Base features, clean-machine installation, declared distro/glibc baseline, and Linux package gates pass |
+
+- [ ] Release the Windows v0.1 preview with its tested OS/hardware matrix.
+- [ ] Release the macOS v0.1 preview with its tested OS/architecture matrix.
+- [ ] Release the Linux v0.1 preview with its tested distro/hardware matrix.
+- [ ] Use explicit preview/prerelease versions and record the source commit for
+  each package; keep platform status and differences visible in release notes.
+
+All three previews include hardware detection, training, inference with adapters,
+and RAG on at least one documented configuration. Accelerator and quantization
+support may differ. Complete the detailed P0 and platform gates below before
+publishing each applicable artifact.
+
+### Presentation and outreach readiness
+
+- [ ] Record a short populated demo of hardware detection, training, adapter
+  activation, inference, and RAG; show actual results and supported hardware.
+- [ ] Publish a portfolio case study explaining architecture, engineering
+  decisions, verification, limitations, and the maintainer's contribution.
+- [ ] Prepare social launch material with the repository, verified downloads,
+  demo, quickstart, and a clear request for tester/contributor feedback.
+- [ ] Prepare concise email material for hiring contacts, collaborators, and
+  potential investors, separating shipped capabilities from the future roadmap.
+  Sending outreach is a separate action, not part of this checklist update.
+- [ ] Provide a feedback channel and track setup success, completion of the
+  core workflow, repeat use, and requested improvements. Collect feedback
+  voluntarily; these goals do not introduce automatic telemetry.
+
+## Staged roadmap — v0.1 to v1.0
+
+Milestone numbers are proposed planning labels, not deadlines. Release useful
+increments after their acceptance checks pass; feedback can refine the scope.
+The following roadmap is available in this public checklist so a fresh clone
+does not depend on local-only planning files.
+
+| Milestone | Planned outcome | Acceptance focus |
+| --- | --- | --- |
+| v0.1 previews | Open-source base features on Windows, macOS, and Linux | Each platform completes the core workflow and its publication gates |
+| v0.2 — guided setup | Hardware-aware onboarding, dependency checks, supported recipes, dataset preview, progress/retry, diagnostics, and durable chat | A new user can reach a useful result on a declared configuration without maintainer help |
+| v0.3 — seamless training and adapters | One-click training after preflight, automatic matching-base/engine selection, reusable configurations, and base-versus-adapter evaluation | Train → compare → try adapter works without manually finding files or reconstructing settings |
+| v0.4 — RAG engine update | Measured retrieval/embedding improvements, inspectable sources, safe reindexing, ingestion jobs, and documented corpus limits | A representative corpus passes relevance, context, cancellation, and lifecycle checks |
+| v0.5 — local agents preview | Local-model agent execution, explicit tool permissions, RAG tools, run traces, stop controls, and saved agent configurations | A bounded task works with a base model or compatible adapter; denied and cancelled actions remain controlled |
+| v0.6–v0.x — integration and beta | Reproducible experiments, evaluation/reporting, advanced controls, cross-platform hardening, and additional validated features | Learner, builder, and researcher workflows are tested together; beta scope is frozen before v1.0 |
+| v1.0 — stable workbench | Integrated hardware-aware setup, training, evaluation, adapters, inference, RAG, and agents | All committed roadmap capabilities meet the stable release gates below |
+
+- [ ] Validate onboarding and training recipes with learners and independent builders.
+- [ ] Define held-out evaluation tasks and record meaningful base/adapter results.
+- [ ] Benchmark the current RAG engine before choosing an upgrade or replacement;
+  select storage/indexing changes from measured relevance and scale requirements.
+- [ ] Add agent tooling incrementally, with model capability checks, explicit
+  permissions for file/command actions, visible traces, and recovery tests.
+- [ ] Add research workflows: dataset/model/configuration provenance, seeds,
+  experiment comparison, evaluation exports, and inspectable artifacts.
+- [ ] Maintain an additional-feature backlog with user need, dependencies,
+  acceptance criteria, and a target milestone. More features are expected;
+  undefined ideas are not silently included in the v1.0 completion promise.
+- [ ] Review feedback after each milestone and freeze the final v1.0 scope
+  before beta. Move unfinished or unvalidated ideas to a later release explicitly.
+
+### v1.0 stable release gates
+
+- [ ] Integrate all agreed milestone capabilities into complete workflows.
+- [ ] Verify supported Windows, macOS, and Linux configurations with native
+  desktop checks, reproducible dependencies, CI, and clean-machine packages.
+- [ ] Demonstrate useful training/evaluation, RAG, and agent outcomes beyond toy
+  models; publish hardware needs, performance, and known capability limits.
+- [ ] Verify security boundaries, tool permissions, resource contention, failure
+  recovery, backups/migrations, upgrades, and process cleanup.
+- [ ] Finalize user/developer guides, accessibility checks, support policy,
+  security reporting, release evidence, and contributor onboarding.
+- [ ] Review sustainability and any commercial offering using actual feedback;
+  preserve the open-source v0.1 foundation. Pricing or a paid edition is not
+  assumed by this roadmap.
 
 ## Existing baseline — preserve, do not rebuild
 
@@ -155,15 +278,23 @@ These are prioritized improvements, not a reason to restart implemented systems 
 - [ ] Publish package checksums, build provenance, third-party notices, and a documented upgrade/rollback path that preserves user data.
 - [ ] Publish only verified platform packages as release assets, with installation instructions and explicit OS/hardware/engine limits. Link download-page buttons to those assets if a website is added.
 
-Gate each platform separately. Completing a local test package does not establish public-release readiness, and three-platform installers are not a prerequisite for a Linux source preview.
+Gate each platform separately. Completing a local test package does not establish
+public-release readiness. Three-platform installers are not a prerequisite for
+the first Linux source preview, but all three platform previews are targets of
+the complete v0.1 rollout.
 
-## Explicitly deferred
+## Outside v0.1 scope
 
 - Hosted providers, cloud training, remote credentials, billing, and cloud dispatch.
 - Public/LAN inference serving and a full OpenAI-compatible API.
 - Native vLLM multi-LoRA and llama.cpp adapter conversion/hot-switching.
-- A vector-database replacement without measured need.
-- Unrelated new product features. The subsequently requested UI refinement is recorded in docs/release/UI_POLISH.md.
+- Seamless guided training, advanced evaluation, RAG engine upgrades, and agents
+  are scheduled through the post-v0.1 milestones above.
+- A vector-database replacement without measured need; RAG upgrades start with benchmarks.
+- Additional features without defined acceptance criteria. The subsequently requested UI refinement is recorded in docs/release/UI_POLISH.md.
+
+Hosted/cloud services and public network serving remain outside the agreed local
+roadmap unless separately scoped. They are not prerequisites for v1.0.
 
 ## Execution order and release gate
 
@@ -171,6 +302,12 @@ Gate each platform separately. Completing a local test package does not establis
 2. Resolve license/publication decisions; make fresh-clone setup and documentation complete.
 3. Establish CI and close supported-workflow hardening gaps.
 4. Run candidate verification; finish screenshots, examples, release notes, and known limitations.
-5. Publish the source preview only after all P0 items are complete or explicitly narrowed by documented release scope. Add binaries only after their separate gates pass.
+5. Publish the source preview only after all P0 items are complete or explicitly narrowed by documented release scope. Release the v0.1 Windows, macOS, and Linux packages as their separate gates pass.
+6. Gather feedback and deliver the staged roadmap; freeze and verify the integrated v1.0 scope before its stable release.
 
-Product decisions still needed during execution: private reporting contact, final supported OS/hardware matrix, and source-only versus packaged first release. MIT is selected and documentation uses the existing GitHub origin; repository visibility is unchanged. These do not block preparing the rest of the release work.
+Product decisions still needed during execution: private reporting contact, final
+supported OS/hardware matrix per preview, platform rollout order, and initial
+macOS architecture. MIT is selected; v0.1 targets open-source previews on all
+three desktop platforms. Documentation uses the existing GitHub origin;
+repository visibility is unchanged. These decisions do not block preparing the
+rest of the release work.
