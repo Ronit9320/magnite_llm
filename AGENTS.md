@@ -18,7 +18,7 @@ cmake --build build -j
 
 ## Verify
 
-CI is configured in `.github/workflows/verify.yml` for the base backend, CMake build, theme audit, and bare desktop selftest; its first hosted run still needs verification. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
+CI in `.github/workflows/verify.yml` covers the base backend, CMake, theme/UI and desktop selftest. `.github/workflows/linux-preview.yml` builds/tests/signs/publishes Linux CPU previews on dev/release pushes, excluding master. Both hosted workflows passed for v0.1-preview on 2026-10-23. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
 
 ```bash
 ./build/magnite-app --theme-check                                  # token/QSS/font/icon audit; prints "0 failure(s)"
@@ -37,6 +37,13 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 - Start ordinary changes on a new branch from `dev`. Release packaging/pipeline work uses `release/` branches; the owner selected the existing `release/v0.1-testing` branch for the first preview.
 - Merge completed work into `dev` for testing, then promote tested `dev` changes to `master`.
 - Do not develop directly on `dev` or `master`. Delete completed branches only after verifying their commits are merged into `dev`; preserve unmerged work.
+
+## Preview identity and updates
+
+- `backend/src/backend/_version.py` is the canonical release identity; CMake, backend metadata and packaging derive from it. Python distribution metadata uses a computed PEP 440 spelling.
+- To ship another preview, increase both `RELEASE_VERSION` and `UPDATE_SEQUENCE`. Published versions are never overwritten.
+- `DATA_SCHEMA` is an update compatibility contract, not a migration framework. Bump it when persistent formats change; the updater rejects schema changes.
+- Never commit `.release-secrets/` or replace the update public key without planning trust/key rotation. See `docs/development/RELEASE_PIPELINE.md` for architecture, signing and verification.
 
 ## Current theme
 

@@ -1,7 +1,7 @@
 # Installation from source
 
-The current layout is a developer/source installation, not a relocatable desktop
-bundle. No released installer or tested cross-platform matrix is claimed yet.
+Source installation uses the checkout layout below. A bundled Linux x86-64
+AppImage is available for v0.1-preview; Windows and macOS remain unverified.
 
 ## Linux preview package
 

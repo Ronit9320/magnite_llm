@@ -82,6 +82,12 @@ The HTTP contract is expressed in Python routes/Pydantic models and manually con
 
 ### Desktop startup
 
+Packaged Linux runs use the adjacent isolated Python runtime instead of the
+source-checkout lookup described below, with no fallback to a host interpreter.
+Signed preview delivery and restart installation are described in
+[the release/update architecture](RELEASE_PIPELINE.md).
+
+
 1. `main.cpp` creates `QApplication`, setting the QSettings organization to `Magnite` and application name to `Magnite LLM`.
 2. Theme resources and fonts are initialized. Special verification modes can run before a normal window is created.
 3. `MainWindow` constructs the workspace, shared `BackendClient`, and `BackendManager`, restores panel preferences, and starts the backend.
@@ -419,4 +425,4 @@ For a new workspace, derive from `BasePanel`, add navigation and backend wiring 
 
 For retrieval changes, preserve embedding-model/dimension consistency and atomic document/chunk insertion. Replacing the flat search with a scalable index would also require a durable synchronization/rebuild strategy, not just a different similarity function.
 
-Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, flat full-scan retrieval, and source-checkout-dependent desktop deployment. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).
+Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, flat full-scan retrieval, and preview-only Linux packaging and incomplete macOS/Windows deployment. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).

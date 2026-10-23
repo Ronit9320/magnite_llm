@@ -15,9 +15,10 @@
 - MIT project license, contributor guidance, issue/PR templates, and draft security policy.
 - Public installation, workflows, API, storage/privacy, and troubleshooting documentation.
 - Synthetic example data, current preview screenshots, and explicit release limitations.
-- CI workflow for base regressions/build/theme/IPC, plus documented checks in a fresh base source/venv installation. Hosted CI execution remains pending.
+- CI workflow for base regressions/build/theme/IPC, plus documented checks in a fresh base source/venv installation. Hosted source and Linux CPU package checks passed on 2026-10-23.
 
 Preview delivery adds GitHub Actions/AppImage releases, a single version source,
 signed metadata, in-app update controls, an idle gate and atomic installation
-with startup recovery. Hosted release verification remains pending. See
+with startup recovery. The first GitHub prerelease was published after hosted
+verification passed. See
 [verification](docs/release/VERIFICATION.md) and [remaining gates](RELEASE_CHECKLIST.md).

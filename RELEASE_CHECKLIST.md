@@ -17,8 +17,8 @@ and current baseline verification. See [verification](docs/release/VERIFICATION.
 and [publication review](docs/release/PUBLICATION_REVIEW.md).
 
 **Owner-deferred:** replace `[PRIVATE_SECURITY_CONTACT_PENDING]` in SECURITY.md
-before publication. The user will supply the contact later. CI needs its first
-hosted run; icon provenance, clean-machine installation, final support policy,
+before publication. The user will supply the contact later. Hosted source and Linux CPU preview CI
+passed on 2026-10-23; icon provenance, native clean-machine installation, final support policy,
 recorded demo, and remaining source changes are not claimed complete.
 
 ## Release scope
@@ -212,10 +212,10 @@ Completion: no known data-loss, unauthorized local-file operation, orphan-proces
 ### 5. Establish release verification
 
 - [x] Configure CI for offline backend regressions, CMake build, theme audit, and the bare desktop selftest with loopback access.
-- [ ] Run the workflow on GitHub and fix any hosted-environment issues; YAML validation and local passes do not establish hosted CI success.
+- [x] Run hosted verification: [source CI](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267083) and [Linux preview package/publication](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267559) passed on 2026-10-23.
 - [x] Verify the current baseline: 24 regressions, build, theme, bare desktop test, all five feature tests, and the combined real workflow pass; see docs/release/VERIFICATION.md.
 - [x] Run all five feature selftests on the UI candidate with disposable MAGNITE_HOME and XDG_CONFIG_HOME: pull, inference, training, adapters, and RAG. Passed 2026-09-30; see docs/release/UI_POLISH.md. Rerun after subsequent functional changes.
-- [ ] Run `backend/tests/live_workflow.py` for the combined train → adapter → RAG chat → export/import workflow.
+- [x] Run `backend/tests/live_workflow.py` for the combined train → adapter → RAG chat → export/import workflow. Passed locally and in the hosted v0.1-preview package job with disposable data.
 - [ ] Test representative usable models and a mixed document corpus in addition to tiny random models. Record memory, latency, cancellation, retrieval relevance, and context-limit behavior; token delivery alone does not establish answer quality.
 - [ ] Verify live vLLM/Ollama if they are advertised as supported; otherwise label those integrations experimental and keep the supported path clear.
 - [x] Smoke-test light/dark modes, keyboard navigation, reduced motion, display scaling, and long/error content across all six panels. Offscreen checks passed at 1×/2×; native desktop and assistive-technology review remain separate.
@@ -233,7 +233,7 @@ Completion: reproducible checks pass for the exact candidate commit and its adve
 - [x] Capture current empty-state screenshots in both themes with disposable data/settings.
 - [ ] Refresh screenshots after source cleanup and record a populated end-to-end demo using docs/release/DEMO.md; avoid credentials, private paths, datasets, and unsupported claims.
 - [x] Use the canonical v0.1-preview identity across CMake, Python, and FastAPI (Python package metadata spelling is derived); prepare CHANGELOG and draft release notes with features, installation, limitations, and verification links.
-- [ ] Select the final release version/tag/date and finalize release notes after the source changes; no tag or release was created.
+- [x] Publish the first explicitly unfinished [v0.1-preview](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.1-preview) on 2026-10-23 at `e629bfb`, with final preview notes. The owner deferred the broader checklist; unchecked gates remain open.
 
 Completion: a user can understand, install, use, and troubleshoot the released product without local planning files or maintainer assistance.
 

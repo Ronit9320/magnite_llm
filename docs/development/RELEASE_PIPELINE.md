@@ -109,8 +109,9 @@ TESTING.md
 ```
 
 The workflow needs GitHub Actions enabled and a repository configuration that
-allows its publishing job `contents: write`. Hosted success still needs to be
-observed; adding workflow YAML alone is not a passing hosted run.
+allows its publishing job `contents: write`. The first hosted source and preview runs both passed on 2026-10-23; the exact
+run and published-asset checks are recorded below. Adding workflow YAML alone
+is not evidence of success for future candidates.
 
 ## Signing setup and repository access
 
@@ -258,7 +259,7 @@ key rotation, better recovery UI and stable releases. These are follow-up work.
 - Theme audit: 0 failures. UI interaction/layout check: 0 failures, with loopback
   access outside the socket-restricted sandbox.
 - Backend regressions, helper transaction checks, final package verification,
-  GitHub secret setup and first hosted release: results recorded below as completed.
+  GitHub secret setup and first hosted release: completed and recorded below.
 
 Verification follow-up:
 
@@ -277,7 +278,7 @@ Verification follow-up:
 - Superseded local AppImage/evidence were moved from `dist/` into
   `build/packaging/historical-pre-preview/`; historical binaries were not relabeled.
 - Owner selected making the source repository public for unauthenticated updates.
-  The signing secret is being configured by the owner.
+  The owner configured the signing secret; hosted signing succeeded.
 
 - Relocation testing caught stale Qt from the old AppDir. Native staging now
   resets before every build while preserving only the Python runtime cache;
@@ -297,6 +298,33 @@ Verification follow-up:
   public key. This diagnostic Arch package is not the hosted Ubuntu artifact.
 - Preserve extract-and-run mode when restarting an update, so a FUSE-free launch
   does not accidentally restart through a FUSE-only path.
+
+## Published preview verification — 2026-10-23
+
+- Release: [v0.1-preview](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.1-preview), published as a prerelease,
+  never marked latest stable. Source commit: `e629bfbf73b5ddc9d279f29dedccaf4544e64037`.
+- [Hosted source verification](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267083): passed on Ubuntu 24.04.
+- [Hosted packaging and publication](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267559): package and publish jobs passed
+  on Ubuntu 22.04, including updater tests, backend regressions and relocated
+  real tiny-model inference/LoRA/adapter/RAG workflows.
+- Published AppImage: 422,869,496 bytes; SHA-256
+  `1cac9a510fa6ddd22299399f838e4deae421604da122e93677c97927641de5b6`.
+- Hosted audit: **597 ELF files, glibc 2.35 maximum requirement, zero offenders**.
+  The public artifact is the Ubuntu-built package, not the local Arch diagnostic.
+- Confirmed all six expected public release assets, tag, source commit and
+  prerelease status. Manifest size/hash match GitHub's uploaded-asset digest;
+  manifest compatibility matches the published ELF report.
+- The actual Qt updater code, using bundled native libraries, fetched the public
+  release and accepted its signature: **You are up to date · v0.1-preview**.
+  This verifies live release discovery and trust; receiving a newer installed
+  version still needs a subsequent preview release.
+- The private signing key remained ignored and untracked. Keep its secure backup
+  and the GitHub Actions secret for future releases.
+- Implementation was committed and tested on `release/v0.1-testing`, then the
+  verified release work and documentation were fast-forwarded into `dev` to
+  activate future dev-triggered previews. `master` remains at `294c59a`; no master
+  promotion was performed. Published assets are never overwritten. The dev
+  integration can build again, but publication skips the already published version.
 
 ## References
 - GitHub Releases API: https://docs.github.com/en/rest/releases/releases

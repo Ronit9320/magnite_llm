@@ -5,10 +5,12 @@ Magnite is a native C++20/Qt 6 desktop app backed by a local Python service.
 The release scope is local training, inference, and RAG; hosted inference and
 cloud training are excluded.
 
-**v0.1-preview:** Linux AppImage release/update automation is being established.
+**[v0.1-preview](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.1-preview):**
+Linux x86-64 AppImage available, with signed in-app preview updates.
 See the [pipeline architecture and setup](docs/development/RELEASE_PIPELINE.md)
 and [release checklist](RELEASE_CHECKLIST.md) for verification and deferred work.
-Linux has development-test evidence. macOS and Windows are not yet verified.
+Hosted source and CPU AppImage checks passed on Ubuntu. Native desktop coverage
+is still limited; macOS and Windows are not yet verified.
 
 Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
 
