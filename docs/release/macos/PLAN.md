@@ -324,7 +324,7 @@ rows, embeddings, and `probe_hf_cache.py` for ISSUE-007.
 
 ---
 
-### Phase 7 — `.dmg` creation · model: Sonnet · **status: TODO**
+### Phase 7 — `.dmg` creation · model: Sonnet · **status: IN-PROGRESS**
 **Goal:** a compressed, checksummed `.dmg` with a drag-to-Applications layout, using only `hdiutil` (no Homebrew `create-dmg` dependency).
 
 New `packaging/macos/build_dmg.sh`: stage `Magnite.app` + an `Applications` symlink +
@@ -332,11 +332,12 @@ New `packaging/macos/build_dmg.sh`: stage `Magnite.app` + an `Applications` syml
 `hdiutil create -volname "Magnite 0.1.0-test.1" -srcfolder … -ov -format UDZO -fs HFS+`.
 
 ```sh
-bash packaging/macos/build_dmg.sh
-hdiutil verify dist/Magnite-0.1.0-test.1-arm64.dmg
-shasum -a 256 dist/Magnite-0.1.0-test.1-arm64.dmg | tee -a dist/SHA256SUMS
-ls -lh dist/Magnite-0.1.0-test.1-arm64.dmg
+bash packaging/macos/build_dmg.sh            # verify_bundle gate, hdiutil create + verify, dist/SHA256SUMS-macos
+bash packaging/macos/check_dmg.sh dist/Magnite-0.1.0-test.1-arm64.dmg   # mount read-only, layout, smoke from the volume
 ```
+**Corrections (2026-10-23):** checksums go to **`dist/SHA256SUMS-macos`**, not `tee -a dist/SHA256SUMS`. That file belongs to the Linux
+AppImage, whose script rewrites it with `>`, and Linux `dist/` is read-only for this work. `check_dmg.sh` was added so Phases 8–10
+reuse the same mount/smoke check.
 **Acceptance:** `hdiutil verify` passes; the `.dmg` mounts, shows `Magnite.app` plus an
 `Applications` alias, and the app inside launches `--theme-check` from the mounted volume;
 SHA-256 appended to `dist/SHA256SUMS` and recorded in `LOG.md`.

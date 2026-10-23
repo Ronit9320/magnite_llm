@@ -6,7 +6,7 @@ unless the current phase names a specific section.
 
 - Last updated: 2026-10-23 19:05 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 7 — `.dmg` creation** (TODO)
+- Current phase: **Phase 7 — `.dmg` creation** (IN-PROGRESS)
 - Last completed: **Phase 6 — ML matrix: 17 cells measured (13 PASS / 4 FAIL); Metal, MPS inference, LoRA on MPS, embeddings supported;
   QLoRA not supported — and the UI defaults to it (ISSUE-010)**
 - Suggested model for the next phase: **Sonnet** (scripting; per the plan)

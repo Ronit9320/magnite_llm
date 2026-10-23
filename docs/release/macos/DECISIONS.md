@@ -114,3 +114,17 @@ Planned (not yet made):
 - **No hardened runtime / entitlements yet** — ad-hoc only (ADR 0005); Phase 11 adds `--options runtime` with Developer ID.
 - **`smoke_bundle.sh` promoted to `packaging/macos/`** (the Phase 4 harness was throwaway): Phases 7–10 run the same checks on the
   `.dmg` copy, `/Applications` and the second account.
+
+## Decisions made during Phase 7 (small; no separate ADR)
+
+- **`hdiutil` kept despite the macOS 27 deprecation warning** (`use 'diskutil image create from' instead`). `hdiutil` still works,
+  verifies, and exists on every macOS a build host might run. `diskutil image` is new, so using it would tie packaging to a recent
+  host. Revisit when `hdiutil create` stops working.
+- **UDZO + HFS+, as planned.** 1.1 GB bundle → 320 MB image. ULFO/APFS were not tried: no measured need, and UDZO is the most
+  widely readable.
+- **No custom Finder window layout** (background image, icon positions). That needs scripting Finder against a read-write image, which
+  is fragile in automation. The volume shows `Magnite.app` next to an `Applications` link, which is the drag-to-install layout.
+- **`dist/SHA256SUMS-macos`** keeps the macOS checksum separate from the Linux `dist/SHA256SUMS` (rewritten by `build_appimage.sh`).
+- **`build_dmg.sh` refuses to package a bundle that fails `verify_bundle.py`** and warns when `build.json` says the tree was modified.
+- **No `TESTING.md` on the volume yet** (Phase 12 writes it); the script picks it up automatically once it exists.
+- **`check_dmg.sh` smoke-tests the app *inside* the read-only mounted volume.** That also proves the app never writes into its bundle.
