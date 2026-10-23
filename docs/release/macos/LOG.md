@@ -409,6 +409,12 @@ Size **1.1 GB**: runtime 1.0 GB, Qt `Frameworks` 22 MB (thinned; ~62 MB fat at s
 - **ISSUE-009**: no Qt license texts exist to bundle.
 - `build.json` says `working_tree_modified: true` for these builds. The clean-tree rebuild is recorded below once committed.
 
+**8. Clean-tree build (after committing `3edf65d`).**
+- `build_app.sh` (`build4-clean`) → no uncommitted-changes warning; `verify_bundle.py` **0 failure(s)**.
+- `build.json`: `"commit": "3edf65df055f89f32c48ce61ebb21b955a8b93ee"`, `"working_tree_modified": false`.
+- `ditto` to `$TMPDIR/magnite phase5 clean/`, then `smoke_bundle.sh` → **6/6 PASS, 0 failure(s)**. Logs copied to
+  `build/packaging/phase5-smoke-logs/`; the 1.1 GB copy was deleted.
+
 **Not verified / not claimed:**
 - Gatekeeper/quarantine behaviour, App Translocation and `/Applications` (Phases 7–10).
 - Another Mac or user account (Phase 10).
