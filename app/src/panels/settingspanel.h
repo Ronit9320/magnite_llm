@@ -7,6 +7,7 @@ class QCheckBox;
 class QLineEdit;
 class QLabel;
 class QPushButton;
+class UpdateManager;
 
 // Settings panel: app-level configuration with persistence via QSettings.
 // This is the canonical owner of global settings (engine, data directory, appearance).
@@ -15,6 +16,7 @@ class SettingsPanel : public BasePanel {
 
 public:
     explicit SettingsPanel(QWidget *parent = nullptr);
+    void setUpdateManager(UpdateManager *manager);
 
 signals:
     void settingsChanged();
@@ -34,4 +36,9 @@ private:
     QCheckBox *m_reducedMotion = nullptr;
     QPushButton *m_saveButton;
     QLabel *m_statusLabel;
+    QLabel *m_updateStatus = nullptr;
+    QPushButton *m_updateCheck = nullptr;
+    QPushButton *m_updateDownload = nullptr;
+    QPushButton *m_updateInstall = nullptr;
+    QPushButton *m_updateCancel = nullptr;
 };

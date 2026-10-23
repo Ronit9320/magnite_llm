@@ -1,49 +1,48 @@
-# Magnite v0.1 testing build
+# Magnite v0.1-preview testing
 
-This is an unfinished application packaged for testing, not a stable release.
+This is an unfinished Linux x86-64 development preview. The broader application
+release checklist is intentionally deferred while testing delivery and updates.
 
-The package contains Qt, Python 3.12 and the backend with CPU llama.cpp,
-PyTorch, LoRA/PEFT and document retrieval dependencies. It does not contain model
-weights. Initial model/embedding downloads require internet access. CPU training
-is suitable only for small tests. CUDA acceleration and quantized training are
-not supported by this CPU package. vLLM and Ollama are not bundled.
-
-## Linux
-
-Make the AppImage executable, then launch it:
+The package contains Qt, isolated Python, CPU llama.cpp/PyTorch, LoRA/PEFT and
+RAG dependencies. It excludes model weights, CUDA, vLLM and Ollama. Initial model
+and embedding downloads require internet access. CPU training suits small tests.
 
 ```sh
-chmod +x Magnite-0.1.0-test.1-x86_64.AppImage
-./Magnite-0.1.0-test.1-x86_64.AppImage
+chmod +x Magnite-v0.1-preview-linux-x86_64.AppImage
+./Magnite-v0.1-preview-linux-x86_64.AppImage
 ```
 
-If FUSE is unavailable, use `--appimage-extract-and-run`, or extract with
-`--appimage-extract` and launch `squashfs-root/AppRun`.
+If FUSE is unavailable, add `--appimage-extract-and-run`. Extracted `AppRun` can
+also launch the app, but only a writable original AppImage can self-update.
+Store the AppImage in a permanent user-writable directory; symlinked images
+and protected installation directories do not support in-app installation.
 
-To keep test data separate from an existing install:
+CI builds on Ubuntu 22.04 and audits the bundled ELF requirements against glibc
+2.35. See the attached `linux-compatibility.json` for the artifact's actual
+requirement. A local build from a newer host can require newer glibc. Historical
+local test packages are superseded and are not this preview artifact.
+
+Keep testing stores separate from existing work:
 
 ```sh
 MAGNITE_HOME="$HOME/.magnite-testing" \
 XDG_CONFIG_HOME="$HOME/.config/magnite-testing" \
-./Magnite-0.1.0-test.1-x86_64.AppImage
+HF_HOME="$HOME/.cache/magnite-testing-hf" \
+./Magnite-v0.1-preview-linux-x86_64.AppImage
 ```
 
-Hugging Face caches are separate; use `HF_HOME` to isolate downloaded weights too.
-Without these overrides the package uses the same user data as a source build.
-Removing the AppImage does not remove models, adapters or user data.
+Without these overrides the package shares the normal application store and
+model caches. Removing or updating the AppImage does not remove user data.
+Chat is currently in memory: export/copy anything important before closing.
 
-The initial local build is x86-64, built on Arch Linux with Qt 6.11.2, and requires
-**glibc 2.43 or newer**. Older Ubuntu/Debian installations cannot run this build.
-AppImage does not bundle glibc. A build on an older distribution is needed for
-broader Linux compatibility. See the adjacent verification report for evidence.
+Settings → Updates checks publicly accessible GitHub preview releases. The first
+preview cannot receive a newer update until a later preview is published. The
+client verifies signed metadata and the complete download, then offers a restart.
+Finish training, downloads, chat generation and document work first. Updates do
+not force-kill the backend. The previous AppImage and an installation status log
+are retained in a private `.magnite-update-*` directory beside the app.
 
-## Smoke tests
-
-The application accepts `--theme-check`, `--ui-check` and `--selftest`.
-Run tests with a disposable `MAGNITE_HOME`. Model feature tests also accept the
-`MAGNITE_SELFTEST_*` flags documented in the repository's AGENTS.md.
-
-`build-info/` inside the package records the source revision, whether the source
-tree was modified, and resolved Python dependencies. Python package license
-metadata stays alongside installed packages; project/font notices are under
-`licenses/`. Public redistribution review remains separate from this test build.
+The app accepts `--theme-check`, `--ui-check` and `--selftest`; use disposable data.
+`build-info/` records source and dependencies inside the image. Existing security,
+provenance, migration and clean-machine release work remains open; report observed
+behavior with the exact version, commit, OS and compatibility report.

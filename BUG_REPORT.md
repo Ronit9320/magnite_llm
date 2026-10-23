@@ -216,10 +216,10 @@ PYTHONPATH=backend/src .venv/bin/python docs/testing/extreme_bug_probe.py
 
 ## Packaged-app addendum
 
-The existing `dist/Magnite-0.1.0-test.1-x86_64.AppImage` passed **all seven** relocated checks: extraction, theme, UI, desktop/backend selftest, real GGUF inference, combined LoRA/adapter/RAG workflow, and the actual AppImage extract-and-run launcher. The test supplied invalid host `PYTHONHOME`/`PYTHONPATH` and a restricted `PATH` to verify runtime isolation.
+The historical pre-preview AppImage (superseded; not the current preview artifact) passed **all seven** relocated checks: extraction, theme, UI, desktop/backend selftest, real GGUF inference, combined LoRA/adapter/RAG workflow, and the actual AppImage extract-and-run launcher. The test supplied invalid host `PYTHONHOME`/`PYTHONPATH` and a restricted `PATH` to verify runtime isolation.
 
 ```bash
-python3 packaging/smoke_appimage.py dist/Magnite-0.1.0-test.1-x86_64.AppImage \
+python3 packaging/smoke_appimage.py dist/Magnite-v0.1-preview-linux-x86_64.AppImage \
   --logs /tmp/magnite-extreme-audit/package \
   --cache /tmp/magnite-extreme-audit/package-cache --features
 ```

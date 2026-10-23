@@ -15,6 +15,8 @@ and [AGENTS.md](AGENTS.md).
 ## Branch workflow
 
 Create a new branch from `dev` for every change, including fixes and cleanup.
+Release packaging and pipeline work uses `release/` branches; the current preview
+continues on `release/v0.1-testing`. See [preview delivery](docs/development/RELEASE_PIPELINE.md).
 Merge completed work into `dev` for integration testing. Promote tested changes
 from `dev` to `master`. Do not develop directly on `dev` or `master`, or merge
 feature branches directly into `master`.

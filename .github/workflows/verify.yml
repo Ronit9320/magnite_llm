@@ -34,7 +34,7 @@ jobs:
       - name: Install native prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential cmake ninja-build qt6-base-dev libqt6svg6-dev libgl1-mesa-dev
+          sudo apt-get install --no-install-recommends -y build-essential cmake ninja-build libssl-dev qt6-base-dev libqt6svg6-dev libgl1-mesa-dev
       - name: Install base backend in desktop discovery layout
         run: |
           python -m venv .venv
@@ -50,6 +50,10 @@ jobs:
           cmake --build build -j2
       - name: Theme audit
         run: ./build/magnite-app --theme-check
+      - name: Update verification and installer recovery
+        run: |
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s packaging/tests -v
       - name: UI interaction and layout checks
         run: ./build/magnite-app --ui-check
       - name: Desktop and IPC selftest

@@ -62,6 +62,7 @@ def main():
     run(uv, "pip", "install", "--python", python, "--break-system-packages",
         "--torch-backend", "cpu", "--no-binary", "llama-cpp-python",
         "--reinstall-package", "magnite-backend",
+        "--constraint", REPO / "packaging/constraints-cpu.txt",
         "-r", REPO / "packaging/requirements-cpu.txt", REPO / "backend", env=env)
     run(python, "-I", "-B", "-c",
         "import backend.server, llama_cpp, torch, transformers, peft, "

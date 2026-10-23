@@ -7,7 +7,7 @@ the user's request until after Linux testing.
 
 ## Artifact and environment
 
-- `dist/Magnite-0.1.0-test.1-x86_64.AppImage`, approximately 418 MiB.
+- Historical pre-preview AppImage, approximately 418 MiB (superseded; not the v0.1-preview artifact).
 - `dist/SHA256SUMS` contains the final artifact checksum.
 - Arch Linux x86-64, GCC 16.2.1, Qt 6.11.2, host glibc 2.44.
 - Highest referenced GLIBC symbol version in the client, bundled system/Qt

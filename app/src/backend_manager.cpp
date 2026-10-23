@@ -8,6 +8,9 @@
 #include <QTimer>
 #include <QUrl>
 #include <QSettings>
+#include <QCoreApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
@@ -54,6 +57,16 @@ void BackendManager::stop() {
 
 bool BackendManager::isRunning() const {
     return m_process->state() == QProcess::Running;
+}
+
+bool BackendManager::stopForUpdate() {
+    m_stopping = true;
+    if (m_process->state() == QProcess::NotRunning) return true;
+    m_process->terminate();
+    // Update installation must never force-kill a live ML operation.
+    if (m_process->waitForFinished(15000)) return true;
+    m_stopping = false;
+    return false;
 }
 
 QString BackendManager::baseUrl() const {
@@ -178,7 +191,9 @@ void BackendManager::waitForBackend() {
             if (m_started) {
                 return;
             }
-            if (reply->error() == QNetworkReply::NoError) {
+            const auto health = QJsonDocument::fromJson(reply->readAll()).object();
+            if (reply->error() == QNetworkReply::NoError
+                && health.value("version").toString() == QCoreApplication::applicationVersion()) {
                 m_started = true;
                 fprintf(stderr, "[magnite] backend health OK (%s)\n",
                         qUtf8Printable(baseUrl()));

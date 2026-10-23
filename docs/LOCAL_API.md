@@ -80,6 +80,15 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score` |
 | Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
 | Runtime engine preference | `POST /inference/settings` with `engine_override`: 0 Auto, 1 vLLM, 2 llama.cpp |
+| Prepare application update | `POST /updates/quiesce` with `{}`; 200 when idle, 409 while work is active |
+| Cancel update maintenance | `POST /updates/resume` with `{}`; 200 restores request admission |
+
+Update maintenance is implemented by ASGI middleware. Quiescing is refused while
+HTTP responses/worker cleanup, training jobs or model pulls are active. Once
+quiesced, new application requests return 503; `/health` and the maintenance
+controls remain available. The desktop stops its backend before replacing the
+application bundle. These endpoints coordinate lifecycle and do not implement
+authentication. See [update architecture](development/RELEASE_PIPELINE.md).
 
 Training example body after dataset ingestion:
 

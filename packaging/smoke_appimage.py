@@ -30,6 +30,7 @@ def main():
         env = os.environ.copy()
         env.update({
             "QT_QPA_PLATFORM": "offscreen",
+            "QT_FORCE_STDERR_LOGGING": "1",
             "MAGNITE_HOME": str(root / "data"),
             "XDG_CONFIG_HOME": str(root / "config"),
             "HF_HOME": str(cache),

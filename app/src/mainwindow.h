@@ -23,6 +23,7 @@ class ChatPanel;
 class SettingsPanel;
 class QPropertyAnimation;
 class QLabel;
+class UpdateManager;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -70,6 +71,7 @@ private:
     QStackedWidget *m_stack;
     BackendManager *m_backend;
     BackendClient *m_backendClient;
+    UpdateManager *m_updater;
 
     ModelsPanel *m_modelsPanel;
     TrainingPanel *m_trainingPanel;

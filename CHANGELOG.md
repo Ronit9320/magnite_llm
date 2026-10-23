@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — local desktop preview
+## v0.1-preview — Linux development preview
 
 ### Available workflows
 
@@ -17,5 +17,7 @@
 - Synthetic example data, current preview screenshots, and explicit release limitations.
 - CI workflow for base regressions/build/theme/IPC, plus documented checks in a fresh base source/venv installation. Hosted CI execution remains pending.
 
-This is an unreleased summary, not a tagged release announcement. See
+Preview delivery adds GitHub Actions/AppImage releases, a single version source,
+signed metadata, in-app update controls, an idle gate and atomic installation
+with startup recovery. Hosted release verification remains pending. See
 [verification](docs/release/VERIFICATION.md) and [remaining gates](RELEASE_CHECKLIST.md).

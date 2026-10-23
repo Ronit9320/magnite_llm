@@ -1,4 +1,6 @@
+from backend._version import RELEASE_VERSION
 from fastapi import FastAPI
+from backend.maintenance import UpdateGate
 
 from backend.routes.adapters import router as adapters_router, _adapter_setup
 from backend.routes.health import router as health_router
@@ -11,7 +13,8 @@ from backend.routes.training import (
     _training_setup,
 )
 
-app = FastAPI(title="Magnite LLM Backend", version="0.1.0")
+app = FastAPI(title="Magnite LLM Backend", version=RELEASE_VERSION)
+app.add_middleware(UpdateGate)
 
 
 @app.on_event("shutdown")

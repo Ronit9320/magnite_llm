@@ -1,3 +1,5 @@
+> Preview update: the application identity now comes from `backend/src/backend/_version.py` (v0.1-preview). CMake derives its numeric project version and display label from it; older line-numbered examples below are historical. OpenSSL Crypto, the update helper, and updater tests are additional build targets.
+
 # Magnite LLM — CMake Build Process & Toolchain Architecture
 
 This document provides a comprehensive technical guide to the CMake build system used for the Magnite desktop client. It covers CMake configuration, compiler flags, Qt 6 code-generation tooling (AUTOMOC, AUTORCC, AUTOUIC), source dependency management, artifact output layout, and execution verification.
@@ -35,7 +37,7 @@ Below is the complete CMake specification annotated with engineering rationale:
 
 ```cmake
 1: cmake_minimum_required(VERSION 3.20)
-2: project(magnite-app VERSION 0.1.0 LANGUAGES CXX)
+2: project(magnite-app VERSION ${MAGNITE_NUMERIC_VERSION} LANGUAGES CXX)
 3: 
 4: set(CMAKE_CXX_STANDARD 20)
 5: set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,7 +102,7 @@ Below is the complete CMake specification annotated with engineering rationale:
 #### 1. Minimum Version & Project Setup (Lines 1–2)
 ```cmake
 cmake_minimum_required(VERSION 3.20)
-project(magnite-app VERSION 0.1.0 LANGUAGES CXX)
+project(magnite-app VERSION ${MAGNITE_NUMERIC_VERSION} LANGUAGES CXX)
 ```
 - Requires CMake 3.20 or newer, ensuring access to modern target properties, C++20 compiler feature detection, and robust Qt 6 integration.
 - `LANGUAGES CXX` restricts the project to C++, avoiding unnecessary discovery checks for C or Fortran toolchains.

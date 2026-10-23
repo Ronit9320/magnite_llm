@@ -3,9 +3,16 @@
 The current layout is a developer/source installation, not a relocatable desktop
 bundle. No released installer or tested cross-platform matrix is claimed yet.
 
+## Linux preview package
+
+The first package identity is v0.1-preview. The AppImage includes Qt and isolated
+Python; see [tester instructions](../packaging/TESTING.md) and
+[release/update setup](development/RELEASE_PIPELINE.md) for availability and
+verification status. Source builds remain available below.
+
 ## Requirements
 
-- C++20 compiler, CMake 3.20+, and Qt 6 development libraries: Widgets, Network, Svg.
+- C++20 compiler, CMake 3.20+, and Qt 6 development libraries: Widgets, Network, Svg; OpenSSL Crypto development files.
 - Python 3.10+ with venv and pip; native build tools for Python packages.
 - Disk space for the Python environment, model/embedding caches, datasets, and adapters.
 - Sufficient RAM/VRAM for the specific model, context length, and training configuration.
@@ -78,6 +85,11 @@ backend started by the desktop; the desktop does not attach to it automatically.
 See [local API examples](LOCAL_API.md).
 
 ## Updating
+
+For a writable Linux AppImage, use Settings → Updates. Finish active work before
+restarting. Preview update checks need public GitHub release access. For source
+builds, follow the rebuild procedure below.
+
 
 Stop running jobs and close the app before updating. Back up the application
 store and note cache locations first. Reinstall the editable backend and rebuild

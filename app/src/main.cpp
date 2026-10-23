@@ -7,6 +7,14 @@
 #include <QFont>
 #include <QSettings>
 #include <QTimer>
+#include <QFileInfo>
+#include <QFile>
+#include <QMessageBox>
+#ifdef Q_OS_LINUX
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -14,6 +22,22 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationDomain("magnite.local");
     QCoreApplication::setApplicationName("Magnite LLM");
     QCoreApplication::setApplicationVersion(QStringLiteral(MAGNITE_BUILD_LABEL));
+
+#ifdef Q_OS_LINUX
+    // Coordinate all packaged instances and the independent update helper.
+    // A stable lock beside the image survives atomic replacement of its inode.
+    int installationLock = -1;
+    if (!qEnvironmentVariableIsEmpty("APPIMAGE")) {
+        const auto lockPath = QFile::encodeName(QFileInfo(qEnvironmentVariable("APPIMAGE")).absoluteFilePath() + ".update-lock");
+        installationLock = open(lockPath.constData(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (installationLock >= 0 && flock(installationLock, LOCK_EX | LOCK_NB) != 0) {
+            close(installationLock);
+            QMessageBox::information(nullptr, "Magnite", "This AppImage is already running or being updated.");
+            return 1;
+        }
+        // A read-only location can still run; its in-app installer is disabled.
+    }
+#endif
 
     const bool selftest = argc > 1 && QString(argv[1]) == "--selftest";
     const bool uiCheck = argc > 1 && QString(argv[1]) == "--ui-check";
@@ -54,5 +78,8 @@ int main(int argc, char *argv[]) {
         QTimer::singleShot(2000, &window, &MainWindow::runSelfTest);
     }
 
-    return app.exec();
+    const int result = app.exec();
+    // MainWindow and BackendManager must be destroyed before releasing the lock.
+    // The process exit closes the descriptor after these automatic objects.
+    return result;
 }

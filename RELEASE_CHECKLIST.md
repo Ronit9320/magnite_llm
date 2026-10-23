@@ -36,9 +36,11 @@ engine limits. A Linux source preview may ship first; the full v0.1 platform
 rollout remains open until all three previews are available. Platform targets
 are not claims of current support.
 
-Testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages remain to be built. These are testing artifacts for the unfinished app; public release gates remain open.
+Preview pipeline update — 2026-10-23: v0.1-preview is the first canonical application release. The owner has deferred the broader checklist while testing delivery and updates. See [release pipeline and implementation log](docs/development/RELEASE_PIPELINE.md); unchecked items below remain open.
 
-## v0.1 — open-source desktop previews
+Historical testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages remain to be built. These are testing artifacts for the unfinished app; public release gates remain open.
+
+## v0.1 preview series — open-source desktop previews
 
 Purpose: publish a usable foundation for learning and building with local AI,
 make the engineering inspectable for job opportunities, build visibility on
@@ -230,7 +232,7 @@ Completion: reproducible checks pass for the exact candidate commit and its adve
 - [x] Document storage/deletion/backup behavior, settings restart requirements, retained histories, and current chat persistence limits. Describe actual outbound connections without implying downloads are offline.
 - [x] Capture current empty-state screenshots in both themes with disposable data/settings.
 - [ ] Refresh screenshots after source cleanup and record a populated end-to-end demo using docs/release/DEMO.md; avoid credentials, private paths, datasets, and unsupported claims.
-- [x] Confirm existing CMake, Python, and FastAPI versions agree at 0.1.0; prepare CHANGELOG and draft release notes with features, installation, limitations, and verification links.
+- [x] Use the canonical v0.1-preview identity across CMake, Python, and FastAPI (Python package metadata spelling is derived); prepare CHANGELOG and draft release notes with features, installation, limitations, and verification links.
 - [ ] Select the final release version/tag/date and finalize release notes after the source changes; no tag or release was created.
 
 Completion: a user can understand, install, use, and troubleshoot the released product without local planning files or maintainer assistance.
@@ -255,7 +257,7 @@ These are prioritized improvements, not a reason to restart implemented systems 
 ### Linux AppImage — test build completed
 
 - [x] Make backend/Python/resource discovery work outside the repository layout and add CMake installation/AppImage packaging rules. The Linux package uses an adjacent isolated Python runtime; see [packaging instructions](packaging/README.md).
-- [x] Build `dist/Magnite-0.1.0-test.1-x86_64.AppImage` with Qt, Python and CPU inference/LoRA/RAG dependencies. Built 2026-10-08 on `release/v0.1-testing`, commit `6c83de5`; approximately 418 MiB. Model weights download separately.
+- [x] Build the historical pre-preview AppImage with Qt, Python and CPU inference/LoRA/RAG dependencies (superseded; not the v0.1-preview artifact). Built 2026-10-08 on `release/v0.1-testing`, commit `6c83de5`; approximately 418 MiB. Model weights download separately.
 - [x] Verify relocated startup, theme/UI checks, GGUF inference and the combined CPU LoRA/adapter/RAG workflow. Record checksums, resolved dependencies and build provenance locally. See [Linux test-build verification](docs/release/V0_1_LINUX_TESTING.md).
 - [ ] Test on a clean second Linux machine, including native desktop integration, Qt plugins, backend process cleanup and removal behavior. Current build requires x86-64 and glibc 2.43+; build on an older distribution and verify separately before advertising broader compatibility.
 

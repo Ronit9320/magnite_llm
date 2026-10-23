@@ -13,6 +13,7 @@ public:
 
     void start();
     void stop();
+    bool stopForUpdate();
     bool isRunning() const;
     QString baseUrl() const;
 

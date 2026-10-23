@@ -1,0 +1,153 @@
+name: Linux preview release
+
+on:
+  push:
+    branches: [dev, 'release/**']
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    # Deliberately exclude master, including manual runs selected on master.
+    if: github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MAGNITE_GLIBC_MAX: '2.35'
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.12'
+      - name: Read the canonical preview identity
+        id: identity
+        run: echo "version=$(python3 packaging/release_metadata.py --print-version)" >> "$GITHUB_OUTPUT"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake ninja-build binutils curl patchelf libssl-dev qt6-base-dev qt6-base-dev-tools libqt6svg6-dev qt6-wayland libgl1-mesa-dev libfuse2
+          python -m pip install uv==0.13.5
+      - name: Build the complete CPU AppImage and audit glibc
+        run: bash packaging/build_appimage.sh
+      - name: Verify updater signatures and installation recovery
+        run: |
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s packaging/tests -v
+      - name: Offline backend regressions using the bundled runtime
+        env:
+          HF_HUB_OFFLINE: '1'
+          PYTHONPATH: backend/src
+        run: |
+          export MAGNITE_HOME="$RUNNER_TEMP/regression-data"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/regression-config"
+          build/packaging/Magnite.AppDir/usr/bin/runtime/python/bin/python3 -m unittest discover -s backend/tests -v
+      - name: Relocated package and real tiny-model workflows
+        env:
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          python3 packaging/smoke_appimage.py "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" \
+            --logs build/packaging/relocated-tests --cache build/packaging/test-cache --features
+      - name: Upload exact tested package
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-preview-${{ steps.identity.outputs.version }}
+          path: |
+            dist/Magnite-*.AppImage
+            dist/SHA256SUMS
+            dist/linux-compatibility.json
+            dist/TESTING.md
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-preview-verification
+          path: |
+            build/packaging/relocated-tests/
+            build/packaging/Magnite.AppDir/usr/bin/build-info/
+            dist/linux-compatibility.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish:
+    needs: package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-${{ needs.package.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-preview-${{ needs.package.outputs.version }}
+          path: dist
+      - name: Refuse overwrites of an already published version
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          if gh release view "$RELEASE_VERSION" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/release-draft"; then
+            if test "$(cat "$RUNNER_TEMP/release-draft")" = false; then
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              echo 'This preview already exists. Package checks passed; bump RELEASE_VERSION and UPDATE_SEQUENCE to distribute another update.' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo 'A draft with this version already exists. Inspect it and remove/recover the unfinished draft before retrying.' >&2
+              exit 1
+            fi
+          elif git rev-parse --verify --quiet "refs/tags/$RELEASE_VERSION"; then
+            echo 'A tag already exists without a release. Inspect it before publishing.' >&2
+            exit 1
+          fi
+      - name: Sign metadata with the persistent release key
+        if: steps.existing.outputs.published != 'true'
+        env:
+          MAGNITE_UPDATE_SIGNING_KEY: ${{ secrets.MAGNITE_UPDATE_SIGNING_KEY }}
+          RELEASE_VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          if test -z "$MAGNITE_UPDATE_SIGNING_KEY"; then
+            echo 'Add the MAGNITE_UPDATE_SIGNING_KEY repository secret. See docs/development/RELEASE_PIPELINE.md.' >&2
+            exit 1
+          fi
+          umask 077
+          key_file="$RUNNER_TEMP/magnite-update-signing.pem"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$MAGNITE_UPDATE_SIGNING_KEY" > "$key_file"
+          python3 packaging/release_metadata.py --repository "$GITHUB_REPOSITORY" \
+            --appimage "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" --key "$key_file"
+      - name: Publish the verified preview, without marking it stable/latest
+        if: steps.existing.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          gh release create "$RELEASE_VERSION" --target "$GITHUB_SHA" --title "Magnite $RELEASE_VERSION" \
+            --draft --prerelease --latest=false --notes-file docs/release/RELEASE_NOTES.md
+          gh release upload "$RELEASE_VERSION" \
+            "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" dist/SHA256SUMS \
+            dist/update-linux-x86_64.json dist/update-linux-x86_64.json.sig \
+            dist/linux-compatibility.json dist/TESTING.md
+          gh release edit "$RELEASE_VERSION" --draft=false --prerelease --latest=false

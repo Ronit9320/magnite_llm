@@ -4,6 +4,8 @@
 #include "mainwindow.h"
 #include "backend_manager.h"
 #include "backend_client.h"
+#include "update_manager.h"
+#include "update_config.h"
 #include "panels/basepanel.h"
 #include "panels/modelspanel.h"
 #include "panels/trainingpanel.h"
@@ -42,6 +44,7 @@
 #include <QTcpSocket>
 #include <QHostAddress>
 #include <QVariant>
+#include <QSaveFile>
 
 #include <memory>
 
@@ -50,6 +53,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_stack(new QStackedWidget(this))
     , m_backend(new BackendManager(this))
     , m_backendClient(new BackendClient(this))
+    , m_updater(new UpdateManager(this))
     , m_modelsPanel(nullptr)
     , m_trainingPanel(nullptr)
     , m_ragPanel(nullptr)
@@ -72,6 +76,53 @@ MainWindow::MainWindow(QWidget *parent)
 
     loadPanelSettings();
     startBackend();
+    m_settingsPanel->setUpdateManager(m_updater);
+    connect(m_updater, &UpdateManager::installRequested, this, [this]() {
+        if (!m_backendClient->isReady()) {
+            QMessageBox::information(this, "Update", "Wait for the local service to become ready before installing."); return;
+        }
+        if (QMessageBox::question(this, "Install preview update",
+            "Restart Magnite to install the update? Finish your work and export anything you need from this conversation first.") != QMessageBox::Yes) return;
+        setEnabled(false);
+        m_backendClient->post("/updates/quiesce", {}, [this](int status, const QJsonDocument &doc) {
+            if (status != 200) {
+                setEnabled(true);
+                QMessageBox::information(this, "Update postponed", doc.object().value("detail").toString("Could not confirm that the local service is idle. Retry when all work is finished."));
+                return;
+            }
+            m_backendClient->abortAll();
+            if (!m_backend->stopForUpdate()) {
+                setEnabled(true);
+                m_backendClient->post("/updates/resume", {}, [](int, const QJsonDocument &) {});
+                QMessageBox::information(this, "Update postponed", "The local service has not finished shutting down. Close and reopen Magnite before retrying.");
+                return;
+            }
+            m_updater->install();
+        });
+    });
+    connect(m_updater, &UpdateManager::restartReady, this, []() { QCoreApplication::quit(); });
+    connect(m_updater, &UpdateManager::installFailed, this, [this](const QString &reason) {
+        setEnabled(true);
+        if (!m_backend->isRunning()) startBackend();
+        QMessageBox::information(this, "Update", reason);
+    });
+    connect(m_backend, &BackendManager::started, this, []() {
+        QSettings().setValue("updates/highestSequence", qMax(MAGNITE_UPDATE_SEQUENCE,
+            QSettings().value("updates/highestSequence", MAGNITE_UPDATE_SEQUENCE).toInt()));
+        const auto args = QCoreApplication::arguments();
+        const int index = args.indexOf("--update-health-file");
+        if (index >= 0 && index + 1 < args.size()) {
+            QSaveFile health(args[index + 1]);
+            if (health.open(QIODevice::WriteOnly)) {
+                health.write(QCoreApplication::applicationVersion().toUtf8());
+                health.commit();
+            }
+        }
+    });
+    const auto args = QCoreApplication::arguments();
+    const bool verification = m_selfTest || args.contains("--ui-check") || args.contains("--screenshot");
+    if (!verification && QSettings().value("updates/checkOnStartup", true).toBool())
+        QTimer::singleShot(5000, m_updater, &UpdateManager::check);
 }
 
 MainWindow::~MainWindow() {

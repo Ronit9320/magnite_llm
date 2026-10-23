@@ -54,6 +54,9 @@ class ModelRegistry:
 
     # ---- Job management ------------------------------------------------
 
+    def has_active_pulls(self) -> bool:
+        return any(job.status in ("queued", "running") for job in list(self._jobs.values()))
+
     def _create_job(self, ref: str, source: str) -> str:
         job_id = uuid.uuid4().hex[:12]
         self._jobs[job_id] = PullJob(

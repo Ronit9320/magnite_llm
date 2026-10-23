@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Launch the real executable by its full path. A symlink-only AppRun relies on
+# /proc/self/exe discovery for Qt's qt.conf and packaged-runtime lookup.
+appdir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export APPDIR="$appdir"
+exec "$appdir/usr/bin/magnite-app" "$@"

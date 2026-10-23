@@ -6,6 +6,7 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import runpy
 
 
 def record_build(destination: Path):
@@ -20,7 +21,8 @@ def record_build(destination: Path):
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo))
     (info / "build.json").write_text(json.dumps({
-        "version": "0.1.0-test.1", "commit": commit, "working_tree_modified": dirty,
+        "version": runpy.run_path(str(repo / "backend/src/backend/_version.py"))["RELEASE_VERSION"],
+        "commit": commit, "working_tree_modified": dirty,
         "platform": platform.platform(), "architecture": platform.machine(),
         "host_libc": platform.libc_ver(),
         "runtime": "Python 3.12.12; CPU torch and llama.cpp; ML extras",

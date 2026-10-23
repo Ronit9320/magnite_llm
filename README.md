@@ -5,8 +5,9 @@ Magnite is a native C++20/Qt 6 desktop app backed by a local Python service.
 The release scope is local training, inference, and RAG; hosted inference and
 cloud training are excluded.
 
-**Development preview:** source builds are available. Release verification and
-packaging are still in progress; see the [release checklist](RELEASE_CHECKLIST.md).
+**v0.1-preview:** Linux AppImage release/update automation is being established.
+See the [pipeline architecture and setup](docs/development/RELEASE_PIPELINE.md)
+and [release checklist](RELEASE_CHECKLIST.md) for verification and deferred work.
 Linux has development-test evidence. macOS and Windows are not yet verified.
 
 Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
@@ -41,7 +42,7 @@ the [backend audit](docs/development/BACKEND_AUDIT.md) records findings, tests, 
 ## Build and run
 
 Requires Python 3.10+, CMake 3.20+, a C++20 compiler, and Qt 6 Widgets, Network,
-and Svg development packages. Python dependencies may compile native code,
+and Svg development packages, plus OpenSSL Crypto development files. Python dependencies may compile native code,
 including llama-cpp-python. See [installation details](docs/INSTALL.md).
 
 ```bash
@@ -83,6 +84,7 @@ model hub caches and Qt settings have separate locations. See
 
 Training, inference, and document processing run locally. Model searches and
 weight downloads contact Hugging Face; Ollama uses its configured service URL.
+Preview update checks contact GitHub.
 There is no application telemetry implementation. Cached weights are needed
 for offline work. The backend is intended for local desktop use and currently
 has no application authentication layer.

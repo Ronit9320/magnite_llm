@@ -11,7 +11,7 @@ cmake --build build -j
 ./build/magnite-app
 ```
 
-- New C++ files must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt` (explicit list, AUTOMOC/AUTORCC on). Qt6 Widgets + Network + Svg; `-Wall -Wextra`.
+- New C++ files must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt` (explicit list, AUTOMOC/AUTORCC on). Qt6 Widgets + Network + Svg and OpenSSL Crypto; `-Wall -Wextra`.
 - Source builds look up the repo from the binary's location: use `<repo>/build/magnite-app` for `backend/src` and `.venv` to resolve. Packaged builds instead use the isolated Python under `runtime/python` beside the executable. See `packaging/README.md` for the test AppImage recipe and checks.
 - Backend data lives in `~/.magnite` (override `MAGNITE_HOME`). Run it standalone for debugging: `magnite-backend --port 0 --home ~/.magnite`.
 - `shared/` is an empty placeholder; the IPC contract lives in `backend/src/backend/routes/` and the C++ `BackendClient`.
@@ -34,7 +34,7 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 ## Branch workflow
 
-- Start every change on a new branch from `dev`.
+- Start ordinary changes on a new branch from `dev`. Release packaging/pipeline work uses `release/` branches; the owner selected the existing `release/v0.1-testing` branch for the first preview.
 - Merge completed work into `dev` for testing, then promote tested `dev` changes to `master`.
 - Do not develop directly on `dev` or `master`. Delete completed branches only after verifying their commits are merged into `dev`; preserve unmerged work.
 

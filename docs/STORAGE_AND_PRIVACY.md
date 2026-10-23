@@ -42,6 +42,12 @@ Keep it local and use operating-system account/storage protections as needed.
 Logs and exported adapter metadata may contain local paths, model identifiers,
 or error text. Inspect and redact them before sharing.
 
+Settings → Updates checks GitHub for preview releases and downloads signed update
+metadata and application packages. Startup checks are enabled by default and can
+be disabled there. GitHub receives ordinary network request information such as
+your IP address and the application version in its User-Agent. No prompts,
+documents, model weights or authentication tokens are sent by the updater.
+
 ## Deletion and backup
 
 Deleting a Hugging Face registry model uses cache-aware revision deletion; shared

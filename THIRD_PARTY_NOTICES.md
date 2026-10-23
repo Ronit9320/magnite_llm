@@ -35,6 +35,12 @@ selected distribution/modules; review the actual bundle and preserve its notices
 before shipping a binary. Source installation instructions do not constitute a
 binary licensing review.
 
+The application updater links OpenSSL Crypto for Ed25519 verification. OpenSSL
+3 is under Apache-2.0; the packaging script includes the build distribution's
+OpenSSL copyright/license metadata alongside the linked library. The standalone
+Linux helper statically links the compiler's C++/GCC runtimes; their distribution
+notices and runtime exceptions also need to accompany redistributed packages.
+
 The table below transcribes license metadata from the installed direct Python
 dependencies in the review environment on 2026-09-29. It is an environment
 inventory, **not a lockfile, authoritative license interpretation, or complete

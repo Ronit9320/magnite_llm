@@ -1,5 +1,7 @@
 #include <QTabWidget>
 #include "panels/settingspanel.h"
+#include "update_manager.h"
+#include <QCoreApplication>
 
 #include <QCheckBox>
 #include "widgets/combobox.h"
@@ -47,6 +49,36 @@ void SettingsPanel::setupUi() {
     auto *runtime = makeCategory("Runtime");
     auto *storage = makeCategory("Storage && privacy");
     auto *visual = makeCategory("Appearance");
+    auto *updates = makeCategory("Updates");
+    auto *updateCard = Surface::card(this, "Magnite " + QCoreApplication::applicationVersion());
+    auto *updateHint = new QLabel("Preview channel. Updates replace the app and bundled runtime; models and application data stay in place. Restart when your work is finished.", this);
+    updateHint->setWordWrap(true);
+    updateHint->setObjectName("cardMeta");
+    updateCard->addWidget(updateHint);
+    m_updateStatus = new QLabel("Check for a new preview release.", this);
+    m_updateStatus->setObjectName("updateStatus");
+    m_updateStatus->setTextFormat(Qt::PlainText);
+    m_updateStatus->setWordWrap(true);
+    updateCard->addWidget(m_updateStatus);
+    m_updateCheck = new QPushButton("Check for updates", this);
+    m_updateCheck->setObjectName("secondaryBtn");
+    m_updateDownload = new QPushButton("Download update", this);
+    m_updateDownload->setObjectName("secondaryBtn");
+    m_updateInstall = new QPushButton("Restart to install", this);
+    m_updateInstall->setObjectName("primaryBtn");
+    m_updateCancel = new QPushButton("Cancel download", this);
+    m_updateCancel->setObjectName("secondaryBtn");
+    for (auto *button : {m_updateCheck, m_updateDownload, m_updateInstall, m_updateCancel}) {
+        updateCard->addWidget(button);
+        button->setEnabled(false);
+    }
+    auto *automatic = new QCheckBox("Check for preview updates on startup", this);
+    automatic->setObjectName("automaticUpdatesToggle");
+    automatic->setChecked(QSettings().value("updates/checkOnStartup", true).toBool());
+    connect(automatic, &QCheckBox::toggled, this, [](bool enabled) { QSettings().setValue("updates/checkOnStartup", enabled); });
+    updateCard->addWidget(automatic);
+    updates->addWidget(updateCard->parentWidget());
+    updates->addStretch();
 
     auto *engineBox = new QGroupBox("Engine", this);
     auto *engineForm = new QFormLayout(engineBox);
@@ -179,4 +211,21 @@ void SettingsPanel::onSave() {
 void SettingsPanel::setStatus(const QString &text) {
     m_statusLabel->setText(text);
     applyStatusTone(m_statusLabel,QString());
+}
+
+void SettingsPanel::setUpdateManager(UpdateManager *manager) {
+    connect(m_updateCheck, &QPushButton::clicked, manager, &UpdateManager::check);
+    connect(m_updateDownload, &QPushButton::clicked, manager, &UpdateManager::download);
+    connect(m_updateInstall, &QPushButton::clicked, manager, &UpdateManager::installRequested);
+    connect(m_updateCancel, &QPushButton::clicked, manager, &UpdateManager::cancel);
+    auto refresh = [this, manager]() {
+        m_updateStatus->setText(manager->status());
+        const auto state = manager->state();
+        m_updateCheck->setEnabled(state == UpdateManager::Idle || state == UpdateManager::Available || state == UpdateManager::Failed);
+        m_updateDownload->setEnabled(state == UpdateManager::Available && manager->canInstall());
+        m_updateInstall->setEnabled(state == UpdateManager::Ready && manager->canInstall());
+        m_updateCancel->setEnabled(state == UpdateManager::Downloading);
+    };
+    connect(manager, &UpdateManager::changed, this, refresh);
+    refresh();
 }
