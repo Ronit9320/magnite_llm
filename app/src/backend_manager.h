@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QProcess>
-#include <QNetworkAccessManager>
 
 class BackendManager : public QObject {
     Q_OBJECT
@@ -28,10 +27,10 @@ private:
     void launchBackend();
     void processLine(const QString &line);
     void waitForBackend();
+    void checkHealth();
 
     QProcess *m_process;
     quint16 m_port;
-    QNetworkAccessManager *m_nam;
     QByteArray m_stderrBuffer;
     bool m_started;
     bool m_stopping;
