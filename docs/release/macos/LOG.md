@@ -621,3 +621,22 @@ back up → test → restore real data; leave `/Applications` as it was.
 - A quarantined (downloaded) install and Gatekeeper (Phase 10).
 - Upgrading from a *different* version (only one build exists).
 - Cmd-Q from the menu bar in an interactive session (the Quit Apple Event takes the same `QApplication` quit path).
+
+---
+
+## 2026-10-23 21:40 IST — Phase 10 (prepared; waiting for the maintainer)
+
+- `dscl` shows only one account (`architbhuta`, uid 501). Creating a second needs admin credentials and a GUI session I cannot operate,
+  so Phase 10 is handed to the maintainer.
+- **New:**
+  - `docs/release/macos/CLEAN_INSTALL.md` — the tester script;
+  - `packaging/macos/stage_clean_install.sh`;
+  - `packaging/macos/clean_install_results.md` — the form.
+- Kit staged in `/Users/Shared/magnite-clean-install/`:
+  - `Magnite-download.dmg` (same bytes as `dist/`, sha256 `f72686db…`; quarantine `0181;6adb8655;Safari;`);
+  - `CLEAN_INSTALL.md`, `smoke_bundle.sh`, `RESULTS.md`.
+- The `dist/` original has no quarantine xattr and still passes `shasum -c`.
+- Checked my own steps:
+  - `cp` of the quarantined dmg keeps the flag but rewrites it to `0181;…;;` without `Safari`. `CLEAN_INSTALL.md` was corrected to accept that.
+  - Re-running the staging script is safe.
+  - The script refuses to overwrite a `RESULTS.md` that has been filled in.

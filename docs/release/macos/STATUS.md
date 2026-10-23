@@ -6,7 +6,7 @@ unless the current phase names a specific section.
 
 - Last updated: 2026-10-23 19:50 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 10 — Clean-install proxy verification (second user account)** (TODO) — **needs the maintainer**
+- Current phase: **Phase 10 — Clean-install proxy verification** (PREPARED — **waiting for the maintainer** to run `CLEAN_INSTALL.md` in a second account)
 - Last completed: **Phase 9 — clean quit / upgrade / removal PASS; force-kill orphans the backend, which accumulates on relaunch
   (ISSUE-001 confirmed); real user data backed up and restored byte-identical**
 - Suggested model for the next phase: **Sonnet** (per the plan)
@@ -22,6 +22,10 @@ unless the current phase names a specific section.
    `~/.magnite`. The recommended fix is a parent-PID watchdog in `backend/main.py` (macOS-guarded); it needs approval.
 
 ## Next exact commands (Phase 10 — read its section in `PLAN.md`)
+
+**Prepared on 2026-10-23:** the kit is in `/Users/Shared/magnite-clean-install/`. When the maintainer reports back, read its `RESULTS.md`, log it
+verbatim in `LOG.md` (Gatekeeper wording, first-chat time, smoke output), update ISSUE-002/003, and mark Phase 10 DONE (as a **proxy**:
+the clean-machine checklist line stays unticked). To rebuild the kit: `bash packaging/macos/stage_clean_install.sh`.
 
 Phase 10 **needs the maintainer**: a second macOS user account (name it, or run `CLEAN_INSTALL.md` there yourself). An agent in this
 account cannot click through Gatekeeper dialogs in another user's GUI session.

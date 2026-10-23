@@ -404,7 +404,7 @@ PASS (only the prefs plist remains). The real data was backed up and then restor
 
 ---
 
-### Phase 10 — Clean-install proxy verification (second user account) · model: Sonnet · **status: TODO**
+### Phase 10 — Clean-install proxy verification (second user account) · model: Sonnet · **status: PREPARED — waiting for the maintainer** (kit staged 2026-10-23)
 **Goal:** prove the bundle depends on nothing from the developer account, under a quarantined download.
 
 Steps: write `docs/release/macos/CLEAN_INSTALL.md` as a tester script; set

@@ -4,7 +4,7 @@ Scripts here build a self-contained `Magnite.app` for **Apple Silicon (arm64)**
 and wrap it in a testing `.dmg`. They are re-runnable from scratch and do not
 touch the Linux packaging, the developer virtualenv or `~/.magnite`.
 
-Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3), `build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh` (5), `ml_matrix.py`, `probe_hf_cache.py` (6), `build_dmg.sh`, `check_dmg.sh` (7), `verify_installed.sh` (8); the rest are added phase by phase.
+Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3), `build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh` (5), `ml_matrix.py`, `probe_hf_cache.py` (6), `build_dmg.sh`, `check_dmg.sh` (7), `verify_installed.sh` (8), `stage_clean_install.sh` (10, prepared); the rest are added phase by phase.
 
 Build and check a bundle (about 1–3 minutes; `--fresh-runtime` rebuilds Python deps and llama.cpp):
 
@@ -39,6 +39,7 @@ Planned contents:
 | `probe_hf_cache.py` | 6 ✔ | ISSUE-007: backend HF-cache scan/delete on a clone of a shared-blobs cache |
 | `build_dmg.sh` | 7 ✔ | gate on `verify_bundle.py`, then an `hdiutil` UDZO image (`Magnite.app` + `Applications` link) and `dist/SHA256SUMS-macos` |
 | `verify_installed.sh` | 8 ✔ | full acceptance set on an installed app: theme/ui checks, 6 selftests, `live_workflow.py`, screenshots, signature |
+| `stage_clean_install.sh` | 10 | build the second-account kit in `/Users/Shared` (quarantined dmg copy, `CLEAN_INSTALL.md`, results form) |
 | `check_dmg.sh` | 7 ✔ | mount read-only, check layout, run `smoke_bundle.sh` on the app inside the volume, detach |
 | `TESTING.md` | 12 | tester instructions, including the Gatekeeper steps |
 | `sign_and_notarize.sh` | 11 | Developer ID signing + notarization (**BLOCKED**, no certificate) |
