@@ -33,6 +33,13 @@ pgrep -fl backend.main                                   # before / between / af
 # 4 removal: rm -rf /Applications/Magnite.app; ~/.magnite and prefs remain; nothing running; nothing in ~/Library/LaunchAgents
 ```
 
+Phase 9 decisions from the maintainer (2026-10-23):
+- **User data: back up → test → restore.** Copy `~/.magnite` and `~/Library/Preferences/com.magnite-local.Magnite LLM.plist` (the real
+  name; the plan's `com.magnite.magnite-llm.plist` is wrong) to `build/packaging/phase9-backup/` with `ditto`. Record a checksum manifest,
+  run the lifecycle tests against the real locations, then restore the originals and prove the restore with a manifest diff.
+- **`/Applications`: nothing is installed there now.** The Phase 9 copy is the `0.1.0-test.1` testing build, not a final release (ISSUE-010/007/008
+  and Phases 11–12 are still open). The removal step deletes it, leaving `/Applications` as it was. Reinstall only if the maintainer asks.
+
 Phase 9 cautions:
 - `~/.magnite` and `~/Library/Preferences/com.magnite.magnite-llm.plist` may already hold **real user data** from development. Back them up
   (or point `MAGNITE_HOME` at a test dir) before the upgrade/removal steps. **Never delete real user data.**
