@@ -4,11 +4,11 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 19:35 IST
+- Last updated: 2026-10-23 19:50 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 9 — Process cleanup, upgrade and removal** (TODO)
-- Last completed: **Phase 8 — 9/11 acceptance steps PASS on the app copied out of the `.dmg`; TRAINING and ADAPTER selftests FAIL on
-  ISSUE-010 only (`live_workflow.py` LoRA training passes)**
+- Current phase: **Phase 10 — Clean-install proxy verification (second user account)** (TODO) — **needs the maintainer**
+- Last completed: **Phase 9 — clean quit / upgrade / removal PASS; force-kill orphans the backend, which accumulates on relaunch
+  (ISSUE-001 confirmed); real user data backed up and restored byte-identical**
 - Suggested model for the next phase: **Sonnet** (per the plan)
 
 ## ⚠ Decisions needed from the maintainer (not blocking Phase 7)
@@ -18,34 +18,38 @@ unless the current phase names a specific section.
    shared-code change, so it needs approval.
 2. **ISSUE-007.** Raise the `huggingface_hub` pin to ≥ 1.33 (both platforms), or document the disk leak on delete.
 3. **ISSUE-008.** Lock the transitive Python deps before the tester build (affects Linux too).
+4. **ISSUE-001 (confirmed in Phase 9).** A force-quit or crash leaves the backend running, and relaunching adds another one on the same
+   `~/.magnite`. The recommended fix is a parent-PID watchdog in `backend/main.py` (macOS-guarded); it needs approval.
 
-## Next exact commands (Phase 9 — read its section in `PLAN.md`)
+## Next exact commands (Phase 10 — read its section in `PLAN.md`)
+
+Phase 10 **needs the maintainer**: a second macOS user account (name it, or run `CLEAN_INSTALL.md` there yourself). An agent in this
+account cannot click through Gatekeeper dialogs in another user's GUI session.
 
 ```sh
 cd /Users/architbhuta/magnite_llm
-# install from the dmg into /Applications (drag-install equivalent):
-M=$(cd -P "$(mktemp -d)" && pwd); hdiutil attach dist/Magnite-0.1.0-test.1-arm64.dmg -readonly -nobrowse -mountpoint "$M"
-ditto "$M/Magnite.app" /Applications/Magnite.app; hdiutil detach "$M"
-pgrep -fl backend.main                                   # before / between / after every step
-# 1 clean quit: launch (open -a or the binary), wait for "backend health OK", quit (osascript 'quit app "Magnite"'), check no backend.main
-# 2 force-kill: launch, kill -9 the GUI pid, check for a surviving backend.main (expected orphan: ISSUE-001)
-# 3 upgrade in place: seed ~/.magnite data + prefs, ditto the dmg app over /Applications/Magnite.app, relaunch, data intact?
-# 4 removal: rm -rf /Applications/Magnite.app; ~/.magnite and prefs remain; nothing running; nothing in ~/Library/LaunchAgents
+# 1. write docs/release/macos/CLEAN_INSTALL.md (tester script: copy dmg, open, drag to /Applications, record the dialog verbatim,
+#    Privacy & Security -> Open Anyway, then run verify_installed.sh or at least --theme-check, --selftest and one real chat)
+# 2. mark a COPY of the dmg as downloaded (do not touch the original artifact's checksum):
+cp dist/Magnite-0.1.0-test.1-arm64.dmg "$TMPDIR/Magnite-download.dmg"
+xattr -w com.apple.quarantine "0181;$(printf %x $(date +%s));Safari;" "$TMPDIR/Magnite-download.dmg"
+# 3. hand that copy to the second account (e.g. /Users/Shared) and follow CLEAN_INSTALL.md there
 ```
 
-Phase 9 decisions from the maintainer (2026-10-23):
-- **User data: back up → test → restore.** Copy `~/.magnite` and `~/Library/Preferences/com.magnite-local.Magnite LLM.plist` (the real
-  name; the plan's `com.magnite.magnite-llm.plist` is wrong) to `build/packaging/phase9-backup/` with `ditto`. Record a checksum manifest,
-  run the lifecycle tests against the real locations, then restore the originals and prove the restore with a manifest diff.
-- **`/Applications`: nothing is installed there now.** The Phase 9 copy is the `0.1.0-test.1` testing build, not a final release (ISSUE-010/007/008
-  and Phases 11–12 are still open). The removal step deletes it, leaving `/Applications` as it was. Reinstall only if the maintainer asks.
+Phase 10 cautions:
+- Quarantine changes only xattrs, not the dmg's bytes, but use a copy anyway so `dist/` stays exactly what was checksummed.
+- The second account has a **cold Metal shader cache**, so time the first chat (ISSUE-002, ~10 s expected), and a cold HF cache.
+- `spctl` already says `rejected` (ad-hoc, not notarized). Expect "cannot be opened because Apple cannot check it for malicious software"
+  or the newer wording, and record it verbatim.
+- `/Applications` is shared by both accounts. Remove the test install afterwards, as agreed (Phase 9 decision).
 
-Phase 9 cautions:
-- `~/.magnite` and `~/Library/Preferences/com.magnite.magnite-llm.plist` may already hold **real user data** from development. Back them up
-  (or point `MAGNITE_HOME` at a test dir) before the upgrade/removal steps. **Never delete real user data.**
-- Installing into `/Applications` changes the system outside the repo. Confirm with the maintainer if an existing `/Applications/Magnite.app`
-  is present, and remove only what this phase installed.
-- The force-kill orphan (ISSUE-001) is expected; record it, do not patch `backend/main.py` without approval.
+## Things learned in Phase 9 that later phases must respect
+
+- The preferences domain is `com.magnite-local.Magnite LLM` (QSettings), not the bundle id. Use it in `TESTING.md` uninstall notes.
+- A normal quit is clean; a force-quit is not (ISSUE-001). `TESTING.md` must tell testers to check Activity Monitor for a stray
+  `python3` after a crash until it is fixed.
+- Launch like a user with `open -n -a /Applications/Magnite.app --stdout F --stderr F`; quit with the Quit Apple Event (the reply may be `-128`).
+- Helpers that use `local` in loops must run under `bash`, not the tool's zsh.
 
 ## Things learned in Phase 8 that later phases must respect
 

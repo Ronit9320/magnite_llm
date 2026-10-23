@@ -379,7 +379,7 @@ TRAINING and ADAPTER FAIL on the 4-bit QLoRA default (ISSUE-010). No orphans; si
 
 ---
 
-### Phase 9 — Process cleanup, upgrade and removal · model: Sonnet · **status: TODO**
+### Phase 9 — Process cleanup, upgrade and removal · model: Sonnet · **status: DONE** (2026-10-23)
 **Goal:** prove the lifecycle behaviours the checklist names, including that user data survives upgrade and removal.
 
 Steps: launch the app; capture the backend PID; quit normally and confirm the child exits;
@@ -390,12 +390,15 @@ and nothing is left running or in `~/Library/LaunchAgents`.
 
 ```sh
 pgrep -fl "backend.main"              # before, between and after each step
-ls -la ~/.magnite ~/Library/Preferences/com.magnite.magnite-llm.plist 2>/dev/null
+ls -la ~/.magnite ~/Library/Preferences/"com.magnite-local.Magnite LLM.plist" 2>/dev/null   # corrected domain (Phase 9)
 ls ~/Library/LaunchAgents ~/Library/Application\ Support/Magnite* 2>/dev/null
 ```
 **Acceptance:** a written table in `LOG.md` with the observed result for each of: clean quit,
 force-kill, upgrade-in-place, removal. Expected and acceptable finding: the force-kill case
 leaves an orphan (R8) — recorded in `ISSUES.md` as a functional bug, not silently patched.
+**Result (2026-10-23):** clean quit PASS; force-kill leaves an orphan that survives 60 s, keeps serving, and **accumulates on relaunch**
+(two backends on one `~/.magnite`); this is ISSUE-001, now confirmed. Upgrade in place PASS (data and prefs untouched, the app sees identical data). Removal
+PASS (only the prefs plist remains). The real data was backed up and then restored, verified identical by sha256 manifest.
 **Idempotent:** yes. **Rollback:** reinstall from the `.dmg`.
 **Depends on:** Phase 8.
 

@@ -7,7 +7,7 @@ issues must be reflected in `STATUS.md` blockers when they gate a phase.
 
 ## ISSUE-001 — No parent-death signal on macOS: force-killed GUI can orphan the backend
 
-- Status: **OPEN — to be verified in Phase 9, not fixed as part of packaging**
+- Status: **OPEN — CONFIRMED in Phase 9 (2026-10-23); needs a fix decision** (not fixed as part of packaging)
 - Found: 2026-10-23 (code reading during the Phase 0 feasibility check)
 - Severity: functional bug, user-visible (stray `python` process holding a port and RAM)
 
@@ -40,6 +40,19 @@ Possible fixes, if the maintainer wants one later (each platform-guarded):
 
 Recommendation if asked: option 2 for v0.1 (small, guarded, testable), option 1
 if a cleaner solution is wanted.
+
+**Phase 9 measurement (2026-10-23, installed `/Applications/Magnite.app`, launched through LaunchServices):**
+- `kill -9` of the GUI (pid 52274) → backend 52282 is **still alive at t+5 s, t+30 s and t+60 s**, reparented to launchd (`ppid=1`),
+  and still answering `GET /health` → `{"status":"ok"}`.
+- **Orphans accumulate.** Relaunching the app starts a second backend (52552, child of the new GUI) next to the orphan. Both hold a
+  `~/.magnite/*.db` file open at the same time (`lsof`). Quitting the new app normally stops only its own backend; the orphan stays.
+  Every crash or force-quit therefore leaves one more backend, along with its RAM (GBs if a model was loaded), a port, and concurrent
+  writers to the same SQLite stores.
+- The cooperative path is clean: a normal quit stops the backend, measured twice.
+
+Severity is therefore higher than first written: a user who force-quits a hung app, then relaunches, ends up with two backends
+on one data directory. Recommendation stands (option 2, platform-guarded, in `backend/main.py`). It needs the maintainer's approval
+because it changes application source.
 
 ---
 
@@ -317,6 +330,10 @@ Options (all touch shared code or the release scope, so they are the maintainer'
 3. Ship bitsandbytes on macOS like Linux: the default 4-bit path then trains with CPU-resident base weights, and 8-bit stays broken.
    Not recommended without measuring a realistic model size.
 Until one is chosen, `TESTING.md` must tell macOS testers to untick "Use 4-bit QLoRA".
+
+**Note for any fix (Phase 9):** the choice is *persisted*. This Mac's preferences already hold `panels.Training` with `"qlora":true,
+"quantization":"4-bit (NF4)"`. Changing only the checkbox default would leave existing users on 4-bit, so a fix must also handle a saved
+4-bit choice when quantization is unavailable.
 
 **Phase 8 (2026-10-23):** reproduced on the app copied out of the `.dmg` (`5a04358`). `selftest-training` and `selftest-adapter` both
 end `[selftest] FAIL: … Using bitsandbytes 4-bit quantization requires bitsandbytes …`. These are the only 2 failures in the 11-step

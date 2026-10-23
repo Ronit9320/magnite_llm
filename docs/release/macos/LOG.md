@@ -579,3 +579,45 @@ Logs: `build/packaging/phase8/*.log` (untracked); screenshots committed in `docs
 - An interactive (non-offscreen) GUI session.
 - Gatekeeper / quarantine and `/Applications` (Phases 9–10).
 - Real-size models through the UI (`ML_MATRIX.md` covers ≤ 1.5B through the backend).
+
+---
+
+## 2026-10-23 19:50 IST — Phase 9: process cleanup, upgrade and removal
+
+Logs and manifests: `build/packaging/phase9/` (untracked); backup in `build/packaging/phase9-backup/`. Build under test: the dmg
+`dist/Magnite-0.1.0-test.1-arm64.dmg` (commit `5a04358`, checksum OK), installed with `ditto` from the read-only mounted volume to
+`/Applications/Magnite.app`, which did not exist before. Launched the way users do: `open -n -a /Applications/Magnite.app` (LaunchServices).
+Quit with the standard Quit Apple Event: `osascript -e 'tell application "Magnite" to quit'`. Maintainer decisions:
+back up → test → restore real data; leave `/Applications` as it was.
+
+**Step 0 — backup.**
+- `ditto ~/.magnite` (12 files, sha256 manifest) and `defaults export "com.magnite-local.Magnite LLM"`.
+- The real preferences domain is **`com.magnite-local.Magnite LLM`**, not the `com.magnite.magnite-llm.plist` the plan named; QSettings uses
+  the organization domain + app name, not the bundle id. No `storage/dataDir` override, so the data dir is `~/.magnite`.
+
+**Step 1 — install.** Signature valid. No `com.apple.quarantine` (built locally, never downloaded), so it launches without a dialog.
+`spctl --assess --type execute` → `rejected` (ad-hoc, not notarized; Phase 10/11).
+
+| Step | Observed | Result |
+|---|---|---|
+| **Clean quit** | GUI 51686 → backend 51739 (`…/runtime/python/bin/python3 -B -I -m backend.main`, child of the GUI), `/health` ok, app sees real data (6 models, 1 adapter, 1 dataset, 1 job, 1 RAG doc). After Quit, both processes exit; no `backend.main` left; no crash report in `~/Library/Logs/DiagnosticReports`. `osascript` returned `User cancelled (-128)` although the app quit — a cosmetic reply. | **PASS** |
+| **Force-kill** | `kill -9` GUI 52274 → backend 52282 **alive at +5/+30/+60 s**, `ppid=1`, `/health` ok. Relaunch → **2 backends** (orphan + new child), both with a `~/.magnite/*.db` open; a normal quit of the new app leaves the orphan. Orphan removed by hand afterwards. | **FAIL — expected, ISSUE-001** (now confirmed and more severe) |
+| **Upgrade in place** | Finder-style replace (`rm -rf` bundle → `ditto` from the dmg) with the app closed: `~/.magnite` manifest unchanged (12 files), prefs unchanged, signature valid. Relaunch → the API reports **identical** data (6/1/1/1/1 — `diff` of snapshots empty). Clean quit, nothing left running. | **PASS** |
+| **Removal** | `rm -rf /Applications/Magnite.app`: `~/.magnite` manifest unchanged, prefs domain still present, nothing running. `~/Library/{LaunchAgents,Application Support,Caches,Saved Application State,HTTPStorages,WebKit,Logs,Containers}` contain nothing named Magnite; the only leftover is the prefs plist (user data, expected). | **PASS** |
+
+**Step 6 — restore.**
+- Changes the test made, as expected for normal use: the prefs gained a Training-panel base model/dataset, and 2 `.db` files in `~/.magnite`
+  changed (registry/job stores).
+- Restored with `ditto` from the backup and `defaults delete` + `defaults import`.
+- **`~/.magnite` sha256 manifest identical to the original (12 files); prefs export identical to the original.**
+- `/Applications` has no Magnite.app, as before.
+
+**Harness notes:**
+- The Bash tool's shell is zsh, and zsh echoes `local` re-declarations (my first helper printed `b=''`). The helpers now run under `bash -c`.
+- A `find ~/Library -maxdepth 3` sweep stalled on privacy-protected folders, so I replaced it with targeted checks of the standard
+  per-app locations.
+
+**Not verified / not claimed:**
+- A quarantined (downloaded) install and Gatekeeper (Phase 10).
+- Upgrading from a *different* version (only one build exists).
+- Cmd-Q from the menu bar in an interactive session (the Quit Apple Event takes the same `QApplication` quit path).
