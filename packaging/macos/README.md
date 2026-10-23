@@ -4,7 +4,7 @@ Scripts here build a self-contained `Magnite.app` for **Apple Silicon (arm64)**
 and wrap it in a testing `.dmg`. They are re-runnable from scratch and do not
 touch the Linux packaging, the developer virtualenv or `~/.magnite`.
 
-Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3), `build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh` (5); the rest are added phase by phase.
+Done so far: `run_regressions.sh` (1), `make_icon.sh`, `Info.plist.in` (2), the requirements files, `prepare_runtime.sh`, `scan_macho.py` (3), `build_app.sh`, `finalize_bundle.py`, `verify_bundle.py`, `smoke_bundle.sh` (5), `ml_matrix.py`, `probe_hf_cache.py` (6); the rest are added phase by phase.
 
 Build and check a bundle (about 1–3 minutes; `--fresh-runtime` rebuilds Python deps and llama.cpp):
 
@@ -33,7 +33,8 @@ Planned contents:
 | `scan_macho.py` | 3 ✔ | prototype scan: minos and architectures of every Mach-O (feeds `verify_bundle.py`) |
 | `verify_bundle.py` | 5 ✔ | reject non-arm64 slices, `minos` > 14.0, absolute links/rpaths, unresolved deps, host paths, bad symlinks, bad signatures |
 | `smoke_bundle.sh` | 5 ✔ | run a bundle anywhere with a poisoned host env: theme-check, selftest, interpreter, orphans, signature before/after |
-| `ml_matrix.py` | 6 | measure CPU/MPS/Metal/quantization support |
+| `ml_matrix.py` | 6 ✔ | measure llama.cpp Metal/CPU, torch CPU/MPS, LoRA/QLoRA, embeddings through the backend's own code → `ML_MATRIX.md` |
+| `probe_hf_cache.py` | 6 ✔ | ISSUE-007: backend HF-cache scan/delete on a clone of a shared-blobs cache |
 | `build_dmg.sh` | 7 | `hdiutil` UDZO image with a drag-to-Applications layout |
 | `TESTING.md` | 12 | tester instructions, including the Gatekeeper steps |
 | `sign_and_notarize.sh` | 11 | Developer ID signing + notarization (**BLOCKED**, no certificate) |

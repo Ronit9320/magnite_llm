@@ -1,7 +1,7 @@
 # ADR 0004 — ML dependency strategy on Apple Silicon
 
 - Date: 2026-10-23
-- Status: Accepted (verification pending in Phase 6)
+- Status: Accepted — verified in Phase 6 (2026-10-23); see `../ML_MATRIX.md`
 
 ## Context
 
@@ -52,3 +52,11 @@ of those pins behave differently (all checked against PyPI on 2026-10-23):
   M1, which is correct for a redistributable package.
 - A llama.cpp Metal failure degrades performance but not correctness; a torch MPS
   failure narrows training to CPU; neither blocks producing the `.dmg`.
+
+## Outcome (Phase 6, measured)
+
+- Metal llama.cpp built with the embedded shader library works. The shader compile (~10 s) is cached per user (ISSUE-002).
+- torch MPS works for inference (float16), LoRA training (float32) and embeddings; no CPU fallback was needed.
+- Keeping bitsandbytes out was right. With it, quantized weights stay on CPU and 8-bit QLoRA crashes. The UI, however, still defaults
+  to 4-bit QLoRA, which the shipped runtime cannot run (ISSUE-010, decision pending).
+

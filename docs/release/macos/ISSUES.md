@@ -45,7 +45,7 @@ if a cleaner solution is wanted.
 
 ## ISSUE-002 — No Metal shader compiler on the build host
 
-- Status: **RESOLVED for build; load-time cost remains a documented limitation (measure in Phase 6)**
+- Status: **RESOLVED for build; first-ever-load cost (~10 s, once per user) is a documented limitation** — measured in Phase 6
 - Found: 2026-10-23
 - Severity: build-time constraint
 
@@ -84,6 +84,15 @@ Two things this does **not** establish, deliberately left for later phases:
 (`ggml_metal_library_init: loaded in 10.292 sec`) — consistent with Phase 1's 10.2 s on 0.3.36, so a first GGUF load on
 macOS pauses ~10 s. Whether it is cached across launches is still unknown; Phase 6 measures it. The CPU-only fallback was
 not needed.
+
+**Phase 6 update (2026-10-23, measured): the cost is paid once per macOS user, not per launch.** Each llama.cpp cell of the
+ML matrix runs in a fresh process. In all of them the log shows `ggml_metal_library_init: using embedded metal library`, then
+`loaded in 0.013 sec` / `0.014 sec` / `0.050 sec`, against `10.292 sec` in Phase 3. Whole model loads (135M GGUF) took 1.0–1.2 s
+in a new process and 0.5–0.7 s in the same process. The driver caches the compiled library per user under
+`$(getconf DARWIN_USER_CACHE_DIR)com.apple.metal/<compiler-id>/` (46 MB here; it presumably resets with a macOS/Metal compiler
+update). I did **not** clear that system cache to re-measure the cold case. The 10.3 s from Phase 3 stands as the cold number,
+and Phase 10's second account will measure the true first-run cost. `TESTING.md` (Phase 12) should say: "the very first chat
+after installing may pause ~10 s while macOS prepares GPU shaders; later loads are fast".
 
 ---
 
@@ -216,22 +225,36 @@ Positive result from the same scan, relevant to ADR 0002: of **372 Mach-O files*
 
 ---
 
-## ISSUE-007 — Pinned `huggingface_hub` 1.30.0 warns on a cache written by a newer hub (found in Phase 4)
+## ISSUE-007 — Pinned `huggingface_hub` 1.30.0 cannot free disk for models in a shared-blobs cache (found in Phase 4, measured in Phase 6)
 
-- Status: **OPEN — assess in Phase 6 (ML matrix) / Phase 9 (functional pass)**; no change made
-- Found: 2026-10-23, in the Phase 4 GREEN selftest (`build/packaging/phase4-green.log`, 6 occurrences)
-- Severity: cosmetic on this host (selftest PASS, `GET /models` 200, 6 models); possible model-listing gap on testers' machines
-- Evidence: `Hugging Face cache: Repo path is not a valid HuggingFace cache directory: ~/.cache/huggingface/hub/blobs`,
-  logged from `backend/src/backend/models/registry.py:165` (`scan_cache_dir` warnings)
+- Status: **OPEN — functional; fix is a pin decision shared with Linux** (needs approval). Not changed here.
+- Found: 2026-10-23, Phase 4 GREEN selftest (`hub/blobs` warning); measured in Phase 6 with `packaging/macos/probe_hf_cache.py`
+- Severity: **disk leak on delete** for testers whose HF cache was written by huggingface_hub ≥ 1.33; listing is unaffected
+- Evidence: `build/packaging/macos/hf-probe/probe-{130,133}.json` (untracked)
 
-Root cause: `~/.cache/huggingface/hub/blobs/` (with a `.huggingface-shared-blobs` marker) is a shared-blobs layout created on
-2026-10-02 by the dev `.venv`'s **huggingface_hub 1.33.0**. The bundled runtime pins **1.30.0** (`requirements-macos-arm64.txt`,
-same pin as Linux), whose `scan_cache_dir` does not know that top-level directory and reports it. The plain dev build (1.33.0)
-does not warn on the same cache. Not caused by the Phase 4 edit.
+Background: huggingface_hub ≥ 1.33 can keep blob content once in `<hub>/blobs/xx/<sha>` (marker `.huggingface-shared-blobs`) and make each
+repo's `blobs/<sha>` a symlink to it. This Mac's real cache has that layout: written on 2026-10-02 by the dev `.venv`'s 1.33.0; 3 of 6 repos
+use it. The bundled runtime pins **1.30.0**, the same pin as Linux.
 
-Open question for Phase 6/9: whether models whose files live in the shared `hub/blobs` store are listed, sized and deleted
-correctly by 1.30.0 (cf. `test_hf_cache_deletion_preserves_shared_blobs`). A tester whose cache was written by newer HF tools
-would hit the same path. Options if it matters: raise the pin on both platforms (a Linux-affecting decision), or document it.
+Measurement: two APFS clones of the real 6 GB cache. On each, the backend's own code ran under one hub version:
+`scan_cache_dir`, as `_record_hf_models` uses it, then `ModelRegistry._remove_hf` on `HuggingFaceTB/SmolLM2-135M-Instruct`.
+
+| | hub 1.30.0 (bundled) | hub 1.33.0 (dev venv) |
+|---|---|---|
+| scan warnings | 1 (`…/hub/blobs` "not a valid HuggingFace cache directory") | 0 |
+| repos listed / sizes / file counts | 6, identical to 1.33 (e.g. SmolLM2 1,832,693,206 B, 24 files) | 6 |
+| `_remove_hf` | `ok`; repo dir fully removed; repo gone from the next scan | same |
+| dangling symlinks in *other* repos afterwards | 0 | 0 |
+| shared-store bytes left unreferenced afterwards | **1,829,250,588 (≈1.83 GB)** | 244 |
+
+So listing is correct and deletion never corrupts another model. Under the pinned 1.30, though, **deleting a model whose blobs live in
+the shared store frees none of its disk space**. The UI reports it deleted while ≈ the model's full size stays in `~/.cache/huggingface/hub/blobs`.
+1.30 never *creates* that layout, so only caches written by newer HF tools are affected. That is plausible for exactly the testers who
+already use HF tooling.
+
+Options (need a decision; both affect Linux):
+1. Raise the `huggingface_hub` pin to ≥ 1.33 on both platforms, then re-run regressions and the Phase 8 selftests. This is the real fix.
+2. Keep 1.30 and document "deleting a model downloaded by other HF tools may not free disk; run `hf cache delete`".
 
 ---
 
@@ -261,3 +284,36 @@ The bundle ships 6 Qt frameworks and 12 plugins (LGPLv3 for Qt Base/Svg under th
 Arch's `/usr/share/licenses/qt6-*`; macOS has no equivalent. `THIRD_PARTY_NOTICES.md` already says Qt notices must be preserved
 "before shipping a binary". Fix belongs to the release review: obtain the Qt 6.8.3 license texts from the Qt source/installer and
 bundle them under `Contents/Resources/licenses/qt/` (plus the LGPL relinking note). Not invented here.
+
+---
+
+## ISSUE-010 — Default training settings fail on macOS: "Use 4-bit QLoRA" is on by default, and the runtime has no bitsandbytes (found in Phase 6)
+
+- Status: **OPEN — needs a decision before Phase 8** (its TRAINING/ADAPTER selftests hard-code `quantization: "4bit"`)
+- Found: 2026-10-23, ML matrix (`qlora-4bit-shipped`, `qlora-8bit-shipped`) + code reading
+- Severity: **high for macOS** — the default training path errors out; LoRA itself works (MPS, measured)
+- Evidence: `ML_MATRIX.md`; `app/src/panels/trainingpanel.cpp:144-146` (checkbox `setChecked(true)`), `:260` (combo offers 4-bit/8-bit);
+  `app/src/mainwindow.cpp:834`, `:959` (selftests send `"4bit"`)
+
+What happens in the shipped app: the training job ends in `error` with
+`Using bitsandbytes 4-bit quantization requires bitsandbytes: pip install -U bitsandbytes>=0.46.1` (8-bit: same text). A packaged-app
+user cannot act on a `pip install` instruction. Linux does not hit this, because `packaging/requirements-cpu.txt` ships bitsandbytes 0.50.2;
+macOS leaves it out on purpose (ADR 0004).
+
+What bitsandbytes 0.50.2 *would* do on this Mac, measured in a throwaway runtime:
+- quantized weights always load on **CPU**, even though the Trainer runs on MPS;
+- 4-bit QLoRA trains (finite, falling loss) on mixed devices;
+- **8-bit QLoRA fails** with `Tensor for argument #2 'mat2' is on CPU, but expected it to be on GPU`;
+- 4-bit generation on the 135M model degenerates into repetition.
+
+None of this was measured above 135M parameters.
+
+Options (all touch shared code or the release scope, so they are the maintainer's call):
+1. **Capability-aware UI** (recommended): the backend reports whether quantization is available (`bitsandbytes` importable); the Training
+   panel defaults "Use 4-bit QLoRA" off and disables the 4-bit/8-bit choices when it is not. The selftests send `"none"` in that case.
+   Platform-neutral, and correct for any future runtime without bitsandbytes.
+2. Minimal macOS-only change: default the checkbox off and make the selftests use `"none"` on `Q_OS_MAC`. 8-bit stays selectable and
+   fails.
+3. Ship bitsandbytes on macOS like Linux: the default 4-bit path then trains with CPU-resident base weights, and 8-bit stays broken.
+   Not recommended without measuring a realistic model size.
+Until one is chosen, `TESTING.md` must tell macOS testers to untick "Use 4-bit QLoRA".

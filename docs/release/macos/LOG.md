@@ -420,3 +420,67 @@ Size **1.1 GB**: runtime 1.0 GB, Qt `Frameworks` 22 MB (thinned; ~62 MB fat at s
 - Another Mac or user account (Phase 10).
 - Model loading/inference/training through the bundled app (Phases 6, 9).
 - Linux/Windows compilation of the CMake change. It sits inside `if(APPLE AND MAGNITE_MACOS_BUNDLE)`; that is reasoning, not a run.
+
+---
+
+## 2026-10-23 19:05 IST — Phase 6: ML dependency matrix
+
+Logs: `build/packaging/macos/ml-matrix/{results.json,logs/}`, `build/packaging/macos/hf-probe/probe-{130,133}.json`,
+`build/packaging/phase6-selftest-training.log` (all untracked). Bundle under test: `stage/Magnite.app`, runtime of commit `3edf65d`.
+
+**New:** `packaging/macos/ml_matrix.py`, `probe_hf_cache.py`, `docs/release/macos/ML_MATRIX.md`. **No shared-file edits** this phase
+(only new scripts and docs), so the regression/plain-build re-run rule did not apply.
+
+**1. Method.**
+- Every cell runs as its own `-I -B` subprocess of the **bundled** interpreter, with `HF_HOME` set to a dedicated test cache.
+- Each cell goes through the backend's own code where the app has one: `LlamaCppEngine` (the supervisor's `n_gpu_layers=20`),
+  `TorchPeftEngine`, `run_training`, `rag.embeddings`.
+- Peak RSS comes from `wait4`.
+- bitsandbytes cells use a throwaway APFS clone of the runtime with `requirements-macos-quantization.txt` installed.
+- `codesign --verify --deep --strict` on the bundle **still passes after every matrix run** (`-B` writes nothing into the bundle).
+
+**2. Harness bugs found and fixed before the final run** (no result below depends on them):
+- `snapshot_download` without a filter pulled 2.6 GB of ONNX/other exports. Now `allow_patterns`; the test cache is 1.5 GB.
+- "CPU training" first patched `torch.backends.mps.is_available` → transformers failed to import `Trainer`. The second attempt replaced
+  `transformers.TrainingArguments`, which `from transformers import …` ignores, so it **silently trained on MPS** (caught because the
+  cell records `args.device`). The final version wraps `TrainingArguments.__post_init__` → `device=cpu`, `param_device=cpu`.
+- Single 48-token throughput samples were noise: llama.cpp CPU read 55 tok/s in one run and 295 tok/s in the next. Now one warm-up,
+  then the median of 5 (llama.cpp) or 3 (torch) 128-token runs, with the range.
+
+**3. Final run** (all 17 cells in one fresh run, 2026-10-23 ~18:55): **13 PASS, 4 FAIL**. Full table in `ML_MATRIX.md`. Key numbers:
+- llama.cpp 135M: Metal 20/31 → 95.6 tok/s; all layers → 103.8; CPU → 291.7.
+- llama.cpp 1.5B Q4_K_M (Qwen2.5): 20/29 → 46.0 tok/s, 1,514 MB; all → 43.8, 1,298 MB, load 0.31 s; CPU → 49.3, 2,110 MB.
+- torch: MPS fp16 → 42.5 tok/s (load 9.0 s); CPU fp32 → 44.1 (load 2.6 s).
+- LoRA (12 steps): MPS fp32 → 8.8 s, loss 4.07 → 3.13; CPU (`use_cpu=True`) → 201.0 s, same curve. Each adapter served on MPS.
+- Embeddings on `mps:0`: 2,132 sentences/s; cosine related 0.608 / unrelated −0.044.
+- QLoRA 4-bit/8-bit in the **shipped** runtime → FAIL: `Using bitsandbytes 4-bit quantization requires bitsandbytes: pip install -U bitsandbytes>=0.46.1`.
+- With bitsandbytes 0.50.2 added:
+  - 4-bit and 8-bit loads run, but on `device=cpu` (210 quantized layers); the 4-bit text degenerates into repetition;
+  - QLoRA 4-bit trains with `param_device=cpu` under an MPS Trainer;
+  - QLoRA 8-bit → FAIL `Tensor for argument #2 'mat2' is on CPU, but expected it to be on GPU`.
+- `llama_supports_gpu_offload()` → `True`.
+
+**4. Metal shader cache (ISSUE-002).**
+- Every Phase 6 process logged `ggml_metal_library_init: loaded in 0.013–0.050 sec`, against 10.292 s in Phase 3.
+- The compiled library is cached per user in `$(getconf DARWIN_USER_CACHE_DIR)com.apple.metal/` (46 MB).
+- I did not clear it to re-measure the cold case; Phase 10's fresh account will.
+
+**5. ISSUE-007 measured** (`probe_hf_cache.py` on two APFS clones of the real 6 GB cache, backend code under hub 1.30.0 vs 1.33.0):
+- Listing and sizes are identical.
+- `_remove_hf` succeeds under both and leaves no dangling links in other repos.
+- Under 1.30, **1,829,250,588 bytes** of the deleted model stay unreferenced in `hub/blobs`; under 1.33, 244 bytes.
+
+**6. ISSUE-010 (new) confirmed in the app itself.**
+- `MAGNITE_SELFTEST_TRAINING=1 Magnite.app/Contents/MacOS/Magnite --selftest`, run on the bundle (`env -i`, isolated `HF_HOME`/`MAGNITE_HOME`),
+  printed:
+  - `[selftest] ok: training started …`
+  - `[selftest] FAIL: training job error: Using bitsandbytes 4-bit quantization requires bitsandbytes…`
+  - `[selftest] FAIL (1 failures)`
+- No orphan backend afterwards.
+- Cause: the selftests send `quantization: "4bit"`, and the Training panel's "Use 4-bit QLoRA" is checked by default.
+
+**Not verified / not claimed:**
+- Models above 1.5B; prompt-prefill speed; fine-tuning quality.
+- macOS 14/15; any Mac other than this M1 8 GB.
+- The HTTP/UI paths for these features (Phase 8 selftests).
+- The cold Metal compile on a fresh user (Phase 10).

@@ -295,7 +295,7 @@ linkage/resolve/host-paths/symlinks/signature PASS); bundle 1.1 GB (Qt 22 MB thi
 
 ---
 
-### Phase 6 — ML dependency matrix · model: Opus · **status: TODO**
+### Phase 6 — ML dependency matrix · model: Opus · **status: DONE** (2026-10-23)
 **Goal:** measure, not assume, what works on Apple Silicon — CPU vs MPS vs llama.cpp Metal, and whether quantization is usable at all.
 
 New `packaging/macos/ml_matrix.py`, run **with the bundled interpreter**, writing
@@ -315,6 +315,12 @@ set is what later docs and release notes are allowed to claim.
 **Rollback:** delete the generated matrix.
 **Depends on:** Phase 5. **Expected narrowing:** quantized (QLoRA) training unsupported,
 matching how the Linux build excluded QLoRA.
+**Result (2026-10-23):** `ML_MATRIX.md` has 17 cells and a verdict for each (13 PASS, 4 FAIL, none untested). Supported: llama.cpp on Metal,
+torch MPS inference, LoRA on MPS, adapter serving, embeddings. Not supported: QLoRA. The UI defaults to it, so the shipped app's
+default training job and the TRAINING selftest fail (**ISSUE-010, decision needed before Phase 8**). ISSUE-007 is measured (delete leaks
+disk under hub 1.30), and ISSUE-002 is refined (shader compile once per user). The bundle signature is still valid after every run.
+**Additions beyond the plan:** a realistic 1.5B GGUF row (the app's partial offload), CPU-training via `use_cpu=True`, the shipped-runtime QLoRA
+rows, embeddings, and `probe_hf_cache.py` for ISSUE-007.
 
 ---
 

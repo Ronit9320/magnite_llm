@@ -4,28 +4,49 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 18:05 IST
+- Last updated: 2026-10-23 19:05 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 6 — ML dependency matrix** (TODO)
-- Last completed: **Phase 5 — `build_app.sh` produces a self-contained, ad-hoc-signed `Magnite.app` (1.1 GB); `verify_bundle.py` 0 failures;
-  `smoke_bundle.sh` 6/6 PASS from a copy outside the checkout with a poisoned host env**
-- Suggested model for the next phase: **Opus** (measurement design and failure interpretation, per the plan)
+- Current phase: **Phase 7 — `.dmg` creation** (TODO)
+- Last completed: **Phase 6 — ML matrix: 17 cells measured (13 PASS / 4 FAIL); Metal, MPS inference, LoRA on MPS, embeddings supported;
+  QLoRA not supported — and the UI defaults to it (ISSUE-010)**
+- Suggested model for the next phase: **Sonnet** (scripting; per the plan)
 
-## Next exact commands (Phase 6 — read its section in `PLAN.md`)
+## ⚠ Decisions needed from the maintainer (not blocking Phase 7)
+
+1. **ISSUE-010 — blocks Phase 8.** "Use 4-bit QLoRA" is on by default, and the TRAINING/ADAPTER selftests send `"4bit"`; the macOS
+   runtime has no bitsandbytes, so both fail. Options are in `ISSUES.md` (recommended: a capability-aware UI and selftests). This is a
+   shared-code change, so it needs approval.
+2. **ISSUE-007.** Raise the `huggingface_hub` pin to ≥ 1.33 (both platforms), or document the disk leak on delete.
+3. **ISSUE-008.** Lock the transitive Python deps before the tester build (affects Linux too).
+
+## Next exact commands (Phase 7 — read its section in `PLAN.md`)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
 export MAGNITE_QT_ROOT=/Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
-# Bundle present? else: bash packaging/macos/build_app.sh   (72 s with an existing runtime)
-R=build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3
-# write packaging/macos/ml_matrix.py, then run it with the BUNDLED interpreter (-I -B keeps the bundle signature intact):
-"$R" -I -B packaging/macos/ml_matrix.py --out docs/release/macos/ML_MATRIX.md --cache build/packaging/macos/test-cache
-codesign --verify --deep --strict build/packaging/macos/stage/Magnite.app   # must still pass afterwards
+# Bundle present and from a clean tree? else: bash packaging/macos/build_app.sh
+# write packaging/macos/build_dmg.sh (hdiutil only), then:
+bash packaging/macos/build_dmg.sh
+hdiutil verify dist/Magnite-0.1.0-test.1-arm64.dmg
+# mount, copy Magnite.app OUT of the volume, run: bash packaging/macos/smoke_bundle.sh <copy>; also --theme-check from the volume itself
 ```
 
-Phase 6 must also answer ISSUE-007 (do models in the shared `hub/blobs` store list/size/delete correctly with huggingface_hub 1.30.0?)
-and keep in mind ISSUE-002 (≈10 s Metal shader compile on first llama.cpp load). bitsandbytes is **not** in the runtime: probe it in a
-throwaway copy (`ditto` the runtime, `uv pip install` from `requirements-macos-quantization.txt`), never in the shipped one.
+Phase 7 cautions:
+- **Do not `tee -a dist/SHA256SUMS`** as the plan says. That file belongs to the Linux AppImage (`build_appimage.sh` rewrites it with `>`),
+  and the Linux `dist/` is read-only for this work. Write `dist/SHA256SUMS-macos` instead, and correct the plan text.
+- `packaging/macos/TESTING.md` does not exist yet (Phase 12). Stage a placeholder or skip it, and say which in `LOG.md`. Until ISSUE-010
+  is fixed, `TESTING.md` must tell testers to untick "Use 4-bit QLoRA".
+- A mounted `.dmg` is read-only, so `smoke_bundle.sh` on the mounted copy also proves the app never writes into its bundle.
+
+## Things learned in Phase 6 that later phases must respect
+
+- `ML_MATRIX.md` is the **only** source of ML claims for README/TESTING/release notes. Re-run:
+  `"$R" -I -B packaging/macos/ml_matrix.py --out docs/release/macos/ML_MATRIX.md --cache build/packaging/macos/test-cache`
+  (~10 min; models are cached in the 1.5 GB test cache; `--only cell,cell` for a subset).
+- Phase 8's TRAINING and ADAPTER selftests **will fail** until ISSUE-010 is resolved. That is expected, not a packaging bug.
+- First GPU chat on a fresh user pauses ~10 s (Metal shader compile, once per user); Phase 10 should time it on the second account.
+- MPS makes LoRA ~23× faster than CPU; there is no reason to add a CPU-training fallback for Apple silicon.
+- Benchmark tiny models with care: on a 135M GGUF, the CPU beats Metal 3×; on 1.5B they are roughly equal on a base M1.
 
 ## Things learned in Phase 5 that later phases must respect
 
@@ -90,8 +111,9 @@ throwaway copy (`ditto` the runtime, `uv pip install` from `requirements-macos-q
 - **Phase 10 needs a second macOS user account** on this M1 (the agreed clean-install
   proxy). Its name must be supplied, or the maintainer runs `CLEAN_INSTALL.md` there.
 - Open, non-blocking issues: ISSUE-001 (no macOS parent-death signal; verify in Phase 9), ISSUE-004 (disk, 21 GiB free),
-  ISSUE-005 (test/`_remove_hf` symlink handling), ISSUE-007 (HF hub pin vs shared-blobs cache; Phase 6/9), ISSUE-008 (unpinned transitive deps; before Phase 7/12),
-  ISSUE-009 (Qt license texts; Phase 12). ISSUE-006 resolved in Phase 5.
+  ISSUE-005 (test/`_remove_hf` symlink handling), ISSUE-007 (hub 1.30 leaks disk on delete for shared-blobs caches; decision), ISSUE-008 (unpinned transitive deps; before Phase 7/12),
+  ISSUE-009 (Qt license texts; Phase 12),
+  **ISSUE-010 (default 4-bit QLoRA fails on macOS; blocks Phase 8)**. ISSUE-006 resolved in Phase 5.
 
 ## Standing rules for every session
 
