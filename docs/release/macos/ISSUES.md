@@ -45,7 +45,7 @@ if a cleaner solution is wanted.
 
 ## ISSUE-002 — No Metal shader compiler on the build host
 
-- Status: **OPEN — mitigation planned in Phase 3**
+- Status: **LARGELY MITIGATED — confirmed in Phase 1; remaining questions go to Phase 3/6**
 - Found: 2026-10-23
 - Severity: build-time constraint
 
@@ -60,6 +60,23 @@ source and lets the Metal driver compile it at runtime, requiring no build-time
 toolchain. If that fails twice, fall back to `-DGGML_METAL=OFF` (CPU-only
 llama.cpp) and record it as a documented limitation rather than installing Xcode
 for v0.1. Either way the outcome is measured in Phase 6, not assumed.
+
+**Phase 1 update (2026-10-23, measured):** `uv pip install -e backend` built
+`llama-cpp-python==0.3.36` from sdist in ~2 minutes with **default flags and no
+Metal compiler present**, and the result reports `llama_supports_gpu_offload() == True`
+on the M1. The log shows `ggml_metal_library_init: using embedded metal library`, so
+this llama.cpp version embeds the shaders by default and compiles them at runtime.
+This confirms the mitigation works on this host.
+
+Two things this does **not** establish, deliberately left for later phases:
+
+1. The pinned version is `0.3.35`, not `0.3.36`; the dev venv is unpinned. The pinned
+   sdist must be rebuilt with explicit flags in Phase 3 and checked again.
+2. Runtime shader compilation has a **startup cost**: `loaded 34 libraries from
+   embedded data in 10.195 sec`. A user's first GGUF load on macOS may therefore
+   pause ~10 s before the first token. Phase 6 should measure it on the packaged
+   runtime and `TESTING.md` should say so; whether it is cached across launches
+   is unknown.
 
 ---
 
@@ -97,3 +114,50 @@ and a test HF model cache sit under `build/packaging/`. Mitigation: record
 prune the uv cache after a successful runtime build. 8 GiB of RAM also caps which
 models can be used for real-model verification — tiny toy models remain the
 default, which is a limitation to state, not to hide.
+
+---
+
+## ISSUE-005 — Backend tests fail on macOS because `/var` is a symlink to `/private/var`
+
+- Status: **OPEN — reported, not fixed (application/test source is out of scope for packaging)**
+- Found: 2026-10-23, Phase 1 (`PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests -v`)
+- Severity: low for users, but it breaks the "regressions all pass" gate on a stock Mac
+- Evidence: `build/packaging/phase1-unittest.log` (4 FAIL + 1 ERROR of 53) versus
+  `build/packaging/phase1-unittest-resolvedtmp.log` (53 tests, OK, 0 skipped)
+
+**What fails** (all in `backend/tests/`): `test_cache_discovery.py` — 4 tests
+(`test_external_cache_is_discovered_offline_and_filtered`,
+`test_main_preferred_and_existing_revision_metadata_preserved`,
+`test_missing_registered_revision_replaced_by_cached_revision`,
+`test_list_endpoint_registers_external_model_for_inference_resolution`) and
+`test_regressions.py::StoreTests::test_hf_cache_deletion_preserves_shared_blobs`.
+
+**Root cause.** `tempfile` returns `/var/folders/…` on macOS, which is a symlink to
+`/private/var/folders/…`. The backend returns the *resolved* path (`/private/var/…`),
+so the four assertions compare `/private/var/…` against `/var/…`. The fifth failure is
+the same mismatch on the product side: `ModelRegistry._remove_hf`
+(`backend/src/backend/models/registry.py:254`) builds `Path(rec.path).absolute()`, which
+keeps the symlink, then compares it with `huggingface_hub`'s `revision.snapshot_path`,
+which does not; no revision matches, so it raises `ValueError("Cannot safely identify
+cached model revision; files were not removed")`.
+
+**Proof, not assumption.** Re-running with `TMPDIR` set to the already-resolved
+directory (`/private/var/folders/…/T`) — no source change — turns every failure green:
+`Ran 53 tests … OK`. That isolates symlink handling as the only cause.
+
+**Product impact.** Narrow and fail-safe: nothing is deleted when the match fails. It can
+only affect a macOS user whose Hugging Face cache path itself passes through a symlink
+(e.g. `HF_HOME` on a symlinked folder), who would be unable to delete a cached model from
+the app. A default `~/.cache/huggingface` is not under a symlink.
+
+**Caveat.** The dev venv resolved `huggingface-hub 2.3.0`, whereas the shipped pin is
+`1.30.0`. The behaviour under the pinned version is untested until Phase 3/4.
+
+**Workaround used for verification** (recorded in `LOG.md`): run the suite with
+`TMPDIR="$(python -c 'import os,tempfile;print(os.path.realpath(tempfile.gettempdir()))')"`.
+Phases that re-run the suite after shared-file edits must use the same prefix.
+
+**Possible fixes if wanted** (each tiny): in the tests use
+`Path(tempfile.mkdtemp()).resolve()`; in `_remove_hf` use `.resolve()` instead of
+`.absolute()` (and confirm it still refuses paths outside a managed `snapshots` dir).
+Linux CI is unaffected, which is why this was not caught earlier.

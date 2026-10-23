@@ -90,7 +90,7 @@ git add docs/release/macos packaging/macos && git commit -m "docs(macos): Phase 
 
 ---
 
-### Phase 1 — Environment audit, pins, and macOS baseline · model: Sonnet · **status: TODO**
+### Phase 1 — Environment audit, pins, and macOS baseline · model: Sonnet · **status: DONE** (2026-10-23)
 **Goal:** merge the required macOS fix and prove the repo's own checks pass on this Mac before any packaging work.
 
 ```sh
@@ -98,7 +98,8 @@ git merge --no-ff mac -m "merge: macOS loopback health probe (7fcdb3c) for v0.1 
 sw_vers; uname -m; clang --version | head -2; cmake --version | head -1; uv --version
 "$MAGNITE_QT_ROOT/bin/qmake6" -query QT_VERSION
 uv venv --python 3.12 .venv-macos && uv pip install --python .venv-macos -e "backend"
-PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests -v
+uv pip install --python .venv-macos "pypdf==6.19.0"   # [ml]-extra; avoids a skipped test
+bash packaging/macos/run_regressions.sh   # NOT bare unittest: macOS /var symlink breaks 5 tests (ISSUE-005)
 cmake -S app -B build-macos -DCMAKE_PREFIX_PATH="$MAGNITE_QT_ROOT" \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
       -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DMAGNITE_BUILD_LABEL=0.1.0-test.1
@@ -112,6 +113,7 @@ otool -l build-macos/magnite-app | grep -A3 LC_BUILD_VERSION
 **Idempotent:** yes. Clean retry: `rm -rf build-macos .venv-macos`.
 **Rollback:** `git merge --abort`, or `git reset --hard origin/dev` on the branch.
 **Depends on:** Phase 0.
+**Result (2026-10-23):** merge clean; 53 regressions OK (0 skipped) via `run_regressions.sh`; `--theme-check` 0 failure(s); `minos 14.0`; bare `--selftest` PASS with `backend health OK`. Bare `unittest` fails 5 tests on macOS (symlinked `/var`) — see ISSUE-005. Evidence in `LOG.md`.
 **Note:** `build-macos/` is a new build dir so the existing `build/` (and the AGENTS.md
 dev workflow) is untouched. Add `build-macos/` to `.gitignore` if not already covered.
 
@@ -201,7 +203,7 @@ cmake --build build-macos -j4 && cmake --install build-macos --prefix build/pack
 env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent \
     MAGNITE_HOME="$TMPDIR/magnite-phase4" QT_QPA_PLATFORM=offscreen \
     build/packaging/macos/stage/Magnite.app/Contents/MacOS/magnite-app --selftest
-PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests
+bash packaging/macos/run_regressions.sh   # sets a resolved TMPDIR; see ISSUE-005
 cmake --build build -j4   # Linux-shaped non-bundle build still fine
 ```
 **Acceptance:** the `--selftest` run prints `[selftest] PASS (0 failures)` **with a broken
@@ -426,7 +428,7 @@ are read-only references.
 
 ## Verification summary (how we know it worked, end to end)
 
-1. `PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests` — after every shared-file edit.
+1. `bash packaging/macos/run_regressions.sh` — after every shared-file edit (wraps the unittest run with a symlink-resolved `TMPDIR`; ISSUE-005).
 2. `./build-macos/magnite-app --theme-check` → `0 failure(s)`.
 3. `packaging/macos/verify_bundle.py` → no non-arm64 slices, no host paths, minos ≤ 14.0, codesign valid.
 4. The five `MAGNITE_SELFTEST_*` runs plus `--ui-check` and `--selftest` against the app copied out of the mounted `.dmg`, with a disposable `MAGNITE_HOME`.

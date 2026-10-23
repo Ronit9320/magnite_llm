@@ -92,3 +92,80 @@ suite on macOS, any CMake build, any selftest, any packaging step.
   `docs/release/macos/` are `packaging/macos/README.md` (new) and `.gitignore`
   (three appended lines). No application source, no Linux packaging, no
   `RELEASE_CHECKLIST.md` change in this phase.
+
+---
+
+## 2026-10-23 15:04 IST — Phase 1: macOS baseline (branch `release/v0.1-macos`)
+
+Everything below ran in this session on the build host; raw logs are under
+`build/packaging/phase1-*.log` (gitignored). Host/toolchain/Qt pins are in
+`environment-macos.txt`.
+
+**1. Merge of the `mac` branch (ADR 0008)**
+- `git merge --no-ff mac` → "Merge made by the 'ort' strategy", no conflicts;
+  `app/src/backend_manager.{h,cpp}` +54/−22. Commit `30ec89a`.
+- `git merge-base --is-ancestor mac HEAD` → true.
+
+**2. Dev regression venv** (`uv venv --python 3.12 .venv-macos`; `uv pip install -e backend`)
+- Python 3.12.13 (uv's latest 3.12; the shipped runtime will pin 3.12.12, confirmed
+  downloadable for macos-aarch64 via `uv python list 3.12.12`).
+- Install succeeded in ~111 s wall. **Versions are unpinned** (this is a baseline venv,
+  not the shipped runtime): fastapi 0.161.1, pydantic 2.14.1, huggingface-hub 2.3.0,
+  numpy 2.5.4, uvicorn 0.54.0, llama-cpp-python **0.3.36** (pinned set has 0.3.35).
+  Full list: `environment-macos.txt`.
+- `llama-cpp-python` compiled from sdist with **no flags and no Metal compiler**; it
+  reports `llama_supports_gpu_offload() == True` and "using embedded metal library"
+  on the M1; 34 shader libraries loaded in 10.195 s (startup cost → ISSUE-002 update).
+- Added `pypdf==6.19.0` (an `[ml]` extra) to remove the only skipped test.
+
+**3. Offline regression suite**
+| Run | Command | Result |
+|---|---|---|
+| a | bare `PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests -v` | **53 tests: 4 FAIL, 1 ERROR, 1 skipped (pypdf)** |
+| b | same, `TMPDIR` = symlink-resolved `/private/var/folders/…/T` | 53 tests, OK, 1 skipped (pypdf) |
+| c | b + `pypdf==6.19.0` installed | **53 tests, OK, 0 skipped** |
+| d | `bash packaging/macos/run_regressions.sh` (new wrapper) | **53 tests, OK (exit 0)** |
+
+Root cause of run a: macOS `/var` → `/private/var` symlink vs resolved backend paths.
+Run b is the controlled experiment that isolates it. Full analysis: **ISSUE-005**
+(reported, source not changed). Linux had 41 tests at its build; `dev` now has 53.
+Caveat: run on unpinned huggingface-hub 2.3.0, not the shipped 1.30.0.
+
+**4. CMake build** — `build-macos/` (new dir; `build/` and the AGENTS.md workflow untouched)
+- Configure: `-DCMAKE_PREFIX_PATH=$MAGNITE_QT_ROOT -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+  -DMAGNITE_BUILD_LABEL=0.1.0-test.1` → exit 0, Qt 6.8.3 found.
+- Build `-j4` → exit 0 in 17.4 s wall; 4.8 MB binary. 5 compiler warnings, all
+  `-Wunused-lambda-capture` in `app/src/mainwindow.cpp` (lines 454, 777, 878, 1088, 1163),
+  pre-existing and not macOS-specific; not touched.
+- `file` → Mach-O 64-bit executable **arm64**.
+- `otool -l` → `LC_BUILD_VERSION` **`minos 14.0`**, `sdk 13.3` (SDK is older than the
+  target; that is permitted and the SDK is the newest installed).
+  The 2026-10-04 binary had inherited `minos 13.3`; the deployment target is now explicit (R2).
+
+**5. Desktop checks**
+- `QT_QPA_PLATFORM=offscreen ./build-macos/magnite-app --theme-check` → **`0 failure(s)`**.
+- `--selftest` (disposable `MAGNITE_HOME`, offscreen, dev layout → repo `.venv`):
+  **`[selftest] PASS (0 failures)`**; log contains
+  `[magnite] backend health OK (http://127.0.0.1:49375)` after ~6 "Backend health check
+  failed - retrying" lines (normal ~13 s backend startup). `pgrep -fl backend.main` after
+  exit → none, i.e. clean shutdown. This is the direct observable for the merged `mac` fix.
+  Scope: dev-layout only; the packaged runtime is not exercised until Phase 4.
+- Note: macOS has no `timeout(1)`; use a shell-level guard in future scripts.
+
+**6. Disk** — `build-macos` 35 MB, `.venv-macos` 150 MB, `build/packaging/uv-cache` 413 MB;
+23 GiB free on the data volume (89% used) after the phase. ISSUE-004 stays open.
+
+**New files:** `packaging/macos/run_regressions.sh` (verified: exit 0, 53 OK),
+`docs/release/macos/environment-macos.txt`.
+
+**Shared-file edits this phase:** none. (The `mac` merge is a branch merge of an
+existing commit, covered by ADR 0008.) No re-verification after a shared edit was
+therefore required.
+
+**Phase 1 acceptance:** regressions pass (53/53 via the wrapper, bare-run caveat
+documented) ✔ · `--theme-check` 0 failure(s) ✔ · `minos 14.0` ✔ · versions pinned in
+`LOG.md` + `environment-macos.txt` ✔ · `build-macos/` gitignored ✔.
+
+**Not claimed:** anything about the packaged runtime, `.app` bundle, pinned dependency
+set, macOS 14/15 behaviour, MPS, or training/RAG/adapter paths.
