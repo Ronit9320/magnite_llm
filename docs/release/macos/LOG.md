@@ -531,3 +531,51 @@ Logs: `build/packaging/phase7-{dmg-trial,build-app,build-dmg,check-dmg}.log`, `b
 - The `MAGNITE_SELFTEST_*` workloads from the dmg copy (Phase 8).
 - Any other Mac or account.
 - No custom Finder window layout (deliberate).
+
+---
+
+## 2026-10-23 19:35 IST — Phase 8: functional verification of the installed app
+
+Logs: `build/packaging/phase8/*.log` (untracked); screenshots committed in `docs/release/macos/screenshots/`.
+**New:** `packaging/macos/verify_installed.sh`. No shared-file edits.
+
+**Setup.**
+- `(cd dist && shasum -a 256 -c SHA256SUMS-macos)` → `OK`.
+- Mounted the `.dmg` read-only, `ditto`'d `Magnite.app` to `$TMPDIR/Magnite-verify.app`, detached.
+- `codesign --verify --deep --strict` passes on the copy; `build.json` commit `5a04358`.
+- Every step below ran with:
+  - `env -i`, `PATH=/usr/bin:/bin`, `PYTHONHOME`/`PYTHONPATH` poisoned;
+  - a fresh `MAGNITE_HOME` per step;
+  - `HF_HOME=build/packaging/macos/test-cache` (never the real HF cache);
+  - `QT_QPA_PLATFORM=offscreen`, a 900 s guard, and an orphan check after each step.
+
+**Results** (`bash packaging/macos/verify_installed.sh "$TMPDIR/Magnite-verify.app" build/packaging/phase8 build/packaging/macos/test-cache`,
+2 min 32 s in total):
+
+| Step | Result | Evidence (log line) |
+|---|---|---|
+| `--theme-check` | PASS (8 s) | `[theme-check] 0 failure(s)` |
+| `--ui-check` | PASS (10 s) | `[ui-check] PASS (0 failures)`; 43 captures |
+| `--selftest` | PASS (13 s) | `[selftest] PASS (0 failures)` |
+| `MAGNITE_SELFTEST_PULL` | PASS (16 s) | `pull e2e: models now registered=5` |
+| `MAGNITE_SELFTEST_INFERENCE` | PASS (16 s) | `inference load engine=llamacpp`, `inference e2e: status=200, deltas=8`, `inference unload` |
+| `MAGNITE_SELFTEST_TRAINING` | **FAIL** (15 s) | `Using bitsandbytes 4-bit quantization requires bitsandbytes …` → **ISSUE-010** |
+| `MAGNITE_SELFTEST_ADAPTER` | **FAIL** (13 s) | same → **ISSUE-010** |
+| `MAGNITE_SELFTEST_RAG` | PASS (19 s) | `rag ingest … chunks=1`, `rag query: status=200 score=0.652`, `rag delete`, `rag cleanup` |
+| `live_workflow.py` (bundled `python3 -I -B`) | PASS (28 s) | `PASS registered transformer model -> auto engine -> nonstreaming chat` · `PASS mixed instruction/text training -> registered adapter` · `PASS active adapter + real RAG retrieval -> chat response (quality not assessed)` · `PASS real PEFT export -> delete -> import; RAG cleanup` · `PASS training history survives backend lifespan restart` |
+| `--screenshot` | PASS (11 s) | `[screenshot] done`; 6 panels |
+| signature after all steps | PASS | bundle unmodified |
+
+**9 of 11 steps PASS, 2 FAIL.** Both failures are the known ISSUE-010, now reproduced on the dmg copy.
+
+- No backend was orphaned after any step.
+- The screenshots show the bundled fonts, icons and brand rendering correctly. Each shows "Connecting", because `--screenshot` captures
+  400 ms after launch, before the backend is ready. That is a property of the dev tool, not a defect.
+
+**Acceptance not fully met:** the plan requires every selftest to PASS. TRAINING and ADAPTER do not, so the macOS checklist line for
+"supported inference/training/RAG paths" cannot be ticked until ISSUE-010 is fixed and these two steps are re-run.
+
+**Not verified / not claimed:**
+- An interactive (non-offscreen) GUI session.
+- Gatekeeper / quarantine and `/Applications` (Phases 9–10).
+- Real-size models through the UI (`ML_MATRIX.md` covers ≤ 1.5B through the backend).

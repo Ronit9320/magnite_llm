@@ -4,12 +4,12 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 19:12 IST
+- Last updated: 2026-10-23 19:35 IST
 - Branch: `release/v0.1-macos`
-- Current phase: **Phase 8 — Functional verification of the installed app** (TODO)
-- Last completed: **Phase 7 — `dist/Magnite-0.1.0-test.1-arm64.dmg` (321 MB, clean commit `5a04358`, SHA-256 `f72686db…d3ab43`
-  in `dist/SHA256SUMS-macos`); `check_dmg.sh` 10/10 PASS from the read-only volume**
-- Suggested model for the next phase: **Sonnet** (running and recording; per the plan)
+- Current phase: **Phase 9 — Process cleanup, upgrade and removal** (TODO)
+- Last completed: **Phase 8 — 9/11 acceptance steps PASS on the app copied out of the `.dmg`; TRAINING and ADAPTER selftests FAIL on
+  ISSUE-010 only (`live_workflow.py` LoRA training passes)**
+- Suggested model for the next phase: **Sonnet** (per the plan)
 
 ## ⚠ Decisions needed from the maintainer (not blocking Phase 7)
 
@@ -19,25 +19,32 @@ unless the current phase names a specific section.
 2. **ISSUE-007.** Raise the `huggingface_hub` pin to ≥ 1.33 (both platforms), or document the disk leak on delete.
 3. **ISSUE-008.** Lock the transitive Python deps before the tester build (affects Linux too).
 
-## Next exact commands (Phase 8 — read its section in `PLAN.md`)
+## Next exact commands (Phase 9 — read its section in `PLAN.md`)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
-D=dist/Magnite-0.1.0-test.1-arm64.dmg; (cd dist && shasum -a 256 -c SHA256SUMS-macos)   # expect: OK
-M=$(mktemp -d); hdiutil attach "$D" -readonly -nobrowse -mountpoint "$M"
-ditto "$M/Magnite.app" "$TMPDIR/Magnite-verify.app"; hdiutil detach "$M"
-A="$TMPDIR/Magnite-verify.app/Contents/MacOS/Magnite"
-export MAGNITE_HOME="$TMPDIR/magnite-verify-home" HF_HOME="$PWD/build/packaging/macos/test-cache" QT_QPA_PLATFORM=offscreen
-# then the plan's list: --theme-check, --ui-check, --selftest, the five MAGNITE_SELFTEST_* runs, live_workflow.py, --screenshot
+# install from the dmg into /Applications (drag-install equivalent):
+M=$(cd -P "$(mktemp -d)" && pwd); hdiutil attach dist/Magnite-0.1.0-test.1-arm64.dmg -readonly -nobrowse -mountpoint "$M"
+ditto "$M/Magnite.app" /Applications/Magnite.app; hdiutil detach "$M"
+pgrep -fl backend.main                                   # before / between / after every step
+# 1 clean quit: launch (open -a or the binary), wait for "backend health OK", quit (osascript 'quit app "Magnite"'), check no backend.main
+# 2 force-kill: launch, kill -9 the GUI pid, check for a surviving backend.main (expected orphan: ISSUE-001)
+# 3 upgrade in place: seed ~/.magnite data + prefs, ditto the dmg app over /Applications/Magnite.app, relaunch, data intact?
+# 4 removal: rm -rf /Applications/Magnite.app; ~/.magnite and prefs remain; nothing running; nothing in ~/Library/LaunchAgents
 ```
 
-Phase 8 cautions:
-- **Expected failures until ISSUE-010 is decided:** `MAGNITE_SELFTEST_TRAINING` and `MAGNITE_SELFTEST_ADAPTER` send `quantization: "4bit"`,
-  and that fails ("requires bitsandbytes") — already reproduced on the bundle in Phase 6. Record them as ISSUE-010, not as new bugs. If the
-  maintainer approves a fix first, rebuild (`build_app.sh` → `build_dmg.sh`) before Phase 8.
-- Use `HF_HOME=build/packaging/macos/test-cache` so the selftests never touch the real `~/.cache/huggingface` (ISSUE-007).
-- Run each selftest with a fresh `MAGNITE_HOME` and a time guard (macOS has no `timeout`; see `smoke_bundle.sh`).
-- `backend/tests/live_workflow.py` exists; run it with the bundled interpreter `-I -B` as the plan says, and check what it needs first.
+Phase 9 cautions:
+- `~/.magnite` and `~/Library/Preferences/com.magnite.magnite-llm.plist` may already hold **real user data** from development. Back them up
+  (or point `MAGNITE_HOME` at a test dir) before the upgrade/removal steps. **Never delete real user data.**
+- Installing into `/Applications` changes the system outside the repo. Confirm with the maintainer if an existing `/Applications/Magnite.app`
+  is present, and remove only what this phase installed.
+- The force-kill orphan (ISSUE-001) is expected; record it, do not patch `backend/main.py` without approval.
+
+## Things learned in Phase 8 that later phases must respect
+
+- `bash packaging/macos/verify_installed.sh <app> <log-dir> build/packaging/macos/test-cache` is the full acceptance set (~2.5 min with a warm
+  cache). Phase 10 runs it on the second account (cold cache: expect model downloads, and the ~10 s Metal compile).
+- The only failures are ISSUE-010; once it is fixed, rebuild (`build_app.sh` → `build_dmg.sh`) and re-run this script for a clean 11/11.
 
 ## Things learned in Phase 7 that later phases must respect
 

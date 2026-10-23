@@ -317,3 +317,8 @@ Options (all touch shared code or the release scope, so they are the maintainer'
 3. Ship bitsandbytes on macOS like Linux: the default 4-bit path then trains with CPU-resident base weights, and 8-bit stays broken.
    Not recommended without measuring a realistic model size.
 Until one is chosen, `TESTING.md` must tell macOS testers to untick "Use 4-bit QLoRA".
+
+**Phase 8 (2026-10-23):** reproduced on the app copied out of the `.dmg` (`5a04358`). `selftest-training` and `selftest-adapter` both
+end `[selftest] FAIL: … Using bitsandbytes 4-bit quantization requires bitsandbytes …`. These are the only 2 failures in the 11-step
+acceptance set. `live_workflow.py`, which sends `quantization: "none"`, passes training → adapter → RAG chat → export/import through
+the same HTTP API. So LoRA itself works in the packaged app; only the 4-bit default is broken.

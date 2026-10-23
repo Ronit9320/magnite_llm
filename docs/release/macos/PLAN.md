@@ -349,7 +349,7 @@ SHA-256 `f72686db…d3ab43` in `dist/SHA256SUMS-macos`; `check_dmg.sh` 10/10 PAS
 
 ---
 
-### Phase 8 — Functional verification of the installed app · model: Sonnet · **status: TODO**
+### Phase 8 — Functional verification of the installed app · model: Sonnet · **status: DONE with 2 known failures (ISSUE-010)** (2026-10-23)
 **Goal:** run the full acceptance set against the installed bundle, not the build tree.
 
 ```sh
@@ -372,6 +372,10 @@ appended to `LOG.md`. Any failure goes to `ISSUES.md` and blocks the checklist t
 **Idempotent:** yes, with a disposable `MAGNITE_HOME` each run. Retry: `rm -rf "$TMPDIR/magnite-verify-home"`.
 **Rollback:** nothing to revert; evidence only.
 **Depends on:** Phases 6–7.
+**Result (2026-10-23):** `verify_installed.sh` on the app copied out of the `.dmg`: **9/11 PASS**. theme, ui-check, bare selftest, PULL,
+INFERENCE (llama.cpp), RAG, `live_workflow.py` (train → adapter → RAG chat → export/import → restart) and screenshots all pass.
+TRAINING and ADAPTER FAIL on the 4-bit QLoRA default (ISSUE-010). No orphans; signature intact. Re-run both after ISSUE-010 is fixed:
+`STEP_ENV=… ` or the whole script.
 
 ---
 
