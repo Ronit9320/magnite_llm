@@ -109,3 +109,7 @@ Magnite's original code, documentation, and example inputs are under the
 [MIT license](LICENSE). Third-party assets and dependencies retain their own
 terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Model and dataset licenses
 are separate from the app's license.
+
+## Windows build
+
+See [BUILD_WINDOWS.md](BUILD_WINDOWS.md) for Windows build instructions. The codebase has been prepared for Windows compatibility while maintaining Linux support.

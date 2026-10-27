@@ -75,7 +75,22 @@ QString BackendManager::baseUrl() const {
 
 void BackendManager::launchBackend() {
     QString appDir = QCoreApplication::applicationDirPath();
-    QString repoRoot = QDir(appDir + "/../").canonicalPath();
+    QString repoRoot;
+
+    // Try to find repo root by walking up from appDir looking for markers
+    QDir cur(appDir);
+    for (int i = 0; i < 8; ++i) {
+        if (QDir(cur.absolutePath() + "/backend/src").exists() || 
+            QFileInfo::exists(cur.absolutePath() + "/app/CMakeLists.txt") ||
+            QFileInfo::exists(cur.absolutePath() + "/README.md")) {
+            repoRoot = cur.canonicalPath();
+            break;
+        }
+        if (!cur.cdUp()) break;
+    }
+    if (repoRoot.isEmpty()) {
+        repoRoot = QDir(appDir + "/../").canonicalPath();
+    }
 
     // Resolve paths in dev layout: <repo>/build/ -> <repo>/backend/src, <repo>/.venv
     QString modulePath;
@@ -83,10 +98,16 @@ void BackendManager::launchBackend() {
     if (devBackend.exists()) {
         modulePath = devBackend.absolutePath();
     } else {
-        // Fall back to the location of this binary: <repo>/build/../backend/src
+        // Fall back to the location of this binary: look relative to appDir
         QDir inlineBackend(QDir(appDir).absoluteFilePath("../backend/src"));
         if (inlineBackend.exists()) {
             modulePath = inlineBackend.absolutePath();
+        } else {
+            // Try going up further
+            QDir inlineBackend2(QDir(appDir).absoluteFilePath("../../backend/src"));
+            if (inlineBackend2.exists()) {
+                modulePath = inlineBackend2.absolutePath();
+            }
         }
     }
 
@@ -112,7 +133,39 @@ void BackendManager::launchBackend() {
 #ifdef Q_OS_WIN
     venvPython = repoRoot + "/.venv/Scripts/python.exe";
 #endif
-    QString python = QFileInfo::exists(venvPython) ? venvPython : QString("python3");
+    QString python;
+    if (QFileInfo::exists(venvPython)) {
+        python = venvPython;
+    } else {
+#ifdef Q_OS_WIN
+        // Try common Windows Python executables
+        QStringList winCandidates;
+        winCandidates << repoRoot + "/.venv/Scripts/python.exe";
+        winCandidates << repoRoot + "/venv/Scripts/python.exe";
+        winCandidates << "C:/Python313/python.exe";
+        winCandidates << "C:/Python312/python.exe";
+        winCandidates << "C:/Python311/python.exe";
+        winCandidates << "C:/Python310/python.exe";
+        winCandidates << "py";
+        winCandidates << "python";
+        bool found = false;
+        for (const auto &cand : winCandidates) {
+            if (cand == "py" || cand == "python") {
+                python = cand;
+                found = true;
+                break;
+            }
+            if (QFileInfo::exists(cand)) {
+                python = cand;
+                found = true;
+                break;
+            }
+        }
+        if (!found) python = "python";
+#else
+        python = "python3";
+#endif
+    }
 
     // Test packages carry a relocatable Python installation beside the client.
     // Use isolated mode so a user's PYTHONPATH/site-packages cannot replace the
@@ -141,9 +194,28 @@ void BackendManager::launchBackend() {
     m_process->setWorkingDirectory(appDir);
     m_process->start(python, args);
 
-    if (!m_process->waitForStarted(5000) && !packaged && python != "python3") {
-        m_process->start("python3", args);
-        m_process->waitForStarted(5000);
+    if (!m_process->waitForStarted(5000) && !packaged) {
+#ifdef Q_OS_WIN
+        if (python != "python" && python != "py") {
+            m_process->start("python", args);
+            m_process->waitForStarted(5000);
+            if (m_process->state() != QProcess::Running) {
+                m_process->start("py", args);
+                m_process->waitForStarted(5000);
+            }
+        } else if (python == "python") {
+            // Already tried python? maybe try py as fallback
+            if (m_process->state() != QProcess::Running) {
+                m_process->start("py", args);
+                m_process->waitForStarted(5000);
+            }
+        }
+#else
+        if (python != "python3") {
+            m_process->start("python3", args);
+            m_process->waitForStarted(5000);
+        }
+#endif
     }
 }
 

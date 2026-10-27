@@ -1,5 +1,4 @@
 import argparse
-import ctypes
 import os
 import socket
 import sys
@@ -8,14 +7,15 @@ import uvicorn
 
 from backend.server import app
 
-_PDEATHSIG_SIGTERM = 15
-
 
 def _enable_parent_death_signal() -> None:
     """Ask the kernel to SIGTERM us if our parent process dies, so a crashed
     or force-killed GUI cannot leave an orphaned backend behind."""
     if sys.platform == "linux" and os.name == "posix":
         try:
+            import ctypes
+
+            _PDEATHSIG_SIGTERM = 15
             PR_SET_PDEATHSIG = 1
             libc = ctypes.CDLL("libc.so.6", use_errno=True)
             if libc.prctl(PR_SET_PDEATHSIG, _PDEATHSIG_SIGTERM) != 0:
