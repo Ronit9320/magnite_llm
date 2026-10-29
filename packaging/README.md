@@ -43,3 +43,24 @@ This requires loopback access and downloads small test models. It checks the
 theme, UI, desktop/backend startup, GGUF inference, and the combined CPU
 LoRA/adapter/RAG workflow. It deliberately supplies broken host Python paths
 and runs an extracted copy from a temporary location outside the checkout.
+
+## macOS Apple silicon (arm64)
+
+The macOS recipe lives in [`macos/`](macos/README.md). It needs Command Line Tools, CMake, `uv` and the pinned official Qt 6.8.3
+(`MAGNITE_QT_ROOT`), then:
+
+```sh
+bash packaging/macos/build_app.sh     # Qt + isolated Python 3.12 runtime + backend -> ad-hoc signed Magnite.app, verify_bundle.py gate
+bash packaging/macos/build_dmg.sh     # -> dist/Magnite-0.1.0-test.1-arm64.dmg and dist/SHA256SUMS-macos
+bash packaging/macos/check_dmg.sh dist/Magnite-0.1.0-test.1-arm64.dmg
+bash packaging/macos/verify_installed.sh <app> <log-dir> <hf-cache>   # full acceptance set on an installed copy
+```
+
+The runtime is installed from `macos/requirements-macos-arm64.txt` under the full lock `macos/constraints-macos-arm64.txt`.
+llama-cpp-python is built from source with Metal; bitsandbytes is not included. The client launches the bundled interpreter with `-I -B`
+and never falls back to a system Python once `Contents/Resources/runtime` exists. Regressions run through
+`bash packaging/macos/run_regressions.sh` (a bare `unittest` run is affected by the `/var` symlink).
+
+These are **testing** builds: ad-hoc signed, not notarized, one architecture, minimum macOS 14.0. Developer ID signing and notarization
+are not done (blocked on a certificate). Tester instructions: [`macos/TESTING.md`](macos/TESTING.md). Evidence and limits:
+[`docs/release/macos/V0_1_MACOS_TESTING.md`](../docs/release/macos/V0_1_MACOS_TESTING.md).

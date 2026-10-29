@@ -892,3 +892,29 @@ The smoke logs are in `/Users/Shared/magnite-clean-install/logs-tester/`.
 **Verdict.** Acceptance is met except for one item. The app launches and passes `--selftest` in a second account, under a quarantined
 download. The "exact Gatekeeper wording recorded verbatim" item is **not met**. Phase 10 is DONE as a **proxy**, with that gap carried
 forward to Phase 11/12. The clean-machine checklist line stays unticked.
+
+## 2026-10-30 — Phase 12: checksums, provenance, docs and checklist
+
+**Checks run this session.**
+- `(cd dist && shasum -a 256 -c SHA256SUMS-macos)` → `Magnite-0.1.0-test.1-arm64.dmg: OK` (`48050836…`, 335,068,085 bytes).
+- `bash packaging/macos/run_regressions.sh` → **65 tests OK**, exit 0.
+- `git status --porcelain dist/` → empty; the dmg is ignored.
+- By file mtime, every code file in `8337e65` is older than the dmg (2026-10-28 02:41); only the tester-kit scripts and docs are newer.
+  The dmg's `build.json` says commit `ef173fd`, `working_tree_modified: true`.
+
+**Written.** `docs/release/macos/V0_1_MACOS_TESTING.md`, `packaging/macos/TESTING.md`; macOS sections in `packaging/README.md` and `README.md`
+(status sentence and three compatibility rows); `packaging/macos/README.md` table marks.
+
+**Checklist (`RELEASE_CHECKLIST.md`, macOS block only).**
+- Ticked: architecture and minimum macOS (ADR 0001/0002, `environment-macos.txt`); `.app`/`.dmg` with versions and SHA-256.
+- **Not ticked: the "clean Mac" line.** Evidence is the dmg acceptance run (11/11) and the second-account proxy (6/6), but no machine free of
+  Homebrew/system Python, no Gatekeeper wording, and the §7b check was skipped. The plan expected three ticks; this is a deliberate ruling.
+- Signing line: marked BLOCKED (Phase 11).
+
+**Not done / follow-ups.**
+- No git commit (maintainer rule); nothing staged.
+- Stale public statements ("no application authentication") in `README.md`, `SECURITY.md`, `docs/LOCAL_API.md`, `docs/STORAGE_AND_PRIVACY.md`
+  were corrected afterwards in the same session: app-launched backend authenticated, hand-started one open (Host check only), macOS-only
+  verification, per `backend/local_access.py`.
+- The dmg was not rebuilt from the committed tree.
+

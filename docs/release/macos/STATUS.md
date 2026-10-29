@@ -4,15 +4,14 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-28
-- Branch: `release/v0.1-macos` — **uncommitted local changes, by maintainer instruction (no git commits)**
-- Current phase: **Phase 12 — Checksums, provenance, docs and checklist** (TODO; Phase 11 stays BLOCKED)
-- Last completed: **Phase 10 — clean-install proxy (2026-10-28), DONE as a proxy**:
-  - Standard account `tester`, quarantined download, Open Anyway;
-  - the app ran from `/Applications` under the bundled `python3 -B -I`;
-  - `smoke_bundle.sh` 6/6 PASS; one real chat replied in under 1 s.
-  - **Gap:** the Gatekeeper dialog wording was not captured. §7b (cross-account) was skipped.
-- Suggested model for the next phase: **Sonnet**
+- Last updated: 2026-10-30
+- Branch: `release/v0.1-macos`. The fixes and docs up to Phase 10 are committed as `8337e65` (pushed to `mac`). Phase 12's edits are
+  **uncommitted**; the standing no-commit rule below dates from 2026-10-24 and was overridden by that commit, so ask before committing.
+- Current phase: **none open.** Phase 12 is DONE; Phase 11 (Developer ID signing and notarization) is DEFERRED by the maintainer (2026-10-30); users follow `docs/MACOS_FIRST_LAUNCH.md`.
+- Last completed: **Phase 12 (2026-10-30):** `shasum -c` OK; 65 regressions OK; wrote `V0_1_MACOS_TESTING.md` and `packaging/macos/TESTING.md`;
+  added macOS sections to `packaging/README.md` and `README.md`; ticked checklist lines 1–2 (line 3 stays open, line 4 marked BLOCKED).
+- Before a tester build: rebuild from a clean commit (`build_app.sh` → `build_dmg.sh`). The current dmg's `build.json` says commit `ef173fd`,
+  modified tree.
 
 ## Decisions
 
@@ -143,7 +142,7 @@ Phase 12 cautions:
 
 ## Known blockers
 
-- **Phase 11 (Developer ID signing + notarization) is BLOCKED.** Needs: Apple Developer
+- **Phase 11 (Developer ID signing + notarization) is DEFERRED (was BLOCKED).** Needs: Apple Developer
   Program enrollment, a Developer ID Application certificate in the login keychain, the
   Team ID, and a `notarytool store-credentials` profile. See `adr/0005-signing-approach.md`.
 - *(Done 2026-10-28.)* **Phase 10 needed a second macOS user account** on this M1 (the agreed clean-install

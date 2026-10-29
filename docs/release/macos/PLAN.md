@@ -437,8 +437,8 @@ Gatekeeper wording and the steps that cleared it are recorded verbatim. Recorded
 
 ---
 
-### Phase 11 — Developer ID signing and notarization · model: Sonnet · **status: BLOCKED**
-**Goal:** the public-distribution gate. Cannot start without credentials.
+### Phase 11 — Developer ID signing and notarization · model: Sonnet · **status: DEFERRED by the maintainer (2026-10-30)**
+**Goal:** the public-distribution gate. Cannot start without credentials. The maintainer chose not to do it for now: testers get a guide to approve the unnotarized app in System Settings (`docs/MACOS_FIRST_LAUNCH.md`). Release builds are planned for GitHub CI/CD later; the CI job will need the credentials below as secrets if this is ever picked up.
 
 Blocked on, exactly: (1) an Apple Developer Program enrollment; (2) a **Developer ID
 Application** certificate + private key in the login keychain (`security find-identity -v
@@ -458,7 +458,7 @@ unsigned-by-Apple Python extension modules and JIT-ish ML code); submit the `.dm
 
 ---
 
-### Phase 12 — Checksums, provenance, docs and checklist · model: Sonnet · **status: TODO**
+### Phase 12 — Checksums, provenance, docs and checklist · model: Sonnet · **status: DONE (2026-10-30; uncommitted; checklist lines 1–2 ticked, line 3 left open on evidence)**
 **Goal:** make the artifact reproducible-on-paper and tick only what has logged evidence.
 
 Steps: write `docs/release/macos/V0_1_MACOS_TESTING.md` in the shape of

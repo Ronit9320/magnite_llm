@@ -1,7 +1,7 @@
 # ADR 0005 — Signing: ad-hoc now, Developer ID deferred
 
 - Date: 2026-10-23
-- Status: Accepted (Developer ID work BLOCKED)
+- Status: Accepted (Developer ID work BLOCKED). Update 2026-10-30: the maintainer deferred Developer ID/notarization indefinitely; users approve the app through Privacy & Security, documented in `docs/MACOS_FIRST_LAUNCH.md`.
 
 ## Context
 

@@ -7,7 +7,8 @@ cloud training are excluded.
 
 **Development preview:** source builds are available. Release verification and
 packaging are still in progress; see the [release checklist](RELEASE_CHECKLIST.md).
-Linux has development-test evidence. macOS and Windows are not yet verified.
+Linux has development-test evidence. A macOS Apple-silicon testing `.dmg` has local verification evidence but is ad-hoc signed and not
+notarized; see the [macOS verification record](docs/release/macos/V0_1_MACOS_TESTING.md). Windows is not yet verified.
 
 Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
 
@@ -24,10 +25,10 @@ Capture the current interface using the [screenshot instructions](docs/release/S
 
 | Workflow | Input / dependency | Current status |
 | --- | --- | --- |
-| GGUF inference | GGUF weights, llama-cpp-python | Tiny-model checks recorded on Linux; hardware acceleration depends on the installed build |
+| GGUF inference | GGUF weights, llama-cpp-python | Tiny-model checks recorded on Linux; on macOS arm64 (M1) verified up to 1.5B models with Metal; hardware acceleration depends on the installed build |
 | Transformer inference | Compatible HF/local transformer weights, `[ml]` | torch path exercised with tiny models |
-| LoRA training | Transformer base weights and JSONL/CSV/text dataset, `[ml]` | Tiny-model workflow exercised |
-| QLoRA training | Supported GPU and bitsandbytes quantization, `[ml]` | Historical tiny-model check; not a promise of support on every device |
+| LoRA training | Transformer base weights and JSONL/CSV/text dataset, `[ml]` | Tiny-model workflow exercised; on macOS arm64 runs on MPS (12-step runs, M1) |
+| QLoRA training | Supported GPU and bitsandbytes quantization, `[ml]` | Historical tiny-model check; not a promise of support on every device; not supported on macOS |
 | Trained adapter inference | PEFT adapter and matching base model, `[ml]` | Activation restarts torch; clearing unloads the model |
 | RAG | sentence-transformers; pypdf for PDF, both in `[ml]` | Local SQLite/NumPy retrieval; first use may download embedding weights |
 | vLLM / Ollama | Separately installed engine/service | Integrations exist; live release verification pending |
@@ -84,8 +85,10 @@ model hub caches and Qt settings have separate locations. See
 Training, inference, and document processing run locally. Model searches and
 weight downloads contact Hugging Face; Ollama uses its configured service URL.
 There is no application telemetry implementation. Cached weights are needed
-for offline work. The backend is intended for local desktop use and currently
-has no application authentication layer.
+for offline work. The backend is intended for local desktop use. When the app
+launches it, every request needs a per-launch secret and a loopback `Host`; a
+backend you start by hand without `MAGNITE_API_TOKEN` has no credential check.
+This protection has been verified on macOS only.
 
 ## Development and release
 

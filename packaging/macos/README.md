@@ -40,10 +40,10 @@ Planned contents:
 | `probe_hf_cache.py` | 6 ✔ | ISSUE-007: backend HF-cache scan/delete on a clone of a shared-blobs cache |
 | `build_dmg.sh` | 7 ✔ | gate on `verify_bundle.py`, then an `hdiutil` UDZO image (`Magnite.app` + `Applications` link) and `dist/SHA256SUMS-macos` |
 | `verify_installed.sh` | 8 ✔ | full acceptance set on an installed app: theme/ui checks, 6 selftests, `live_workflow.py`, screenshots, signature |
-| `stage_clean_install.sh` | 10 | build the second-account kit in `/Users/Shared` (quarantined dmg copy, `CLEAN_INSTALL.md`, results form) |
+| `stage_clean_install.sh` | 10 ✔ | build the second-account kit in `/Users/Shared` (quarantined dmg copy, `CLEAN_INSTALL.md`, results form) |
 | `qt_notices.py` | fix ✔ | generate `licenses/qt/` (Qt LGPL/GPL texts + third-party notices for this Qt build) from Qt's `qt_attribution.json` at the pinned tag |
 | `check_dmg.sh` | 7 ✔ | mount read-only, check layout, run `smoke_bundle.sh` on the app inside the volume, detach |
-| `TESTING.md` | 12 | tester instructions, including the Gatekeeper steps |
+| `TESTING.md` | 12 ✔ | tester instructions, including the Gatekeeper steps |
 | `sign_and_notarize.sh` | 11 | Developer ID signing + notarization (**BLOCKED**, no certificate) |
 
 Requirements on the build host: Command Line Tools, CMake, `uv`, and the pinned
