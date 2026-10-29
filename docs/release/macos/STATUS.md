@@ -4,48 +4,56 @@
 that phase, then stop.** Do not re-read `RELEASE_CHECKLIST.md` or other long docs
 unless the current phase names a specific section.
 
-- Last updated: 2026-10-23 19:50 IST
-- Branch: `release/v0.1-macos`
-- Current phase: **Phase 10 — Clean-install proxy verification** (PREPARED — **waiting for the maintainer** to run `CLEAN_INSTALL.md` in a second account)
-- Last completed: **Phase 9 — clean quit / upgrade / removal PASS; force-kill orphans the backend, which accumulates on relaunch
-  (ISSUE-001 confirmed); real user data backed up and restored byte-identical**
-- Suggested model for the next phase: **Sonnet** (per the plan)
+- Last updated: 2026-10-28
+- Branch: `release/v0.1-macos` — **uncommitted local changes, by maintainer instruction (no git commits)**
+- Current phase: **Phase 12 — Checksums, provenance, docs and checklist** (TODO; Phase 11 stays BLOCKED)
+- Last completed: **Phase 10 — clean-install proxy (2026-10-28), DONE as a proxy**:
+  - Standard account `tester`, quarantined download, Open Anyway;
+  - the app ran from `/Applications` under the bundled `python3 -B -I`;
+  - `smoke_bundle.sh` 6/6 PASS; one real chat replied in under 1 s.
+  - **Gap:** the Gatekeeper dialog wording was not captured. §7b (cross-account) was skipped.
+- Suggested model for the next phase: **Sonnet**
 
-## ⚠ Decisions needed from the maintainer (not blocking Phase 7)
+## Decisions
 
-1. **ISSUE-010 — blocks Phase 8.** "Use 4-bit QLoRA" is on by default, and the TRAINING/ADAPTER selftests send `"4bit"`; the macOS
-   runtime has no bitsandbytes, so both fail. Options are in `ISSUES.md` (recommended: a capability-aware UI and selftests). This is a
-   shared-code change, so it needs approval.
-2. **ISSUE-007.** Raise the `huggingface_hub` pin to ≥ 1.33 (both platforms), or document the disk leak on delete.
-3. **ISSUE-008.** Lock the transitive Python deps before the tester build (affects Linux too).
-4. **ISSUE-001 (confirmed in Phase 9).** A force-quit or crash leaves the backend running, and relaunching adds another one on the same
-   `~/.magnite`. The recommended fix is a parent-PID watchdog in `backend/main.py` (macOS-guarded); it needs approval.
+All fixes (ISSUE-001/005/007/008/009/010/011) are in place and **uncommitted**; see `DECISIONS.md` and `LOG.md`.
+- ISSUE-009 needs the maintainer's **legal sign-off** on the bundled Qt notices before anything ships.
+- ISSUE-002 and ISSUE-003 are accepted limitations. Phase 10 did not reproduce the 10 s pause at chat time, but model-load time was not
+  measured. The Gatekeeper wording is still uncaptured.
+- ISSUE-004: keep an eye on disk space.
+- Current dmg: `48050836…` (320 MB); acceptance 11/11 (developer account), smoke 6/6 (second account).
 
-## Next exact commands (Phase 10 — read its section in `PLAN.md`)
-
-**Prepared on 2026-10-23:** the kit is in `/Users/Shared/magnite-clean-install/`. When the maintainer reports back, read its `RESULTS.md`, log it
-verbatim in `LOG.md` (Gatekeeper wording, first-chat time, smoke output), update ISSUE-002/003, and mark Phase 10 DONE (as a **proxy**:
-the clean-machine checklist line stays unticked). To rebuild the kit: `bash packaging/macos/stage_clean_install.sh`.
-
-Phase 10 **needs the maintainer**: a second macOS user account (name it, or run `CLEAN_INSTALL.md` there yourself). An agent in this
-account cannot click through Gatekeeper dialogs in another user's GUI session.
+## Next exact commands (Phase 12 — read its section in `PLAN.md`)
 
 ```sh
 cd /Users/architbhuta/magnite_llm
-# 1. write docs/release/macos/CLEAN_INSTALL.md (tester script: copy dmg, open, drag to /Applications, record the dialog verbatim,
-#    Privacy & Security -> Open Anyway, then run verify_installed.sh or at least --theme-check, --selftest and one real chat)
-# 2. mark a COPY of the dmg as downloaded (do not touch the original artifact's checksum):
-cp dist/Magnite-0.1.0-test.1-arm64.dmg "$TMPDIR/Magnite-download.dmg"
-xattr -w com.apple.quarantine "0181;$(printf %x $(date +%s));Safari;" "$TMPDIR/Magnite-download.dmg"
-# 3. hand that copy to the second account (e.g. /Users/Shared) and follow CLEAN_INSTALL.md there
+(cd dist && shasum -a 256 -c SHA256SUMS-macos)
+# write docs/release/macos/V0_1_MACOS_TESTING.md (shape of docs/release/V0_1_LINUX_TESTING.md), packaging/macos/TESTING.md,
+# a macOS section in packaging/README.md, README.md verification matrix; tick only evidenced macOS lines in RELEASE_CHECKLIST.md
 ```
 
-Phase 10 cautions:
-- Quarantine changes only xattrs, not the dmg's bytes, but use a copy anyway so `dist/` stays exactly what was checksummed.
-- The second account has a **cold Metal shader cache**, so time the first chat (ISSUE-002, ~10 s expected), and a cold HF cache.
-- `spctl` already says `rejected` (ad-hoc, not notarized). Expect "cannot be opened because Apple cannot check it for malicious software"
-  or the newer wording, and record it verbatim.
-- `/Applications` is shared by both accounts. Remove the test install afterwards, as agreed (Phase 9 decision).
+Phase 12 cautions:
+- **Do not run the plan's `git add`/`git commit` lines.** The no-commit rule below overrides them.
+- `ML_MATRIX.md` is the only source of ML claims.
+- Do **not** quote Gatekeeper wording that was never captured. Describe the flow (blocked → Privacy & Security → Open Anyway), or have
+  the maintainer capture the wording first: reinstall from the kit in `tester` and screenshot it.
+- Put the "not claimed" items into V0_1_MACOS_TESTING.md:
+  - no notarization;
+  - no truly clean machine (machine-wide Homebrew/python3 were visible to the proxy account);
+  - no Intel;
+  - no macOS 14/15;
+  - the cross-account API check (§7b) not run.
+- `TESTING.md`: "the first time a model is loaded may pause ~10 s while macOS prepares GPU shaders". Also the force-quit note, and the
+  prefs domain `com.magnite-local.Magnite LLM` for uninstall.
+
+## Things learned in Phase 10 that later phases must respect
+
+- `packaging/macos/clean_install_collect.sh` (staged as `collect.sh`) records everything a tester would paste. Ask the tester only for
+  clicks, screenshots and timings.
+- Screenshots: no files reached the kit folder. It is unclear whether any were taken, or whether the `screencapture location`
+  redirect failed. If wording matters, ask the tester to type the dialog text into the chat as well.
+- Homebrew under `/opt/homebrew` and `/usr/local/bin/python3` are visible to every account. A second account is only a partial proxy for a clean Mac.
+- The Metal compile cost lands at **model load**. Time the load, not just the first reply, and keep the backend log before cleanup.
 
 ## Things learned in Phase 9 that later phases must respect
 
@@ -138,7 +146,7 @@ Phase 10 cautions:
 - **Phase 11 (Developer ID signing + notarization) is BLOCKED.** Needs: Apple Developer
   Program enrollment, a Developer ID Application certificate in the login keychain, the
   Team ID, and a `notarytool store-credentials` profile. See `adr/0005-signing-approach.md`.
-- **Phase 10 needs a second macOS user account** on this M1 (the agreed clean-install
+- *(Done 2026-10-28.)* **Phase 10 needed a second macOS user account** on this M1 (the agreed clean-install
   proxy). Its name must be supplied, or the maintainer runs `CLEAN_INSTALL.md` there.
 - Open, non-blocking issues: ISSUE-001 (no macOS parent-death signal; verify in Phase 9), ISSUE-004 (disk, 21 GiB free),
   ISSUE-005 (test/`_remove_hf` symlink handling), ISSUE-007 (hub 1.30 leaks disk on delete for shared-blobs caches; decision), ISSUE-008 (unpinned transitive deps; before Phase 7/12),
@@ -147,7 +155,11 @@ Phase 10 cautions:
 
 ## Standing rules for every session
 
-- One phase per session. Stop at the acceptance check and say it is safe to `/clear`.
+- **NO GIT COMMITS (maintainer instruction, 2026-10-24).** Keep every change as uncommitted local work. Do not `git commit`, amend, push,
+  merge or stash-drop. The phase commits up to `ef173fd` exist only locally and have never been pushed. Builds made from the
+  uncommitted tree record `working_tree_modified: true` in `build.json`, which is accurate and expected now.
+
+- One phase per session. Stop at the acceptance check and say it is safe to `/clear` (no commit; see the rule above).
 - Update `STATUS.md`, `LOG.md` and `PLAN.md` statuses as work happens, not at the end.
 - Shared-file edits (`app/CMakeLists.txt`, `app/src/backend_manager.cpp`,
   `packaging/prepare_runtime.py`) must be additive and platform-guarded, logged in

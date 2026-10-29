@@ -3,7 +3,7 @@
 #
 # Usage: bash packaging/macos/stage_clean_install.sh [kit-dir]   (default /Users/Shared/magnite-clean-install)
 # Copies the checksummed dmg, marks the COPY as downloaded by Safari (com.apple.quarantine), and adds the tester
-# script, smoke_bundle.sh and a RESULTS.md form. dist/ is never modified. Refuses to overwrite filled-in results.
+# script, smoke_bundle.sh, the collect.sh helper and a RESULTS.md form. dist/ is never modified. Refuses to overwrite filled-in results.
 set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 kit="${1:-/Users/Shared/magnite-clean-install}"
@@ -21,6 +21,7 @@ cp "$dmg" "$kit/Magnite-download.dmg"
 xattr -w com.apple.quarantine "0181;$(printf %x "$(date +%s)");Safari;" "$kit/Magnite-download.dmg"
 cp "$repo_dir/packaging/macos/smoke_bundle.sh" "$repo_dir/docs/release/macos/CLEAN_INSTALL.md" "$kit/"
 cp "$repo_dir/packaging/macos/clean_install_results.md" "$kit/RESULTS.md"
-chmod 0777 "$kit"; chmod 0644 "$kit/Magnite-download.dmg" "$kit/CLEAN_INSTALL.md"; chmod 0755 "$kit/smoke_bundle.sh"; chmod 0666 "$kit/RESULTS.md"
+cp "$repo_dir/packaging/macos/clean_install_collect.sh" "$kit/collect.sh"
+chmod 0777 "$kit"; chmod 0644 "$kit/Magnite-download.dmg" "$kit/CLEAN_INSTALL.md"; chmod 0755 "$kit/smoke_bundle.sh" "$kit/collect.sh"; chmod 0666 "$kit/RESULTS.md"
 echo "kit ready in $kit:"; ls -l "$kit"
 echo "quarantine: $(xattr -p com.apple.quarantine "$kit/Magnite-download.dmg")"

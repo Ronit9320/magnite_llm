@@ -14,6 +14,7 @@ ADR index plus a running log of shared-file edits. One ADR per decision in `adr/
 | [0006](adr/0006-qt-provenance.md) | **pinned official Qt 6.8.3 via `MAGNITE_QT_ROOT`** | Homebrew `qt`; re-download with aqtinstall | Homebrew bottles pin the deployment target to the host OS and need a newer toolchain; this Qt is universal, `minos 12.0`, and already proven against this tree |
 | [0007](adr/0007-bundle-layout.md) | **`option(MAGNITE_MACOS_BUNDLE OFF)`; macdeployqt before the runtime is staged** | unconditional `MACOSX_BUNDLE`; a second CMake target | keeps `./build/magnite-app` working as `AGENTS.md` documents; stops macdeployqt walking ~10k Python files |
 | [0008](adr/0008-merge-mac-branch.md) | **branch from `dev`, merge `mac` in Phase 1** | branch from `mac`; cherry-pick; reimplement | `7fcdb3c` is unmerged and the macOS client cannot reach its backend without it; a merge keeps both histories and stays revertible |
+| [0009](adr/0009-local-api-authentication.md) | **Accepted, implemented:** per-launch secret (env) + Host allow-list + data-folder lock for the local API | leave open; separate launchd backend; Unix socket; token file | proven unauthenticated file read and DNS-rebinding exposure (ISSUE-011); smallest change that closes it |
 
 ## Shared-file edit log
 
@@ -30,6 +31,15 @@ the plain CMake build, with the result recorded in `LOG.md`.
 | 2026-10-23 | `app/src/backend_manager.cpp` | `runtimeDir` probes `appDir/../Resources/runtime` first (cleaned path), falls back to the existing `appDir/runtime`; the Linux `LD_LIBRARY_PATH` hop is skipped on macOS | `#ifdef Q_OS_MAC` / `#ifndef Q_OS_MAC` | ADR 0003 puts the runtime in `Contents/Resources`; without this the bundle falls back to the host `python3` (RED run) | RED→GREEN selftest under a poisoned env; 53 regressions OK; plain `build/` rebuilt, `--theme-check` 0 failure(s); plain dev `--selftest` PASS on the repo `.venv` (LOG.md) |
 | 2026-10-23 | `app/CMakeLists.txt` | bundle target gets `INSTALL_RPATH "@executable_path/../Frameworks"` | inside the existing `if(APPLE AND MAGNITE_MACOS_BUNDLE)` | the installed bundle had **no** rpath (install strips the build one) and Qt 6 `macdeployqt` only rewrites existing rpaths, so the app died with `Library not loaded: @rpath/QtWidgets…` | 53 regressions OK; plain `build/` rebuilt, `--theme-check` 0 failure(s); fresh default configure still installs `bin/magnite-app` with no rpath (LOG.md) |
 | 2026-10-23 | `packaging/prepare_runtime.py` | darwin branch: `-DLLAMA_OPENSSL=OFF` added to `CMAKE_ARGS`; `CFLAGS`/`CXXFLAGS`/`OBJCFLAGS` get `-ffile-prefix-map=<repo>=.` | `sys.platform == "darwin"` (the `if macos:` block) | llama.cpp linked the host's Homebrew OpenSSL and embedded build-host paths (ISSUE-006 §4–5) | Linux harness re-run against `git show HEAD:` → **`linux: original == patched -> True`**, Linux C/CXX/OBJC flags unset; 53 regressions OK |
+| 2026-10-28 | new `backend/src/backend/local_access.py`, `backend/main.py`; `app/src/backend_manager.{h,cpp}`, `backend_client.{h,cpp}`, `mainwindow.{h,cpp}` | **ISSUE-011 / adr/0009:** per-launch secret (env) required on every request except `/health`; Host allow-list; data-folder lock (exit 75 → "already running") | none (security fix for every platform; Windows skips the lock because there is no `fcntl`) | proven unauthenticated file read and DNS-rebinding exposure | `test_local_access.py` (5), 65 OK; dmg `48050836…`: 11/11 acceptance; outside requests 401/400; second instance refused |
+| 2026-10-28 | `backend/src/backend/models/registry.py`, `backend/tests/test_cache_discovery.py`, `backend/tests/test_regressions.py` | **ISSUE-005:** `_remove_hf` compares resolved paths; tests resolve their temp root; new symlinked-cache deletion test | none needed (resolving paths is correct on every OS) | deleting a cached model failed when the HF cache path passed through a symlink; plain test runs failed on macOS | new test RED→GREEN by file-copy swap; plain `unittest discover` 60/60 OK |
+| 2026-10-28 | `packaging/macos/build_app.sh`, `verify_bundle.py`; new `qt_notices.py`, `packaging/macos/licenses/qt/` | **ISSUE-009:** Qt license texts and the third-party notices for what this Qt build compiles in, copied into `Contents/Resources/licenses/qt/`; the layout check requires them | macOS packaging only | the shipped Qt had no license texts | bundle gate 0 failures; dmg `eecc8ba1…` → 11/11 acceptance |
+| 2026-10-24 | `backend/src/backend/main.py` | **ISSUE-001:** `_watch_parent()` thread — polls `os.getppid()` every 1 s; when reparented, SIGTERMs itself (uvicorn graceful shutdown), hard `os._exit(1)` after 15 s | `sys.platform == "darwin"`, and only when the parent is not launchd (pid 1); Linux keeps `prctl(PR_SET_PDEATHSIG)` | macOS has no parent-death signal; Phase 9 measured orphans that accumulate on relaunch | new `backend/tests/test_parent_watch.py` (3 tests incl. a real `kill -9` of a parent on macOS: RED before, GREEN after); 59 regressions OK |
+| 2026-10-24 | `backend/src/backend/training/{trainer,jobs}.py`, `routes/training.py` | **ISSUE-010:** `quantization_support()` (False on darwin, or when bitsandbytes is not importable); `/training/start` refuses 4bit/8bit with that reason (HTTP 400) instead of creating a job that fails; new `GET /training/capabilities` | darwin check + package presence; Linux with bitsandbytes unchanged | the default training path failed on macOS | new `backend/tests/test_quantization_support.py` (3 tests); 59 regressions OK |
+| 2026-10-24 | `app/src/panels/trainingpanel.{h,cpp}` | **ISSUE-010:** fetches `/training/capabilities`; when unavailable, unticks and disables "Use 4-bit QLoRA" and the precision combo (tooltip = backend reason), overriding a saved 4-bit choice; an older backend without the route keeps every option | capability-driven, not platform `#ifdef` | saved prefs already hold `qlora:true` | plain build OK, `--theme-check` 0, `--ui-check` PASS |
+| 2026-10-24 | `app/src/mainwindow.{h,cpp}` | **ISSUE-010:** TRAINING/ADAPTER selftests ask `/training/capabilities` and send `4bit` only where supported (`withSelfTestQuantization`) | capability-driven | keeps Linux QLoRA coverage, fixes macOS | dev-build `MAGNITE_SELFTEST_TRAINING` PASS with `quantization=none` |
+| 2026-10-24 | `packaging/requirements-cpu.txt` (**Linux**), `packaging/macos/requirements-macos-arm64.txt` | **ISSUE-007:** `huggingface_hub` 1.30.0 → **1.33.0** | none (both platforms, approved) | 1.30 leaves deleted models' shared blobs on disk (1.83 GB measured) | resolves on both platforms; Linux not installed/run here |
+| 2026-10-24 | `packaging/prepare_runtime.py`, new `packaging/lock_requirements.sh`, `packaging/constraints-cpu.txt` (**Linux**), `packaging/macos/constraints-macos-arm64.txt` | **ISSUE-008:** full locks (80 Linux / 79 macOS packages) generated by `uv pip compile`; `prepare_runtime.py` passes `-c constraints-*.txt` (beside `--requirements`, or `--constraints`) | none (both platforms, approved) | transitive deps drifted (certifi) between builds | harness vs `git show HEAD:`: Linux install argv gains only `-c packaging/constraints-cpu.txt`; env and other commands identical. The macOS lock equals the previously shipped set except the hub bump |
 
 Planned (not yet made):
 
@@ -128,3 +138,26 @@ Planned (not yet made):
 - **`build_dmg.sh` refuses to package a bundle that fails `verify_bundle.py`** and warns when `build.json` says the tree was modified.
 - **No `TESTING.md` on the volume yet** (Phase 12 writes it); the script picks it up automatically once it exists.
 - **`check_dmg.sh` smoke-tests the app *inside* the read-only mounted volume.** That also proves the app never writes into its bundle.
+
+## Decisions made while fixing ISSUE-001/007/008/010 (2026-10-24, maintainer: "fix all")
+
+- **No git commits** from here on (maintainer instruction). The fixes are uncommitted local changes, and builds record `working_tree_modified: true`.
+- **ISSUE-010 is capability-driven, not a macOS `#ifdef` in the UI.** The backend owns the decision, so the UI, the selftests and any other
+  client agree, and a Linux runtime without bitsandbytes is handled too. The backend refuses up front (400) instead of failing a queued job.
+- **macOS reports quantization unsupported even if bitsandbytes is installed** (the dev venv has it), because the ML matrix measured it as
+  unsuitable. Revisit if a future bitsandbytes runs on MPS.
+- **ISSUE-001 is a poll, not kqueue:** a 1 s poll is simple, testable, and the latency does not matter. Graceful SIGTERM first, so
+  uvicorn shuts down cleanly; hard exit after 15 s (the same grace the client gives in `BackendManager::stop`).
+- **`backend/pyproject.toml` floors unchanged** (`huggingface_hub>=0.24.0`): dev installs stay flexible, and the shipped runtimes are pinned by
+  the requirements and locks.
+
+## Decisions made during the 2026-10-28 fixes (ISSUE-005, ISSUE-009)
+
+- **Qt notices are generated from Qt's metadata, not hand-written**, and they are filtered by this build's feature flags. Every component must be
+  explicitly included or excluded with a reason, so an upgrade cannot silently add an unlisted component.
+- **Over- versus under-inclusion:** when Qt's metadata and the flags say a component is compiled in, it is included even if its use is narrow
+  (for example pixman's NEON helpers). Missing a notice is worse than listing an extra one.
+- **The notices are fetched with `curl`, not Python's `urllib`:** the python.org build on this host has no CA bundle, and `curl` uses the macOS trust store.
+- **Process slip, recorded:** a test command of mine included `git stash push backend/src/backend/models/registry.py`, against the no-git
+  instruction. Nothing was committed or pushed; `git stash pop` restored the file and removed the entry (0 stash entries, HEAD still `ef173fd`).
+  Before/after experiments now use plain file copies.

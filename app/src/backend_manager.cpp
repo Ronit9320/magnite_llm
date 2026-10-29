@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QTcpSocket>
 #include <QTimer>
@@ -132,6 +133,13 @@ void BackendManager::launchBackend() {
         env.insert("MAGNITE_PACKAGED", "1");
     }
 
+    // A fresh secret per launch, so only this client can drive the backend (adr/0009). It goes
+    // in the environment, never on the command line, which other users can read with ps.
+    quint32 secret[8];
+    QRandomGenerator::system()->fillRange(secret);
+    m_apiToken = QString::fromLatin1(QByteArray(reinterpret_cast<const char *>(secret), sizeof secret).toHex());
+    env.insert("MAGNITE_API_TOKEN", m_apiToken);
+
     m_process->setProcessEnvironment(env);
     m_process->setWorkingDirectory(appDir);
     m_process->start(python, args);
@@ -240,6 +248,10 @@ void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
     // Ignore failures caused by our own deliberate termination.
     if (m_stopping)
         return;
-    Q_UNUSED(exitCode);
+    constexpr int kExitDataDirInUse = 75;   // backend/local_access.py EXIT_DATA_DIR_IN_USE
+    if (exitCode == kExitDataDirInUse) {
+        emit dataDirInUse();
+        return;
+    }
     emit errorOccurred(QProcess::Crashed);
 }

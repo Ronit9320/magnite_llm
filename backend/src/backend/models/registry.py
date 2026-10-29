@@ -247,7 +247,9 @@ class ModelRegistry:
         from pathlib import Path
         from huggingface_hub import scan_cache_dir
 
-        snapshot = Path(rec.path).absolute()
+        # Resolve symlinked ancestors (macOS /var -> /private/var, a symlinked HF_HOME):
+        # scan_cache_dir reports resolved snapshot paths.
+        snapshot = Path(rec.path).resolve()
         if not snapshot.exists():
             return
         if snapshot.parent.name != "snapshots":
@@ -255,7 +257,7 @@ class ModelRegistry:
         cache = scan_cache_dir(snapshot.parent.parent.parent)
         for repo in cache.repos:
             for revision in repo.revisions:
-                if revision.snapshot_path == snapshot:
+                if Path(revision.snapshot_path).resolve() == snapshot:
                     cache.delete_revisions(revision.commit_hash).execute()
                     return
         raise ValueError("Cannot safely identify cached model revision; files were not removed")

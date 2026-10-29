@@ -22,7 +22,7 @@ class CacheDiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()   # the backend reports resolved paths (macOS /var symlink)
         self.cache = self.root / 'hub'
         self.cache.mkdir()
         self.store = ModelStore(str(self.root / 'models.db'))

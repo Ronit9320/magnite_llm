@@ -7,6 +7,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QNetworkRequest;
 class QJsonDocument;
 class QJsonObject;
 
@@ -24,6 +25,8 @@ public:
     explicit BackendClient(QObject *parent = nullptr);
 
     void setBaseUrl(const QString &url) { m_baseUrl = url; }
+    // Per-launch secret the backend requires on every request (empty: send none).
+    void setAuthToken(const QString &token) { m_authToken = token; }
     QString baseUrl() const { return m_baseUrl; }
     bool isReady() const { return !m_baseUrl.isEmpty(); }
 
@@ -43,10 +46,12 @@ public:
     void abortStream();
 
 private:
+    QNetworkRequest request(const QString &path) const;
     void send(const QString &method, const QString &path,
               const QJsonObject &body, Callback onDone);
 
     QNetworkAccessManager *m_nam;
     QString m_baseUrl;
+    QString m_authToken;
     QNetworkReply *m_streamReply = nullptr;
 };

@@ -54,6 +54,10 @@ for item in runtime build-info licenses TESTING.md; do
     fi
 done
 
+# Qt license texts and third-party notices (ISSUE-009); regenerate with packaging/macos/qt_notices.py.
+mkdir -p "$app/Contents/Resources/licenses"
+ditto "$repo_dir/packaging/macos/licenses/qt" "$app/Contents/Resources/licenses/qt"
+
 python3 "$repo_dir/packaging/macos/finalize_bundle.py" "$app"
 python3 "$repo_dir/packaging/macos/verify_bundle.py" "$app"
 du -sh "$app"

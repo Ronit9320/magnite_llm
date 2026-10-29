@@ -162,7 +162,8 @@ def check_layout(app: Path) -> list:
         problems.append(f"bundled interpreter missing: {python}")
     for rel in ("Frameworks/QtCore.framework", "Frameworks/QtWidgets.framework", "Frameworks/QtSvg.framework",
                 "PlugIns/platforms/libqcocoa.dylib", "PlugIns/platforms/libqoffscreen.dylib",
-                "PlugIns/imageformats/libqsvg.dylib", "Resources/qt.conf"):
+                "PlugIns/imageformats/libqsvg.dylib", "Resources/qt.conf",
+                "Resources/licenses/qt/LGPL-3.0-only.txt", "Resources/licenses/qt/README.md"):
         if not (contents / rel).exists():
             problems.append(f"missing {rel}")
     return problems

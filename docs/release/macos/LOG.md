@@ -640,3 +640,255 @@ back up → test → restore real data; leave `/Applications` as it was.
   - `cp` of the quarantined dmg keeps the flag but rewrites it to `0181;…;;` without `Safari`. `CLEAN_INSTALL.md` was corrected to accept that.
   - Re-running the staging script is safe.
   - The script refuses to overwrite a `RESULTS.md` that has been filled in.
+
+---
+
+## 2026-10-24 02:05 IST — Fixes for ISSUE-001, -007, -008, -010 (maintainer: "fix all"; **no git commits** from here on)
+
+All changes are uncommitted local edits on `release/v0.1-macos` (HEAD `ef173fd`). The maintainer asked for nothing to go into git; nothing
+was ever pushed (`git log --not --remotes` lists the 15 local phase commits; origin has no macOS branch). Logs: `build/packaging/fix*-*`.
+
+**Code and packaging changes** (details in `DECISIONS.md`):
+- `backend/main.py`: macOS parent watchdog.
+- `training/{trainer,jobs}.py` + `routes/training.py`: `quantization_support()`, a 400 on unsupported 4/8-bit, and `GET /training/capabilities`.
+- `trainingpanel.{h,cpp}`: capability-aware QLoRA controls.
+- `mainwindow.{h,cpp}`: capability-aware selftests.
+- Requirements: hub 1.33.0 (both platforms); `lock_requirements.sh` + `constraints-*.txt`; `prepare_runtime.py -c`.
+- New tests: `test_parent_watch.py`, `test_quantization_support.py`.
+
+**Tests.**
+- `test_parent_watch` was RED before the fix: the real `kill -9` case gave "backend child survived its parent's SIGKILL". GREEN after.
+- `run_regressions.sh` → **59 tests OK** (53 + 6 new).
+- Plain build: no new warnings; `--theme-check` 0 failures; `--ui-check` PASS.
+- Dev-build `MAGNITE_SELFTEST_TRAINING` → `quantization=none`, `train done`, PASS.
+
+**Locks.**
+- `lock_requirements.sh`: Linux 80 packages (`torch==2.14.0+cpu`, bitsandbytes, hub 1.33.0); macOS 79.
+- The first macOS compile failed: uv's `aarch64-apple-darwin` target sits below the torch wheel's macOS 14 floor. Fixed with
+  `MACOSX_DEPLOYMENT_TARGET=14.0`.
+- The macOS lock equals the Phase 5 shipped set except hub 1.30.0 → 1.33.0. `pip` is part of Python itself.
+- Linux harness vs `git show HEAD:packaging/prepare_runtime.py`: install argv additions `['-c', '…/packaging/constraints-cpu.txt']`, removals
+  `[]`; env identical; other commands identical.
+
+**Rebuild** (`build_app.sh --fresh-runtime`, 3 min 26 s):
+- The install line contains `-c …/packaging/macos/constraints-macos-arm64.txt`; `runtime imports OK`.
+- `verify_bundle.py` **0 failure(s)** (368 Mach-O, all arm64, minos ≤ 14.0).
+- The installed package list **equals the lock**; `huggingface_hub==1.33.0`.
+- `build.json`: commit `ef173fd`, `working_tree_modified: true` (expected: the fixes are uncommitted).
+
+**dmg.**
+- `dist/Magnite-0.1.0-test.1-arm64.dmg`, **322 MB**, SHA-256 `1ad942a7899c5b1f0eb1cdaac8ba586c4ab71f94986fd5785d6bc2fa0f02464e`
+  (`dist/SHA256SUMS-macos`). It supersedes `f72686db…`.
+- `check_dmg.sh` → 0 failure(s).
+
+**Acceptance on the app copied out of the new dmg** (`verify_installed.sh`) — **11/11 PASS**:
+
+| Step | Time |
+|---|---|
+| theme-check | 10 s |
+| ui-check | 10 s |
+| selftest | 14 s |
+| PULL | 13 s |
+| INFERENCE | 14 s |
+| **TRAINING** | 18 s |
+| **ADAPTER** | 20 s |
+| RAG | 19 s |
+| live-workflow | 19 s |
+| screenshots | 11 s |
+| signature after all steps | intact |
+
+**ISSUE-001 on the packaged app:** GUI `kill -9` → backend exited **1.0 s** later, in 2 of 2 rounds; nothing left running.
+In Phase 9 the orphan was still alive at 60 s.
+
+**ISSUE-007 on the bundled runtime** (fresh clone of the real cache): hub 1.33.0, 0 warnings, delete ok, 0 dangling, **244 B** left unreferenced
+(was 1,829,250,588 B).
+
+**Phase 10 kit re-staged** with the new dmg (`1ad942a7…`, quarantined, blank `RESULTS.md`).
+
+**Not verified / not claimed:**
+- Linux: requirements and lock resolve, but no Linux build or run happened here.
+- Phase 9's `/Applications` lifecycle was not re-run. The changes do not touch install/upgrade/removal, and the force-kill case was re-tested above.
+
+**ML matrix re-measured on the fixed runtime** (2026-10-24, one full run of 17 cells, runtime of `ef173fd` + uncommitted fixes):
+- The verdicts match Phase 6: 13 PASS, 4 FAIL. The bundle signature is still valid afterwards.
+- The `qlora-*-shipped` cells now go through the app's `/training/start` validation (`app_gate=True` in `ml_matrix.py`), so they record what
+  a user sees: `4-bit/8-bit QLoRA is not supported on macOS. Choose quantization 'None' (LoRA trains on the Apple GPU).`
+  They no longer show the `pip install bitsandbytes` error.
+- `ML_MATRIX.md`'s hand-written verdict for QLoRA was updated to match.
+
+---
+
+## 2026-10-28 — Fixes for ISSUE-005 and ISSUE-009 (maintainer: "continue the fixes"; still no git commits)
+
+**ISSUE-005.**
+- Reproduced: a plain `unittest discover` gave 4 FAIL + 1 ERROR of 59.
+- Fix: `_remove_hf` compares resolved paths; the test root is resolved; a new symlinked-cache deletion test was added.
+- The new test was RED without the fix (`ValueError: Cannot safely identify cached model revision`) and GREEN with it.
+- A plain run now gives **60 tests OK**, with no `TMPDIR` workaround.
+
+**Process slip.**
+- That RED/GREEN command first ran `git stash push` on `registry.py`, which I should not have run under the no-git rule.
+- `git stash list` showed one entry, containing exactly the registry fix. `git stash pop` restored it.
+- Afterwards: 0 stash entries, HEAD `ef173fd`, 27 uncommitted files.
+- The RED/GREEN proof was then redone with a plain file copy. Nothing was committed or pushed.
+
+**ISSUE-009.**
+- `qt_notices.py` covers 59 Qt components from qtbase and qtsvg at `v6.8.3`: **37 included, 22 excluded with reasons**.
+- It ships 4 Qt license texts and 38 component license texts (372 KB), all checked to be real texts.
+- Its first run caught a typo in my exclusion list. A python.org Python without CA certificates made `urllib` fail, so it now uses `curl`.
+- `build_app.sh` copies the notices into `Contents/Resources/licenses/qt/`; `verify_bundle.py` requires them.
+
+**Rebuild and verification.**
+- `build_app.sh` → gate **0 failure(s)**. The notices are in the bundle, and the bundled `registry.py` has the fix.
+- `build_dmg.sh` → `dist/Magnite-0.1.0-test.1-arm64.dmg`, **320 MB**, SHA-256
+  `eecc8ba1d959f2f56b96ac641f76a0d35fe4d3e1bbba78ecedc1b6fc16b4c81d`. It supersedes `1ad942a7…`.
+- `check_dmg.sh` → 0 failure(s).
+- `verify_installed.sh` on the copy out of the dmg → **11/11 PASS**; signature intact.
+- Phase 10 kit re-staged with this dmg (quarantined, blank `RESULTS.md`).
+
+**Harness note:** a safety check refused `rmdir "$M"` with `M` derived from `mktemp`; the removal was left undone. The copy-out step now uses
+literal paths and leaves the empty mountpoint directory in place.
+
+---
+
+## 2026-10-28 — ISSUE-011: lock down the local API (adr/0009; maintainer: "do what you recommended"; no git)
+
+**Proof of the problem** (throwaway dev backend, plain `curl`, no credentials):
+- `POST /datasets/ingest {"path":"/etc/hosts"}` read the file (`rows 1, source /etc/hosts`).
+- `Host: evil.example` → 200.
+
+**Options weighed** (adr/0009): leave as is; a separate always-on backend (rejected: wider exposure); a Unix socket (strongest, but a rewrite
+of the app's networking); a token file; a per-launch env secret + Host allow-list + data-folder lock (**chosen**).
+
+**Implementation:** `backend/local_access.py` + `main.py`; `BackendManager`, `BackendClient` (one `request()` helper for every call),
+`MainWindow` (in-use message). Design refinement while planning: the middleware wraps the server in `main.py`, not the FastAPI app, because
+in-process tests send `Host: testserver`.
+
+**Tests.**
+- `test_local_access.py` was RED, then 4/5 passed. The remaining failure was my test's fault: the helper process discarded the lock handle,
+  so the lock was released at once. After the fix: 5/5.
+- Full suite **65 OK**. Dev-build `--selftest` and `--ui-check` PASS, with no developer-mode warning, so the secret was passed.
+
+**Rebuild.**
+- Bundle gate 0 failure(s); `local_access.py` is in the bundled backend.
+- dmg **320 MB**, SHA-256 `480508361da193be7b8bfb9cf39caff3829073baa9b14ad93aeadabf76ce61de` (supersedes `eecc8ba1…`).
+- `check_dmg.sh` 0 failure(s); `verify_installed.sh` on the copy out of the dmg: **11/11**.
+
+**Attack probes on the packaged app** (running with a scratch `MAGNITE_HOME`):
+
+| Request | Result |
+|---|---|
+| `/datasets` without a secret | **401** |
+| `/datasets` with a wrong secret | **401** |
+| ingest `/etc/hosts` without a secret | **401** |
+| fake Host | **400** |
+| `/health` | 200 (open on purpose) |
+
+- The secret is not on the backend command line (`python3 -B -I -m backend.main --port 0`).
+- Second copy on the same folder: `[selftest] backend error: Magnite is already running…`, exit 1; still 1 backend; the first copy kept
+  answering.
+- After quitting, nothing was left running.
+
+**Environment visibility, measured.**
+- `ps -Eww` shows my own process's marker variable.
+- For root processes it shows command lines (for example `/usr/sbin/systemstats --daemon`) but **not** environments.
+- So the env secret is hidden from other accounts but visible to the same user. ISSUE-011 and adr/0009 were corrected to say so.
+  `CLEAN_INSTALL.md` §7b adds the cross-account check.
+
+**Not verified here:** the cross-account refusal itself (Phase 10 §7b); Linux and Windows. Windows has no `fcntl`, so the lock is skipped there.
+`BackendClient::download` with the secret was not exercised by an app-level check (the export tests run in-process), but it uses the same
+`request()` helper.
+
+**Phase 10 kit** re-staged with dmg `48050836…` and the new §7b.
+
+---
+
+## 2026-10-28 04:15 IST — Phase 10: clean-install proxy run (maintainer, second account `tester`)
+
+**Who ran what.** The maintainer created a **Standard** account `tester` (uid 502), ran the kit there, then logged out and removed the
+install. To spare manual copy-paste I added `packaging/macos/clean_install_collect.sh` (staged as `collect.sh`; `start` / `running` /
+`finish`). It runs the `CLEAN_INSTALL.md` §1, §2, §5, §7 and §8 commands and appends their output to `auto-results.txt` in the kit.
+`stage_clean_install.sh` now copies it. The maintainer did the Finder/Gatekeeper clicks and the chat.
+
+**Artifact.** The kit dmg is `480508361da193be7b8bfb9cf39caff3829073baa9b14ad93aeadabf76ce61de`, the same as `dist/`.
+
+**`auto-results.txt`, verbatim:**
+
+```
+===== 1. Environment (2026-10-28 03:47:35, user tester) =====
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+tester
+uid=502(tester) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),701(com.apple.sharepoint.group.1),702(com.apple.sharepoint.group.2),100(_lpoperator)
+PATH=/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/opt/homebrew/bin
+python3: /usr/local/bin/python3
+brew: /opt/homebrew/bin/brew
+uv: not found
+ls: /Users/tester/.cache/huggingface: No such file or directory
+ls: /Users/tester/.magnite: No such file or directory
+/opt/homebrew
+ls: /Applications/Magnite.app: No such file or directory
+
+===== 2. Quarantine on the downloaded copy (2026-10-28 03:47:35, user tester) =====
+0181;6ae11529;Safari;
+
+===== 5. Processes while Magnite is open (2026-10-28 03:50:16, user tester) =====
+22187 tester           /Applications/Magnite.app/Contents/MacOS/Magnite
+22192 tester           /Applications/Magnite.app/Contents/Resources/runtime/python/bin/python3 -B -I -m backend.main --port 0
+
+===== 7. Automated check (2026-10-28 03:55:36, user tester) =====
+PASS  signature before run
+PASS  --theme-check: 0 failure(s)
+PASS  --selftest: [selftest] PASS (0 failures), backend health OK
+PASS  backend interpreter: bundled python3 -B -I
+PASS  no backend left running
+PASS  signature after run (bundle unmodified)
+0 failure(s); logs in /Users/tester/magnite-smoke
+nothing running
+
+===== 8. Clean up (2026-10-28 03:55:54, user tester) =====
+cleaned ~/.magnite, ~/magnite-smoke and the downloaded dmg
+```
+
+The smoke logs are in `/Users/Shared/magnite-clean-install/logs-tester/`.
+
+**What this shows.**
+
+- **Quarantine:** the downloaded copy carried the Safari flag.
+- **No App Translocation:** the app ran from `/Applications/...`.
+- **Bundled interpreter:** the backend ran under the bundled `python3 -B -I`. It did not use `/usr/local/bin/python3`, even though that was first on `PATH`.
+- **Selftest:** PASS in the new account, with a cold `~/.magnite` and a cold HF cache.
+- **Bundle unchanged:** the signature was intact after the run.
+- **Clean exit:** nothing was left running.
+
+**Proxy limits, measured.**
+
+- `tester` is **not** free of developer tools. Homebrew (`/opt/homebrew`) and a `python3` in `/usr/local/bin` are machine-wide, and both are on its `PATH`.
+- The app ignored both, which the §5 process line proves. Even so, this is not a machine without them.
+
+**Real chat (maintainer report, not timed by a tool).**
+
+- `Segilmez06/SmolLM2-135M-Instruct-Q4_K_M-GGUF` was downloaded.
+- Both messages replied in **"under a second or so"**.
+- The ~10 s cold Metal compile (ISSUE-002) was **not noticed**. Two caveats:
+  - the compile happens at **model load**, which was not timed (only time-to-first-words was);
+  - the backend log that would show `ggml_metal_library_init: loaded in …` was deleted by the §8 cleanup.
+
+  So the cold cost in a new account is **unverified**: either it happened during load, or it no longer occurs.
+
+**Not captured.**
+
+- **Gatekeeper wording.** No screenshots reached the kit folder, and the maintainer did not transcribe the dialogs, so the verbatim
+  dialog text is **missing**. The flow (blocked → Privacy & Security → Open Anyway → launched) was completed: the app was running at 03:50.
+- **§7b cross-account check (ISSUE-011).** Skipped; Magnite was not running in the developer account at the same time.
+
+**Cleanup.**
+
+- `/Applications/Magnite.app`: absent.
+- The image: no longer mounted.
+- The `tester` account still exists (deleting it is optional).
+
+**Verdict.** Acceptance is met except for one item. The app launches and passes `--selftest` in a second account, under a quarantined
+download. The "exact Gatekeeper wording recorded verbatim" item is **not met**. Phase 10 is DONE as a **proxy**, with that gap carried
+forward to Phase 11/12. The clean-machine checklist line stays unticked.

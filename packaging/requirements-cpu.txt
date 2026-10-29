@@ -4,7 +4,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 httpx==0.28.1
 pydantic==2.13.5
-huggingface_hub==1.30.0
+huggingface_hub==1.33.0
 llama-cpp-python==0.3.35
 tqdm==4.70.0
 anyio==4.15.0

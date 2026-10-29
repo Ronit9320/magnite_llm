@@ -349,7 +349,7 @@ SHA-256 `f72686db…d3ab43` in `dist/SHA256SUMS-macos`; `check_dmg.sh` 10/10 PAS
 
 ---
 
-### Phase 8 — Functional verification of the installed app · model: Sonnet · **status: DONE with 2 known failures (ISSUE-010)** (2026-10-23)
+### Phase 8 — Functional verification of the installed app · model: Sonnet · **status: DONE** (2026-10-23; **11/11** after the ISSUE-010 fix, 2026-10-24)
 **Goal:** run the full acceptance set against the installed bundle, not the build tree.
 
 ```sh
@@ -376,6 +376,7 @@ appended to `LOG.md`. Any failure goes to `ISSUES.md` and blocks the checklist t
 INFERENCE (llama.cpp), RAG, `live_workflow.py` (train → adapter → RAG chat → export/import → restart) and screenshots all pass.
 TRAINING and ADAPTER FAIL on the 4-bit QLoRA default (ISSUE-010). No orphans; signature intact. Re-run both after ISSUE-010 is fixed:
 `STEP_ENV=… ` or the whole script.
+**Re-run (2026-10-24, after the fixes):** dmg `1ad942a7…` → `verify_installed.sh` **11/11 PASS**, including TRAINING and ADAPTER.
 
 ---
 
@@ -399,12 +400,13 @@ leaves an orphan (R8) — recorded in `ISSUES.md` as a functional bug, not silen
 **Result (2026-10-23):** clean quit PASS; force-kill leaves an orphan that survives 60 s, keeps serving, and **accumulates on relaunch**
 (two backends on one `~/.magnite`); this is ISSUE-001, now confirmed. Upgrade in place PASS (data and prefs untouched, the app sees identical data). Removal
 PASS (only the prefs plist remains). The real data was backed up and then restored, verified identical by sha256 manifest.
+**After the ISSUE-001 fix (2026-10-24):** force-kill of the packaged app → the backend exits in 1.0 s (2/2); no orphan.
 **Idempotent:** yes. **Rollback:** reinstall from the `.dmg`.
 **Depends on:** Phase 8.
 
 ---
 
-### Phase 10 — Clean-install proxy verification (second user account) · model: Sonnet · **status: PREPARED — waiting for the maintainer** (kit staged 2026-10-23)
+### Phase 10 — Clean-install proxy verification (second user account) · model: Sonnet · **status: DONE (proxy, 2026-10-28)** — Gatekeeper wording not captured
 **Goal:** prove the bundle depends on nothing from the developer account, under a quarantined download.
 
 Steps: write `docs/release/macos/CLEAN_INSTALL.md` as a tester script; set
@@ -425,6 +427,13 @@ Gatekeeper wording and the steps that cleared it are recorded verbatim. Recorded
 **Rollback:** remove the app and the second account's `~/.magnite`.
 **Depends on:** Phase 7 (ideally after 9).
 **Needs you:** a second macOS user account must exist and I need to be told its name, or you run the script there yourself.
+**Result (2026-10-28):**
+- Run in Standard account `tester`; quarantined download; Open Anyway cleared it; the app ran from `/Applications` under the
+  bundled `python3 -B -I`.
+- `smoke_bundle.sh` **6/6 PASS**; one real chat (135M GGUF) replied in under 1 s.
+- Gaps: the Gatekeeper wording was not captured, and §7b was skipped.
+- Limit: Homebrew and `/usr/local/bin/python3` are machine-wide, so they were visible to `tester` (the app ignored them).
+  See `LOG.md`.
 
 ---
 

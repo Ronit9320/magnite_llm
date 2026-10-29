@@ -86,6 +86,19 @@ bash /Users/Shared/magnite-clean-install/smoke_bundle.sh /Applications/Magnite.a
 pgrep -fl backend.main || echo "nothing running"
 ```
 
+### 7b. Optional: can this account control the *other* account's Magnite? (security check, ISSUE-011)
+
+Only if Magnite is also running in the developer account right now (Fast User Switching keeps it running). In Terminal:
+
+```sh
+ps -axww -o pid,user,command | grep "backend.main" | grep -v grep          # note the other user's backend PID
+lsof -nP -iTCP -sTCP:LISTEN | grep python3                                 # its port (if lsof shows it)
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:<PORT>/datasets   # expected: 401 (refused)
+ps -Eww -o command= -p <PID> | grep -c MAGNITE_API_TOKEN                   # expected: 0 (the secret is not visible to you)
+```
+
+Paste the output into § 8 of `RESULTS.md`. A `200`, or a count of `1`, would be a security finding.
+
 ### 8. Clean up
 
 ```sh

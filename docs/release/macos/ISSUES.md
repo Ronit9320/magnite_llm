@@ -7,7 +7,7 @@ issues must be reflected in `STATUS.md` blockers when they gate a phase.
 
 ## ISSUE-001 — No parent-death signal on macOS: force-killed GUI can orphan the backend
 
-- Status: **OPEN — CONFIRMED in Phase 9 (2026-10-23); needs a fix decision** (not fixed as part of packaging)
+- Status: **FIXED (2026-10-24, uncommitted)** — macOS parent watchdog in `backend/main.py`; verified on the packaged app: backend exits 1.0 s after `kill -9` of the GUI (2/2)
 - Found: 2026-10-23 (code reading during the Phase 0 feasibility check)
 - Severity: functional bug, user-visible (stray `python` process holding a port and RAM)
 
@@ -53,6 +53,13 @@ if a cleaner solution is wanted.
 Severity is therefore higher than first written: a user who force-quits a hung app, then relaunches, ends up with two backends
 on one data directory. Recommendation stands (option 2, platform-guarded, in `backend/main.py`). It needs the maintainer's approval
 because it changes application source.
+
+**Fix (2026-10-24, approved "fix all").** On macOS, `_enable_parent_death_signal()` now starts a `parent-watch` thread (option 2 above).
+It polls `os.getppid()` every second. Once the backend has been reparented, it SIGTERMs itself, which takes uvicorn's graceful shutdown;
+if shutdown stalls, it calls `os._exit(1)` after 15 s. Linux keeps `prctl`. It is skipped when the parent is launchd (pid 1).
+- Tests: `backend/tests/test_parent_watch.py`, including a real macOS test that `kill -9`s a parent process. It was **RED** before the change
+  ("backend child survived its parent's SIGKILL") and **GREEN** after.
+- Packaged app (dmg build): GUI `kill -9` → backend gone in **1.0 s**, in 2 of 2 rounds, with nothing left running.
 
 ---
 
@@ -107,6 +114,11 @@ update). I did **not** clear that system cache to re-measure the cold case. The 
 and Phase 10's second account will measure the true first-run cost. `TESTING.md` (Phase 12) should say: "the very first chat
 after installing may pause ~10 s while macOS prepares GPU shaders; later loads are fast".
 
+**Phase 10 update (2026-10-28, maintainer report):** in the second account `tester`, both chat replies with the 135M GGUF came
+in "under a second or so"; no pause was noticed. Only time-to-first-words was observed; the model **load**, where the compile
+happens, was not timed, and the backend log was removed by cleanup. The cold cost in a new account is therefore **unverified**.
+Keep the `TESTING.md` sentence, but phrase it as "may pause ... when a model is first loaded".
+
 ---
 
 ## ISSUE-003 — Unsigned build will trip Gatekeeper on download
@@ -128,6 +140,11 @@ testing build; `CLEAN_INSTALL.md` (Phase 10) records the exact dialog wording an
 the steps that clear it; the macOS public-distribution checklist line stays
 unticked; Phase 11 stays BLOCKED.
 
+**Phase 10 update (2026-10-28):** the quarantined download (`0181;…;Safari;`) was blocked and then cleared through Privacy &
+Security → Open Anyway in a Standard second account. After that the app ran from `/Applications`, so there was no translocation.
+The **verbatim dialog wording was not captured** (no screenshots, nothing transcribed). Capture it before `TESTING.md` quotes it,
+or describe the flow without quoting.
+
 ---
 
 ## ISSUE-004 — Build-host disk headroom is tight
@@ -148,7 +165,7 @@ default, which is a limitation to state, not to hide.
 
 ## ISSUE-005 — Backend tests fail on macOS because `/var` is a symlink to `/private/var`
 
-- Status: **OPEN — reported, not fixed (application/test source is out of scope for packaging)**
+- Status: **FIXED (2026-10-28, uncommitted)** — `_remove_hf` compares resolved paths; tests use a resolved temp root; a plain `unittest discover` now passes (60/60)
 - Found: 2026-10-23, Phase 1 (`PYTHONPATH=backend/src .venv-macos/bin/python -m unittest discover -s backend/tests -v`)
 - Severity: low for users, but it breaks the "regressions all pass" gate on a stock Mac
 - Evidence: `build/packaging/phase1-unittest.log` (4 FAIL + 1 ERROR of 53) versus
@@ -190,6 +207,16 @@ Phases that re-run the suite after shared-file edits must use the same prefix.
 `Path(tempfile.mkdtemp()).resolve()`; in `_remove_hf` use `.resolve()` instead of
 `.absolute()` (and confirm it still refuses paths outside a managed `snapshots` dir).
 Linux CI is unaffected, which is why this was not caught earlier.
+
+**Fix (2026-10-28, maintainer: "continue the fixes").**
+- `ModelRegistry._remove_hf` now uses `Path(rec.path).resolve()` and compares it with `Path(revision.snapshot_path).resolve()`. The
+  "managed `snapshots/<rev>` only" guard is unchanged.
+- `test_cache_discovery.py` resolves its temp root, because the backend correctly reports resolved paths.
+- New test `test_hf_cache_deletion_through_symlinked_cache_path` runs on every platform, with a symlinked cache dir:
+  - with the fix removed (file-copy swap) → `ValueError: Cannot safely identify cached model revision`;
+  - with the fix → OK.
+- A plain `PYTHONPATH=backend/src python -m unittest discover -s backend/tests` (no `TMPDIR` workaround) → **60 tests OK**.
+  `run_regressions.sh` still works but no longer needs its workaround.
 
 ---
 
@@ -240,7 +267,7 @@ Positive result from the same scan, relevant to ADR 0002: of **372 Mach-O files*
 
 ## ISSUE-007 — Pinned `huggingface_hub` 1.30.0 cannot free disk for models in a shared-blobs cache (found in Phase 4, measured in Phase 6)
 
-- Status: **OPEN — functional; fix is a pin decision shared with Linux** (needs approval). Not changed here.
+- Status: **FIXED (2026-10-24, uncommitted)** — `huggingface_hub` pinned to 1.33.0 on both platforms; bundled runtime: delete leaves 244 B, not 1.83 GB
 - Found: 2026-10-23, Phase 4 GREEN selftest (`hub/blobs` warning); measured in Phase 6 with `packaging/macos/probe_hf_cache.py`
 - Severity: **disk leak on delete** for testers whose HF cache was written by huggingface_hub ≥ 1.33; listing is unaffected
 - Evidence: `build/packaging/macos/hf-probe/probe-{130,133}.json` (untracked)
@@ -269,11 +296,16 @@ Options (need a decision; both affect Linux):
 1. Raise the `huggingface_hub` pin to ≥ 1.33 on both platforms, then re-run regressions and the Phase 8 selftests. This is the real fix.
 2. Keep 1.30 and document "deleting a model downloaded by other HF tools may not free disk; run `hf cache delete`".
 
+**Fix (2026-10-24, approved).** `huggingface_hub==1.33.0` in `packaging/requirements-cpu.txt` (Linux) and
+`packaging/macos/requirements-macos-arm64.txt`. Re-measured with the rebuilt bundle on a fresh clone of the real cache: hub 1.33.0, 0 warnings,
+6 → 5 repos, delete `ok`, 0 dangling links, **244 bytes** left unreferenced (`hf-probe/probe-bundled-133.json`). Linux was resolved but not built
+or run here.
+
 ---
 
 ## ISSUE-008 — Transitive Python dependencies are not pinned; the runtime is not reproducible (found in Phase 5)
 
-- Status: **OPEN — decide before the tester build (Phase 7/12)**; affects Linux the same way
+- Status: **FIXED (2026-10-24, uncommitted)** — full locks via `packaging/lock_requirements.sh`; the runtime installs with `-c constraints-*.txt`; the installed set equals the lock
 - Found: 2026-10-23, Phase 5 `--fresh-runtime` rebuild vs the Phase 3 package list
 - Severity: reproducibility/provenance; no functional failure observed
 - Evidence: `build-info/python-packages.txt` vs `docs/release/macos/runtime-packages-macos.txt`: `certifi==2026.10.19` →
@@ -284,11 +316,18 @@ whatever is newest at build time. Two builds of the same commit can therefore sh
 (`uv pip compile` → a constraints file committed next to the requirements) for macOS, or for both platforms. The Linux side is a
 shared decision, so not changed here. `runtime-packages-macos.txt` now records the Phase 5 set.
 
+**Fix (2026-10-24, approved).** `packaging/lock_requirements.sh` runs `uv pip compile` over the direct pins and
+`backend/pyproject.toml`, producing `packaging/constraints-cpu.txt` (Linux x86_64, CPU torch, 80 packages) and
+`packaging/macos/constraints-macos-arm64.txt` (79). `prepare_runtime.py` installs with `-c` on the lock next to the requirements file.
+- The macOS lock equals the previously shipped set except the intended hub bump.
+- The rebuilt runtime's package list equals the lock exactly.
+- Linux: the install command gains only `-c packaging/constraints-cpu.txt` (harness diff). It was resolved but not run here.
+
 ---
 
 ## ISSUE-009 — No Qt license texts are bundled (found in Phase 5)
 
-- Status: **OPEN — release/licensing review (Phase 12)**; not a packaging fix
+- Status: **FIXED for engineering (2026-10-28, uncommitted); legal sign-off still needed** — Qt LGPL/GPL texts + 37 third-party notices bundled in `Contents/Resources/licenses/qt/`
 - Found: 2026-10-23, preparing Phase 5 notices
 - Severity: licensing compliance for distribution; nothing functional
 
@@ -298,11 +337,32 @@ Arch's `/usr/share/licenses/qt6-*`; macOS has no equivalent. `THIRD_PARTY_NOTICE
 "before shipping a binary". Fix belongs to the release review: obtain the Qt 6.8.3 license texts from the Qt source/installer and
 bundle them under `Contents/Resources/licenses/qt/` (plus the LGPL relinking note). Not invented here.
 
+**Fix (2026-10-28).** `packaging/macos/qt_notices.py` reads every `qt_attribution.json` of qtbase and qtsvg at `v6.8.3` from Qt's
+GitHub mirror (59 components) and classifies each one using this Qt build's own feature flags (`mkspecs/modules/qt_lib_*_private.pri`):
+- bundled: doubleconversion, pcre2, freetype, harfbuzz, jpeg, png, textmarkdownreader;
+- from the system: zlib;
+- disabled: vulkan, OpenGL ES.
+
+Results:
+- **37 components included**, each with its own license file, or Qt's SPDX text where the metadata names no file.
+- **22 excluded with a written reason**: other OSes, disabled features, system zlib, tests and tools, QtSql not shipped.
+- Qt's own `LGPL-3.0-only.txt`, `GPL-2.0-only.txt`, `GPL-3.0-only.txt` and `Qt-GPL-exception-1.0.txt` are included.
+- `README.md` lists every component with its version, license, copyright and where it lives, plus where to get the Qt 6.8.3 source and how
+  to swap in rebuilt frameworks.
+- Any component left unclassified (for example after a Qt upgrade), or a typo in the lists, makes the script fail. It caught one typo of mine.
+
+The notices are stored in `packaging/macos/licenses/qt/` (372 KB). `build_app.sh` copies them into `Contents/Resources/licenses/qt/`, and
+`verify_bundle.py` now fails a bundle without them. All 38 downloaded component texts plus the 4 Qt texts were checked to be real license
+texts (no HTML or 404 bodies).
+
+**Not claimed:** that this satisfies LGPL obligations. That is a legal judgement for the maintainer, for example whether pointing to Qt's own
+source download is a sufficient source offer. The README says it is an engineering inventory, not legal advice.
+
 ---
 
 ## ISSUE-010 — Default training settings fail on macOS: "Use 4-bit QLoRA" is on by default, and the runtime has no bitsandbytes (found in Phase 6)
 
-- Status: **OPEN — needs a decision before Phase 8** (its TRAINING/ADAPTER selftests hard-code `quantization: "4bit"`)
+- Status: **FIXED (2026-10-24, uncommitted)** — capability-aware backend/UI/selftests; the app copied from the new dmg passes TRAINING and ADAPTER (11/11 acceptance)
 - Found: 2026-10-23, ML matrix (`qlora-4bit-shipped`, `qlora-8bit-shipped`) + code reading
 - Severity: **high for macOS** — the default training path errors out; LoRA itself works (MPS, measured)
 - Evidence: `ML_MATRIX.md`; `app/src/panels/trainingpanel.cpp:144-146` (checkbox `setChecked(true)`), `:260` (combo offers 4-bit/8-bit);
@@ -339,3 +399,67 @@ Until one is chosen, `TESTING.md` must tell macOS testers to untick "Use 4-bit Q
 end `[selftest] FAIL: … Using bitsandbytes 4-bit quantization requires bitsandbytes …`. These are the only 2 failures in the 11-step
 acceptance set. `live_workflow.py`, which sends `quantization: "none"`, passes training → adapter → RAG chat → export/import through
 the same HTTP API. So LoRA itself works in the packaged app; only the 4-bit default is broken.
+
+**Fix (2026-10-24, approved).** Option 1 (capability-aware):
+- **Backend:** `quantization_support()` returns False on macOS (measured unsuitable) and wherever bitsandbytes is missing.
+  `POST /training/start` refuses 4bit/8bit with that reason (HTTP 400), and there is a new `GET /training/capabilities`.
+- **Training panel:** it fetches the capability, then unticks and disables "Use 4-bit QLoRA" and the precision combo, with the reason as a
+  tooltip. This also overrides a saved 4-bit choice.
+- **Selftests:** they request 4-bit only where it is supported, so Linux keeps its QLoRA coverage.
+- Tests: `backend/tests/test_quantization_support.py`.
+- Verified: dev build `MAGNITE_SELFTEST_TRAINING` PASS with `quantization=none`; `--ui-check` PASS; the app copied from the new dmg passes
+  **11/11** acceptance steps, including TRAINING and ADAPTER.
+
+---
+
+## ISSUE-011 — The local backend API has no authentication and accepts any Host (found 2026-10-28)
+
+- Status: **FIXED (2026-10-28, uncommitted)** — adr/0009 implemented: per-launch secret + Host allow-list + data-folder lock; the packaged app refuses outside callers (401/400)
+- Found: 2026-10-28, while assessing the maintainer's question about running the backend separately
+- Severity: **security** — any process of any macOS user on the same Mac can drive the backend; web pages can try via DNS rebinding
+- Affects Linux too: the code is shared
+
+**Proof (2026-10-28):** a throwaway backend (`--port 54871`, scratch `--home`) listening on `127.0.0.1:54871`, driven with plain `curl` and no
+credentials:
+- `GET /health` → `{"status":"ok"}`.
+- `POST /datasets/ingest {"path":"/etc/hosts"}` → the backend **read the file** into a dataset (`rows 1, size_kb 0.2, source /etc/hosts`).
+- `GET /datasets` with `Host: evil.example:54871` → **200**: no Host validation, so DNS rebinding is possible.
+
+Why it matters:
+- `127.0.0.1` is shared by every user account on a Mac, so another account can make *your* backend read your files (dataset ingest, adapter
+  import), delete models, or start training.
+- The random port only slows a scanner down.
+- CORS plus FastAPI's JSON content-type check already stop ordinary cross-site requests, but not DNS rebinding.
+
+**Fix (2026-10-28, maintainer: "do what you recommended").**
+- **Backend:** new `backend/local_access.py`, wired in `backend/main.py`, so only the network-facing server is wrapped and in-process tests
+  are unaffected.
+  - A pure-ASGI middleware checks the Host (loopback names only, else 400) and the `Authorization: Bearer <MAGNITE_API_TOKEN>` header
+    (constant-time compare, else 401). `/health` stays open.
+  - `fcntl.flock` on `MAGNITE_HOME/.backend.lock` with a 5 s retry; on conflict the backend exits with code 75.
+- **App:**
+  - `BackendManager` makes a 256-bit secret per launch (`QRandomGenerator::system()`) and passes it in the environment.
+  - `BackendClient` sends it from a single `request()` helper used by GET/POST/DELETE, streaming and download.
+  - `MainWindow` shows "Magnite is already running…" on exit code 75.
+- **Tests:** `backend/tests/test_local_access.py` (5): stub-app checks for 401/401/200, open `/health`, the Host allow-list including
+  `[::1]` and a port-less `127.0.0.1`, and developer mode; a lock held by another process and released after `kill -9`; a launched backend
+  returning 401 without the secret, 200 with it, and a second backend exiting 75. Full suite **65 OK**.
+- **Packaged app** (dmg `48050836…`):
+
+| Request | Before | After |
+|---|---|---|
+| no secret | 200 | **401** |
+| wrong secret | — | **401** |
+| ingest `/etc/hosts` without a secret | **read the file** | **401** |
+| fake Host | 200 | **400** |
+| `/health` | 200 | 200 |
+
+  - A second copy on the same folder gets "Magnite is already running…", with 1 backend left and the first copy unaffected.
+  - The secret is not on the command line.
+  - `verify_installed.sh` **11/11**.
+
+**Correction to adr/0009's wording.** `os.environ.pop` only keeps the secret away from the backend's child processes. macOS still shows the
+process's *initial* environment through `ps -E`, but only to the same user and root. Measured: my own process's marker variable was visible;
+root processes' environments were not, although their command lines were. Other accounts therefore cannot read it. The same user can, which
+is outside the threat model: that user can already read `~/.magnite` and the app's memory. `CLEAN_INSTALL.md` §7b lets the second account
+confirm this from its own side.

@@ -69,6 +69,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
     connect(m_backend, &BackendManager::errorOccurred, this, &MainWindow::onBackendError);
+    connect(m_backend, &BackendManager::dataDirInUse, this, &MainWindow::onBackendDataDirInUse);
 
     loadPanelSettings();
     startBackend();
@@ -411,6 +412,7 @@ void MainWindow::startBackend() {
 }
 
 void MainWindow::onBackendStarted() {
+    m_backendClient->setAuthToken(m_backend->apiToken());
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
@@ -427,6 +429,17 @@ void MainWindow::onBackendStarted() {
     // Connection details live in the header; do not create a second status bar.
 }
 
+void MainWindow::onBackendDataDirInUse() {
+    const QString msg = "Magnite is already running. Another Magnite window is using your data folder; "
+                        "switch to it, or quit it and open Magnite again.";
+    m_backendClient->abortAll();
+    m_backendClient->setBaseUrl(QString());
+    m_backendClient->setAuthToken(QString());
+    setPillState("error", "Already running");
+    if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
+    else QMessageBox::information(this, "Magnite is already running", msg);
+}
+
 void MainWindow::onBackendError(QProcess::ProcessError error) {
     QString msg;
     switch (error) {
@@ -441,6 +454,7 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
     }
     m_backendClient->abortAll();
     m_backendClient->setBaseUrl(QString());
+    m_backendClient->setAuthToken(QString());
     setPillState("error", msg);
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
     else QMessageBox::warning(this, "Backend Error", msg);
@@ -831,7 +845,6 @@ void MainWindow::trainingSelfTest(std::shared_ptr<int> failCount,
             body["rank"] = 4;
             body["alpha"] = 8;
             body["target_modules"] = "all-linear";
-            body["quantization"] = "4bit";
             body["epochs"] = 3;
             body["max_steps"] = 3;
             body["learning_rate"] = 2e-4;
@@ -839,7 +852,8 @@ void MainWindow::trainingSelfTest(std::shared_ptr<int> failCount,
             body["warmup_ratio"] = 0.03;
             body["max_length"] = 64;
 
-            m_backendClient->post("/training/start", body,
+            withSelfTestQuantization(body, [this, failCount, finish](const QJsonObject &request) {
+            m_backendClient->post("/training/start", request,
                 [this, failCount, finish](int s2, const QJsonDocument &d2) {
                     if (s2 != 202) {
                         ++(*failCount);
@@ -852,6 +866,20 @@ void MainWindow::trainingSelfTest(std::shared_ptr<int> failCount,
                             qUtf8Printable(jobId));
                     pollTrainingSelfTest(jobId, 0, failCount, finish);
                 });
+            });
+        });
+}
+
+// QLoRA where the backend can run it (bitsandbytes on Linux), plain LoRA elsewhere.
+void MainWindow::withSelfTestQuantization(QJsonObject body,
+                                          std::function<void(const QJsonObject &)> next) {
+    m_backendClient->get("/training/capabilities",
+        [body, next](int status, const QJsonDocument &caps) mutable {
+            const bool qlora = status != 200 || caps.object()["quantization"].toBool(true);
+            body["quantization"] = qlora ? "4bit" : "none";
+            fprintf(stderr, "[selftest] ok: training quantization=%s\n",
+                    qUtf8Printable(body["quantization"].toString()));
+            next(body);
         });
 }
 
@@ -956,7 +984,6 @@ void MainWindow::adapterSelfTest(std::shared_ptr<int> failCount,
             body["rank"] = 4;
             body["alpha"] = 8;
             body["target_modules"] = "all-linear";
-            body["quantization"] = "4bit";
             body["epochs"] = 3;
             body["max_steps"] = 3;
             body["learning_rate"] = 2e-4;
@@ -964,7 +991,8 @@ void MainWindow::adapterSelfTest(std::shared_ptr<int> failCount,
             body["warmup_ratio"] = 0.03;
             body["max_length"] = 64;
 
-            m_backendClient->post("/training/start", body,
+            withSelfTestQuantization(body, [this, failCount, finish](const QJsonObject &request) {
+            m_backendClient->post("/training/start", request,
                 [this, failCount, finish](int s2, const QJsonDocument &d2) {
                     if (s2 != 202) {
                         ++(*failCount);
@@ -977,6 +1005,7 @@ void MainWindow::adapterSelfTest(std::shared_ptr<int> failCount,
                             qUtf8Printable(jobId));
                     pollTrainingForAdapter(jobId, 0, failCount, finish);
                 });
+            });
         });
 }
 

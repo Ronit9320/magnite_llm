@@ -49,6 +49,9 @@ private:
     void setupHyperparameters(QWidget *parent);
     void refreshModels();
     void refreshDatasets(const QString &selectId = QString());
+    // Asks the backend whether 4-bit/8-bit QLoRA can run here (not on macOS).
+    void refreshCapabilities();
+    void applyQuantizationAvailability();
     QString quantizationCode() const;
     void finishJob(const QString &message, const QString &color);
     // tone: "" neutral | "ok" | "error" | "warn" — drives #statusLabel state.
@@ -84,4 +87,6 @@ private:
     StudioCanvas *m_activity = nullptr;
     QWidget *m_setup = nullptr;
     QLabel *m_runHint = nullptr;
+    bool m_quantizationAvailable = true;
+    QString m_quantizationDetail;
 };

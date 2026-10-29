@@ -140,7 +140,7 @@ def _dataset(path: Path):
                                              {"role": "assistant", "content": a}]}) + "\n")
 
 
-def cell_train(work: Path, quantization: str, force_cpu: bool):
+def cell_train(work: Path, quantization: str, force_cpu: bool, app_gate: bool = False):
     import transformers
     if force_cpu:
         # What a CPU fallback in trainer.py would do (it hard-codes use_cpu=False today). Patch the
@@ -168,6 +168,13 @@ def cell_train(work: Path, quantization: str, force_cpu: bool):
         return original_train(self, *a, **kw)
     transformers.Trainer.train = train
 
+    if app_gate and quantization != "none":
+        # The app's POST /training/start validates before queueing (TrainingJobManager._validate).
+        from backend.training.trainer import quantization_support
+        supported, reason = quantization_support()
+        if not supported:
+            _result(ok=False, status="refused (HTTP 400 from /training/start)", error=reason)
+            return
     work.mkdir(parents=True, exist_ok=True)
     data = work / "dataset.jsonl"; _dataset(data)
     cfg = TrainingConfig(base_model=TORCH_REPO, dataset_id="ml-matrix", name=f"matrix-{quantization}",
@@ -256,12 +263,12 @@ CELLS = {
                  lambda a: cell_train(a.work / "lora-cpu", "none", True), "no: fallback only"),
     "embeddings": ("RAG embeddings (sentence-transformers)", "bundled", lambda a: cell_embeddings(),
                    "yes: knowledge ingest/query"),
-    "qlora-4bit-shipped": ("QLoRA 4-bit in the SHIPPED runtime (what the UI option does today)", "bundled",
-                           lambda a: cell_train(a.work / "qlora-4bit-shipped", "4bit", False),
-                           "yes: Training > quantization 4bit"),
-    "qlora-8bit-shipped": ("QLoRA 8-bit in the SHIPPED runtime (what the UI option does today)", "bundled",
-                           lambda a: cell_train(a.work / "qlora-8bit-shipped", "8bit", False),
-                           "yes: Training > quantization 8bit"),
+    "qlora-4bit-shipped": ("QLoRA 4-bit in the SHIPPED app (through /training/start validation)", "bundled",
+                           lambda a: cell_train(a.work / "qlora-4bit-shipped", "4bit", False, app_gate=True),
+                           "no: the UI disables it on macOS"),
+    "qlora-8bit-shipped": ("QLoRA 8-bit in the SHIPPED app (through /training/start validation)", "bundled",
+                           lambda a: cell_train(a.work / "qlora-8bit-shipped", "8bit", False, app_gate=True),
+                           "no: the UI disables it on macOS"),
     "bnb-4bit-load": ("bitsandbytes 4-bit load + generate", "bnb", lambda a: cell_bnb_load("4bit"),
                       "no: bitsandbytes is not shipped"),
     "bnb-8bit-load": ("bitsandbytes 8-bit load + generate", "bnb", lambda a: cell_bnb_load("8bit"),

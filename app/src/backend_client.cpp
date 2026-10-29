@@ -40,9 +40,16 @@ void BackendClient::remove(const QString &path, Callback onDone) {
     send("DELETE", path, QJsonObject(), onDone);
 }
 
+QNetworkRequest BackendClient::request(const QString &path) const {
+    QNetworkRequest req(QUrl(m_baseUrl + path));
+    if (!m_authToken.isEmpty())
+        req.setRawHeader("Authorization", "Bearer " + m_authToken.toUtf8());
+    return req;
+}
+
 void BackendClient::send(const QString &method, const QString &path,
                          const QJsonObject &body, Callback onDone) {
-    QNetworkRequest req(QUrl(m_baseUrl + path));
+    QNetworkRequest req = request(path);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     // Model initialization and embedding can outlast vLLM's 240s startup budget.
     req.setTransferTimeout(600000);
@@ -81,7 +88,7 @@ void BackendClient::send(const QString &method, const QString &path,
 
 void BackendClient::streamPost(const QString &path, const QJsonObject &body,
                                SseEvent onEvent, SseDone onDone) {
-    QNetworkRequest req(QUrl(m_baseUrl + path));
+    QNetworkRequest req = request(path);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     req.setTransferTimeout(600000);
 
@@ -136,9 +143,9 @@ void BackendClient::download(const QString &path, const QString &destination,
                              std::function<void(const QString &)> onDone) {
     auto file = std::make_shared<QSaveFile>(destination);
     if (!file->open(QIODevice::WriteOnly)) { onDone(file->errorString()); return; }
-    QNetworkRequest request(QUrl(m_baseUrl + path));
-    request.setTransferTimeout(60000);
-    auto *reply = m_nam->get(request);
+    QNetworkRequest req = request(path);
+    req.setTransferTimeout(60000);
+    auto *reply = m_nam->get(req);
     reply->setReadBufferSize(1024*1024);
     auto error = std::make_shared<QString>();
     auto drain = [reply,file,error]() {

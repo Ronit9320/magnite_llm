@@ -29,6 +29,9 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Retry an interrupted dependency install")
     parser.add_argument("--requirements", type=Path, default=REPO / "packaging/requirements-cpu.txt",
                         help="Pinned requirements file (default: the Linux CPU set)")
+    parser.add_argument("--constraints", type=Path,
+                        help="Full lock for `uv pip install -c` (default: constraints-*.txt beside --requirements; "
+                             "regenerate with packaging/lock_requirements.sh)")
     args = parser.parse_args()
     dest = args.destination.resolve()
     dest.mkdir(parents=True, exist_ok=True)
@@ -81,10 +84,15 @@ def main():
         env["CMAKE_BUILD_PARALLEL_LEVEL"] = "2"
     # macOS has no separate CPU torch build: the standard wheel provides CPU and MPS.
     torch_backend = [] if macos else ["--torch-backend", "cpu"]
+    constraints = args.constraints or args.requirements.with_name(
+        args.requirements.name.replace("requirements-", "constraints-", 1))
+    lock = ["-c", constraints] if constraints.exists() else []
+    if not lock:
+        print(f"note: no lock at {constraints}; transitive dependencies are unpinned")
     run(uv, "pip", "install", "--python", python, "--break-system-packages",
         *torch_backend, "--no-binary", "llama-cpp-python",
         "--reinstall-package", "magnite-backend",
-        "-r", args.requirements, REPO / "backend", env=env)
+        "-r", args.requirements, *lock, REPO / "backend", env=env)
     run(python, "-I", "-B", "-c",
         "import backend.server, llama_cpp, torch, transformers, peft, "
         "sentence_transformers, datasets; "
