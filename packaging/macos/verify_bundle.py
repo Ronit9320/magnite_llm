@@ -8,7 +8,7 @@ Checks (each prints PASS/FAIL; exit 1 on any FAIL):
   minos       no Mach-O requires macOS newer than 14.0 (ADR 0002)
   linkage     dylib references are @rpath/@loader_path/@executable_path or system paths; rpaths are relative
   resolve     every non-weak @rpath/@loader_path/@executable_path dependency exists inside the bundle
-  host-paths  no file (text or binary) mentions this build host's home, the checkout, or the Qt install
+  host-paths  reject checkout/Qt paths and unexpected host paths; classify upstream CI diagnostics
   symlinks    no absolute symlinks and none that escape the bundle
   signature   codesign --verify --deep --strict
 Grown from scan_macho.py (Phase 3). Runs on the host's python3 (3.9+); stdlib only.

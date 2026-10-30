@@ -14,6 +14,7 @@ jobs:
     env:
       MAGNITE_REQUIRE_CLEAN: '1'
       QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: '1'
       UV_CACHE_DIR: ${{ github.workspace }}/build/packaging/uv-cache
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +43,8 @@ jobs:
           df -h > build/packaging/macos/hosted/disk-before.txt
       - name: Build, audit and sign the testing bundle ad hoc
         run: bash packaging/macos/build_app.sh > build/packaging/macos/hosted/build.log 2>&1
+      - name: Verify signed update manifest handling
+        run: ctest --test-dir build-macos --output-on-failure > build/packaging/macos/hosted/ctest.log 2>&1
       - name: Backend regressions with the bundled runtime
         run: |
           export TMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
@@ -49,6 +52,8 @@ jobs:
           export HF_HUB_OFFLINE=1
           build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3 -I -B \
             -m unittest discover -s backend/tests -v > build/packaging/macos/hosted/backend.log 2>&1
+          codesign --verify --deep --strict --verbose=4 build/packaging/macos/stage/Magnite.app \
+            > build/packaging/macos/hosted/signature-after-regressions.log 2>&1
       - name: Relocated bundle smoke and UI
         run: |
           ditto build/packaging/macos/stage/Magnite.app "$RUNNER_TEMP/Relocated App/Magnite.app"

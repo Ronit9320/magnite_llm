@@ -21,7 +21,7 @@ run_clean() {
         MAGNITE_HOME="$home" QT_QPA_PLATFORM=offscreen "$@"
 }
 
-if codesign --verify --deep --strict "$app" 2>"$log_dir/codesign-before.log"; then pass "signature before run"
+if codesign --verify --deep --strict --verbose=4 "$app" 2>"$log_dir/codesign-before.log"; then pass "signature before run"
 else fail "signature before run (see $log_dir/codesign-before.log)"; fi
 
 run_clean "$exe" --theme-check >"$log_dir/theme-check.log" 2>&1
@@ -55,7 +55,7 @@ sleep 2
 orphans=$(pgrep -fl "$app/Contents/Resources/runtime" || true)
 if [[ -z "$orphans" ]]; then pass "no backend left running"; else fail "orphaned backend: $orphans"; fi
 
-if codesign --verify --deep --strict "$app" 2>"$log_dir/codesign-after.log"; then pass "signature after run (bundle unmodified)"
+if codesign --verify --deep --strict --verbose=4 "$app" 2>"$log_dir/codesign-after.log"; then pass "signature after run (bundle unmodified)"
 else fail "signature after run (see $log_dir/codesign-after.log)"; fi
 
 echo "$failures failure(s); logs in $log_dir"

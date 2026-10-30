@@ -606,3 +606,17 @@ behaviour changes; this plan must not become the sole source of user instruction
 - After those fixes, local backend suite: 73 run, 72 passed, one Mac-only skip.
   Packaging suite: 10 tests PASS. New native candidates are required before
   Phases 1–3 can be marked complete. No public release was created or modified.
+- Native run [41064678856](https://github.com/Ronit9320/magnite_llm/actions/runs/41064678856)
+  at `8faaae9`: Linux package PASS again; Mac bundle audit PASS and all 73
+  native backend tests PASS, including actual parent-death coverage. Relocated
+  theme/desktop checks passed, but bundle signatures were invalidated during
+  the regression stage before relocation. Regression child interpreters now
+  inherit bytecode suppression; a signature check immediately after regressions
+  and verbose signature diagnostics enforce bundle immutability. Added Mac
+  native CTest execution for the shared signed manifest implementation.
+- In that same run, Windows native compilation and installer creation passed;
+  SQLite and archive tests were fixed. The remaining native suite failure was
+  a BOM fixture using platform-default encoding (CP1252). The fixture now
+  explicitly writes UTF-8. No application encoding policy was changed to hide
+  the test failure. Windows installation/lifecycle acceptance still needs its
+  first successful run; aggregate acceptance remains pending.

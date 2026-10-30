@@ -122,7 +122,7 @@ class DatasetTests(unittest.TestCase):
             expected = Path(self.store.ingest_content('x', content, fmt).path).read_text()
             self.assertEqual(Path(self.store.ingest_content('x', '\ufeff'+content, fmt).path).read_text(), expected)
             path = self.root/('bom.'+fmt)
-            path.write_text('\ufeff'+content)
+            path.write_text('\ufeff'+content, encoding='utf-8')
             self.assertEqual(Path(self.store.ingest_path(str(path)).path).read_text(), expected)
 
     def test_invalid_values_and_csv_size_boundaries(self):
