@@ -44,7 +44,7 @@ jobs:
           cmake --version > build/packaging/runner-evidence/tools.txt
           c++ --version >> build/packaging/runner-evidence/tools.txt
       - name: Build the complete CPU AppImage and audit glibc
-        run: bash packaging/build_appimage.sh
+        run: bash packaging/build_appimage.sh > build/packaging/runner-evidence/build.log 2>&1
       - name: Verify updater signatures and installation recovery
         run: |
           ctest --test-dir build --output-on-failure
@@ -86,6 +86,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Report bounded failure details in public annotations
+        if: failure()
+        run: python packaging/report_failure.py build/packaging/runner-evidence
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@v4

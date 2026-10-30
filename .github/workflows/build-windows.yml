@@ -33,6 +33,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force build/packaging/windows/hosted | Out-Null
+          Start-Transcript -Path build/packaging/windows/hosted/tools.log
           python -m pip install uv==0.13.5 aqtinstall==3.3.0
           $lock = Get-Content packaging/windows/tools.lock.json -Raw | ConvertFrom-Json
           python -m aqt install-qt windows desktop $lock.qt $lock.qt_arch --outputdir "$env:RUNNER_TEMP/qt"
@@ -53,6 +55,7 @@ jobs:
           $install = Start-Process $download -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/PORTABLE=1', "/DIR=$inno")
           if ($install.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
           "MAGNITE_INNO_COMPILER=$inno/ISCC.exe" >> $env:GITHUB_ENV
+          Stop-Transcript
       - name: Record native environment
         run: |
           New-Item -ItemType Directory -Force build/packaging/windows/hosted | Out-Null
@@ -95,6 +98,9 @@ jobs:
             dist/provenance-windows-x86_64.json
           if-no-files-found: error
           compression-level: 0
+      - name: Report bounded failure details in public annotations
+        if: failure()
+        run: python packaging/report_failure.py build/packaging/windows/hosted
       - name: Upload Windows evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4

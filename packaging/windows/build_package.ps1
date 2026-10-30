@@ -22,6 +22,11 @@ Invoke-Native 'cmake' @('-S', 'app', '-B', $nativeBuild, '-G', 'Ninja', '-DCMAKE
 Invoke-Native 'cmake' @('--build', $nativeBuild, '-j', '2')
 Copy-Item "$nativeBuild/magnite-app.exe" $stage
 Invoke-Native "$QtRoot/bin/windeployqt.exe" @('--release', '--compiler-runtime', '--no-translations', "$stage/magnite-app.exe")
+# App-local CRT DLLs make deployment independent of the runner's system-wide
+# VC redistributable installation.
+$crt = Get-ChildItem (Join-Path $env:VCToolsRedistDir 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+if (-not $crt) { throw 'MSVC redistributable CRT directory was not found' }
+Copy-Item (Join-Path $crt.FullName '*.dll') $stage
 # windeployqt deploys Qt; explicitly stage non-Qt OpenSSL dependencies too.
 Copy-Item "$VcpkgRoot/installed/x64-windows/bin/*.dll" $stage
 New-Item -ItemType Directory -Force "$stage/platforms" | Out-Null

@@ -67,6 +67,16 @@ def main():
                     time.sleep(0.2)
                 else:
                     raise RuntimeError("Desktop backend did not become ready before crash check")
+                backends = [child for child in children if "backend.main" in child.cmdline()]
+                if len(backends) != 1:
+                    raise RuntimeError("Expected exactly one installed backend process")
+                for child in backends:
+                    if not Path(child.exe()).resolve().is_relative_to(installed.resolve()):
+                        raise RuntimeError(f"Host executable leaked into installed process tree: {child.exe()}")
+                qt_modules = [entry.path for entry in psutil.Process(gui.pid).memory_maps()
+                              if Path(entry.path).name.lower().startswith("qt6") and entry.path.lower().endswith(".dll")]
+                if not qt_modules or any(not Path(path).resolve().is_relative_to(installed.resolve()) for path in qt_modules):
+                    raise RuntimeError(f"Qt DLLs did not load from the installed package: {qt_modules}")
                 gui.kill()
                 gui.wait(10)
                 _, alive = psutil.wait_procs(children, timeout=15)
