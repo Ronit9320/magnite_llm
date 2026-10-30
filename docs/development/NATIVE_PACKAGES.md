@@ -28,9 +28,11 @@ These manifests are build evidence, not the signed update metadata of Phase 5/6.
 
 Linux retains its pinned AppImage tools and portable CPU flags. The existing
 Linux preview workflow calls the same reusable builder; its publisher is still
-restricted to `dev`, pending the Phase 6 replacement. An integration push can
-run both Linux workflows, but neither may publish from a release branch.
+restricted to `dev`, pending the Phase 6 replacement. Integration pushes use the native coordinator; the legacy Linux workflow skips
+that branch to avoid duplicate package builds. Neither publishes from release branches.
 
+Mac and Windows host tooling uses setup-python 3.12.10 (3.12.12 is unavailable
+there); their isolated shipped runtime remains Python 3.12.12 through uv.
 Mac uses official Qt 6.8.3 installed by aqtinstall 3.3.0. The updater's OpenSSL
 3.6.5 is checksum-pinned and built statically for macOS 14; it does not inherit
 a newer Homebrew bottle's deployment baseline. Existing bundle/Mach-O audits,

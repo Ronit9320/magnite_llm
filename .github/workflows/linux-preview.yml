@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   package:
-    if: github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/release/')
+    if: (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/release/')) && github.ref != 'refs/heads/release/integration'
     uses: ./.github/workflows/build-linux.yml
     with:
       source_sha: ${{ github.sha }}
