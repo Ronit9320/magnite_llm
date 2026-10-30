@@ -48,6 +48,14 @@ data; it still rejects exact checkout/Qt roots and host paths in scripts.
 Loader paths, dependency resolution, signatures and poisoned-runtime smoke
 are audited independently. Local personal home prefixes remain fully checked.
 
+Smoke log and data directories are resolved to absolute paths before launch.
+The desktop also resolves relative `MAGNITE_HOME` values against its launch cwd,
+before changing the backend cwd, so a relative override cannot accidentally put
+databases inside the application bundle. Mac regression child interpreters
+disable bytecode output, and bundle signatures are verified after regressions
+and after relocated startup. Content/link/mode inventories diagnose mutations;
+OS-added provenance attributes are recorded separately from file contents.
+
 Windows tooling and installer operation are in
 [the platform guide](../../packaging/windows/README.md). Qt's deployment tool
 does not supply every non-Qt dependency, so OpenSSL DLLs are staged explicitly;

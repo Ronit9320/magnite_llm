@@ -628,3 +628,21 @@ behaviour changes; this plan must not become the sole source of user instruction
   metadata remains tested everywhere, and production verification is unchanged.
   Local Linux CTest still passes with the Linux assertion enabled. A fresh
   native run is required to reach later Mac/Windows package checks.
+- Native run [41069672641](https://github.com/Ronit9320/magnite_llm/actions/runs/41069672641)
+  at `f400dea`: Linux package PASS; Windows all native job steps PASS, including
+  backend/manifest tests and actual per-user install, startup/UI, same-candidate
+  upgrade, crash cleanup/restart, uninstall and external-data preservation.
+  Mac audit, 73 backend tests, manifest CTest and the post-regression signature
+  check passed. The relocated smoke still invalidated its seal during startup.
+- Root cause: the native smoke call supplied a relative log/data directory.
+  The backend's executable-directory cwd put relative MAGNITE_HOME databases
+  inside the relocated bundle. The harness now canonicalizes log paths, and
+  the client resolves relative data overrides against the desktop launch cwd
+  before starting the backend. Local desktop selftest from /tmp with
+  MAGNITE_HOME=data passed and created all five database files under that launch
+  directory, outside the executable directory. Added before/after bundle byte,
+  link, mode and diagnostic attribute inventories; OS provenance attributes
+  are recorded while signature verification remains the seal gate.
+  This is not a re-sign-after-tests workaround: original tested bundle bytes
+  must remain unchanged. Native Mac acceptance and the one-SHA combined run
+  remain pending the corrected candidate.

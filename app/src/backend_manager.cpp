@@ -92,6 +92,11 @@ void BackendManager::launchBackend() {
     QSettings settings;
     const QString dataDir = settings.value("storage/dataDir").toString().trimmed();
     if (!env.contains("MAGNITE_HOME") && !dataDir.isEmpty()) env.insert("MAGNITE_HOME", dataDir);
+    // The backend runs from the executable directory. Resolve relative data
+    // overrides here, before changing its cwd, so a packaged app never stores
+    // user databases inside its installation by accident.
+    if (!env.value("MAGNITE_HOME").isEmpty())
+        env.insert("MAGNITE_HOME", QFileInfo(env.value("MAGNITE_HOME")).absoluteFilePath());
     env.insert("MAGNITE_ENGINE_OVERRIDE", QString::number(qBound(0, settings.value("engine/override", 0).toInt(), 2)));
     QString python;
     if (packaged) {
