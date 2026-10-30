@@ -49,6 +49,8 @@ def main():
                 "assets": assets, "evidence_created_at": int(time.time())}
     (args.output / f"provenance-{label}.json").write_text(json.dumps(evidence, indent=2) + "\n")
     (args.output / f"SHA256SUMS-{label}").write_text("".join(f"{a['sha256']}  {a['name']}\n" for a in assets))
+    print("::notice title=Tested native package::" + json.dumps({
+        **expected, "platform": args.platform, "architecture": args.architecture, "assets": assets}))
 
 
 if __name__ == "__main__":

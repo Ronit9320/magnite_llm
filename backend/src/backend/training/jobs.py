@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import sqlite3
+
+from backend.database import connection
 import queue
 import os
 import threading
@@ -33,7 +34,7 @@ class TrainingJobManager:
         self._cancel: dict[str, threading.Event] = {}
 
         self._db = os.path.join(data_dir, "training_jobs.db")
-        with sqlite3.connect(self._db) as conn:
+        with connection(self._db) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL)")
             for (record,) in conn.execute("SELECT record FROM jobs"):
                 job = TrainingJob.model_validate_json(record)
@@ -51,7 +52,7 @@ class TrainingJobManager:
         self._worker.start()
 
     def _persist(self, job):
-        with sqlite3.connect(self._db) as conn:
+        with connection(self._db) as conn:
             conn.execute("INSERT OR REPLACE INTO jobs VALUES (?, ?)", (job.id, job.model_dump_json()))
 
     def _run_queue(self):

@@ -5,6 +5,8 @@ import io
 import json
 import os
 import sqlite3
+
+from backend.database import connection
 import threading
 import time
 import uuid
@@ -42,14 +44,12 @@ class DatasetStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, sqlite3.connect(self._db_path) as conn:
+        with self._lock, connection(self._db_path) as conn:
             conn.execute(_SCHEMA)
             conn.commit()
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _conn(self):
+        return connection(self._db_path)
 
     # ---- ingestion ------------------------------------------------------
 

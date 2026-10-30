@@ -84,6 +84,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     def archive(self, entries=None, record=None):
         path = self.root / 'adapter.zip'
+        raw_names = {}
         rec = dict(id='adapter:test', name='test', base_model='test/base', path='ignored')
         with zipfile.ZipFile(path, 'w') as z:
             z.writestr('record.json', json.dumps(rec if record is None else record))
@@ -91,11 +92,20 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             from safetensors.numpy import save
             z.writestr('weights/adapter_model.safetensors', save({'lora_A.weight': np.zeros((2, 2), dtype=np.float32)}))
             for name, value in (entries or {}).items():
-                z.writestr(name, value)
+                encoded_name = name.replace('\\', '?').replace('\0', '!')
+                z.writestr(encoded_name, value)
+                if encoded_name != name:
+                    raw_names[encoded_name.encode()] = name.encode()
+        # Windows ZipInfo normalizes backslashes while writing. Patch equal-
+        # length header names so the fixture contains the intended wire bytes.
+        content = path.read_bytes()
+        for encoded, raw in raw_names.items():
+            content = content.replace(encoded, raw)
+        path.write_bytes(content)
         return path
 
     async def test_archive_traversal_rejected_without_writes(self):
-        for name in ('weights/../escaped', 'weights//tmp/escaped', 'weights/../../escaped', 'weights/a\\b'):
+        for name in ('weights/../escaped', 'weights//tmp/escaped', 'weights/../../escaped', 'weights/a\\b', 'weights/a\0b'):
             # Double slash is normalized inside the destination; absolute remainder must be rejected.
             path = self.archive({name: 'marker'})
             response = await self.client.post('/adapters/import', json={'path': str(path)})

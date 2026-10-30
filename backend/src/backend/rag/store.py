@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+
+from backend.database import connection
 import threading
 import time
 import uuid
@@ -66,16 +68,14 @@ class RagStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, sqlite3.connect(self._db_path) as conn:
+        with self._lock, connection(self._db_path) as conn:
             conn.execute(_DOC_SCHEMA)
             conn.executescript(_CHUNK_SCHEMA)
             conn.execute(_CONFIG_SCHEMA)
             conn.commit()
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _conn(self):
+        return connection(self._db_path)
 
     # ---- config ---------------------------------------------------------
 
@@ -166,7 +166,8 @@ class RagStore:
         )
 
     def _embedding_dim(self) -> Optional[int]:
-        row = self._conn().execute("SELECT embedding FROM rag_chunks LIMIT 1").fetchone()
+        with self._conn() as conn:
+            row = conn.execute("SELECT embedding FROM rag_chunks LIMIT 1").fetchone()
         if row is None:
             return None
         return len(np.frombuffer(row["embedding"], dtype=np.float32))

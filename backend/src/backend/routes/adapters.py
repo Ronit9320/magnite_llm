@@ -152,9 +152,11 @@ def _import_adapter(body: AdapterImportRequest):
             total = 0
             seen = set()
             for entry in zf.infolist():
-                name = entry.filename
+                # ZipInfo normalizes backslashes on Windows. Validate the raw
+                # archive name before that platform-dependent normalization.
+                name = entry.orig_filename
                 path = PurePosixPath(name)
-                if (path.is_absolute() or ".." in path.parts or "\\" in name
+                if (path.is_absolute() or ".." in path.parts or "\\" in name or "\0" in name
                         or ":" in name or stat.S_ISLNK(entry.external_attr >> 16)):
                     raise ValueError("Unsafe archive member")
                 if name in seen:

@@ -169,7 +169,7 @@ def check_layout(app: Path) -> list:
     return problems
 
 
-def check_host_paths(app: Path, needles: list) -> list:
+def check_host_paths(app: Path, needles: list, upstream_home: str | None = None) -> list:
     encoded = [n.encode() for n in needles]
     hits = []
     for path in iter_files(app):
@@ -178,7 +178,15 @@ def check_host_paths(app: Path, needles: list) -> list:
         except OSError as exc:
             hits.append(f"unreadable {path}: {exc}")
             continue
-        found = [n.decode() for n in encoded if n in data]
+        relative = path.relative_to(app).as_posix()
+        upstream = (relative.startswith("Contents/Resources/runtime/python/lib/python3.12/site-packages/")
+                    and (is_macho(path) or path.suffix == ".a" or ".dist-info/" in relative))
+        # Upstream wheels are also built by GitHub's /Users/runner account.
+        # Its generic prefix in diagnostic strings/SBOMs is not a loader path.
+        # Exact checkout/Qt paths always fail; linkage and rpath audits above
+        # independently reject every unresolved external runtime dependency.
+        found = [n.decode() for n in encoded if n in data
+                 and not (upstream and upstream_home and n.decode() == upstream_home)]
         if found:
             hits.append(f"{path.relative_to(app)}  ({', '.join(found)})")
     return hits
@@ -244,7 +252,8 @@ def main():
 
     needles = sorted({str(Path.home()), str(Path(__file__).resolve().parents[2])}
                      | ({os.environ["MAGNITE_QT_ROOT"]} if os.environ.get("MAGNITE_QT_ROOT") else set()))
-    report.check("host-paths", check_host_paths(app, needles), "none of " + ", ".join(needles))
+    upstream_home = str(Path.home()) if os.environ.get("GITHUB_ACTIONS") == "true" and str(Path.home()) == "/Users/runner" else None
+    report.check("host-paths", check_host_paths(app, needles, upstream_home), "no checkout/Qt or unexpected host paths")
     report.check("symlinks", check_symlinks(app))
 
     sig = subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)],

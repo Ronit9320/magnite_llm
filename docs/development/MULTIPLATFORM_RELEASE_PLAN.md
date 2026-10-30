@@ -578,3 +578,31 @@ behaviour changes; this plan must not become the sole source of user instruction
   owner selected public job status only. Artifact-only integration push is
   necessary to execute the requested hosted validation. No merge/push to dev
   or master is involved.
+- Native run [41060457131](https://github.com/Ronit9320/magnite_llm/actions/runs/41060457131)
+  at `5f07de6`: Linux reusable package job PASS, including its Ubuntu/glibc
+  audit and relocated tests. Mac and Windows did not pass, so aggregate
+  acceptance was skipped. The public-only debugging choice was respected;
+  artifact download returned 401, and bounded failure excerpts were added as
+  public job annotations instead of requesting credentials again.
+- Initial `29e919d` jobs failed native setup-python 3.12.12 availability. Host
+  tooling now uses pinned 3.12.10 on Mac/Windows; isolated shipped runtime stays
+  3.12.12. Native coordinator cancels superseded artifact-only candidates, and
+  legacy Linux packaging skips integration pushes to avoid duplicate builds.
+- The `5f07de6` Mac bundle passed layout, all 368 ARM Mach-O architecture and
+  minimum-OS checks, linkage/resolution, symlinks and signature. Its raw-home
+  scan falsely matched upstream wheel diagnostic/SBOM paths using the same
+  `/Users/runner` account. Refinement permits that generic prefix only in
+  third-party binary/archive or dist-info data on GitHub's runner; exact source
+  and Qt paths, scripts, actual dylib references and rpaths remain checked.
+  A regression verifies that upstream diagnostics do not hide real source paths.
+- The `5f07de6` Windows installer compiled successfully. Native regressions
+  exposed SQLite handles left open by transaction context managers and archive
+  path normalization. SQLite transactions now close deterministically (without
+  changing data formats); tests verify commit, rollback and removal with live
+  connection references. Archive validation now checks raw `orig_filename`,
+  including backslash/NUL names, using wire-byte fixtures that work on Windows.
+  Native Windows temporary directories are pinned to RUNNER_TEMP to avoid 8.3
+  alias spelling in path-sensitive fixtures.
+- After those fixes, local backend suite: 73 run, 72 passed, one Mac-only skip.
+  Packaging suite: 10 tests PASS. New native candidates are required before
+  Phases 1–3 can be marked complete. No public release was created or modified.

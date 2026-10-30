@@ -41,6 +41,13 @@ DMG mount smoke run natively. Metal/MPS capability claims still require a real
 device; hosted CPU tests do not close that acceptance gap. Developer ID signing
 and notarization are not part of these ad-hoc testing artifacts.
 
+On GitHub's Mac account, upstream wheel diagnostics and SBOMs may contain the
+same generic `/Users/runner` prefix as the current host. The string audit allows
+that generic prefix only in prebuilt third-party binary/archive or dist-info
+data; it still rejects exact checkout/Qt roots and host paths in scripts.
+Loader paths, dependency resolution, signatures and poisoned-runtime smoke
+are audited independently. Local personal home prefixes remain fully checked.
+
 Windows tooling and installer operation are in
 [the platform guide](../../packaging/windows/README.md). Qt's deployment tool
 does not supply every non-Qt dependency, so OpenSSL DLLs are staged explicitly;
