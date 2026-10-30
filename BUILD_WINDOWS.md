@@ -18,7 +18,7 @@ git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
 C:\vcpkg\bootstrap-vcpkg.bat
 
 # Install dependencies
-C:\vcpkg\vcpkg install qtbase[widgets,network]:x64-windows qtsvg:x64-windows openssl:x64-windows
+C:\vcpkg\vcpkg install qtbase[widgets,network]:x64-windows qtsvg:x64-windows openssl:x64-windowsgit 
 ```
 
 ## Build

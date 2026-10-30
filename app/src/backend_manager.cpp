@@ -128,15 +128,38 @@ void BackendManager::launchBackend() {
         env.insert("PYTHONPATH", merged);
     }
 
-    // Prefer the repo venv python if present
-    QString venvPython = repoRoot + "/.venv/bin/python";
 #ifdef Q_OS_WIN
-    venvPython = repoRoot + "/.venv/Scripts/python.exe";
+    QList<QString> venvPythons = {
+        repoRoot + "/.venv312/Scripts/python.exe",
+        repoRoot + "/.venv/Scripts/python.exe",
+    };
+#else
+    QList<QString> venvPythons = {
+        repoRoot + "/.venv312/bin/python",
+        repoRoot + "/.venv/bin/python",
+    };
 #endif
     QString python;
-    if (QFileInfo::exists(venvPython)) {
-        python = venvPython;
-    } else {
+    for (const QString &vp : venvPythons) {
+        if (python.isEmpty()) {
+            if (QFileInfo::exists(vp)) python = vp;
+        }
+        if (!python.isEmpty()) {
+            // Skip venvs that cannot run: wrong architecture or empty python.exe
+            QProcess probe;
+            probe.setProgram(python);
+            QStringList probeArgs; probeArgs << "-c" << "print('ok')";
+            probe.start(probe.program(), probeArgs);
+            if (probe.waitForFinished(8000) &&
+                probe.exitStatus() == QProcess::NormalExit &&
+                probe.exitCode() == 0) {
+                break;
+            }
+            probe.kill();
+            python.clear();
+        }
+    }
+    if (python.isEmpty()) {
 #ifdef Q_OS_WIN
         // Try common Windows Python executables
         QStringList winCandidates;
@@ -146,22 +169,23 @@ void BackendManager::launchBackend() {
         winCandidates << "C:/Python312/python.exe";
         winCandidates << "C:/Python311/python.exe";
         winCandidates << "C:/Python310/python.exe";
-        winCandidates << "py";
-        winCandidates << "python";
         bool found = false;
         for (const auto &cand : winCandidates) {
-            if (cand == "py" || cand == "python") {
-                python = cand;
-                found = true;
-                break;
-            }
-            if (QFileInfo::exists(cand)) {
-                python = cand;
-                found = true;
-                break;
+            if (QFileInfo::exists(cand) && cand.endsWith(".exe")) {
+                // sanity-check candidate runs (architecture match)
+                QProcess probe;
+                probe.start(cand, {"-c", "print('ok')"});
+                if (probe.waitForFinished(8000) &&
+                    probe.exitStatus() == QProcess::NormalExit &&
+                    probe.exitCode() == 0) {
+                    python = cand;
+                    found = true;
+                    break;
+                }
+                probe.kill();
             }
         }
-        if (!found) python = "python";
+        if (!found) python = "py";
 #else
         python = "python3";
 #endif
