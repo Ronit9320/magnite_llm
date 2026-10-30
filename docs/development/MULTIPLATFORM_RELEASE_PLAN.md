@@ -620,3 +620,11 @@ behaviour changes; this plan must not become the sole source of user instruction
   explicitly writes UTF-8. No application encoding policy was changed to hide
   the test failure. Windows installation/lifecycle acceptance still needs its
   first successful run; aggregate acceptance remains pending.
+- Native run [41067786933](https://github.com/Ronit9320/magnite_llm/actions/runs/41067786933)
+  at `f60148a`: Linux package PASS. The newly enabled Mac CTest verified valid
+  signatures, tampering, untrusted keys and malformed fields, but exposed a
+  Linux-only test expectation: rejecting a numeric future glibc requirement on
+  macOS. That host-compatibility assertion is now Linux-guarded; malformed glibc
+  metadata remains tested everywhere, and production verification is unchanged.
+  Local Linux CTest still passes with the Linux assertion enabled. A fresh
+  native run is required to reach later Mac/Windows package checks.

@@ -56,7 +56,11 @@ int main(int argc, char **argv) {
         {"url", "https://attacker.invalid/update"}, {"data_schema", 2}, {"architecture", "aarch64"},
         {"channel", "stable"}, {"variant", "cuda"}, {"size", -1}, {"size", 1e20},
         {"sequence", 0}, {"sequence", 1.5}, {"version", "../evil"}, {"sha256", "bad"},
-        {"minimum_glibc", "999.0"}, {"minimum_glibc", ""}}) {
+#ifdef Q_OS_LINUX
+        // A numeric host glibc requirement is evaluated only on Linux.
+        {"minimum_glibc", "999.0"},
+#endif
+        {"minimum_glibc", ""}}) {
         auto invalid = manifest; invalid.insert(change.first, change.second);
         check(!verify(invalid), qPrintable("incompatible signed field rejected: " + change.first));
     }
