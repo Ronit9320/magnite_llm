@@ -468,6 +468,11 @@ behaviour changes; this plan must not become the sole source of user instruction
   merge yet: Phase 2 depends on Phase 1 native acceptance. All source branches
   remain preserved. No push, public publication, stable promotion, release
   identity change, schema bump or signing-key change.
+- Ending application/source merge: `ad1489e57fd3308100d530b011c98995d960bd2c`,
+  with parents `f3d8d36` and `86950a8`. Verified that `origin/mac` is an ancestor
+  and the tree was clean after that commit. A documentation-only follow-up
+  records this finalized source SHA; no application code changed after the
+  diagnostic package tests. The Windows branch remains unmerged and preserved.
 - Integrated per-launch API authentication, POSIX data-folder locking, Mac
   parent supervision, training capability handling, guarded bundle runtime
   lookup, `.app`/DMG tooling and historical evidence. Raw health transport retains
@@ -480,7 +485,11 @@ behaviour changes; this plan must not become the sole source of user instruction
   theme and UI audits PASS (0 failures); desktop/backend selftest PASS (0
   failures); backend suite **71 tests run, 70 passed, 1 skipped** (the real Mac
   parent-death test); updater helper transactions PASS (6/6). Shell syntax checks
-  for changed Mac build scripts, runtime CLI help and `git diff --check` PASS.
+  for changed Mac build scripts and runtime CLI help PASS. Workflow YAML parses
+  and its publisher guard is `github.ref == 'refs/heads/dev'`; hosted execution
+  has not run. The staged whitespace audit passes with `blank-at-eof` disabled:
+  five imported Mac historical/license files already contain trailing blank
+  lines, which were preserved rather than rewriting third-party license texts.
 - Evidence is local under `build/packaging/multiplatform/mac-{build,configure,
   ctest,theme,ui,selftest,backend,helper}.log`. Backend/UI/desktop tests used
   authorized loopback access after sandbox-only socket failures. The stalled
