@@ -2,7 +2,9 @@
 
 ## Status and instructions for the next agent
 
-Created: 2026-10-30. **Planning only. No implementation phase has started.**
+Created: 2026-10-30. **Implementation started on `release/integration`: Phase 0
+complete; Phase 1 in progress.** See the implementation record below and
+[integration inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md).
 
 The owner requested this Markdown handoff only for this session. Do not interpret
 its creation as permission to merge branches, push changes, publish another
@@ -189,7 +191,11 @@ through recurring manual version edits.
 
 ## Phase 0 — inventory and integration preparation
 
-Status: **NOT STARTED**.
+Status: **COMPLETE** — 2026-10-30; inventory and Linux baseline recorded in
+[MULTIPLATFORM_INTEGRATION_INVENTORY.md](MULTIPLATFORM_INTEGRATION_INVENTORY.md).
+The actual pushed Windows branch is `windows-build-fix` (`2350dff`), not `windows`.
+Integration started at local dev `f3d8d36`, retaining its planning commit above
+remote dev `af5fb18`.
 
 - Inspect status, remotes, current instructions, all relevant branch tips and
   unmerged history. Fetch current `dev`, `mac`, `windows` and `master`.
@@ -209,7 +215,9 @@ baseline and an integration branch with an explicit starting commit.
 
 ## Phase 1 — integrate Mac while preserving Linux
 
-Status: **NOT STARTED**. Depends on Phase 0.
+Status: **IN PROGRESS**. Reviewed Mac source integrated; Linux source and
+diagnostic AppImage checks pass. Native Mac checks against the integrated source
+remain outstanding, as does hosted Ubuntu/glibc-2.35 verification.
 
 - Merge reviewed Mac changes into `release/integration`. Resolve shared files
   semantically; preserve the canonical identity and working Linux updater.
@@ -447,3 +455,71 @@ behaviour changes; this plan must not become the sole source of user instruction
   push, new release or `master` promotion performed for this planning task.
 - Windows implementation has not been inspected. First implementation task:
   Phase 0, including checking the owner's newly pushed `windows` branch.
+
+### Implementation record — 2026-10-30: inventory and Mac integration
+
+- Started on clean local `dev` at `f3d8d36`; fetched current remote tips and
+  created `release/integration` from that commit. Windows was pushed as
+  `windows-build-fix`, tip `2350dff`. Full inputs, merge bases, shared-file review,
+  tool versions and baseline results are in the
+  [inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md).
+- Phase 0 COMPLETE. Reviewed and integrated Mac `86950a8`, with semantic
+  resolutions preserving Linux updater behavior and dependency pins. No Windows
+  merge yet: Phase 2 depends on Phase 1 native acceptance. All source branches
+  remain preserved. No push, public publication, stable promotion, release
+  identity change, schema bump or signing-key change.
+- Integrated per-launch API authentication, POSIX data-folder locking, Mac
+  parent supervision, training capability handling, guarded bundle runtime
+  lookup, `.app`/DMG tooling and historical evidence. Raw health transport retains
+  canonical backend-version matching for update startup/rollback. Removed the
+  active Mac version override, derived numeric bundle fields, retained Linux
+  CPU locks, and required platform runtime locks. Added an authenticated update
+  quiesce/resume regression. Reconciled stale Mac status instructions and active
+  package examples; old test records retain their original identities.
+- Linux source checks: CMake configure/build PASS; CTest manifest PASS (1/1);
+  theme and UI audits PASS (0 failures); desktop/backend selftest PASS (0
+  failures); backend suite **71 tests run, 70 passed, 1 skipped** (the real Mac
+  parent-death test); updater helper transactions PASS (6/6). Shell syntax checks
+  for changed Mac build scripts, runtime CLI help and `git diff --check` PASS.
+- Evidence is local under `build/packaging/multiplatform/mac-{build,configure,
+  ctest,theme,ui,selftest,backend,helper}.log`. Backend/UI/desktop tests used
+  authorized loopback access after sandbox-only socket failures. The stalled
+  initial sandbox baseline was interrupted; it is not counted as a passing run.
+- Diagnostic Linux AppImage rebuilt with
+  `MAGNITE_GLIBC_MAX=2.43 bash packaging/build_appimage.sh`. Initial sandbox
+  build failed on PyPI DNS resolution; authorized network retry PASS. Existing
+  `dist/` artifacts were preserved before rebuilding and restored afterwards.
+  The new candidate and checksums are isolated under
+  `build/packaging/multiplatform/mac-linux-diagnostic/`. Audit: **616 ELF files,
+  maximum glibc 2.43, zero offenders** for this diagnostic baseline. This does
+  not satisfy the hosted Ubuntu 2.35 claim.
+- Diagnostic AppImage SHA-256:
+  `df90fc94c7db3f29cadce233c538130b1d8781fe225f55d2dc592e7c1d425378`.
+  Built from the integration working tree before the merge commit; embedded
+  provenance accurately records `f3d8d36` and `working_tree_modified: true`.
+  It is a local test artifact, not a new distributed release or a replacement
+  for the public preview.
+- `python3 packaging/smoke_appimage.py <candidate> --logs
+  build/packaging/multiplatform/mac-relocated --cache build/packaging/test-cache
+  --features`: all **7 checks PASS** — extraction, theme, UI, authenticated
+  desktop startup, real GGUF inference, combined real CPU LoRA/adapter/RAG
+  workflow, and the actual AppImage extract-and-run launcher. Runs relocate
+  outside the checkout with poisoned host Python paths. Main result log:
+  `build/packaging/multiplatform/mac-package-tests.log`; builder log:
+  `build/packaging/multiplatform/mac-appimage-build.log`.
+- Phase 1 remains IN PROGRESS: this environment is Linux x86_64, with no native
+  Mac/Windows runner or device execution available in this session. Historical
+  Mac evidence cannot close this gap. Signing/notarization remains deferred;
+  no new signing credentials were requested or installed. As an early prerequisite
+  for hosted integration testing, the existing Linux publisher is now guarded to
+  `refs/heads/dev` only. Release branches build/test artifacts without publishing,
+  including manual runs. The coordinator is not implemented; Phase 6 is not complete.
+- Next: on a native Apple Silicon Mac, build this integrated source using
+  `MAGNITE_QT_ROOT=<pinned Qt 6.8.3>/macos bash packaging/macos/build_app.sh`, run
+  bundle/DMG audits, relocated smoke, installed acceptance, authenticated update
+  gate and lifecycle checks, and record exact source/environment/results. Run
+  hosted Linux Ubuntu 22.04 checks using the guarded artifact-only integration path.
+  Once Phase 1 acceptance is met, merge the reviewed `windows-build-fix` branch
+  semantically in Phase 2; its existing scripts are source-build support, with
+  installer/runtime locks/updater/signing still missing. Later automation,
+  channels, publication and stable rollout phases remain NOT STARTED.

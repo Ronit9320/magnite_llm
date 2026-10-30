@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.paths import app_home
 from backend.training.datasets import DatasetStore
 from backend.training.jobs import TrainingJobManager
+from backend.training.trainer import quantization_support
 from backend.training.schemas import (
     DatasetIngestRequest,
     DatasetRecord,
@@ -60,6 +61,12 @@ def start_training(cfg: TrainingConfig):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@training_router.get("/capabilities")
+def training_capabilities():
+    supported, reason = quantization_support()
+    return {"quantization": supported, "quantization_detail": reason}
 
 
 @training_router.get("/status/{job_id}", response_model=TrainingJob)

@@ -1,5 +1,13 @@
 # Linux preview releases and application updates
 
+Multi-platform integration has started on `release/integration`; see the
+[current plan](MULTIPLATFORM_RELEASE_PLAN.md) and
+[source inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md). The Linux publication
+workflow described here remains active and has not yet been replaced by a
+three-platform coordinator. Its publisher is now restricted to `dev`;
+`release/**` pushes and manual runs on those branches build/test artifacts only.
+No new preview or stable publication is part of the initial integration work.
+
 ## Scope and decisions
 
 The first application release is **v0.1-preview**. Linux x86-64 with the bundled
@@ -10,8 +18,9 @@ and update delivery while the original application's roadmap continues.
 Work is on the existing `release/v0.1-testing` branch. That branch contained the
 original AppImage work and was fast-forwarded to `dev` at `c00d93a` before this
 implementation. All original packaging commits were already ancestors of `dev`.
-The other local branches were inspected; the remote `mac` branch contains only
-a health-probe change. `master` is not a release source for this preview and is
+At that initial Linux implementation inspection the remote `mac` branch contained
+only a health-probe change; it now contains substantial packaging and shared
+changes inventoried in the integration plan. `master` is not a release source for this preview and is
 left untouched. Feature branches remain reserved for normal feature work.
 
 The owner explicitly deferred the broader release checklist until later. Its
@@ -80,7 +89,7 @@ trigger, master merge, or production promotion step.
 5. Run signature/manifest tests, real installer transaction tests, backend
    regressions, theme/UI/startup tests, and relocated tiny-model workflows.
 6. Upload the exact tested AppImage and verification evidence as Actions artifacts.
-7. Download that artifact in a separate job with release-write permission.
+7. On `dev` only, download that artifact in a separate job with release-write permission.
 8. Sign metadata, checking that the private key matches the shipped public key.
 9. Create a draft tagged at the workflow commit, upload all assets, then publish
    it as a prerelease with `latest=false`.
@@ -91,8 +100,8 @@ the workflow summary explains that a version/sequence bump is required. An
 unfinished draft requires inspection before retrying. This prevents a user from
 seeing a different binary under a version they already installed.
 
-A push to the working release branch can publish the first preview without
-merging into `dev`. Subsequent reviewed work can follow the normal merge into
+A push to the working release branch originally published the first preview
+without merging into `dev`. Release branches are now artifact-only. Subsequent reviewed work can follow the normal merge into
 `dev`; a new canonical version then publishes a new preview. Neither requires
 changing `master`. Publishing the preview is authorized by the owner despite
 the deferred general release checklist.

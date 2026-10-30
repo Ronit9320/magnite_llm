@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QProcess>
 
+#include <QJsonObject>
 #include <QList>
 #include <memory>
 #include <functional>
@@ -39,6 +40,7 @@ public:
 private slots:
     void onBackendStarted();
     void onBackendError(QProcess::ProcessError error);
+    void onBackendDataDirInUse();
     void switchPanel(int index);
     void savePanelSettings();
 
@@ -58,6 +60,7 @@ private:
     void trainingSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish);
     void pollTrainingSelfTest(const QString &jobId, int attempts,
                               std::shared_ptr<int> failCount, std::function<void()> finish);
+    void withSelfTestQuantization(QJsonObject body, std::function<void(const QJsonObject &)> next);
     void adapterSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish);
     void ragSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish);
     void pollTrainingForAdapter(const QString &jobId, int attempts,

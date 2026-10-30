@@ -268,12 +268,13 @@ These are prioritized improvements, not a reason to restart implemented systems 
 - [ ] Verify installation and launch on a clean Windows machine without a developer checkout or system Python. Test inference, CPU LoRA, adapters, RAG, backend process cleanup, upgrade and uninstall while preserving user data.
 - [ ] Complete signing and installer verification for public distribution; identify unsigned testing builds explicitly.
 
-### macOS .dmg — pending
+### macOS .dmg — testing build produced; not release-ready
 
-- [ ] Select and document the initial architecture (Apple Silicon and/or Intel) and minimum macOS version; prepare a native macOS build environment.
-- [ ] Build a self-contained `.app` containing Qt frameworks/plugins, Python, the backend and platform-compatible ML dependencies; package it as a v0.1 testing `.dmg`. Record exact source/dependency versions and a SHA-256 checksum.
+- [x] Select and document the initial architecture (Apple Silicon and/or Intel) and minimum macOS version; prepare a native macOS build environment. *(Apple silicon arm64, macOS 14.0+: `docs/release/macos/adr/0001-target-architecture.md`, `0002-minimum-macos.md`, `environment-macos.txt`.)*
+- [x] Build a self-contained `.app` containing Qt frameworks/plugins, Python, the backend and platform-compatible ML dependencies; package it as a v0.1 testing `.dmg`. Record exact source/dependency versions and a SHA-256 checksum. *(`dist/Magnite-0.1.0-test.1-arm64.dmg`, SHA-256 `48050836…`; see `docs/release/macos/V0_1_MACOS_TESTING.md` and LOG.md Phases 5, 7 and the ISSUE-011 entry. Built from a modified tree, so not claimed reproducible from a commit.)*
 - [ ] Verify installation and launch on a clean Mac without a developer checkout or system Python. Test supported inference/training/RAG paths, backend process cleanup, upgrade and removal while preserving user data. Record Metal/MPS and quantization limits separately.
-- [ ] Complete Developer ID signing, notarization and Gatekeeper verification before public distribution.
+  *Not ticked: the app was verified from the dmg (11/11) and in a second standard account (6/6), with Metal/MPS and the QLoRA limit recorded in `ML_MATRIX.md`, but never on a Mac free of Homebrew/system Python, the Gatekeeper dialog wording was not captured, and the cross-account API check was skipped. See LOG.md Phases 8–10.*
+- [ ] Complete Developer ID signing, notarization and Gatekeeper verification before public distribution. *DEFERRED by the maintainer (2026-10-30); users approve the app via `docs/MACOS_FIRST_LAUNCH.md`. Would need an Apple Developer Program enrollment, a Developer ID Application certificate and a `notarytool` profile. The test build is ad-hoc signed.*
 
 ### Shared publication gates
 

@@ -85,6 +85,9 @@ jobs:
           retention-days: 14
 
   publish:
+    # Integration/release branches build artifacts only. The coordinated
+    # multi-platform publisher will replace this dev-only path later.
+    if: github.ref == 'refs/heads/dev'
     needs: package
     runs-on: ubuntu-22.04
     timeout-minutes: 10

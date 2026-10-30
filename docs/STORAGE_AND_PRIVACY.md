@@ -37,7 +37,8 @@ make network requests. An offline workflow requires cached dependencies and
 weights, and should be verified with the intended engines.
 
 No encryption-at-rest feature is implemented. The backend runs with the user's
-filesystem permissions and currently has no application authentication layer.
+filesystem permissions. Requests to an app-launched backend need a per-launch secret
+(verified on macOS only); a backend started by hand has no credential check.
 Keep it local and use operating-system account/storage protections as needed.
 Logs and exported adapter metadata may contain local paths, model identifiers,
 or error text. Inspect and redact them before sharing.

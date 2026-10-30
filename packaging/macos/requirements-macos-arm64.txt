@@ -1,0 +1,25 @@
+# macOS arm64 test-build runtime (see docs/release/macos/adr/0004).
+# Most direct pins match ../requirements-cpu.txt, EXCEPT:
+#   * huggingface_hub 1.33.0 includes the Mac cache fix; Linux retains its tested 1.30.0 lock
+#   * bitsandbytes is not here -> requirements-macos-quantization.txt (unproven on Apple silicon)
+#   * torch is the standard macOS wheel: it provides CPU *and* MPS (there is no "cpu" variant)
+#   * llama-cpp-python is built from sdist with Metal (flags set by packaging/prepare_runtime.py)
+# Model weights, vLLM and Ollama are not bundled. Resolved versions are recorded in
+# Contents/Resources/build-info/ inside the app.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1
+pydantic==2.13.5
+huggingface_hub==1.33.0
+llama-cpp-python==0.3.35
+tqdm==4.70.0
+anyio==4.15.0
+numpy==2.5.2
+torch==2.14.0
+transformers==5.16.1
+peft==0.20.0
+sentence-transformers==6.0.1
+datasets==5.0.1
+accelerate==1.14.0
+safetensors==0.8.0
+pypdf==6.19.0

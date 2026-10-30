@@ -3,20 +3,20 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QNetworkReply>
+#include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QTcpSocket>
 #include <QTimer>
-#include <QUrl>
 #include <QSettings>
-#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+
+#include <memory>
 
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
     , m_process(new QProcess(this))
     , m_port(0)
-    , m_nam(new QNetworkAccessManager(this))
     , m_started(false)
     , m_stopping(false)
 {
@@ -117,18 +117,26 @@ void BackendManager::launchBackend() {
     // Test packages carry a relocatable Python installation beside the client.
     // Use isolated mode so a user's PYTHONPATH/site-packages cannot replace the
     // packaged backend. Never silently fall back when a package is incomplete.
-    const QString runtimeDir = appDir + "/runtime";
+    QString runtimeDir = appDir + "/runtime";
+#ifdef Q_OS_MAC
+    // A macOS .app keeps the runtime in Contents/Resources, beside Contents/MacOS.
+    const QString bundleRuntimeDir = QDir::cleanPath(appDir + "/../Resources/runtime");
+    if (QDir(bundleRuntimeDir).exists()) runtimeDir = bundleRuntimeDir;
+#endif
     const bool packaged = QDir(runtimeDir).exists();
     if (packaged) {
 #ifdef Q_OS_WIN
         python = runtimeDir + "/python/python.exe";
 #else
         python = runtimeDir + "/python/bin/python3";
+#ifndef Q_OS_MAC
         // Native Python extensions also need the bundled C++/OpenMP libraries.
+        // (macOS wheels resolve their dylibs through @loader_path instead.)
         QString libraryPath = QDir(appDir + "/../lib").absolutePath();
         const QString existingLibraries = env.value("LD_LIBRARY_PATH");
         if (!existingLibraries.isEmpty()) libraryPath += ":" + existingLibraries;
         env.insert("LD_LIBRARY_PATH", libraryPath);
+#endif
 #endif
         args.prepend("-I");
         args.prepend("-B");
@@ -136,6 +144,13 @@ void BackendManager::launchBackend() {
         env.remove("PYTHONHOME");
         env.insert("MAGNITE_PACKAGED", "1");
     }
+
+    // A fresh secret per launch, so only this client can drive the backend (adr/0009). It goes
+    // in the environment, never on the command line, which other users can read with ps.
+    quint32 secret[8];
+    QRandomGenerator::system()->fillRange(secret);
+    m_apiToken = QString::fromLatin1(QByteArray(reinterpret_cast<const char *>(secret), sizeof secret).toHex());
+    env.insert("MAGNITE_API_TOKEN", m_apiToken);
 
     m_process->setProcessEnvironment(env);
     m_process->setWorkingDirectory(appDir);
@@ -185,27 +200,62 @@ void BackendManager::waitForBackend() {
         if (m_started || !isRunning()) {
             return;
         }
-        auto *reply = m_nam->get(QNetworkRequest(QUrl(baseUrl() + "/health")));
-        connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-            reply->deleteLater();
-            if (m_started) {
-                return;
-            }
-            const auto health = QJsonDocument::fromJson(reply->readAll()).object();
-            if (reply->error() == QNetworkReply::NoError
-                && health.value("version").toString() == QCoreApplication::applicationVersion()) {
-                m_started = true;
-                fprintf(stderr, "[magnite] backend health OK (%s)\n",
-                        qUtf8Printable(baseUrl()));
-                emit started();
-            } else if (isRunning()) {
-                qWarning() << "Backend health check failed:" << reply->errorString()
-                           << "- retrying";
-                QTimer::singleShot(500, this, &BackendManager::waitForBackend);
-            }
-        });
+        checkHealth();
     });
     timer->start(500);
+}
+
+// Probes /health over a raw loopback socket. QNetworkAccessManager never sent
+// this request on macOS (the app's GET stalled before reaching the backend),
+// so readiness no longer depends on it.
+void BackendManager::checkHealth() {
+    auto *socket = new QTcpSocket(this);
+    auto response = std::make_shared<QByteArray>();
+    auto settled = std::make_shared<bool>(false);
+    auto settle = [this, socket, settled](bool ok) {
+        if (*settled) {
+            return;
+        }
+        *settled = true;
+        socket->abort();
+        socket->deleteLater();
+        if (m_started) {
+            return;
+        }
+        if (ok) {
+            m_started = true;
+            fprintf(stderr, "[magnite] backend health OK (%s)\n", qUtf8Printable(baseUrl()));
+            emit started();
+        } else if (isRunning()) {
+            qWarning() << "Backend health check failed - retrying";
+            QTimer::singleShot(500, this, &BackendManager::waitForBackend);
+        }
+    };
+
+    connect(socket, &QTcpSocket::connected, socket, [socket]() {
+        socket->write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    });
+    connect(socket, &QTcpSocket::readyRead, socket, [socket, response, settle]() {
+        response->append(socket->readAll());
+        if (response->size() > 65536) settle(false);
+    });
+    connect(socket, &QTcpSocket::disconnected, socket, [response, settle]() {
+        const auto bodyOffset = response->indexOf("\r\n\r\n");
+        const auto health = QJsonDocument::fromJson(response->mid(bodyOffset + 4)).object();
+        settle(response->startsWith("HTTP/1.1 200 ") && bodyOffset >= 0
+               && health.value("version").toString() == QCoreApplication::applicationVersion());
+    });
+    connect(socket, &QTcpSocket::errorOccurred, socket,
+            [settle](QAbstractSocket::SocketError error) {
+        // A graceful close also reports RemoteHostClosedError; the disconnected
+        // handler decides the result for that case.
+        if (error != QAbstractSocket::RemoteHostClosedError) {
+            settle(false);
+        }
+    });
+    QTimer::singleShot(3000, socket, [settle]() { settle(false); });
+
+    socket->connectToHost(QStringLiteral("127.0.0.1"), m_port);
 }
 
 void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
@@ -214,6 +264,10 @@ void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
     // Ignore failures caused by our own deliberate termination.
     if (m_stopping)
         return;
-    Q_UNUSED(exitCode);
+    constexpr int kExitDataDirInUse = 75;   // backend/local_access.py EXIT_DATA_DIR_IN_USE
+    if (exitCode == kExitDataDirInUse) {
+        emit dataDirInUse();
+        return;
+    }
     emit errorOccurred(QProcess::Crashed);
 }

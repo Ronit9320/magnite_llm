@@ -47,3 +47,24 @@ The smoke test requires loopback access and downloads tiny models. It checks
 relocated theme/UI/startup, GGUF inference, and CPU LoRA/adapter/RAG while
 supplying deliberately broken host Python paths. CI signs and publishes only
 after the exact package passes. Local builds do not publish or push anything.
+
+## macOS Apple silicon (arm64)
+
+The macOS recipe lives in [`macos/`](macos/README.md). It needs Command Line Tools, CMake, `uv` and the pinned official Qt 6.8.3
+(`MAGNITE_QT_ROOT`), then:
+
+```sh
+bash packaging/macos/build_app.sh     # Qt + isolated Python 3.12 runtime + backend -> ad-hoc signed Magnite.app, verify_bundle.py gate
+bash packaging/macos/build_dmg.sh     # -> dist/Magnite-v0.1-preview-arm64.dmg and dist/SHA256SUMS-macos
+bash packaging/macos/check_dmg.sh dist/Magnite-v0.1-preview-arm64.dmg
+bash packaging/macos/verify_installed.sh <app> <log-dir> <hf-cache>   # full acceptance set on an installed copy
+```
+
+The runtime is installed from `macos/requirements-macos-arm64.txt` under the full lock `macos/constraints-macos-arm64.txt`.
+llama-cpp-python is built from source with Metal; bitsandbytes is not included. The client launches the bundled interpreter with `-I -B`
+and never falls back to a system Python once `Contents/Resources/runtime` exists. Regressions run through
+`bash packaging/macos/run_regressions.sh` (a bare `unittest` run is affected by the `/var` symlink).
+
+These are **testing** builds: ad-hoc signed, not notarized, one architecture, minimum macOS 14.0. Developer ID signing and notarization
+are not done (blocked on a certificate). Tester instructions: [`macos/TESTING.md`](macos/TESTING.md). Evidence and limits:
+[`docs/release/macos/V0_1_MACOS_TESTING.md`](../docs/release/macos/V0_1_MACOS_TESTING.md).

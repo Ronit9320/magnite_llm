@@ -56,3 +56,8 @@ desktop.ini
 
 # Local release signing credentials (never publish the private key)
 /.release-secrets/
+
+# macOS packaging (release/v0.1-macos)
+build-macos/
+.venv-macos/
+*.dmg

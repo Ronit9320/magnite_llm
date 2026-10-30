@@ -1,0 +1,77 @@
+# macOS build environment — recorded 2026-10-23 15:02 IST (Phase 1)
+# Host facts for the v0.1 macOS testing build. Regenerate by re-running Phase 1.
+
+[host]
+macOS            27.0.1 (build 26A434)
+kernel           Darwin 27.0.0
+arch             arm64 (Apple M1)
+memory_gib       8
+
+[toolchain]
+clang            Apple clang version 14.0.3 (clang-1403.0.22.14.1)
+command_line_tools 14.3.1.0.1.1683849156
+sdk_used         13.3 (newest installed; no full Xcode)
+metal_compiler   absent (xcrun metal: unable to find utility)
+cmake            4.4.3
+uv               0.11.4
+
+[qt]
+MAGNITE_QT_ROOT  /Users/architbhuta/magnite_llm-master/.qt-tools/Qt/6.8.3/macos
+qt_version       6.8.3
+qt_slices        x86_64 arm64 (universal; to be thinned to arm64 in Phase 5)
+qt_minos         12.0
+
+[client build: build-macos/magnite-app]
+file             Mach-O 64-bit executable arm64
+minos            14.0
+sdk              13.3
+cmake_flags      -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DMAGNITE_BUILD_LABEL=0.1.0-test.1
+
+[dev regression venv: .venv-macos (NOT the shipped runtime; versions are UNPINNED)]
+python           3.12.13
+note             shipped runtime uses python-build-standalone 3.12.12 (available for macos-aarch64 per 'uv python list')
+--- pip freeze ---
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.10.19
+click==8.5.0
+diskcache==5.6.3
+fastapi==0.161.1
+filelock==4.2.4
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.7.0
+httpcore==1.0.9
+httpcore2==2.16.0
+httptools==0.9.0
+httpx==0.28.1
+httpx2==2.16.0
+huggingface-hub==2.3.0
+idna==3.20
+jinja2==3.1.6
+llama-cpp-python==0.3.36
+-e file:///Users/architbhuta/magnite_llm/backend
+markupsafe==3.0.4
+numpy==2.5.4
+opentelemetry-api==1.45.1
+packaging==26.3
+pydantic==2.14.1
+pydantic-core==2.50.1
+pypdf==6.19.0
+python-dotenv==1.2.4
+pyyaml==6.0.3
+safetensors==0.8.0
+starlette==1.9.0
+tqdm==4.70.1
+truststore==0.10.5
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+uvicorn==0.54.0
+uvloop==0.23.0
+watchfiles==1.3.0
+websockets==17.3
+
+[pinned set for the shipped runtime: see packaging/requirements-cpu.txt; macOS fork lands in Phase 3]
+git_commit       30ec89ad9f54f4b0d39a7dc38e730f5aee3ead62
+git_branch       release/v0.1-macos

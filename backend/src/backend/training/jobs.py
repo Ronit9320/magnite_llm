@@ -11,7 +11,7 @@ from typing import Optional
 from backend.adapters.store import AdapterStore
 from backend.training.datasets import DatasetStore
 from backend.training.schemas import TrainingConfig, TrainingJob
-from backend.training.trainer import run_training, TrainingCancellation
+from backend.training.trainer import quantization_support, run_training, TrainingCancellation
 
 
 def _now() -> str:
@@ -95,6 +95,10 @@ class TrainingJobManager:
             raise ValueError("base_model is required")
         if cfg.quantization not in ("none", "4bit", "8bit"):
             raise ValueError(f"Unsupported quantization '{cfg.quantization}'")
+        if cfg.quantization != "none":
+            supported, reason = quantization_support()
+            if not supported:
+                raise ValueError(reason)
         if not cfg.rank or cfg.rank < 1:
             raise ValueError("rank must be >= 1")
 

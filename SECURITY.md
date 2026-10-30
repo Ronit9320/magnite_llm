@@ -19,8 +19,15 @@ Magnite is in pre-release development; no stable release support window is
 established yet. Reports should identify the exact revision. Before publishing,
 maintainers must designate supported versions and a monitored reporting route.
 
-The backend is intended for the local desktop and binds to 127.0.0.1. It currently
-has no application authentication and exposes local-path and mutation operations.
+The backend is intended for the local desktop and binds to 127.0.0.1. It exposes
+local-path and mutation operations. When the desktop app launches it, a per-launch
+secret (`MAGNITE_API_TOKEN`, passed in the environment, not on the command line) is
+required on every request except `/health`, requests whose `Host` is not loopback are
+refused, and on Linux/macOS a second backend cannot open the same data folder. A backend started by
+hand without that variable has no credential check (the `Host` check still applies).
+Linux integration checks cover authentication, data-folder locking and updater
+coordination. Earlier macOS evidence is recorded separately. Windows locking is
+not implemented yet. The secret is visible to other processes of the same user.
 Do not expose it as a public or LAN service. Application data is not encrypted
 by Magnite. Treat model files, adapters, datasets, and documents as untrusted inputs.
 

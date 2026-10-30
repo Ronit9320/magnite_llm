@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template for CMake's MACOSX_BUNDLE_INFO_PLIST. ${...} values come from the
+     MACOSX_BUNDLE_* target properties set in app/CMakeLists.txt. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>     <string>en</string>
+    <key>CFBundleExecutable</key>            <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIdentifier</key>            <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
+    <key>CFBundleName</key>                  <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundleDisplayName</key>           <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundlePackageType</key>           <string>APPL</string>
+    <key>CFBundleIconFile</key>              <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+    <key>CFBundleShortVersionString</key>    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>CFBundleVersion</key>               <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <!-- The full build label (e.g. v0.1-preview) is not a valid CFBundleShortVersionString. -->
+    <key>MagniteBuildLabel</key>             <string>${MAGNITE_BUILD_LABEL}</string>
+    <key>LSMinimumSystemVersion</key>        <string>${MAGNITE_MACOS_MIN_VERSION}</string>
+    <key>LSApplicationCategoryType</key>     <string>public.app-category.productivity</string>
+    <key>NSPrincipalClass</key>              <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>       <true/>
+    <key>NSHumanReadableCopyright</key>      <string>Copyright © 2026 Magnite contributors. MIT License.</string>
+</dict>
+</plist>

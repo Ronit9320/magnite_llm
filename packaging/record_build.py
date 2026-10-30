@@ -25,7 +25,10 @@ def record_build(destination: Path):
         "commit": commit, "working_tree_modified": dirty,
         "platform": platform.platform(), "architecture": platform.machine(),
         "host_libc": platform.libc_ver(),
-        "runtime": "Python 3.12.12; CPU torch and llama.cpp; ML extras",
+        "runtime": ("Python 3.12.12; macOS arm64 torch wheel (CPU/MPS); llama-cpp-python built from "
+                    "sdist with GGML_METAL=ON (embedded shaders); ML extras without bitsandbytes"
+                    if sys.platform == "darwin" else
+                    "Python 3.12.12; CPU torch and llama.cpp; ML extras"),
     }, indent=2) + "\n", encoding="utf-8")
 
 

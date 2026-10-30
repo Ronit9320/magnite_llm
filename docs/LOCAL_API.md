@@ -16,8 +16,13 @@ Use `?source=huggingface` for offline Hub-cache discovery without an Ollama prob
 See [cache discovery rules and paths](development/BACKEND_PROCESS.md#4-model-library-discovery-pulls-and-deletion).
 
 The examples contain deliberate placeholders for values from your own backend.
-Do not expose this service through port forwarding or a public proxy: it has no
-application authentication and provides local-path and mutation operations.
+Do not expose this service through port forwarding or a public proxy: it provides
+local-path and mutation operations. A backend started by hand, as above, has no
+credential check; one launched by the desktop app requires a per-launch secret
+(`MAGNITE_API_TOKEN`) on every request except `/health`, so these examples do not
+work against the app's own backend. Requests with a non-loopback `Host` are refused
+in both cases. Linux integration checks cover authenticated API access and updater coordination;
+macOS results for earlier builds are recorded separately.
 
 ## Inference
 

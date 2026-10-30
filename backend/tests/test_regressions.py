@@ -398,6 +398,19 @@ class StoreTests(unittest.TestCase):
             self.assertFalse((blobs/'unique').exists())
             self.assertTrue((blobs/'shared').exists())
 
+    def test_hf_cache_deletion_through_symlinked_cache_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real=Path(directory).resolve()/'real-hub'
+            snapshot=real/'models--owner--model'/'snapshots'/('a'*40)
+            snapshot.mkdir(parents=True)
+            (snapshot/'config.json').write_text('{}')
+            link=Path(directory)/'linked-hub'
+            link.symlink_to(real,target_is_directory=True)
+            registry=ModelRegistry(ModelStore(str(Path(directory)/'models.db')))
+            via_link=link/'models--owner--model'/'snapshots'/('a'*40)
+            registry._remove_hf(ModelRecord(id='hf',name='hf',source='huggingface',ref='owner/model',path=str(via_link)))
+            self.assertFalse(snapshot.exists())
+
     def test_training_queue_cancel_and_history(self):
         with tempfile.TemporaryDirectory() as directory:
             store=DatasetStore(directory,str(Path(directory)/'datasets.db'))

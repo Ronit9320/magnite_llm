@@ -305,6 +305,34 @@ void TrainingPanel::setBackendClient(BackendClient *client) {
 void TrainingPanel::refreshOptions() {
     refreshModels();
     refreshDatasets();
+    refreshCapabilities();
+}
+
+void TrainingPanel::refreshCapabilities() {
+    if (!m_client || !m_client->isReady()) return;
+    m_client->get("/training/capabilities", [this](int status, const QJsonDocument &doc) {
+        if (status != 200 || !doc.isObject()) return;   // older backend: keep every option
+        m_quantizationAvailable = doc.object()["quantization"].toBool(true);
+        m_quantizationDetail = doc.object()["quantization_detail"].toString();
+        applyQuantizationAvailability();
+    });
+}
+
+// Also overrides a saved 4-bit choice, so existing settings cannot start a job
+// the backend would refuse.
+void TrainingPanel::applyQuantizationAvailability() {
+    if (m_quantizationAvailable) {
+        m_qloraCheck->setEnabled(true);
+        m_qloraCheck->setToolTip("Uses 4-bit NF4 weights. Turn off to choose another precision in Hyperparameters.");
+        m_quantCombo->setToolTip(QString());
+        return;
+    }
+    m_qloraCheck->setChecked(false);
+    m_qloraCheck->setEnabled(false);
+    m_qloraCheck->setToolTip(m_quantizationDetail);
+    m_quantCombo->setCurrentIndex(m_quantCombo->findText("None"));
+    m_quantCombo->setEnabled(false);
+    m_quantCombo->setToolTip(m_quantizationDetail);
 }
 
 void TrainingPanel::refreshModels() {
@@ -350,7 +378,7 @@ void TrainingPanel::onQuantizationToggled() {
         m_quantCombo->setEnabled(false);
     } else {
         m_quantCombo->setCurrentIndex(m_quantCombo->findText("None"));
-        m_quantCombo->setEnabled(true);
+        m_quantCombo->setEnabled(m_quantizationAvailable);
     }
 }
 
@@ -593,4 +621,5 @@ void TrainingPanel::applySettingsJson(const QString &json) {
     if (o.contains("maxLength")) m_maxLengthSpin->setValue(o["maxLength"].toInt());
     if (o.contains("qlora")) m_qloraCheck->setChecked(o["qlora"].toBool());
     if (o.contains("quantization")) m_quantCombo->setCurrentText(o["quantization"].toString());
+    if (!m_quantizationAvailable) applyQuantizationAvailability();
 }

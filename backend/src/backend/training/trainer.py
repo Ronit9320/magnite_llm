@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
+import sys
 from contextlib import nullcontext
 import threading
 import time
@@ -65,6 +67,20 @@ class TrainingCancellation(threading.Event):
     def set(self):
         with self.publication_lock:
             super().set()
+
+
+def quantization_support() -> tuple[bool, str]:
+    """Whether 4-bit/8-bit (bitsandbytes) QLoRA can run here, and why not.
+
+    On Apple silicon bitsandbytes keeps quantized weights on the CPU and 8-bit
+    training fails (docs/release/macos/ML_MATRIX.md), so macOS offers LoRA only."""
+    if sys.platform == "darwin":
+        return False, ("4-bit/8-bit QLoRA is not supported on macOS. "
+                       "Choose quantization 'None' (LoRA trains on the Apple GPU).")
+    if importlib.util.find_spec("bitsandbytes") is None:
+        return False, ("4-bit/8-bit QLoRA needs bitsandbytes, which this installation does not include. "
+                       "Choose quantization 'None'.")
+    return True, ""
 
 
 def _quantized(cfg: TrainingConfig) -> bool:
