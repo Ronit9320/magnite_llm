@@ -661,3 +661,14 @@ behaviour changes; this plan must not become the sole source of user instruction
   the copied guide. The snapshot helper supports system Python 3.9 syntax and
   streaming hashing, checked with a local content-mutation fixture. Historical
   original tester records remain unchanged.
+- Native run [41077134268](https://github.com/Ronit9320/magnite_llm/actions/runs/41077134268)
+  at `d88e110`: Linux package PASS; Mac intermittently failed the existing
+  training queue/history regression before packaging. Investigation identified
+  concurrent shutdown/worker SQLite writes: an older serialized "running"
+  snapshot could commit after the worker's "done" snapshot. A dedicated lock
+  now serializes snapshot creation and commit. A targeted threaded regression
+  reproduces the overwrite when serialization is disabled (negative control)
+  and passes with the lock. The queue/history assertion was retained.
+- Local backend suite after that fix: 74 tests, 73 passed, one Mac-only skip;
+  source/build state remains on release/integration. Native revalidation is
+  required; no phase is being declared complete based on a flaky/skipped gate.

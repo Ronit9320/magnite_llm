@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-
-from backend.database import connection
 import queue
 import os
 import threading
@@ -9,6 +7,7 @@ import time
 import uuid
 from typing import Optional
 
+from backend.database import connection
 from backend.adapters.store import AdapterStore
 from backend.training.datasets import DatasetStore
 from backend.training.schemas import TrainingConfig, TrainingJob
@@ -30,6 +29,7 @@ class TrainingJobManager:
         self._adapter_dir = os.path.join(data_dir, "adapters")
         os.makedirs(self._adapter_dir, exist_ok=True)
         self._lock = threading.Lock()
+        self._persist_lock = threading.Lock()
         self._jobs: dict[str, TrainingJob] = {}
         self._cancel: dict[str, threading.Event] = {}
 
@@ -52,7 +52,10 @@ class TrainingJobManager:
         self._worker.start()
 
     def _persist(self, job):
-        with connection(self._db) as conn:
+        # Serialize the snapshot and commit together. Otherwise a shutdown
+        # snapshot of "running" can wait on SQLite and overwrite the worker's
+        # newer "done" record after that worker has committed.
+        with self._persist_lock, connection(self._db) as conn:
             conn.execute("INSERT OR REPLACE INTO jobs VALUES (?, ?)", (job.id, job.model_dump_json()))
 
     def _run_queue(self):
