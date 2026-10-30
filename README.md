@@ -9,12 +9,12 @@ cloud training are excluded.
 Linux x86-64 AppImage available, with signed in-app preview updates.
 See the [pipeline architecture and setup](docs/development/RELEASE_PIPELINE.md)
 and [release checklist](RELEASE_CHECKLIST.md) for verification and deferred work.
-Hosted source and CPU AppImage checks passed on Ubuntu. Native desktop coverage
-is still limited; macOS and Windows are not yet verified.
-
-A macOS Apple-silicon testing DMG has historical local verification evidence. It is
-ad-hoc signed and not notarized; see the [macOS verification record](docs/release/macos/V0_1_MACOS_TESTING.md).
-Integrated packages still require native verification.
+Hosted native integration checks now build and test Linux x86-64 AppImage,
+Mac ARM DMG and Windows x86-64 installer candidates from one source commit.
+See [native package builds and evidence](docs/development/NATIVE_PACKAGES.md).
+These are Actions testing artifacts; the public release above remains Linux-only.
+Mac builds are ad-hoc signed and not notarized; Windows installers are unsigned.
+Physical GPU and additional desktop OS coverage remain separate acceptance work.
 
 Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
 

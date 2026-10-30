@@ -2,8 +2,11 @@
 
 ## Status and instructions for the next agent
 
-Created: 2026-10-30. **Implementation started on `release/integration`: Phase 0
-complete; shared Mac/Windows source integration and Phase 3 automation in progress.** See the implementation record below and
+Created: 2026-10-30. **Phases 0–3 COMPLETE on `release/integration`.**
+All three native package jobs and the combined artifact gate passed for
+`3ee0a4c325faaa7b97b23ae116a6f3a0002e7a4c` in
+[run 41081185134](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134).
+Phase 4 and later phases remain NOT STARTED. See the implementation record below and
 [integration inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md).
 
 The owner requested this Markdown handoff only for this session. Do not interpret
@@ -215,9 +218,10 @@ baseline and an integration branch with an explicit starting commit.
 
 ## Phase 1 — integrate Mac while preserving Linux
 
-Status: **IN PROGRESS**. Reviewed Mac source integrated; Linux source and
-diagnostic AppImage checks pass. Native Mac checks against the integrated source
-remain outstanding, as does hosted Ubuntu/glibc-2.35 verification.
+Status: **COMPLETE** — 2026-10-30. Integrated source passed hosted Linux and
+Apple Silicon Mac native/package checks at `3ee0a4c`; see final evidence below.
+Physical Metal/MPS and additional macOS-version acceptance remain explicit
+later device checks, without new capability claims.
 
 - Merge reviewed Mac changes into `release/integration`. Resolve shared files
   semantically; preserve the canonical identity and working Linux updater.
@@ -237,8 +241,9 @@ exact commits and environments. No claim that Linux testing verifies Mac code.
 
 ## Phase 2 — integrate Windows
 
-Status: **IN PROGRESS**. Windows `2350dff` integrated semantically; shared Linux
-checks pass. Native Windows and final all-platform same-source builds pending.
+Status: **COMPLETE** — 2026-10-30. Windows `2350dff` integrated semantically;
+native Windows build, regressions, installed startup/UI, upgrade, crash cleanup,
+restart and uninstall passed at the same `3ee0a4c` used by Linux and Mac.
 
 - Review the actual pushed branch, its build recipe, installer, runtime layout,
   dependency locks, supported architecture/OS and existing updater work.
@@ -256,9 +261,9 @@ shared-code conflicts or falsely claimed platform test results.
 
 ## Phase 3 — automate reproducible native packages
 
-Status: **IN PROGRESS**. Reusable Linux/Mac/Windows package jobs and artifact-only
-integration coordinator implemented; clean hosted runs and their evidence are
-required before completion. See [native build operations](NATIVE_PACKAGES.md).
+Status: **COMPLETE** — 2026-10-30. Clean hosted Linux/Mac/Windows jobs produced
+tested packages from `3ee0a4c`; the combined identity/size/SHA-256 gate passed.
+See [native build operations](NATIVE_PACKAGES.md) and final evidence below.
 
 - Build Linux on the existing supported glibc baseline; retain portable CPU
   settings, pinned AppImage tools and ELF compatibility audit.
@@ -672,3 +677,70 @@ behaviour changes; this plan must not become the sole source of user instruction
 - Local backend suite after that fix: 74 tests, 73 passed, one Mac-only skip;
   source/build state remains on release/integration. Native revalidation is
   required; no phase is being declared complete based on a flaky/skipped gate.
+
+### Native acceptance — 2026-10-30: Phases 1–3 complete
+
+- Branch: `release/integration`; starting session commit `c2f7406`. Final tested
+  application/workflow source: `3ee0a4c325faaa7b97b23ae116a6f3a0002e7a4c`,
+  clean and pushed. A documentation-only follow-up records this completed
+  evidence; it does not change application code or package bytes.
+- [Native run 41081185134](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134):
+  **SUCCESS**, including Linux, Mac, Windows and the final aggregate gate.
+  [Shared verification 41081185006](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185006):
+  **SUCCESS**. The independent Linux publisher workflow was skipped on this
+  integration branch as intended. No dev/master promotion or public publication.
+- Every builder reported the same clean commit, canonical `v0.1-preview`,
+  UPDATE_SEQUENCE 1 and DATA_SCHEMA 1. The aggregate job downloaded the tested
+  packages and accepted all required platforms, identities, sizes and full
+  SHA-256 values. Public successful-job annotations supplied the following
+  exact asset metadata; no credential was requested after the owner selected
+  public-only status access.
+
+| Platform | Tested package | Bytes | SHA-256 | Native job elapsed |
+| --- | --- | ---: | --- | --- |
+| [linux x86_64](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134/job/124150493890) | `Magnite-v0.1-preview-linux-x86_64.AppImage` | 422,844,920 | `8de2505e318e7960bcfb6c8b899a890f74e23b135b2a051975baa2164cc92dda` | 10m 06s |
+| [macos arm64](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134/job/124150493801) | `Magnite-v0.1-preview-arm64.dmg` | 341,461,864 | `1cae12c693abbbde369f321417b869028403d377b20e4a19407c0e82e8af23c0` | 16m 33s |
+| [windows x86_64](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134/job/124150493753) | `Magnite-v0.1-preview-windows-x86_64-setup.exe` | 328,484,420 | `9cb860fea77967b45585d4304c3d1cd578b8a33db1dc2fb710a5efeaf69c5ae7` | 22m 25s |
+
+- Linux: Ubuntu 22.04 native CMake and CPU runtime build, pinned AppImage tools,
+  glibc ≤ 2.35 audit, backend regressions, manifest/signature tests, actual
+  atomic helper transactions and all relocated package/real tiny-model workflows
+  passed. This is the hosted baseline, not the earlier Arch diagnostic.
+- Mac: ARM macOS 15 runner; pinned Qt 6.8.3 and deployment-target-14 OpenSSL;
+  bundle layout/Mach-O/linkage/minimum-OS/host-path/signature audits, backend
+  regressions including actual parent death, manifest CTest, relocated
+  theme/UI/authenticated desktop, content/seal preservation, CPU LoRA/adapter/RAG,
+  DMG creation, read-only mount and mounted startup checks passed.
+- Windows: x64 Windows Server 2022/MSVC 2022 runner; pinned Qt/vcpkg/Inno;
+  isolated runtime/imports, backend regressions, manifest CTest, installed
+  theme/UI/startup with poisoned host Python and paths containing spaces,
+  same-candidate upgrade, external-data preservation, GUI crash/backend job
+  cleanup, restart and uninstall passed. Loaded Qt/backend paths were checked
+  against the installed location.
+- Backend discovery covers the 74-test suite: the actual Darwin parent-death
+  test runs on Mac and is intentionally skipped on Linux/Windows. Local suite
+  after the persistence fix ran 74 tests: 73 passed, one Mac-only skip. Ten local
+  packaging tests passed; native Linux also ran the packaging/helper suite.
+- Six run artifacts are retained: three exact package/checksum/provenance
+  artifacts and three platform evidence artifacts. Disk-before/after, native
+  tool/environment records and resolved runtime package lists are in platform
+  evidence. Elapsed times above cover each whole native job including uploads,
+  not just compilation; no staged app was reused between source commits.
+- Local evidence index: `build/packaging/multiplatform/phase3/final-hosted-evidence.json`.
+  The training persistence negative control reproduced stale `running` history
+  without the new serialization; the targeted fix and full suite passed.
+  Python/shell syntax, operating-guide links and actionlint 1.7.7 passed.
+- Limitations: Mac packages are ad-hoc signed/not notarized; Windows packages
+  are not Authenticode-signed. No physical Metal/MPS/GPU capability acceptance,
+  Intel Mac package, macOS 14 device run, Windows 10/11 device run, truly clean
+  second-account kit execution or real cross-version installed-app updater
+  transaction is claimed. Those remain the documented device/signing/update
+  acceptance of later phases. The successful CPU/hosted checks do not close
+  broader roadmap, security or licensing checklist work.
+- The artifact-only packages deliberately retain the current canonical identity.
+  They are not a new distributed release and must not replace assets under the
+  existing public tag. Canonical version, update sequence, data schema and
+  persistent signing public key were unchanged. Source branches remain preserved.
+- Next task, outside this completed request: Phase 4 (stable identity/update
+  channels). Phases 4–9 remain NOT STARTED; no stable version/promotion/public
+  release was performed by this work.

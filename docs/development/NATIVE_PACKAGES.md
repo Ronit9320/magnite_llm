@@ -1,5 +1,14 @@
 # Native package builds and integration verification
 
+**Verified 2026-10-30:** [run 41081185134](https://github.com/Ronit9320/magnite_llm/actions/runs/41081185134)
+passed all three native jobs and the combined artifact gate from clean source
+`3ee0a4c325faaa7b97b23ae116a6f3a0002e7a4c`. Download the platform `*-preview-*`
+testing artifacts from that run; the corresponding evidence artifacts contain
+resolved Python packages, native environment, disk observations and test logs.
+GitHub may require login for artifact downloads. These candidates do not replace
+the existing public `v0.1-preview` release assets. Exact package hashes and
+observed job durations are in [the release plan](MULTIPLATFORM_RELEASE_PLAN.md).
+
 `native-packages.yml` is an **artifact-only** coordinator for pushes to
 `release/integration`, and manual runs on `release/**`. It has read-only
 repository permission, no publishing job, and no release signing secrets.
