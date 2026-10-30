@@ -7,12 +7,12 @@
 # interpreter the backend ran under), an orphan check, then the signature check again to prove
 # the app did not write into its own bundle. Exit 0 only if everything passed.
 set -uo pipefail
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app="$(cd -- "$1" && pwd)"
 log_dir="${2:-${TMPDIR%/}/magnite-smoke}"
 mkdir -p "$log_dir"
 log_dir="$(cd -- "$log_dir" && pwd -P)"
-python3 "$repo_dir/packaging/macos/snapshot_bundle.py" "$app" "$log_dir/bundle-before.json" || exit 1
+python3 "$script_dir/snapshot_bundle.py" "$app" "$log_dir/bundle-before.json" || exit 1
 exe="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
 home="$log_dir/magnite-home"
 rm -rf "$home"
@@ -60,7 +60,7 @@ if [[ -z "$orphans" ]]; then pass "no backend left running"; else fail "orphaned
 
 if codesign --verify --deep --strict --verbose=4 "$app" 2>"$log_dir/codesign-after.log"; then pass "signature after run (bundle unmodified)"
 else fail "signature after run (see $log_dir/codesign-after.log)"; fi
-if python3 "$repo_dir/packaging/macos/snapshot_bundle.py" "$app" "$log_dir/bundle-after.json" \
+if python3 "$script_dir/snapshot_bundle.py" "$app" "$log_dir/bundle-after.json" \
     --compare "$log_dir/bundle-before.json" >"$log_dir/inventory-diff.log" 2>&1; then
     pass "bundle file contents, links and modes unchanged"
 else

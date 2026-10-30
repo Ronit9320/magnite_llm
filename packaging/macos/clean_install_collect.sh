@@ -3,7 +3,7 @@
 # so the tester only has to click and take screenshots.
 # Usage (in the second account): bash collect.sh start | running | finish
 set -uo pipefail
-kit=/Users/Shared/magnite-clean-install
+kit="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 out="$kit/auto-results.txt"
 section() { printf '\n===== %s (%s, user %s) =====\n' "$1" "$(date '+%Y-%m-%d %H:%M:%S')" "$(whoami)" >>"$out"; }
 

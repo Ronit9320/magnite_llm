@@ -50,6 +50,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         verify(args.root, args.source_sha)
-    except (ValueError, OSError, KeyError) as exc:
-        sys.exit(str(exc))
+    except Exception as exc:
+        detail = str(exc).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Native artifact validation::{detail}")
+        raise
     print(f"PASS: all three native packages match clean source {args.source_sha}")

@@ -16,7 +16,10 @@ def snapshot(root):
             record["link"] = os.readlink(path)
         elif path.is_file():
             with path.open("rb") as stream:
-                record["sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+                digest = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                record["sha256"] = digest.hexdigest()
         if hasattr(os, "listxattr"):
             record["xattrs"] = {name: hashlib.sha256(os.getxattr(path, name, follow_symlinks=False)).hexdigest()
                                 for name in os.listxattr(path, follow_symlinks=False)}

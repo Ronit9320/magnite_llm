@@ -646,3 +646,18 @@ behaviour changes; this plan must not become the sole source of user instruction
   This is not a re-sign-after-tests workaround: original tested bundle bytes
   must remain unchanged. Native Mac acceptance and the one-SHA combined run
   remain pending the corrected candidate.
+- Native run [41072682626](https://github.com/Ronit9320/magnite_llm/actions/runs/41072682626)
+  at `6e8e049`: **all three native package jobs PASS from that exact commit**.
+  Mac relocated content/seal checks, CPU feature workflow, DMG creation and
+  read-only mount smoke all passed. Windows complete installed lifecycle and
+  Linux full package checks passed again. Final aggregate verification failed;
+  it was using the runner's default Python despite depending on Python 3.11+
+  hashing. The aggregate job now pins Python 3.12.12 and emits public diagnostic
+  errors. Phase 3 remains open until the complete-set gate passes.
+- Final helper review found the second-account Mac kit's old hardcoded DMG
+  identity and its newly introduced snapshot-helper dependency. The kit now
+  derives identity canonically, copies the helper alongside the smoke script,
+  resolves its own location, and renders current version/custom-kit paths into
+  the copied guide. The snapshot helper supports system Python 3.9 syntax and
+  streaming hashing, checked with a local content-mutation fixture. Historical
+  original tester records remain unchanged.
