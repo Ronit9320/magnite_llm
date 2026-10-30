@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -20,8 +21,13 @@ def record_build(destination: Path):
     (info / "python-packages.txt").write_text(packages, encoding="utf-8")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo))
+    if os.environ.get("MAGNITE_REQUIRE_CLEAN") == "1" and dirty:
+        raise RuntimeError("Release packages require a clean source checkout")
+    identity = runpy.run_path(str(repo / "backend/src/backend/_version.py"))
     (info / "build.json").write_text(json.dumps({
-        "version": runpy.run_path(str(repo / "backend/src/backend/_version.py"))["RELEASE_VERSION"],
+        "version": identity["RELEASE_VERSION"],
+        "update_sequence": identity["UPDATE_SEQUENCE"],
+        "data_schema": identity["DATA_SCHEMA"],
         "commit": commit, "working_tree_modified": dirty,
         "platform": platform.platform(), "architecture": platform.machine(),
         "host_libc": platform.libc_ver(),

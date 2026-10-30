@@ -1,0 +1,100 @@
+name: Build Linux native package
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MAGNITE_GLIBC_MAX: '2.35'
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      MAGNITE_REQUIRE_CLEAN: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.12'
+      - name: Read the canonical preview identity
+        id: identity
+        run: echo "version=$(python3 packaging/release_metadata.py --print-version)" >> "$GITHUB_OUTPUT"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake ninja-build binutils curl patchelf libssl-dev qt6-base-dev qt6-base-dev-tools libqt6svg6-dev qt6-wayland libgl1-mesa-dev libfuse2
+          python -m pip install uv==0.13.5
+      - name: Record native environment
+        run: |
+          mkdir -p build/packaging/runner-evidence
+          df -h > build/packaging/runner-evidence/disk-before.txt
+          cmake --version > build/packaging/runner-evidence/tools.txt
+          c++ --version >> build/packaging/runner-evidence/tools.txt
+      - name: Build the complete CPU AppImage and audit glibc
+        run: bash packaging/build_appimage.sh
+      - name: Verify updater signatures and installation recovery
+        run: |
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s packaging/tests -v
+      - name: Offline backend regressions using the bundled runtime
+        env:
+          HF_HUB_OFFLINE: '1'
+          PYTHONPATH: backend/src
+        run: |
+          export MAGNITE_HOME="$RUNNER_TEMP/regression-data"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/regression-config"
+          build/packaging/Magnite.AppDir/usr/bin/runtime/python/bin/python3 -m unittest discover -s backend/tests -v
+      - name: Relocated package and real tiny-model workflows
+        env:
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          python3 packaging/smoke_appimage.py "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" \
+            --logs build/packaging/relocated-tests --cache build/packaging/test-cache --features
+      - name: Record exact tested provenance and checksums
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          python3 packaging/package_evidence.py --platform linux --architecture x86_64 --source-sha "$SOURCE_SHA" \
+            --build-info build/packaging/Magnite.AppDir/usr/bin/build-info --output dist \
+            "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage"
+          df -h > build/packaging/runner-evidence/disk-after.txt
+      - name: Upload exact tested package
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-preview-${{ steps.identity.outputs.version }}
+          path: |
+            dist/Magnite-*.AppImage
+            dist/SHA256SUMS
+            dist/linux-compatibility.json
+            dist/TESTING.md
+            dist/provenance-linux-x86_64.json
+            dist/SHA256SUMS-linux-x86_64
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-preview-verification
+          path: |
+            build/packaging/relocated-tests/
+            build/packaging/runner-evidence/
+            build/packaging/Magnite.AppDir/usr/bin/build-info/
+            dist/linux-compatibility.json
+          if-no-files-found: warn
+          retention-days: 14

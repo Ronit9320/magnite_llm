@@ -26,8 +26,8 @@ required on every request except `/health`, requests whose `Host` is not loopbac
 refused, and on Linux/macOS a second backend cannot open the same data folder. A backend started by
 hand without that variable has no credential check (the `Host` check still applies).
 Linux integration checks cover authentication, data-folder locking and updater
-coordination. Earlier macOS evidence is recorded separately. Windows locking is
-not implemented yet. The secret is visible to other processes of the same user.
+coordination. Earlier macOS evidence is recorded separately. Windows byte-range locking is implemented; native verification is tracked in
+the multi-platform integration plan. The secret is visible to other processes of the same user.
 Do not expose it as a public or LAN service. Application data is not encrypted
 by Magnite. Treat model files, adapters, datasets, and documents as untrusted inputs.
 

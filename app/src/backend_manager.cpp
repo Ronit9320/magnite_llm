@@ -12,6 +12,9 @@
 #include <QJsonObject>
 
 #include <memory>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
@@ -34,6 +37,9 @@ BackendManager::~BackendManager() {
     m_process->disconnect(this);
     m_process->blockSignals(true);
     stop();
+#ifdef Q_OS_WIN
+    closeProcessJob();
+#endif
 }
 
 void BackendManager::start() {
@@ -47,7 +53,7 @@ void BackendManager::start() {
 void BackendManager::stop() {
     m_stopping = true;
     if (m_process->state() != QProcess::NotRunning) {
-        m_process->terminate();
+        requestStop();
         if (!m_process->waitForFinished(15000)) {
             m_process->kill();
             m_process->waitForFinished(3000);
@@ -62,7 +68,7 @@ bool BackendManager::isRunning() const {
 bool BackendManager::stopForUpdate() {
     m_stopping = true;
     if (m_process->state() == QProcess::NotRunning) return true;
-    m_process->terminate();
+    requestStop();
     // Update installation must never force-kill a live ML operation.
     if (m_process->waitForFinished(15000)) return true;
     m_stopping = false;
@@ -74,64 +80,26 @@ QString BackendManager::baseUrl() const {
 }
 
 void BackendManager::launchBackend() {
-    QString appDir = QCoreApplication::applicationDirPath();
-    QString repoRoot = QDir(appDir + "/../").canonicalPath();
-
-    // Resolve paths in dev layout: <repo>/build/ -> <repo>/backend/src, <repo>/.venv
-    QString modulePath;
-    QDir devBackend(repoRoot + "/backend/src");
-    if (devBackend.exists()) {
-        modulePath = devBackend.absolutePath();
-    } else {
-        // Fall back to the location of this binary: <repo>/build/../backend/src
-        QDir inlineBackend(QDir(appDir).absoluteFilePath("../backend/src"));
-        if (inlineBackend.exists()) {
-            modulePath = inlineBackend.absolutePath();
-        }
-    }
-
-    QStringList args;
-    args << "-m" << "backend.main" << "--port" << "0";
-
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QString runtimeDir = appDir + "/runtime";
+#ifdef Q_OS_MAC
+    const QString bundleRuntime = QDir::cleanPath(appDir + "/../Resources/runtime");
+    if (QDir(bundleRuntime).exists()) runtimeDir = bundleRuntime;
+#endif
+    const bool packaged = QDir(runtimeDir).exists();
+    QStringList args = {"-m", "backend.main", "--port", "0"};
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     QSettings settings;
     const QString dataDir = settings.value("storage/dataDir").toString().trimmed();
     if (!env.contains("MAGNITE_HOME") && !dataDir.isEmpty()) env.insert("MAGNITE_HOME", dataDir);
     env.insert("MAGNITE_ENGINE_OVERRIDE", QString::number(qBound(0, settings.value("engine/override", 0).toInt(), 2)));
-    if (!modulePath.isEmpty()) {
-        QString existing = env.value("PYTHONPATH");
-        QString merged = modulePath;
-        if (!existing.isEmpty()) {
-            merged += QDir::listSeparator() + existing;
-        }
-        env.insert("PYTHONPATH", merged);
-    }
-
-    // Prefer the repo venv python if present
-    QString venvPython = repoRoot + "/.venv/bin/python";
-#ifdef Q_OS_WIN
-    venvPython = repoRoot + "/.venv/Scripts/python.exe";
-#endif
-    QString python = QFileInfo::exists(venvPython) ? venvPython : QString("python3");
-
-    // Test packages carry a relocatable Python installation beside the client.
-    // Use isolated mode so a user's PYTHONPATH/site-packages cannot replace the
-    // packaged backend. Never silently fall back when a package is incomplete.
-    QString runtimeDir = appDir + "/runtime";
-#ifdef Q_OS_MAC
-    // A macOS .app keeps the runtime in Contents/Resources, beside Contents/MacOS.
-    const QString bundleRuntimeDir = QDir::cleanPath(appDir + "/../Resources/runtime");
-    if (QDir(bundleRuntimeDir).exists()) runtimeDir = bundleRuntimeDir;
-#endif
-    const bool packaged = QDir(runtimeDir).exists();
+    QString python;
     if (packaged) {
 #ifdef Q_OS_WIN
         python = runtimeDir + "/python/python.exe";
 #else
         python = runtimeDir + "/python/bin/python3";
 #ifndef Q_OS_MAC
-        // Native Python extensions also need the bundled C++/OpenMP libraries.
-        // (macOS wheels resolve their dylibs through @loader_path instead.)
         QString libraryPath = QDir(appDir + "/../lib").absolutePath();
         const QString existingLibraries = env.value("LD_LIBRARY_PATH");
         if (!existingLibraries.isEmpty()) libraryPath += ":" + existingLibraries;
@@ -143,6 +111,42 @@ void BackendManager::launchBackend() {
         env.remove("PYTHONPATH");
         env.remove("PYTHONHOME");
         env.insert("MAGNITE_PACKAGED", "1");
+    } else {
+        // Multi-config Windows builds place the binary in build/Release. Require
+        // backend/src as the repository marker; a nearby README is insufficient.
+        QDir directory(appDir);
+        QString repoRoot;
+        for (int depth = 0; depth < 8; ++depth) {
+            if (QDir(directory.filePath("backend/src/backend")).exists()) {
+                repoRoot = directory.canonicalPath();
+                break;
+            }
+            if (!directory.cdUp()) break;
+        }
+        if (!repoRoot.isEmpty()) {
+            const QString modulePath = repoRoot + "/backend/src";
+            const QString previous = env.value("PYTHONPATH");
+            env.insert("PYTHONPATH", modulePath + (previous.isEmpty() ? QString() : QDir::listSeparator() + previous));
+        }
+#ifdef Q_OS_WIN
+        const QStringList candidates = {repoRoot + "/.venv312/Scripts/python.exe",
+                                        repoRoot + "/.venv/Scripts/python.exe"};
+        for (const auto &candidate : candidates) {
+            if (repoRoot.isEmpty() || !QFileInfo::exists(candidate)) continue;
+            QProcess probe;
+            probe.start(candidate, {"-I", "-c", "import sys; assert sys.version_info >= (3, 10)"});
+            if (probe.waitForFinished(5000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0) {
+                python = candidate;
+                break;
+            }
+            probe.kill();
+            probe.waitForFinished(1000);
+        }
+        if (python.isEmpty()) python = "python";
+#else
+        const QString venv = repoRoot + "/.venv/bin/python";
+        python = !repoRoot.isEmpty() && QFileInfo::exists(venv) ? venv : QString("python3");
+#endif
     }
 
     // A fresh secret per launch, so only this client can drive the backend (adr/0009). It goes
@@ -156,10 +160,21 @@ void BackendManager::launchBackend() {
     m_process->setWorkingDirectory(appDir);
     m_process->start(python, args);
 
-    if (!m_process->waitForStarted(5000) && !packaged && python != "python3") {
-        m_process->start("python3", args);
+    if (!m_process->waitForStarted(5000) && !packaged) {
+#ifdef Q_OS_WIN
+        m_process->start("py", args);
+#else
+        if (python != "python3") m_process->start("python3", args);
+#endif
         m_process->waitForStarted(5000);
     }
+#ifdef Q_OS_WIN
+    if (m_process->state() == QProcess::Running && !attachProcessJob()) {
+        qWarning() << "Cannot supervise backend process tree:" << GetLastError();
+        m_process->kill();
+        m_process->waitForFinished(3000);
+    }
+#endif
 }
 
 void BackendManager::onProcessReadyRead() {
@@ -259,6 +274,9 @@ void BackendManager::checkHealth() {
 }
 
 void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
+#ifdef Q_OS_WIN
+    closeProcessJob();
+#endif
     m_started = false;
     m_port = 0;
     // Ignore failures caused by our own deliberate termination.
@@ -271,3 +289,44 @@ void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
     }
     emit errorOccurred(QProcess::Crashed);
 }
+
+void BackendManager::requestStop() {
+#ifdef Q_OS_WIN
+    // QProcess::terminate sends WM_CLOSE on Windows, which console Python does
+    // not handle. Ask the authenticated local server to drain and exit instead.
+    if (m_port && !m_apiToken.isEmpty()) {
+        QTcpSocket socket;
+        socket.connectToHost(QStringLiteral("127.0.0.1"), m_port);
+        if (socket.waitForConnected(2000)) {
+            socket.write("POST /_desktop/shutdown HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer "
+                         + m_apiToken.toUtf8() + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            socket.waitForBytesWritten(2000);
+            socket.waitForReadyRead(2000);
+        }
+    }
+#else
+    m_process->terminate();
+#endif
+}
+
+#ifdef Q_OS_WIN
+bool BackendManager::attachProcessJob() {
+    closeProcessJob();
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) return false;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE,
+                               static_cast<DWORD>(m_process->processId()));
+    const bool ok = SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))
+                    && child && AssignProcessToJobObject(job, child);
+    if (child) CloseHandle(child);
+    if (!ok) { CloseHandle(job); return false; }
+    m_processJob = job;
+    return true;
+}
+
+void BackendManager::closeProcessJob() {
+    if (m_processJob) { CloseHandle(m_processJob); m_processJob = nullptr; }
+}
+#endif

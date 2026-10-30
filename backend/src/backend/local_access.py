@@ -7,6 +7,7 @@ backends from writing the same databases.
 """
 from __future__ import annotations
 
+import errno
 import hmac
 import os
 import sys
@@ -14,8 +15,9 @@ import time
 
 try:
     import fcntl
-except ImportError:  # Windows: no advisory locks here; the lock is skipped.
+except ImportError:  # Windows uses a one-byte CRT lock.
     fcntl = None
+    import msvcrt
 
 TOKEN_ENV = "MAGNITE_API_TOKEN"
 EXIT_DATA_DIR_IN_USE = 75          # EX_TEMPFAIL; the app reports "already running"
@@ -33,8 +35,9 @@ def _host_name(host: str) -> str:
 class LocalAccessMiddleware:
     """Pure ASGI, so streaming responses and disconnect detection pass through untouched."""
 
-    def __init__(self, app, token: str | None):
+    def __init__(self, app, token: str | None, shutdown=None):
         self.app = app
+        self._shutdown = shutdown
         self._expected = f"Bearer {token}".encode() if token else None
 
     async def __call__(self, scope, receive, send):
@@ -46,6 +49,11 @@ class LocalAccessMiddleware:
         if self._expected is not None and scope.get("path") not in _OPEN_PATHS:
             if not hmac.compare_digest(headers.get(b"authorization", b""), self._expected):
                 return await _reject(send, 401, b"Missing or invalid credentials")
+        if scope.get("path") == "/_desktop/shutdown" and scope.get("method") == "POST":
+            if self._expected is None or self._shutdown is None:
+                return await _reject(send, 404, b"Not available")
+            self._shutdown()
+            return await _reject(send, 200, b"Shutting down")
         return await self.app(scope, receive, send)
 
 
@@ -72,16 +80,21 @@ class DataDirInUse(RuntimeError):
 def acquire_data_dir_lock(home: str, wait: float = 5.0):
     """Hold an exclusive lock on <home>/.backend.lock for the life of the process; the OS releases it on
     any exit, including SIGKILL. Waits briefly so a just-killed predecessor can finish exiting."""
-    if fcntl is None:
-        return None
     os.makedirs(home, exist_ok=True)
-    handle = open(os.path.join(home, ".backend.lock"), "a+")
+    handle = open(os.path.join(home, ".backend.lock"), "a+b")
     deadline = time.monotonic() + wait
     while True:
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             return handle
-        except BlockingIOError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                handle.close()
+                raise
             if time.monotonic() >= deadline:
                 handle.close()
                 raise DataDirInUse(f"data folder {home} is in use by another Magnite backend") from None

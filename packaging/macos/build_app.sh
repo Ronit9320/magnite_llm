@@ -33,7 +33,7 @@ fi
 [[ -f "$pkg_dir/magnite.icns" ]] || bash "$repo_dir/packaging/macos/make_icon.sh"
 cmake -S "$repo_dir/app" -B "$build_dir" -DCMAKE_PREFIX_PATH="$MAGNITE_QT_ROOT" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
-    -DMAGNITE_MACOS_BUNDLE=ON
+    -DMAGNITE_MACOS_BUNDLE=ON -DOPENSSL_USE_STATIC_LIBS=TRUE
 cmake --build "$build_dir" -j "${MAGNITE_BUILD_JOBS:-4}"
 # install copies the whole build-tree bundle; drop any runtime test fixture left there (Phase 4).
 rm -rf "$build_dir/Magnite.app/Contents/Resources/runtime"
@@ -56,6 +56,10 @@ done
 # Qt license texts and third-party notices (ISSUE-009); regenerate with packaging/macos/qt_notices.py.
 mkdir -p "$app/Contents/Resources/licenses"
 ditto "$repo_dir/packaging/macos/licenses/qt" "$app/Contents/Resources/licenses/qt"
+if [[ -f "${OPENSSL_ROOT_DIR:-}/share/magnite-openssl/LICENSE.txt" ]]; then
+    mkdir -p "$app/Contents/Resources/licenses/openssl"
+    cp "$OPENSSL_ROOT_DIR/share/magnite-openssl/LICENSE.txt" "$app/Contents/Resources/licenses/openssl/"
+fi
 
 python3 "$repo_dir/packaging/macos/finalize_bundle.py" "$app"
 python3 "$repo_dir/packaging/macos/verify_bundle.py" "$app"

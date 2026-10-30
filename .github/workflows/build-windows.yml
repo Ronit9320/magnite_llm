@@ -1,0 +1,106 @@
+name: Build Windows x64 native package
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      MAGNITE_REQUIRE_CLEAN: '1'
+      QT_QPA_PLATFORM: offscreen
+      UV_CACHE_DIR: ${{ github.workspace }}/build/packaging/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.12'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install pinned tools, Qt and OpenSSL
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install uv==0.13.5 aqtinstall==3.3.0
+          $lock = Get-Content packaging/windows/tools.lock.json -Raw | ConvertFrom-Json
+          python -m aqt install-qt windows desktop $lock.qt $lock.qt_arch --outputdir "$env:RUNNER_TEMP/qt"
+          $qt = "$env:RUNNER_TEMP/qt/$($lock.qt)/msvc2022_64"
+          "MAGNITE_QT_ROOT=$qt" >> $env:GITHUB_ENV
+          $vcpkg = "$env:RUNNER_TEMP/magnite-vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkg
+          git -C $vcpkg checkout $lock.vcpkg_commit
+          & "$vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+          & "$vcpkg/vcpkg.exe" install openssl:x64-windows --disable-metrics
+          "MAGNITE_VCPKG_ROOT=$vcpkg" >> $env:GITHUB_ENV
+          $download = "$env:RUNNER_TEMP/inno-setup.exe"
+          Invoke-WebRequest $lock.inno_setup.url -OutFile $download
+          if ((Get-FileHash $download -Algorithm SHA256).Hash.ToLower() -ne $lock.inno_setup.sha256) {
+            throw 'Inno Setup SHA-256 mismatch'
+          }
+          $inno = "$env:RUNNER_TEMP/inno"
+          $install = Start-Process $download -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/PORTABLE=1', "/DIR=$inno")
+          if ($install.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
+          "MAGNITE_INNO_COMPILER=$inno/ISCC.exe" >> $env:GITHUB_ENV
+      - name: Record native environment
+        run: |
+          New-Item -ItemType Directory -Force build/packaging/windows/hosted | Out-Null
+          Get-ComputerInfo -Property WindowsProductName,WindowsVersion,OsArchitecture > build/packaging/windows/hosted/environment.txt
+          cmake --version >> build/packaging/windows/hosted/environment.txt
+          Get-PSDrive -PSProvider FileSystem > build/packaging/windows/hosted/disk-before.txt
+      - name: Stage native application, isolated runtime and installer
+        run: |
+          & packaging/windows/build_package.ps1 -QtRoot $env:MAGNITE_QT_ROOT -VcpkgRoot $env:MAGNITE_VCPKG_ROOT -InnoCompiler $env:MAGNITE_INNO_COMPILER *> build/packaging/windows/hosted/build.log
+      - name: Backend regressions and signed manifest checks
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:MAGNITE_HOME = "$env:RUNNER_TEMP/backend-data"
+          $env:HF_HUB_OFFLINE = '1'
+          $env:PATH = "$env:MAGNITE_QT_ROOT/bin;$env:MAGNITE_VCPKG_ROOT/installed/x64-windows/bin;$env:PATH"
+          & build/packaging/windows/stage/runtime/python/python.exe -I -B -m unittest discover -s backend/tests -v *> build/packaging/windows/hosted/backend.log
+          ctest --test-dir build-windows --output-on-failure *> build/packaging/windows/hosted/ctest.log
+      - name: Install, upgrade, lifecycle, relocation and uninstall acceptance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = (python packaging/identity.py | ConvertFrom-Json).version
+          & build/packaging/windows/stage/runtime/python/python.exe -I -B packaging/windows/smoke_package.py --installer "dist/Magnite-$version-windows-x86_64-setup.exe" --logs build/packaging/windows/hosted/installed *> build/packaging/windows/hosted/install-tests.log
+      - name: Record exact tested package provenance
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = (python packaging/identity.py | ConvertFrom-Json).version
+          python packaging/package_evidence.py --platform windows --architecture x86_64 --source-sha $env:SOURCE_SHA --build-info build/packaging/windows/stage/build-info --output dist "dist/Magnite-$version-windows-x86_64-setup.exe"
+          Get-PSDrive -PSProvider FileSystem > build/packaging/windows/hosted/disk-after.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview-${{ inputs.source_sha }}
+          path: |
+            dist/*-windows-x86_64-setup.exe
+            dist/SHA256SUMS-windows-x86_64
+            dist/provenance-windows-x86_64.json
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Windows evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-evidence-${{ inputs.source_sha }}
+          path: |
+            build/packaging/windows/hosted/
+            build/packaging/windows/stage/build-info/
+          if-no-files-found: warn

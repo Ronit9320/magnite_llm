@@ -74,6 +74,23 @@ class LocalAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get("/datasets", headers=auth)).status_code, 200)
 
 
+    async def test_desktop_shutdown_is_authenticated_and_unavailable_in_developer_mode(self):
+        from unittest.mock import Mock
+        shutdown = Mock()
+        app = local_access.LocalAccessMiddleware(_stub_app(), TOKEN, shutdown=shutdown)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://127.0.0.1") as client:
+            self.assertEqual((await client.post("/_desktop/shutdown")).status_code, 401)
+            shutdown.assert_not_called()
+            self.assertEqual((await client.post("/_desktop/shutdown",
+                             headers={"Authorization": f"Bearer {TOKEN}"})).status_code, 200)
+            shutdown.assert_called_once()
+        developer = local_access.LocalAccessMiddleware(_stub_app(), None, shutdown=shutdown)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=developer),
+                                     base_url="http://127.0.0.1") as client:
+            self.assertEqual((await client.post("/_desktop/shutdown")).status_code, 404)
+
+
 class DataDirLockTests(unittest.TestCase):
     def test_second_holder_is_refused_and_a_killed_holder_releases(self):
         with tempfile.TemporaryDirectory() as home:
@@ -85,7 +102,7 @@ class DataDirLockTests(unittest.TestCase):
                 self.assertEqual(holder.stdout.readline().strip(), "held")
                 with self.assertRaises(local_access.DataDirInUse):
                     local_access.acquire_data_dir_lock(home, wait=0.3)
-                os.kill(holder.pid, signal.SIGKILL)
+                holder.kill()
                 holder.wait(5)
                 handle = local_access.acquire_data_dir_lock(home, wait=2)   # the OS released the dead holder's lock
                 handle.close()
@@ -118,8 +135,13 @@ class BackendProcessTests(unittest.TestCase):
                 second = subprocess.run([sys.executable, "-m", "backend.main", "--port", "0", "--home", home],
                                         env=env, capture_output=True, text=True, timeout=60)
                 self.assertEqual(second.returncode, local_access.EXIT_DATA_DIR_IN_USE, second.stderr[-500:])
+                response = httpx.post(base + "/_desktop/shutdown", timeout=5,
+                                      headers={"Authorization": f"Bearer {TOKEN}"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(backend.wait(20), 0)
             finally:
-                backend.terminate()
+                if backend.poll() is None:
+                    backend.terminate()
                 backend.wait(20)
 
 

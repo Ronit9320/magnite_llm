@@ -1,5 +1,4 @@
 import argparse
-import ctypes
 import os
 import signal
 import socket
@@ -13,7 +12,6 @@ from backend import local_access
 from backend.paths import app_home
 from backend.server import app
 
-_PDEATHSIG_SIGTERM = 15
 _PARENT_POLL_SECONDS = 1.0
 _SHUTDOWN_GRACE_SECONDS = 15.0
 
@@ -34,6 +32,9 @@ def _enable_parent_death_signal() -> None:
     or force-killed GUI cannot leave an orphaned backend behind."""
     if sys.platform == "linux" and os.name == "posix":
         try:
+            import ctypes
+
+            _PDEATHSIG_SIGTERM = 15
             PR_SET_PDEATHSIG = 1
             libc = ctypes.CDLL("libc.so.6", use_errno=True)
             if libc.prctl(PR_SET_PDEATHSIG, _PDEATHSIG_SIGTERM) != 0:
@@ -77,7 +78,12 @@ def main():
 
     port = args.port if args.port else find_free_port()
     print(f"Magnite backend starting on http://127.0.0.1:{port}", file=sys.stderr)
-    uvicorn.run(local_access.LocalAccessMiddleware(app, token), host="127.0.0.1", port=port, log_level="info")
+    def request_shutdown():
+        server.should_exit = True
+
+    network_app = local_access.LocalAccessMiddleware(app, token, shutdown=request_shutdown)
+    server = uvicorn.Server(uvicorn.Config(network_app, host="127.0.0.1", port=port, log_level="info"))
+    server.run()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 ## Status and instructions for the next agent
 
 Created: 2026-10-30. **Implementation started on `release/integration`: Phase 0
-complete; Phase 1 in progress.** See the implementation record below and
+complete; shared Mac/Windows source integration and Phase 3 automation in progress.** See the implementation record below and
 [integration inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md).
 
 The owner requested this Markdown handoff only for this session. Do not interpret
@@ -237,7 +237,8 @@ exact commits and environments. No claim that Linux testing verifies Mac code.
 
 ## Phase 2 — integrate Windows
 
-Status: **NOT STARTED**. Depends on Windows availability and Phase 1.
+Status: **IN PROGRESS**. Windows `2350dff` integrated semantically; shared Linux
+checks pass. Native Windows and final all-platform same-source builds pending.
 
 - Review the actual pushed branch, its build recipe, installer, runtime layout,
   dependency locks, supported architecture/OS and existing updater work.
@@ -255,7 +256,9 @@ shared-code conflicts or falsely claimed platform test results.
 
 ## Phase 3 — automate reproducible native packages
 
-Status: **NOT STARTED**. Can begin platform-by-platform after integration.
+Status: **IN PROGRESS**. Reusable Linux/Mac/Windows package jobs and artifact-only
+integration coordinator implemented; clean hosted runs and their evidence are
+required before completion. See [native build operations](NATIVE_PACKAGES.md).
 
 - Build Linux on the existing supported glibc baseline; retain portable CPU
   settings, pinned AppImage tools and ELF compatibility audit.
@@ -532,3 +535,46 @@ behaviour changes; this plan must not become the sole source of user instruction
   semantically in Phase 2; its existing scripts are source-build support, with
   installer/runtime locks/updater/signing still missing. Later automation,
   channels, publication and stable rollout phases remain NOT STARTED.
+
+### Implementation record — 2026-10-30: Windows integration and native automation
+
+- Owner requested completion through Phase 3. Continued from clean
+  `release/integration` at `c2f7406`. Refreshed source branches; integrated
+  `windows-build-fix` at `2350dff` without resetting any branch. Preserved Mac
+  parent supervision while resolving the backend/main.py merge conflict.
+- Reconciled source discovery for build/Release with package-first runtime
+  selection. Windows `.venv312` probes are confined to source builds on Windows;
+  Linux `.venv` precedence remains unchanged. Added Windows process-tree Job
+  supervision, authenticated graceful server shutdown, byte-range data locks,
+  canonical native version resources, and failing-command checks in source
+  build scripts. Added authenticated shutdown/lifetime regressions.
+- Implemented a per-user, unsigned Inno Setup Windows CPU testing installer,
+  isolated Python runtime, Windows-specific direct/transitive dependency locks,
+  explicit Qt/OpenSSL/MSVC deployment, version mapping and installed smoke
+  harness. Native installer reinstallation is not evidence of full cross-version
+  updater/locked-file recovery, which remains Phase 5 work.
+- Added reusable native builders and a read-only artifact-only integration
+  coordinator. Every builder checks out the same source SHA, requires clean
+  provenance and emits independent checksums/package evidence; final acceptance
+  rejects missing platforms, mismatched source/identity and changed package
+  bytes. Linux retains Ubuntu 22.04/glibc-2.35 audit and all earlier tests. Mac
+  uses ARM macOS 15, pinned Qt and a checksum-verified static OpenSSL build with
+  a macOS 14 deployment target. Windows uses Windows Server 2022/MSVC 2022 and
+  pinned Qt/vcpkg/Inno tooling. No staged app is restored from cache.
+- Local Linux evidence under `build/packaging/multiplatform/phase3/`: configure/
+  build PASS; 72 backend tests run, 71 passed, one native Mac test skipped;
+  nine packaging tests PASS (six actual updater transactions and three native
+  artifact-set regressions); CTest PASS; theme/UI/desktop selftest PASS. Python
+  compile checks, shell syntax checks, and actionlint 1.7.7 PASS before the
+  first hosted candidate. The linter was downloaded to /tmp after sandbox DNS
+  restrictions; source dependency locks were resolved with authorized network
+  access. Windows scripts still require native execution for acceptance.
+- Native build operations: [NATIVE_PACKAGES.md](NATIVE_PACKAGES.md). Windows
+  decisions/commands: [packaging guide](../../packaging/windows/README.md).
+  Signing, updater delivery, channels and publication (Phases 4+) are outside
+  this request; public release identity and existing published assets unchanged.
+- Native hosted runs are the next acceptance step; phases remain IN PROGRESS
+  until those results are recorded. No GitHub API token/CLI login is available;
+  owner selected public job status only. Artifact-only integration push is
+  necessary to execute the requested hosted validation. No merge/push to dev
+  or master is involved.

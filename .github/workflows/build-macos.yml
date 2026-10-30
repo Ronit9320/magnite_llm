@@ -1,0 +1,95 @@
+name: Build Mac ARM native package
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MAGNITE_REQUIRE_CLEAN: '1'
+      QT_QPA_PLATFORM: offscreen
+      UV_CACHE_DIR: ${{ github.workspace }}/build/packaging/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.12'
+      - name: Install pinned build tools and Qt
+        run: |
+          test "$(uname -m)" = arm64
+          python3 -m pip install uv==0.13.5 aqtinstall==3.3.0
+          python3 -m aqt install-qt mac desktop 6.8.3 clang_64 --outputdir "$RUNNER_TEMP/qt"
+          echo "MAGNITE_QT_ROOT=$RUNNER_TEMP/qt/6.8.3/macos" >> "$GITHUB_ENV"
+      - name: Build pinned OpenSSL for the macOS 14 baseline
+        run: bash packaging/macos/prepare_openssl.sh
+      - name: Record native environment
+        run: |
+          mkdir -p build/packaging/macos/hosted
+          sw_vers > build/packaging/macos/hosted/environment.txt
+          uname -a >> build/packaging/macos/hosted/environment.txt
+          clang --version >> build/packaging/macos/hosted/environment.txt
+          cmake --version >> build/packaging/macos/hosted/environment.txt
+          df -h > build/packaging/macos/hosted/disk-before.txt
+      - name: Build, audit and sign the testing bundle ad hoc
+        run: bash packaging/macos/build_app.sh > build/packaging/macos/hosted/build.log 2>&1
+      - name: Backend regressions with the bundled runtime
+        run: |
+          export TMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export MAGNITE_HOME="$TMPDIR/magnite-regressions"
+          export HF_HUB_OFFLINE=1
+          build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3 -I -B \
+            -m unittest discover -s backend/tests -v > build/packaging/macos/hosted/backend.log 2>&1
+      - name: Relocated bundle smoke and UI
+        run: |
+          ditto build/packaging/macos/stage/Magnite.app "$RUNNER_TEMP/Relocated App/Magnite.app"
+          bash packaging/macos/smoke_bundle.sh "$RUNNER_TEMP/Relocated App/Magnite.app" build/packaging/macos/hosted/smoke
+          env PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent MAGNITE_HOME="$RUNNER_TEMP/ui-data" \
+            "$RUNNER_TEMP/Relocated App/Magnite.app/Contents/MacOS/Magnite" --ui-check \
+            > build/packaging/macos/hosted/ui.log 2>&1
+      - name: CPU feature acceptance using the bundled runtime
+        run: |
+          build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3 -I -B \
+            backend/tests/live_workflow.py > build/packaging/macos/hosted/cpu-features.log 2>&1
+          echo 'Metal/MPS capability acceptance requires a physical Mac; hosted CPU checks do not certify GPU support.' \
+            > build/packaging/macos/hosted/GPU-NOT-TESTED.txt
+      - name: Package and mount-test DMG
+        run: |
+          bash packaging/macos/build_dmg.sh > build/packaging/macos/hosted/dmg.log 2>&1
+          version="$(python3 packaging/release_metadata.py --print-version)"
+          bash packaging/macos/check_dmg.sh "dist/Magnite-$version-arm64.dmg" >> build/packaging/macos/hosted/dmg.log 2>&1
+      - name: Record exact tested package provenance
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          version="$(python3 packaging/release_metadata.py --print-version)"
+          python3 packaging/package_evidence.py --platform macos --architecture arm64 --source-sha "$SOURCE_SHA" \
+            --build-info build/packaging/macos/stage/Magnite.app/Contents/Resources/build-info --output dist \
+            "dist/Magnite-$version-arm64.dmg"
+          df -h > build/packaging/macos/hosted/disk-after.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-preview-${{ inputs.source_sha }}
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS-macos-arm64
+            dist/provenance-macos-arm64.json
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload Mac evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-evidence-${{ inputs.source_sha }}
+          path: |
+            build/packaging/macos/hosted/
+            build/packaging/macos/stage/Magnite.app/Contents/Resources/build-info/
+          if-no-files-found: warn

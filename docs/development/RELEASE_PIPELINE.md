@@ -7,6 +7,10 @@ workflow described here remains active and has not yet been replaced by a
 three-platform coordinator. Its publisher is now restricted to `dev`;
 `release/**` pushes and manual runs on those branches build/test artifacts only.
 No new preview or stable publication is part of the initial integration work.
+Native artifact-only builds now use the reusable Linux/Mac/Windows jobs in
+[the native packaging guide](NATIVE_PACKAGES.md). The existing Linux preview
+workflow delegates its build to `build-linux.yml`; its dev-only publisher is
+retained until the Phase 6 coordinator replaces it.
 
 ## Scope and decisions
 

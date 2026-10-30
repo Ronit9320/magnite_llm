@@ -61,3 +61,7 @@ desktop.ini
 build-macos/
 .venv-macos/
 *.dmg
+
+# Windows source development virtualenv
+.venv312/
+build-windows/

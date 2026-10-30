@@ -68,3 +68,11 @@ and never falls back to a system Python once `Contents/Resources/runtime` exists
 These are **testing** builds: ad-hoc signed, not notarized, one architecture, minimum macOS 14.0. Developer ID signing and notarization
 are not done (blocked on a certificate). Tester instructions: [`macos/TESTING.md`](macos/TESTING.md). Evidence and limits:
 [`docs/release/macos/V0_1_MACOS_TESTING.md`](../docs/release/macos/V0_1_MACOS_TESTING.md).
+
+## Native integration automation
+
+See [native package operations](../docs/development/NATIVE_PACKAGES.md) for the
+artifact-only three-platform coordinator and [Windows packaging](windows/README.md)
+for the new per-user CPU installer. Reusable jobs check the same source SHA,
+require clean provenance and upload independent packages/checksums/evidence.
+Hosted success and native device gaps are tracked in the multi-platform plan.

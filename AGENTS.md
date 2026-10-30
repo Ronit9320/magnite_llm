@@ -18,7 +18,7 @@ cmake --build build -j
 
 ## Verify
 
-CI in `.github/workflows/verify.yml` covers the base backend, CMake, theme/UI and desktop selftest. `.github/workflows/linux-preview.yml` builds/tests Linux CPU previews on dev/release pushes, excluding master; signing/publication now runs on dev only, while release branches produce test artifacts. Both hosted workflows passed for v0.1-preview on 2026-10-23. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
+CI in `.github/workflows/verify.yml` covers the base backend, CMake, theme/UI and desktop selftest. `.github/workflows/linux-preview.yml` builds/tests Linux CPU previews on dev/release pushes, excluding master; signing/publication now runs on dev only, while release branches produce test artifacts. Both hosted workflows passed for v0.1-preview on 2026-10-23. Native package integration uses `.github/workflows/native-packages.yml` and reusable `build-{linux,macos,windows}.yml`; see `docs/development/NATIVE_PACKAGES.md` for current evidence and limitations. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
 
 ```bash
 ./build/magnite-app --theme-check                                  # token/QSS/font/icon audit; prints "0 failure(s)"

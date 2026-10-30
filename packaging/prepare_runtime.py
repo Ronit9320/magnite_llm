@@ -56,7 +56,7 @@ def main():
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
-    env["UV_CACHE_DIR"] = str(REPO / "build" / "packaging" / "uv-cache")
+    env.setdefault("UV_CACHE_DIR", str(REPO / "build" / "packaging" / "uv-cache"))
     # Never compile llama.cpp for the build host's particular CPU/GPU.
     macos = sys.platform == "darwin"
     if macos:
@@ -79,7 +79,7 @@ def main():
         env["CMAKE_ARGS"] = (
             "-DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_AVX2=OFF "
             "-DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF "
-            "-DLLAMA_CURL=OFF"
+            "-DGGML_METAL=OFF -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF"
         )
         env["CMAKE_BUILD_PARALLEL_LEVEL"] = "2"
     # macOS has no separate CPU torch build: the standard wheel provides CPU and MPS.
@@ -104,7 +104,8 @@ def main():
         shutil.copy2(REPO / name, notices / name)
     for path in (REPO / "app/resources/fonts").glob("OFL-*.txt"):
         shutil.copy2(path, notices / path.name)
-    testing = REPO / ("packaging/macos/TESTING.md" if macos else "packaging/TESTING.md")
+    testing = REPO / ("packaging/macos/TESTING.md" if macos else
+                      "packaging/windows/TESTING.md" if sys.platform == "win32" else "packaging/TESTING.md")
     if testing.exists():
         shutil.copy2(testing, dest / "TESTING.md")
     else:

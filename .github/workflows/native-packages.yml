@@ -1,0 +1,52 @@
+name: Native integration packages
+on:
+  push:
+    branches: ['release/integration']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-integration-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-22.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: source
+        run: |
+          test -z "$(git status --porcelain)"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  linux:
+    needs: source
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      source_sha: ${{ needs.source.outputs.sha }}
+  macos:
+    needs: source
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      source_sha: ${{ needs.source.outputs.sha }}
+  windows:
+    needs: source
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      source_sha: ${{ needs.source.outputs.sha }}
+  acceptance:
+    needs: [source, linux, macos, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-preview-*'
+          path: collected
+      - name: Verify the complete native artifact set
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: python3 packaging/verify_artifact_set.py --source-sha "$SOURCE_SHA" collected

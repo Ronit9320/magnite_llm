@@ -30,6 +30,12 @@ private slots:
 
 private:
     void launchBackend();
+    void requestStop();
+#ifdef Q_OS_WIN
+    bool attachProcessJob();
+    void closeProcessJob();
+    void *m_processJob = nullptr;
+#endif
     void processLine(const QString &line);
     void waitForBackend();
     void checkHealth();
