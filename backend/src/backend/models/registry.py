@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import collections
+import itertools
 import json
 import logging
 import os
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 import uuid
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
-from huggingface_hub import HfApi, snapshot_download, scan_cache_dir
+from huggingface_hub import HfApi, scan_cache_dir
 from huggingface_hub.constants import HF_HUB_CACHE
 from huggingface_hub.errors import CacheNotFound
-from tqdm import tqdm
 
 from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, model_id
 from backend.models.store import ModelStore
@@ -22,40 +25,111 @@ OLLAMA_HOST = os.environ.get("MAGNITE_OLLAMA_URL", "http://127.0.0.1:11434")
 logger = logging.getLogger(__name__)
 
 
-class _ProgressTqdm(tqdm):
-    """tqdm subclass that mirrors progress into a shared dict without
-    printing its own progress bar."""
+def _default_pull_command(repo_id: str, cache_dir: str) -> list[str]:
+    return [sys.executable, "-m", "backend.models.pull_worker", repo_id, cache_dir]
 
-    def __init__(self, *args, progress_key, **kwargs):
-        # Silence visual output: write to a null sink while still tracking
-        # (self.n advances regardless of where the bar would render).
-        kwargs.pop("file", None)
-        null = open(os.devnull, "w")
-        super().__init__(*args, file=null, **kwargs)
-        self._progress_key = progress_key
 
-    def update(self, n: float = 1) -> Optional[bool]:
-        ret = super().update(n)
-        state = self._progress_key
-        state["current"] = int(self.n)
-        state["total"] = int(self.total or 0)
-        return ret
+class _Cancelled(Exception):
+    """Raised inside a pull when the user cancelled it."""
+
+
+class _PullControl:
+    """Cancel flag and worker process for one download."""
+
+    def __init__(self) -> None:
+        self.cancel = threading.Event()
+        self.lock = threading.Lock()
+        self.proc: Optional[subprocess.Popen] = None
+        self.thread: Optional[threading.Thread] = None
+
+    def kill(self) -> None:
+        with self.lock:
+            proc = self.proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+class CacheTransaction:
+    """What a Hub cache held for one repo before a download started.
+
+    A cancelled download removes exactly what it created and nothing else.
+    Downloads write to three places: the repo's own folder, its lock folder, and
+    (for Xet-backed files) a shared ``blobs`` folder at the cache root. Only
+    those are inspected, so other models are never touched. The app runs one
+    Hub download at a time, which is what makes "new since the start" mean
+    "created by this download".
+    """
+
+    def __init__(self, cache_dir: str, repo_id: str) -> None:
+        self.cache = Path(cache_dir).expanduser()
+        # No path separators survive, so the folder is always one level below the cache.
+        folder = "models--" + repo_id.replace("/", "--").replace("\\", "--")
+        self.repo = self.cache / folder
+        self.locks_root = self.cache / ".locks"
+        self.locks = self.locks_root / folder
+        self.shared = self.cache / "blobs"
+        self._before = self._scan()
+
+    def _scan(self) -> set[Path]:
+        found: set[Path] = set()
+        for top in (self.locks_root, self.shared):
+            if os.path.lexists(top):
+                found.add(top)
+        for root in (self.repo, self.locks, self.shared):
+            if not os.path.lexists(root):
+                continue
+            found.add(root)
+            if root.is_dir() and not root.is_symlink():
+                for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+                    for name in dirnames + filenames:
+                        found.add(Path(dirpath) / name)
+        return found
+
+    def rollback(self) -> None:
+        created = sorted(self._scan() - self._before, key=lambda p: len(p.parts), reverse=True)
+        for path in created:   # deepest first: files empty their folders before the folders go
+            try:
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()   # refuses non-empty folders, which is the safe outcome
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                logger.warning("Cannot remove partial download %s: %s", path, exc)
 
 
 class ModelRegistry:
     """Coordinates HF/Ollama downloads with the local SQLite store."""
 
-    def __init__(self, store: ModelStore, hf_cache: Optional[str] = None):
+    def __init__(self, store: ModelStore, hf_cache: Optional[str] = None,
+                 pull_command: Optional[Callable[[str, str], list[str]]] = None):
         self._store = store
         self._api = HfApi()
         self._hf_cache = hf_cache if hf_cache is not None else HF_HUB_CACHE
         self._sync_lock = threading.RLock()
         self._jobs: dict[str, PullJob] = {}
+        self._controls: dict[str, _PullControl] = {}
+        self._pull_lock = threading.Lock()
+        self._pull_command = pull_command or _default_pull_command
 
     # ---- Job management ------------------------------------------------
 
     def has_active_pulls(self) -> bool:
         return any(job.status in ("queued", "running") for job in list(self._jobs.values()))
+
+    def _active_job(self, source: str) -> Optional[PullJob]:
+        for job in list(self._jobs.values()):
+            if job.source == source and job.status in ("queued", "running"):
+                return job
+        return None
+
+    def _active_hf_repos(self) -> set[str]:
+        return {j.ref.lower() for j in list(self._jobs.values())
+                if j.source == "huggingface" and j.status in ("queued", "running")}
 
     def _create_job(self, ref: str, source: str) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -63,6 +137,23 @@ class ModelRegistry:
             id=job_id, ref=ref, source=source, status="queued",
             progress=0.0, message="Queued",
         )
+        self._controls[job_id] = _PullControl()
+        return job_id
+
+    def _start_pull(self, source: str, ref: str, target) -> str:
+        """Start a download thread. One download per source at a time: asking for the
+        one already running returns it, and asking for another is refused."""
+        with self._pull_lock:
+            active = self._active_job(source)
+            if active is not None:
+                if active.ref == ref:
+                    return active.id
+                raise RuntimeError(
+                    f"Another download is in progress ({active.ref}). Wait for it or cancel it first.")
+            job_id = self._create_job(ref, source)
+        thread = threading.Thread(target=target, args=(ref, job_id), daemon=True)
+        self._controls[job_id].thread = thread
+        thread.start()
         return job_id
 
     def job_status(self, job_id: str) -> Optional[PullJob]:
@@ -72,11 +163,46 @@ class ModelRegistry:
         # Re-read so callers get the latest progress.
         return job.model_copy()
 
+    def cancel_pull(self, job_id: str) -> Optional[PullJob]:
+        """Ask a running download to stop. Returns the job, or None if unknown.
+
+        The download is killed at once; the job turns "cancelled" when its partial
+        files have been removed. Cancelling a finished job changes nothing.
+        """
+        job, control = self._jobs.get(job_id), self._controls.get(job_id)
+        if job is None:
+            return None
+        if control is not None and job.status in ("queued", "running"):
+            control.cancel.set()
+            job.message = "Cancelling…"
+            control.kill()
+        return job.model_copy()
+
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Stop every running download (backend exit) and let it clean up."""
+        controls = list(self._controls.values())
+        for control in controls:
+            control.cancel.set()
+            control.kill()
+        deadline = time.monotonic() + timeout
+        for control in controls:
+            if control.thread is not None and control.thread is not threading.current_thread():
+                control.thread.join(max(0.0, deadline - time.monotonic()))
+
     # ---- HuggingFace Hub ----------------------------------------------
 
-    def search_hub(self, query: str, limit: int = 20) -> list[HubSearchResult]:
+    def search_hub(self, query: str, limit: int = 20, offset: int = 0) -> list[HubSearchResult]:
+        """One page of Hub results, each marked if it is already downloaded.
+
+        The Hub client has no offset, only a lazy iterator, so a page is a slice
+        of the first ``offset + limit`` results. The order is the Hub's own, which
+        is what keeps consecutive pages from overlapping.
+        """
+        infos = itertools.islice(
+            self._api.list_models(search=query, limit=offset + limit), offset, offset + limit)
+        downloaded = self._downloaded_hub_repos()
         results = []
-        for info in self._api.list_models(search=query, limit=limit):
+        for info in infos:
             card = info.cardData or {}
             results.append(
                 HubSearchResult(
@@ -87,21 +213,81 @@ class ModelRegistry:
                     gated=bool(getattr(info, "gated", False)),
                     license=card.get("license", "") or "",
                     tags=list(getattr(info, "tags", []) or []),
+                    downloaded=info.id.lower() in downloaded,
                 )
             )
         return results
 
+    def _downloaded_hub_repos(self) -> set[str]:
+        """Lower-cased repo ids of ready Hugging Face models in the local library.
+
+        Uses the same synced view as the Library list, so models downloaded outside
+        the app count too. This is a decoration on search results: if the local
+        scan fails, results are still returned, just without the marker.
+        """
+        try:
+            return {m.ref.lower() for m in self.list_synced(source="huggingface")
+                    if m.status == "ready"} - self._active_hf_repos()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cannot determine downloaded models for search results: %s", exc)
+            return set()
+
     def _hf_snapshot_path(self, repo_id: str, job_id: str) -> str:
-        progress_key = self._jobs[job_id].__dict__
-        def tqdm_class(*args, **kwargs):
-            return _ProgressTqdm(*args, progress_key=progress_key, **kwargs)
-        path = snapshot_download(
-            repo_id=repo_id,
-            cache_dir=self._hf_cache,
-            tqdm_class=tqdm_class,
-            local_files_only=False,
-        )
-        return path
+        """Download in a child process and return the snapshot folder.
+
+        Returns "" if the download was cancelled; raises RuntimeError on failure.
+        Byte progress is copied onto the job as it arrives.
+        """
+        job, control = self._jobs[job_id], self._controls[job_id]
+        command = self._pull_command(repo_id, self._hf_cache)
+        with control.lock:
+            if control.cancel.is_set():
+                return ""
+            try:
+                control.proc = subprocess.Popen(
+                    command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+            except OSError as exc:
+                raise RuntimeError(f"Could not start the download worker: {exc}") from exc
+            proc = control.proc
+
+        result_path, error = "", ""
+        noise: collections.deque[str] = collections.deque(maxlen=3)
+        for line in proc.stdout:
+            try:
+                message = json.loads(line)
+                if not isinstance(message, dict):
+                    raise ValueError
+            except ValueError:
+                if line.strip():
+                    noise.append(line.strip())
+                continue
+            if "total" in message:
+                job.bytes_total = max(job.bytes_total, int(message["total"]))
+            if "done" in message:
+                done = int(message["done"])
+                job.bytes_done = max(job.bytes_done, min(done, job.bytes_total) if job.bytes_total else done)
+                if job.bytes_total:
+                    job.progress = min(99.0, round(100.0 * job.bytes_done / job.bytes_total, 1))
+            if "error" in message:
+                error = str(message["error"])
+            if message.get("result") == "ok":
+                result_path = str(message.get("path", ""))
+        try:
+            code = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            code = proc.wait()
+        if control.cancel.is_set():
+            return ""
+        if error:
+            raise RuntimeError(error)
+        if code != 0:
+            detail = f": {noise[-1]}" if noise else ""
+            raise RuntimeError(f"The download worker exited unexpectedly (code {code}){detail}")
+        if not result_path or not os.path.isdir(result_path):
+            raise RuntimeError("The download finished but produced no model folder")
+        return result_path
 
     def _inspect_hf(self, path: str) -> tuple[str, float]:
         """Return (architecture, approx size in MB)."""
@@ -166,9 +352,12 @@ class ModelRegistry:
             return
         for warning in cache.warnings:
             logger.warning("Hugging Face cache: %s", warning)
+        downloading = self._active_hf_repos()
         for repo in sorted(cache.repos, key=lambda r: r.repo_id):
             if repo.repo_type != "model":
                 continue
+            if repo.repo_id.lower() in downloading:
+                continue   # still arriving: not a usable model yet
             identifier = model_id("huggingface", repo.repo_id)
             existing = self._store.get(identifier)
             try:
@@ -198,19 +387,19 @@ class ModelRegistry:
                 logger.warning("Cannot inspect cached model %s: %s", repo.repo_id, exc)
 
     def pull_hf(self, repo_id: str) -> str:
-        job_id = self._create_job(repo_id, "huggingface")
-        thread = threading.Thread(
-            target=self._run_hf_pull, args=(repo_id, job_id), daemon=True
-        )
-        thread.start()
-        return job_id
+        return self._start_pull("huggingface", repo_id, self._run_hf_pull)
 
     def _run_hf_pull(self, repo_id: str, job_id: str) -> None:
-        job = self._jobs[job_id]
+        job, control = self._jobs[job_id], self._controls[job_id]
+        identifier = model_id("huggingface", repo_id)
+        transaction = CacheTransaction(self._hf_cache, repo_id)
+        had_record = self._store.get(identifier) is not None
         try:
             job.status = "running"
             job.message = "Downloading from HuggingFace Hub"
             path = self._hf_snapshot_path(repo_id, job_id)
+            if control.cancel.is_set() or not path:
+                raise _Cancelled()
 
             job.message = "Inspecting model"
             architecture, size_mb = self._inspect_hf(path)
@@ -221,7 +410,7 @@ class ModelRegistry:
             name = repo_id.rsplit("/", 1)[-1]
 
             rec = ModelRecord(
-                id=model_id("huggingface", repo_id),
+                id=identifier,
                 name=name,
                 source="huggingface",
                 ref=repo_id,
@@ -236,17 +425,43 @@ class ModelRegistry:
                 downloaded_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 status="ready",
             )
+            if control.cancel.is_set():
+                raise _Cancelled()
             self._store.upsert(rec)
             job.status = "done"
             job.progress = 100.0
+            job.bytes_done = job.bytes_total = max(job.bytes_total, job.bytes_done)
             job.message = f"Ready — {rec.name} ({size_mb} MB)"
+        except _Cancelled:
+            self._finish_cancelled(job, transaction, identifier, had_record)
         except Exception as exc:  # noqa: BLE001
-            job.status = "error"
-            job.error = str(exc)
-            job.message = f"Failed: {exc}"
+            if control.cancel.is_set():
+                self._finish_cancelled(job, transaction, identifier, had_record)
+            else:
+                # Partial files stay: a retry resumes from them.
+                job.status = "error"
+                job.error = str(exc)
+                job.message = f"Failed: {exc}"
 
-    def _remove_hf(self, rec: ModelRecord) -> None:
-        """Best-effort removal of the snapshot cache dir since HF has no CLI delete."""
+    def _finish_cancelled(self, job: PullJob, transaction: CacheTransaction,
+                          identifier: str, had_record: bool) -> None:
+        transaction.rollback()
+        if not had_record:
+            self._store.delete(identifier)
+        job.status = "cancelled"
+        job.error = None
+        job.message = "Cancelled. Partial download removed."
+
+    def _remove_hf(self, rec: ModelRecord, *, all_revisions: bool = False) -> None:
+        """Remove a model's snapshot from the Hub cache.
+
+        By default only the registered revision goes, and blobs still used by another
+        revision stay. Deleting a model from the library passes ``all_revisions`` so no
+        older revision is left behind to reappear on the next refresh (the library shows
+        one entry per repo). Hugging Face has no CLI delete, so this uses the cache API.
+        """
+        import dataclasses
+        import shutil
         from pathlib import Path
         from huggingface_hub import scan_cache_dir
 
@@ -257,12 +472,28 @@ class ModelRegistry:
             return
         if snapshot.parent.name != "snapshots":
             raise ValueError("Model path is not a managed Hugging Face snapshot")
-        cache = scan_cache_dir(snapshot.parent.parent.parent)
+        repo_folder = snapshot.parent.parent
+        cache_root = repo_folder.parent
+        cache = scan_cache_dir(cache_root)
         for repo in cache.repos:
-            for revision in repo.revisions:
-                if Path(revision.snapshot_path).resolve() == snapshot:
-                    cache.delete_revisions(revision.commit_hash).execute()
-                    return
+            if Path(repo.repo_path).resolve() != repo_folder:
+                continue
+            if all_revisions:
+                hashes = [revision.commit_hash for revision in repo.revisions]
+            else:
+                hashes = [revision.commit_hash for revision in repo.revisions
+                          if Path(revision.snapshot_path).resolve() == snapshot]
+            if not hashes:
+                break
+            # delete_revisions() finds revisions by commit hash across every repo it is
+            # given, taking the first match in arbitrary order. Forks and mirrors share
+            # commit hashes, so give it only this repo or it may delete the wrong one's files.
+            only_this_repo = dataclasses.replace(cache, repos=frozenset({repo}))
+            only_this_repo.delete_revisions(*hashes).execute()
+            if all_revisions:
+                # The download leaves one lock file per blob behind; only noise once it is gone.
+                shutil.rmtree(cache_root / ".locks" / repo_folder.name, ignore_errors=True)
+            return
         raise ValueError("Cannot safely identify cached model revision; files were not removed")
 
     # ---- Ollama --------------------------------------------------------
@@ -308,15 +539,10 @@ class ModelRegistry:
             self._store.upsert(rec)
 
     def pull_ollama(self, name: str) -> str:
-        job_id = self._create_job(name, "ollama")
-        thread = threading.Thread(
-            target=self._run_ollama_pull, args=(name, job_id), daemon=True
-        )
-        thread.start()
-        return job_id
+        return self._start_pull("ollama", name, self._run_ollama_pull)
 
     def _run_ollama_pull(self, model_name: str, job_id: str) -> None:
-        job = self._jobs[job_id]
+        job, control = self._jobs[job_id], self._controls[job_id]
         try:
             job.status = "running"
             job.message = f"Requesting {model_name} from Ollama"
@@ -328,6 +554,8 @@ class ModelRegistry:
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
+                    if control.cancel.is_set():
+                        break
                     if not line:
                         continue
                     try:
@@ -339,7 +567,13 @@ class ModelRegistry:
                     total = payload.get("total") or 0
                     completed = payload.get("completed") or 0
                     if total:
-                        job.progress = min(100.0, round(100.0 * completed / total, 1))
+                        job.progress = min(99.0, round(100.0 * completed / total, 1))
+                        job.bytes_total, job.bytes_done = int(total), int(completed)
+            if control.cancel.is_set():
+                # Ollama keeps the layers it already fetched and resumes them next time.
+                job.status = "cancelled"
+                job.message = "Cancelled."
+                return
             self._record_ollama_models()
             job.status = "done"
             job.progress = 100.0
@@ -378,7 +612,9 @@ class ModelRegistry:
         if rec is None:
             return False
         if rec.source == "huggingface":
-            self._remove_hf(rec)
+            if rec.ref.lower() in self._active_hf_repos():
+                raise RuntimeError("This model is being downloaded. Cancel the download before deleting it.")
+            self._remove_hf(rec, all_revisions=True)
         elif rec.source == "ollama":
             response = httpx.request("DELETE", f"{OLLAMA_HOST}/api/delete", json={"model": rec.ref}, timeout=30.0)
             if response.status_code != 404:

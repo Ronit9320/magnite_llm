@@ -187,12 +187,14 @@ Registry IDs use `source:reference`, with `/` replaced by `--`; for example, `hu
 
 For a Hugging Face pull:
 
-1. `POST /models/pull` creates a short UUID job ID and starts a daemon thread.
-2. `snapshot_download()` downloads a repository snapshot through the Hub cache. A tqdm bridge updates job progress state.
+1. `POST /models/pull` creates a short UUID job ID and starts a job thread. Only one download per source runs at a time.
+2. The job thread starts `backend.models.pull_worker` as a child process. The worker calls `snapshot_download()` and reports byte progress as JSON lines on stdout; the job copies `bytes_done`/`bytes_total`/`progress` from them.
 3. The registry inspects the snapshot and Hub metadata, then upserts a ready model record.
-4. The desktop polls the job until `done` or `error`, then refreshes its model list.
+4. The desktop polls the job until `done`, `error` or `cancelled`, then refreshes its model list.
 
-Pull jobs are in memory and disappear on backend restart. There is no pull-cancellation endpoint or durable download queue. Pulls request repository snapshots, not a UI-selected individual weight file.
+`POST /models/pull/{id}/cancel` kills the worker process, which stops even a native Xet transfer at once (callbacks cannot interrupt one). The job then removes exactly the files the download created: a `CacheTransaction` records what existed in the repo's cache folder, its lock folder and the shared `blobs` folder before the download and deletes anything new afterwards. Models that were already cached are never touched. A download that fails keeps its partial files so a retry resumes. Ollama pulls cancel by ceasing to read the stream; Ollama keeps its own partial layers.
+
+Pull jobs are in memory and disappear on backend restart; there is no durable download queue. Pulls request repository snapshots, not a UI-selected individual weight file, so a repository's total size can be much larger than the weights alone.
 
 For Ollama, the registry queries `/api/tags`, streams `/api/pull`, and uses `/api/delete`. Listing models can refresh Ollama records, so a registry read may contact the configured service. Ollama owns its weight storage; Magnite stores model handles. Refresh upserts discovered records rather than implementing a complete authoritative reconciliation of externally removed models.
 
