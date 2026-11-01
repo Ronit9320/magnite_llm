@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QIcon>
+#include <QImage>
 #include <QPainter>
 #include <QPixmap>
 #include <QSvgRenderer>
@@ -101,23 +102,30 @@ QString Theme::monoFont() {
 }
 
 // ---- Icon helper (design doc §9 icon set) ----
-QIcon Theme::coloredIcon(const QString &lucideName, const QColor &color, int size) {
-    if (!color.isValid() || color.alpha() == 0) return QIcon();
+QPixmap Theme::iconPixmap(const QString &lucideName, const QColor &color, int size, qreal dpr) {
+    if (!color.isValid() || color.alpha() == 0) return QPixmap();
     const QString svg = loadText(QStringLiteral(":/icons/%1.svg").arg(lucideName));
-    if (svg.isEmpty()) return QIcon();
+    if (svg.isEmpty()) return QPixmap();
     const QByteArray tinted = tintSvg(svg, color).toUtf8();
 
-    // Render at the current device pixel ratio so icons stay crisp on HiDPI
-    // (identical output at 1x, sharper at 2x — no blank-icon regressions).
     QSvgRenderer renderer(tinted);
-    const qreal dpr = qApp->devicePixelRatio();
     QPixmap pm(qRound(size * dpr), qRound(size * dpr));
     pm.setDevicePixelRatio(dpr);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
-    renderer.render(&p);
+    // A painter on a pixmap with a device pixel ratio already scales logical
+    // units to device pixels. Without an explicit target, render() fills the
+    // device-pixel viewport and the dpr scaling is applied twice, which on
+    // Retina left only the top-left quarter of each glyph visible.
+    renderer.render(&p, QRectF(0, 0, size, size));
     p.end();
+    return pm;
+}
 
+QIcon Theme::coloredIcon(const QString &lucideName, const QColor &color, int size) {
+    // Render at the current device pixel ratio so icons stay crisp on HiDPI.
+    const QPixmap pm = iconPixmap(lucideName, color, size, qApp->devicePixelRatio());
+    if (pm.isNull()) return QIcon();
     QIcon icon;
     icon.addPixmap(pm);
     return icon;
@@ -270,6 +278,75 @@ int Theme::selfCheck() {
     // 5. coloredIcon() renders a non-null icon with the tint applied.
     const QIcon icon = Theme::coloredIcon("settings", QColor(Theme::accentPrimary()), 18);
     check("coloredIcon(settings) renders", !icon.isNull());
+
+    // 5b. Icons must render complete at every pixel ratio. Regression guard for
+    // the Retina bug where the SVG was drawn at device-pixel size into a
+    // dpr-scaled painter, leaving only the glyph's top-left corner visible.
+    // The glyph's opaque bounding box (in logical px) must match the 1x render
+    // and fill most of the icon box, centred, at 1x/2x/3x.
+    {
+        auto opaqueBounds = [](const QPixmap &pm) {
+            const QImage img = pm.toImage().convertToFormat(QImage::Format_ARGB32);
+            QRect box;
+            for (int y = 0; y < img.height(); ++y)
+                for (int x = 0; x < img.width(); ++x)
+                    if (qAlpha(img.pixel(x, y)) > 16)
+                        box = box.isNull() ? QRect(x, y, 1, 1) : box.united(QRect(x, y, 1, 1));
+            return box;
+        };
+        // Overlap (IoU) of the glyph mask after scaling a hi-dpi render down to
+        // the logical size. A cropped or enlarged glyph overlaps the 1x render
+        // poorly; the same glyph at a higher resolution overlaps it well.
+        auto maskIou = [](const QPixmap &hi, const QPixmap &lo, int logicalSize) {
+            const QImage a = hi.toImage().scaled(logicalSize, logicalSize,
+                                 Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                                 .convertToFormat(QImage::Format_ARGB32);
+            const QImage b = lo.toImage().convertToFormat(QImage::Format_ARGB32);
+            int inter = 0, uni = 0;
+            for (int y = 0; y < logicalSize; ++y)
+                for (int x = 0; x < logicalSize; ++x) {
+                    const bool pa = qAlpha(a.pixel(x, y)) > 100, pb = qAlpha(b.pixel(x, y)) > 100;
+                    inter += pa && pb;
+                    uni += pa || pb;
+                }
+            return uni ? double(inter) / uni : 0.0;
+        };
+        const int logical = 18;
+        const std::vector<const char *> kGlyphs = {
+            "box", "graduation-cap", "folder", "layers", "message-circle",
+            "settings", "database", "download", "play", "circle-stop"};
+        for (const char *glyph : kGlyphs) {
+            const QString name = QString::fromLatin1(glyph);
+            const QPixmap base = Theme::iconPixmap(name, QColor(Theme::accentPrimary()), logical, 1.0);
+            const QRectF ref = QRectF(opaqueBounds(base));
+            check(qPrintable(name + " renders at 1x"), !ref.isNull() && ref.width() >= logical * 0.45
+                                                      && ref.height() >= logical * 0.45
+                                                      && ref.center().x() >= logical * 0.35
+                                                      && ref.center().x() <= logical * 0.65
+                                                      && ref.center().y() >= logical * 0.35
+                                                      && ref.center().y() <= logical * 0.65);
+            for (qreal dpr : {2.0, 3.0}) {
+                const QPixmap pm = Theme::iconPixmap(name, QColor(Theme::accentPrimary()), logical, dpr);
+                const int device = qRound(logical * dpr);
+                const QRectF got = QRectF(opaqueBounds(pm));
+                const QRectF logicalGot(got.x() / dpr, got.y() / dpr, got.width() / dpr, got.height() / dpr);
+                const bool sized = pm.width() == device && pm.height() == device &&
+                                   qFuzzyCompare(pm.devicePixelRatio(), dpr);
+                const bool matches1x = !got.isNull() &&
+                    std::abs(logicalGot.left() - ref.left()) <= 1.5 &&
+                    std::abs(logicalGot.top() - ref.top()) <= 1.5 &&
+                    std::abs(logicalGot.right() - ref.right()) <= 1.5 &&
+                    std::abs(logicalGot.bottom() - ref.bottom()) <= 1.5;
+                const double iou = maskIou(pm, base, logical);
+                check(qPrintable(QStringLiteral("%1 at %2x matches the 1x render").arg(name).arg(dpr)), iou > 0.6);
+                check(qPrintable(QStringLiteral("%1 pixmap at %2x has device size").arg(name).arg(dpr)), sized);
+                check(qPrintable(QStringLiteral("%1 at %2x is not cropped/shifted").arg(name).arg(dpr)), matches1x);
+            }
+        }
+        check("iconPixmap rejects unknown glyph", Theme::iconPixmap("no-such-icon", QColor("#fff"), 18, 2.0).isNull());
+        check("iconPixmap rejects invalid colour", Theme::iconPixmap("box", QColor(), 18, 2.0).isNull());
+        check("coloredIcon(unknown) is null", Theme::coloredIcon("no-such-icon", QColor("#fff")).isNull());
+    }
 
     const bool originalDark = isDark();
     setDark(true);
