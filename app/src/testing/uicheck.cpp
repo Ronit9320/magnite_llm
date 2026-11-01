@@ -42,7 +42,10 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUrlQuery>
+#include <QSet>
 #include <cstdio>
+#include <functional>
 #include <memory>
 
 namespace {
@@ -50,6 +53,10 @@ void pump(int ms = 80) {
     QEventLoop loop;
     QTimer::singleShot(ms,&loop,&QEventLoop::quit);
     loop.exec();
+}
+bool waitUntil(const std::function<bool()> &done,int timeoutMs = 4000) {
+    for (int waited = 0; !done() && waited < timeoutMs; waited += 20) pump(20);
+    return done();
 }
 void key(QWidget *widget,int code,Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
     QKeyEvent press(QEvent::KeyPress,code,modifiers), release(QEvent::KeyRelease,code,modifiers);
@@ -61,6 +68,34 @@ QPushButton *button(QWidget *widget,const QString &text) {
 }
 struct Fixture : QTcpServer {
     bool failTraining = false, failQuery = false, holdChat = false;
+    // Hub search: hubTotal > 0 serves paged results ("studio/hub-model-NNN");
+    // otherwise the original single-result reply is used.
+    int hubTotal = 0, searchStatus = 200;
+    bool repeatLastOfPrevPage = false, emptySearch = false;
+    QSet<QString> downloadedRepos;
+    QStringList searchRequests;
+    // Download job served at /models/pull/job1. pullMode "fail" is the original
+    // behaviour (the start request is rejected); "run" accepts it; "conflict" is a 409.
+    QString pullMode = "fail", pullStatus = "running", pullError;
+    qint64 pullDone = 0, pullTotal = 0;
+    double pullProgress = 0;
+    int cancelCalls = 0, cancelStatus = 202, pollCount = 0;
+    // Local library: models can be deleted (DELETE /models/<id>); deleteStatus 204 succeeds.
+    QStringList removedModels, deleteRequests;
+    int deleteStatus = 204;
+    QByteArray localModelsJson() const {
+        QJsonArray all{
+            QJsonObject{{"id","studio/sample-model"},{"name","Sample local model"},{"source","huggingface"},{"ref","studio/sample-model"},{"architecture","llama"},{"size_mb",512},{"license","apache-2.0"}},
+            QJsonObject{{"id","studio/long-model-name-for-layout-review-in-a-small-window"},{"name","Layout review"},{"source","local"},{"ref","studio/long-model-name-for-layout-review-in-a-small-window"},{"architecture","gpt2"},{"size_mb",120}}};
+        QJsonArray shown;
+        for (const auto &m : all) if (!removedModels.contains(m.toObject().value("id").toString())) shown.append(m);
+        return QJsonDocument(shown).toJson(QJsonDocument::Compact);
+    }
+    QByteArray pullJson() const {
+        return QJsonDocument(QJsonObject{{"id","job1"},{"ref","studio/hub-model-002"},{"source","huggingface"},
+            {"status",pullStatus},{"progress",pullProgress},{"bytes_done",double(pullDone)},{"bytes_total",double(pullTotal)},
+            {"message","Downloading from HuggingFace Hub"},{"error",pullError.isEmpty()?QJsonValue():QJsonValue(pullError)}}).toJson(QJsonDocument::Compact);
+    }
     QString trainingState = "running";
     QPointer<QTcpSocket> chatSocket;
     int starts = 0, clears = 0;
@@ -78,12 +113,43 @@ struct Fixture : QTcpServer {
                         if (line.toLower().startsWith("content-length:")) length = line.mid(15).trimmed().toInt();
                     if (bytes->size() < headerEnd+4+length) return;
                     socket->setProperty("answered",true);
-                    const QString path = QString::fromUtf8(bytes->split(' ').value(1)).section('?',0,0);
+                    const QString method = QString::fromUtf8(bytes->split(' ').value(0));
+                    const QString target = QString::fromUtf8(bytes->split(' ').value(1));
+                    const QString path = target.section('?',0,0);
                     QByteArray body = "{}", type = "application/json";
                     int status = 200;
-                    if (path == "/models") body = R"([{"id":"studio/sample-model","name":"Sample local model","source":"huggingface","architecture":"llama","size_mb":512,"license":"apache-2.0"},{"id":"studio/long-model-name-for-layout-review-in-a-small-window","name":"Layout review","source":"local","architecture":"gpt2","size_mb":120}])";
-                    else if (path == "/models/search") body = R"([{"repo_id":"studio/example-model","downloads":1200,"likes":32,"license":"apache-2.0"}])";
-                    else if (path == "/models/pull") { status=400; body=R"({"detail":"Fixture download failure"})"; }
+                    if (method == "DELETE" && path.startsWith("/models/")) {
+                        deleteRequests << path;
+                        status = deleteStatus;
+                        if (deleteStatus == 204) removedModels << path.mid(8);
+                        else if (deleteStatus == 409) body = R"({"detail":"Unload this model before deleting it"})";
+                        else if (deleteStatus == 404) body = R"({"detail":"Model not found"})";
+                    }
+                    else if (path == "/models") body = localModelsJson();
+                    else if (path == "/models/search") {
+                        searchRequests << target;
+                        const QUrlQuery query(target.section('?',1));
+                        const int offset = query.queryItemValue("offset").toInt(), limit = query.queryItemValue("limit").toInt();
+                        if (searchStatus != 200) { status=searchStatus; body=R"({"detail":"Could not reach the Hugging Face Hub: fixture offline"})"; }
+                        else if (emptySearch) body = "[]";
+                        else if (hubTotal > 0) {
+                            QJsonArray page;
+                            const int first = repeatLastOfPrevPage && offset > 0 ? offset-1 : offset;
+                            for (int i = first; i < qMin(hubTotal, first+limit); ++i) {
+                                const QString repo = QString("studio/hub-model-%1").arg(i,3,10,QChar('0'));
+                                page.append(QJsonObject{{"repo_id",repo},{"downloads",1000-i},{"likes",i},{"license","mit"},{"downloaded",downloadedRepos.contains(repo)}});
+                            }
+                            body = QJsonDocument(page).toJson(QJsonDocument::Compact);
+                        }
+                        else body = R"([{"repo_id":"studio/example-model","downloads":1200,"likes":32,"license":"apache-2.0"}])";
+                    }
+                    else if (path == "/models/pull") {
+                        if (pullMode == "run") { status=202; body=pullJson(); }
+                        else if (pullMode == "conflict") { status=409; body=R"({"detail":"Another download is in progress (org/other). Wait for it or cancel it first."})"; }
+                        else { status=400; body=R"({"detail":"Fixture download failure"})"; }
+                    }
+                    else if (path == "/models/pull/job1") { ++pollCount; body=pullJson(); }
+                    else if (path == "/models/pull/job1/cancel") { ++cancelCalls; status=cancelStatus; body=cancelStatus==202?pullJson():QByteArray(R"({"detail":"fixture cancel failure"})"); }
                     else if (path == "/datasets") body = R"([{"id":"fixture-data","name":"Example conversations.jsonl"}])";
                     else if (path == "/training/jobs") body = "[]";
                     else if (path == "/training/start") { ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
@@ -197,6 +263,340 @@ int runUiCheck(const QString &captures) {
         key(cards.first(),Qt::Key_Space);
         QMetaObject::invokeMethod(&models,"onDownload"); pump();
         check(button(&models,"Download")->isEnabled(),"failed download restores retry action");
+    }
+    // ---- Hub search paging and "already downloaded" markers ----------------
+    {
+        auto loadMore = [&models]() -> QPushButton * {
+            for (auto *b : models.findChildren<QPushButton *>()) if (b->accessibleName()=="Load more results") return b;
+            return nullptr;
+        };
+        auto setQuery = [&models](const QString &text) {
+            for (auto *edit : models.findChildren<QLineEdit *>())
+                if (edit->accessibleName()=="Search models") edit->setText(text);
+        };
+        auto hubCards = [&models]() { return models.findChildren<ModelCard *>(); };
+        auto cardFor = [&hubCards](const QString &repo) -> ModelCard * {
+            for (auto *c : hubCards()) if (c->id()==repo) return c;
+            return nullptr;
+        };
+        auto hasLabel = [](ModelCard *card,const QString &text) {
+            if (!card) return false;
+            for (auto *l : card->findChildren<QLabel *>()) if (l->text()==text) return true;
+            return false;
+        };
+        auto actionText = [](ModelCard *card) {
+            for (auto *b : card->findChildren<QPushButton *>()) if (b->objectName()=="primaryBtn") return b->text();
+            return QString();
+        };
+        auto lastParam = [&fixture](const QString &name) {
+            return QUrlQuery(fixture.searchRequests.last().section('?',1)).queryItemValue(name);
+        };
+        auto statusText = [&models]() { return models.findChild<QLabel *>("statusLabel")->text(); };
+        auto searchDone = [&models]() { for (auto *b : models.findChildren<QPushButton *>()) if (b->text()=="Search") return b->isEnabled(); return false; };
+
+        fixture.hubTotal = 120;
+        fixture.downloadedRepos = {"studio/hub-model-001","studio/hub-model-060"};
+        fixture.searchRequests.clear();
+        setQuery("hub"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        check(hubCards().size()==50,"first search page shows 50 results, not 25");
+        check(lastParam("limit")=="50" && lastParam("offset")=="0" && lastParam("q")=="hub","first page requests limit=50 offset=0");
+        check(loadMore() && loadMore()->isVisible() && loadMore()->isEnabled(),"full page offers Load more results");
+        check(statusText().contains("50") && statusText().contains("1 already downloaded"),"status reports result and downloaded counts");
+
+        { const QSize original=models.size(); models.resize(original.width(),1300); pump(120);
+          capture(&models,"models-hub-results"); models.resize(original); pump(); }
+        ModelCard *done = cardFor("studio/hub-model-001"), *fresh = cardFor("studio/hub-model-002");
+        check(done && done->isDownloaded() && hasLabel(done,"✓ Downloaded") && actionText(done)=="Load model","downloaded result is marked and offers Load model");
+        check(fresh && !fresh->isDownloaded() && hasLabel(fresh,"Available on the Hub") && actionText(fresh)=="Download","new result still offers Download");
+        check(done && done->localId()=="huggingface:studio--hub-model-001","downloaded result maps to its library id");
+
+        if (done && fresh) {
+            key(done,Qt::Key_Space);
+            check(!button(&models,"Download")->isEnabled(),"toolbar Download is disabled for a downloaded model");
+            key(fresh,Qt::Key_Space);
+            check(button(&models,"Download")->isEnabled(),"toolbar Download is enabled for a model not yet downloaded");
+            QString loaded; auto conn=QObject::connect(&models,&ModelsPanel::loadRequested,[&loaded](const QString &id){ loaded=id; });
+            QMetaObject::invokeMethod(&models,"onDownload"); pump(); // run a real download attempt (fixture rejects it)
+            QPushButton *act=nullptr; for (auto *b : done->findChildren<QPushButton *>()) if (b->objectName()=="primaryBtn") act=b;
+            if (act) act->click(); pump();
+            check(loaded=="huggingface:studio--hub-model-001","Load model on a downloaded result loads the library model");
+            QObject::disconnect(conn);
+            const int before=fixture.searchRequests.size();
+            check(before>=1,"fixture saw the search request");
+        }
+
+        key(cardFor("studio/hub-model-000"),Qt::Key_Space);
+        loadMore()->click(); check(loadMore() && !loadMore()->isEnabled() && loadMore()->text()=="Loading…","Load more is disabled and shows progress while a page is loading");
+        waitUntil([&]() { return hubCards().size()==100; });
+        check(hubCards().size()==100,"Load more appends the next 50 results");
+        check(lastParam("offset")=="50","second page requests offset=50");
+        check(cardFor("studio/hub-model-000") && cardFor("studio/hub-model-000")->isCardSelected(),"Load more keeps the current selection");
+        ModelCard *later = cardFor("studio/hub-model-060");
+        check(later && later->isDownloaded() && hasLabel(later,"✓ Downloaded"),"downloaded marker also applies on later pages");
+        check(loadMore() && loadMore()->isVisible() && loadMore()->isEnabled(),"Load more is usable again after a page arrives");
+
+        loadMore()->click(); waitUntil([&]() { return hubCards().size()==120; });
+        QSet<QString> unique; for (auto *c : hubCards()) unique.insert(c->id());
+        check(hubCards().size()==120 && unique.size()==120,"all 120 results are shown exactly once");
+        check(!loadMore() || !loadMore()->isVisible(),"short final page hides Load more");
+
+        // A failed page must keep what is on screen and allow a retry.
+        setQuery("hub"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        check(hubCards().size()==50 && lastParam("offset")=="0","a new search starts again from the first page");
+        fixture.searchStatus=502; loadMore()->click(); waitUntil([&]() { return loadMore()->isEnabled(); });
+        check(hubCards().size()==50,"failed page keeps the results already shown");
+        check(statusText().contains("Hugging Face Hub") && models.findChild<QLabel *>("statusLabel")->property("state")=="error","failed page explains why");
+        check(loadMore()->isEnabled() && loadMore()->isVisible(),"failed page can be retried");
+        fixture.searchStatus=200; loadMore()->click(); waitUntil([&]() { return hubCards().size()==100; });
+        check(hubCards().size()==100,"retry after failure loads the page");
+
+        // The Hub can reorder between pages: never show the same model twice,
+        // and still advance by what the server returned.
+        fixture.repeatLastOfPrevPage=true; fixture.hubTotal=400;
+        setQuery("hub"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        loadMore()->click(); waitUntil([&]() { return hubCards().size()>=99; });
+        unique.clear(); for (auto *c : hubCards()) unique.insert(c->id());
+        check(hubCards().size()==99 && unique.size()==99,"overlapping pages do not duplicate cards");
+        loadMore()->click(); waitUntil([&]() { return fixture.searchRequests.size()>0 && lastParam("offset")=="100"; });
+        check(lastParam("offset")=="100","paging advances by the number the server returned");
+        fixture.repeatLastOfPrevPage=false;
+
+        // Paging stops at the backend's offset ceiling instead of erroring.
+        fixture.hubTotal=5000; fixture.searchRequests.clear();
+        setQuery("hub"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        for (int i=0;i<60 && loadMore() && loadMore()->isVisible();++i) { const int n=hubCards().size(); loadMore()->click(); waitUntil([&]() { return hubCards().size()>n; }); }
+        int maxOffset=0; for (const auto &r : fixture.searchRequests) maxOffset=qMax(maxOffset,QUrlQuery(r.section('?',1)).queryItemValue("offset").toInt());
+        check(maxOffset<=1000,"offset never exceeds the backend limit of 1000");
+        check(!loadMore() || !loadMore()->isVisible(),"Load more disappears at the offset ceiling");
+
+        // Empty and local-view states.
+        fixture.emptySearch=true; setQuery("nothing"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        check(hubCards().isEmpty() && (!loadMore() || !loadMore()->isVisible()),"empty search shows no cards and no Load more");
+        fixture.emptySearch=false; fixture.hubTotal=120; setQuery("hub"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        check(loadMore() && loadMore()->isVisible(),"Load more is back after a fresh search");
+        for (auto *combo : models.findChildren<QComboBox *>()) combo->setCurrentIndex(0);
+        pump(200);
+        check(!loadMore() || !loadMore()->isVisible(),"switching to Local Models hides Load more");
+        fixture.hubTotal=0; fixture.downloadedRepos.clear();
+    }
+    // ---- Download progress, size and cancel --------------------------------
+    {
+        auto setQuery = [&models](const QString &text) {
+            for (auto *edit : models.findChildren<QLineEdit *>())
+                if (edit->accessibleName()=="Search models") edit->setText(text);
+        };
+        auto searchDone = [&models]() { for (auto *b : models.findChildren<QPushButton *>()) if (b->text()=="Search") return b->isEnabled(); return false; };
+        auto cardFor = [&models](const QString &repo) -> ModelCard * {
+            for (auto *c : models.findChildren<ModelCard *>()) if (c->id()==repo) return c;
+            return nullptr;
+        };
+        auto toolbarCancel = [&models]() { return models.findChild<QPushButton *>("cancelDownload"); };
+        auto cardCancel = [&cardFor](const QString &repo) -> QPushButton * {
+            if (auto *card = cardFor(repo))
+                for (auto *b : card->findChildren<QPushButton *>()) if (b->accessibleName().startsWith("Cancel download ")) return b;
+            return nullptr;
+        };
+        auto progressText = [&cardFor](const QString &repo) {
+            if (auto *card = cardFor(repo))
+                for (auto *l : card->findChildren<QLabel *>()) if (l->objectName()=="monoLabel") return l->text();
+            return QString();
+        };
+        auto progressShown = [&cardFor](const QString &repo) {
+            auto *card = cardFor(repo);
+            auto *bar = card ? card->findChild<QProgressBar *>() : nullptr;
+            return bar && bar->isVisible();
+        };
+        auto statusText = [&models]() { return models.findChild<QLabel *>("statusLabel")->text(); };
+        auto statusState = [&models]() { return models.findChild<QLabel *>("statusLabel")->property("state").toString(); };
+        auto actionEnabled = [&cardFor](const QString &repo) {
+            if (auto *card = cardFor(repo))
+                for (auto *b : card->findChildren<QPushButton *>()) if (b->objectName()=="primaryBtn") return b->isEnabled();
+            return false;
+        };
+        const QString repo = "studio/hub-model-002";
+        auto startDownload = [&]() {
+            fixture.pullMode="run"; fixture.pullStatus="running";
+            if (!cardFor(repo)) { fixture.hubTotal=60; setQuery("dl"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone); }
+            if (auto *card = cardFor(repo)) key(card,Qt::Key_Space);
+            QMetaObject::invokeMethod(&models,"onDownload");
+        };
+        auto finish = [&](const QString &state) { fixture.pullStatus=state; QMetaObject::invokeMethod(&models,"onPullPoll"); pump(120); };
+
+        // formatBytes: SI units like the Hub, with the locale pinned for a stable check.
+        const QLocale previousLocale = QLocale();
+        QLocale::setDefault(QLocale(QLocale::English,QLocale::UnitedStates));
+        check(ModelCard::formatBytes(0)=="0 bytes" && ModelCard::formatBytes(999)=="999 bytes" &&
+              ModelCard::formatBytes(1500)=="1.5 kB" && ModelCard::formatBytes(412000000)=="412.0 MB" &&
+              ModelCard::formatBytes(1800000000LL)=="1.8 GB" && ModelCard::formatBytes(-5)=="0 bytes","byte sizes are formatted in SI units");
+
+        fixture.hubTotal=60; fixture.downloadedRepos.clear(); fixture.pullDone=412000000; fixture.pullTotal=1800000000; fixture.pullProgress=22.9;
+        setQuery("dl"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        check(toolbarCancel() && toolbarCancel()->isHidden() && !cardFor(repo)->findChild<QProgressBar *>()->isVisible(),"no Cancel or progress before a download starts");
+
+        // 1. Running download: bytes, percent, status, Cancel available, nothing else startable.
+        startDownload();
+        waitUntil([&]() { return progressText(repo).contains("412.0 MB"); });
+        check(progressShown(repo) && progressText(repo)=="412.0 MB / 1.8 GB · 22%","card shows downloaded size, total size and percent");
+        check(statusText().contains("412.0 MB of 1.8 GB") && statusText().contains("22%"),"status line shows downloaded and total size");
+        check(toolbarCancel()->isVisible() && toolbarCancel()->isEnabled(),"Cancel download is offered while downloading");
+        check(cardCancel(repo) && cardCancel(repo)->isVisible() && cardCancel(repo)->isEnabled(),"the downloading card has its own Cancel button");
+        check(!button(&models,"Download")->isEnabled(),"Download is disabled while a download runs");
+        check(!actionEnabled(repo),"the downloading card cannot start the same download again");
+        { const QSize original=models.size(); models.resize(original.width(),1300); pump(120);
+          capture(&models,"models-downloading"); models.resize(original); pump(); }
+
+        // 2. Cancel: sent once, controls lock, polling continues until the server confirms.
+        toolbarCancel()->click(); waitUntil([&]() { return fixture.cancelCalls==1; });
+        check(fixture.cancelCalls==1,"Cancel download asks the backend to cancel");
+        check(!toolbarCancel()->isEnabled() && cardCancel(repo)->text()=="Cancelling…" && !cardCancel(repo)->isEnabled(),"controls show Cancelling… and cannot be pressed twice");
+        check(statusText().contains("Cancelling"),"status explains the download is being cancelled");
+        QMetaObject::invokeMethod(&models,"onCancelDownload"); pump(120);
+        check(fixture.cancelCalls==1,"a second Cancel is ignored while one is in flight");
+        finish("cancelled");
+        check(!progressShown(repo) && toolbarCancel()->isHidden(),"cancelled download clears progress and Cancel");
+        check(button(&models,"Download")->isEnabled() && actionEnabled(repo),"Download is available again after a cancel, on the toolbar and the card");
+        check(statusText().contains("cancelled") && statusState()!="error","status says the download was cancelled");
+        check(!models.findChildren<ModelCard *>().isEmpty() && cardCancel(repo) && cardCancel(repo)->isEnabled() && cardCancel(repo)->text()=="Cancel","results stay on screen and the card's Cancel button is reset");
+        { const int polls=fixture.pollCount; pump(1000); check(fixture.pollCount==polls,"polling stops once the download is cancelled"); }
+
+        // 3. The card's own Cancel button does the same.
+        startDownload(); waitUntil([&]() { return progressText(repo).contains("412.0 MB"); });
+        cardCancel(repo)->click(); waitUntil([&]() { return fixture.cancelCalls==2; });
+        check(fixture.cancelCalls==2,"card Cancel asks the backend to cancel");
+        finish("cancelled");
+        check(!progressShown(repo) && toolbarCancel()->isHidden(),"card Cancel ends the download cleanly");
+
+        // 4. Cancel pressed before the start request has answered is not lost.
+        startDownload();
+        QMetaObject::invokeMethod(&models,"onCancelDownload");
+        waitUntil([&]() { return fixture.cancelCalls==3; });
+        check(fixture.cancelCalls==3,"Cancel during start-up is delivered once the job exists");
+        finish("cancelled");
+        check(toolbarCancel()->isHidden() && button(&models,"Download")->isEnabled(),"start-up cancel leaves the panel ready");
+
+        // 5. A cancel the server rejects leaves the download running and Cancel usable.
+        fixture.cancelStatus=500; startDownload(); waitUntil([&]() { return progressText(repo).contains("412.0 MB"); });
+        toolbarCancel()->click(); waitUntil([&]() { return fixture.cancelCalls==4; }); pump(150);
+        check(statusState()=="error" && statusText().contains("Could not cancel"),"failed cancel is reported");
+        check(toolbarCancel()->isEnabled() && cardCancel(repo)->text()=="Cancel","failed cancel can be retried");
+        check(progressShown(repo),"failed cancel does not hide a download that is still running");
+        fixture.cancelStatus=202; toolbarCancel()->click(); waitUntil([&]() { return fixture.cancelCalls==5; });
+        finish("cancelled");
+        check(toolbarCancel()->isHidden(),"retried cancel succeeds");
+
+        // 6. Unknown total: percent only.
+        fixture.pullDone=0; fixture.pullTotal=0; fixture.pullProgress=35;
+        startDownload(); waitUntil([&]() { return progressText(repo)=="35%"; });
+        check(progressText(repo)=="35%" && !statusText().contains(" of "),"unknown size shows percent only");
+
+        // 7. Leaving the results mid-download keeps Cancel reachable.
+        for (auto *combo : models.findChildren<QComboBox *>()) combo->setCurrentIndex(0);
+        pump(200);
+        check(toolbarCancel()->isVisible() && toolbarCancel()->isEnabled(),"Cancel stays available after switching to Local Models");
+        { bool anyDeleteEnabled=false; for (auto *c : models.findChildren<ModelCard *>()) for (auto *b : c->findChildren<QPushButton *>()) if (b->accessibleName().startsWith("Delete model ") && b->isEnabled()) anyDeleteEnabled=true;
+          check(!anyDeleteEnabled,"deleting is disabled on every card while a download runs"); }
+        toolbarCancel()->click(); waitUntil([&]() { return fixture.cancelCalls==6; });
+        finish("cancelled");
+        check(toolbarCancel()->isHidden(),"cancel from the Local Models view finishes cleanly");
+
+        // 8. Failure and conflict are explained and recoverable.
+        fixture.pullDone=412000000; fixture.pullTotal=1800000000; fixture.pullProgress=22.9; fixture.pullError="Disk full";
+        startDownload(); waitUntil([&]() { return progressText(repo).contains("412.0 MB"); });
+        finish("error");
+        check(statusState()=="error" && statusText().contains("Disk full") && toolbarCancel()->isHidden() && !progressShown(repo),"failed download is explained and controls recover");
+        fixture.pullError.clear(); fixture.pullMode="conflict"; fixture.pullStatus="running";
+        if (auto *card = cardFor(repo)) key(card,Qt::Key_Space);
+        QMetaObject::invokeMethod(&models,"onDownload"); pump(250);
+        check(statusState()=="error" && statusText().contains("Another download is in progress"),"a refused start shows the server's reason");
+        check(toolbarCancel()->isHidden() && button(&models,"Download")->isEnabled(),"refused start leaves the panel ready");
+
+        // 9. Completion still returns to the library.
+        for (auto *combo : models.findChildren<QComboBox *>()) combo->setCurrentIndex(1);
+        fixture.pullMode="run"; setQuery("dl"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        startDownload(); waitUntil([&]() { return progressShown(repo); });
+        finish("done");
+        check(toolbarCancel()->isHidden() && models.findChild<QComboBox *>()->currentIndex()==0,"completed download shows the local library and hides Cancel");
+        QLocale::setDefault(previousLocale);
+        fixture.hubTotal=0; fixture.pullMode="fail";
+    }
+    // ---- Deleting models ---------------------------------------------------
+    {
+        auto toolbarDelete = [&models]() { return button(&models,"Delete"); };
+        auto cardFor = [&models](const QString &id) -> ModelCard * {
+            for (auto *c : models.findChildren<ModelCard *>()) if (c->id()==id) return c;
+            return nullptr;
+        };
+        auto cardDelete = [&cardFor](const QString &id) -> QPushButton * {
+            if (auto *card = cardFor(id))
+                for (auto *b : card->findChildren<QPushButton *>()) if (b->accessibleName().startsWith("Delete model ")) return b;
+            return nullptr;
+        };
+        auto statusText = [&models]() { return models.findChild<QLabel *>("statusLabel")->text(); };
+        auto statusState = [&models]() { return models.findChild<QLabel *>("statusLabel")->property("state").toString(); };
+        auto cardCount = [&models]() { return models.findChildren<ModelCard *>().size(); };
+        // Answer the confirmation dialog when it appears, recording what it said.
+        auto armDialog = [](bool accept,QString *text) {
+            auto *timer = new QTimer; timer->setInterval(20);
+            QObject::connect(timer,&QTimer::timeout,[=]() {
+                for (auto *w : QApplication::topLevelWidgets())
+                    if (auto *d = qobject_cast<QMessageBox *>(w); d && d->isVisible()) {
+                        if (text) *text = d->text() + "\n" + d->informativeText();
+                        if (accept) { for (auto *b : d->buttons()) if (b->text()=="Delete") { b->click(); break; } }
+                        else d->reject();
+                        timer->stop(); timer->deleteLater(); return;
+                    }
+            });
+            timer->start();
+        };
+        int changed=0; auto conn=QObject::connect(&models,&ModelsPanel::modelsChanged,[&changed]() { ++changed; });
+        const QString sample="studio/sample-model", layout="studio/long-model-name-for-layout-review-in-a-small-window";
+
+        fixture.removedModels.clear(); fixture.deleteRequests.clear(); fixture.deleteStatus=204;
+        for (auto *combo : models.findChildren<QComboBox *>()) combo->setCurrentIndex(0);
+        waitUntil([&]() { return cardCount()==2; });
+        check(cardCount()==2 && cardDelete(sample) && cardDelete(layout) && cardDelete(sample)->isEnabled(),"every local model card offers Delete");
+        { const QSize original=models.size(); models.resize(original.width(),900); pump(120);
+          capture(&models,"models-local-delete"); models.resize(original); pump(); }
+        check(!toolbarDelete()->isEnabled(),"toolbar Delete needs a selection");
+
+        // Declining changes nothing, and the dialog explains the consequences.
+        key(cardFor(sample),Qt::Key_Space);
+        QString text; armDialog(false,&text);
+        toolbarDelete()->click(); waitUntil([&]() { return !text.isEmpty(); }); pump(100);
+        check(text.contains(sample) && text.contains("512 MB"),"confirmation names the model and the space it frees");
+        check(text.contains("Hugging Face cache") && text.contains("other tools"),"confirmation warns the Hugging Face cache is shared");
+        check(text.contains("1 adapter"),"confirmation warns that adapters depend on the model");
+        check(fixture.deleteRequests.isEmpty() && cardCount()==2,"declining the confirmation deletes nothing");
+
+        // A model nothing depends on gets a plain confirmation.
+        QString plain; armDialog(false,&plain);
+        cardDelete(layout)->click(); waitUntil([&]() { return !plain.isEmpty(); }); pump(100);
+        check(plain.contains(layout) && !plain.contains("Hugging Face cache") && !plain.contains("adapter"),"confirmation only mentions what applies");
+        check(fixture.deleteRequests.isEmpty(),"declining from a card deletes nothing either");
+
+        // A refusal from the backend is explained and leaves everything in place.
+        fixture.deleteStatus=409; QString t409; armDialog(true,&t409);
+        cardDelete(sample)->click(); waitUntil([&]() { return fixture.deleteRequests.size()==1; }); pump(150);
+        check(statusState()=="error" && statusText().contains("Unload this model before deleting it"),"a refused delete shows the server's reason");
+        check(cardCount()==2 && cardDelete(sample)->isEnabled() && toolbarDelete()->isEnabled(),"a refused delete leaves the library and buttons intact");
+
+        // Success removes it, reports what was freed, and tells other panels.
+        fixture.deleteStatus=204; changed=0; QString ok; armDialog(true,&ok);
+        cardDelete(sample)->click(); waitUntil([&]() { return fixture.deleteRequests.size()==2; });
+        waitUntil([&]() { return cardCount()==1; });
+        check(fixture.deleteRequests.last()=="/models/"+sample,"Delete asks the backend to delete that model");
+        check(cardCount()==1 && !cardFor(sample) && cardFor(layout),"the deleted model leaves the library");
+        check(statusText().contains("Deleted") && statusText().contains("512 MB"),"status reports what was deleted and freed");
+        check(changed>0,"other panels are told the model list changed");
+        check(!toolbarDelete()->isEnabled(),"nothing stays selected after a delete");
+
+        // Already gone: refresh instead of failing.
+        fixture.deleteStatus=404; QString gone; armDialog(true,&gone);
+        cardDelete(layout)->click(); waitUntil([&]() { return fixture.deleteRequests.size()==3; }); pump(150);
+        check(statusText().contains("already") && statusState()!="error","a model that was already removed is not an error");
+
+        QObject::disconnect(conn);
+        fixture.removedModels.clear(); fixture.deleteStatus=204;
     }
     knowledge.show(); pump();
     auto docs=knowledge.findChildren<RagDocCard *>();

@@ -7,23 +7,18 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QLocale>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
 
-namespace {
-
-QString formatNumber(double value, const QString &suffix = QString()) {
-    if (value <= 0) return QStringLiteral("-");
-    return QStringLiteral("%1%2").arg(value, 0, 'f', value < 10 ? 1 : 0).arg(suffix);
-}
-
-}  // namespace
-
 ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     : QFrame(parent)
     , m_id(isHub ? data.value("repo_id").toString() : data.value("id").toString())
+    , m_data(data)
+    , m_downloaded(isHub && data.value("downloaded").toBool())
+    , m_isHub(isHub)
     , m_progressRow(nullptr)
     , m_progressLabel(nullptr)
     , m_progressBar(nullptr)
@@ -86,7 +81,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
         auto *dot = new QLabel(QStringLiteral("·"), this);
         dot->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(dot);
-        auto *size = new QLabel(formatNumber(data.value("size_mb").toDouble(), " MB"), this);
+        auto *size = new QLabel(formatSizeMb(data.value("size_mb").toDouble()), this);
         size->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(size);
     }
@@ -115,24 +110,52 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     licenseLabel->setWordWrap(true);
     appendProgressRow();
     auto *actions = new QHBoxLayout();
-    auto *state = new QLabel(isHub ? "Available on the Hub" : "✓ Ready locally",this);
-    state->setObjectName("cardMeta");
-    actions->addWidget(state,1);
-    auto *action = new QPushButton(isHub ? "Download" : "Load model",this);
+    // Hub hits already in the library offer to load them instead of downloading again.
+    const QString stateText = !isHub ? QStringLiteral("✓ Ready locally")
+        : m_downloaded ? QStringLiteral("✓ Downloaded") : QStringLiteral("Available on the Hub");
+    auto *state = new QLabel(stateText, this);
+    state->setObjectName(m_downloaded ? "cardDownloaded" : "cardMeta");
+    const bool loads = !isHub || m_downloaded;
+    auto *action = new QPushButton(loads ? "Load model" : "Download",this);
     action->setObjectName("primaryBtn");
+    m_actionButton = action;
+    if (isHub) {
+        actions->addWidget(state,1);
+    } else {
+        // Local cards have a second action; the status gets its own line so a
+        // narrow card never has to squeeze three things into one row.
+        layout->addWidget(state);
+        actions->addStretch(1);
+        m_deleteButton = new QPushButton("Delete",this);
+        m_deleteButton->setObjectName("cardDanger");
+        m_deleteButton->setCursor(Qt::PointingHandCursor);
+        m_deleteButton->setAccessibleName("Delete model "+m_id);
+        actions->addWidget(m_deleteButton);
+    }
     actions->addWidget(action);
     layout->addLayout(actions);
-    action->setAccessibleName((isHub ? "Download " : "Load ")+m_id);
+    action->setAccessibleName((loads ? "Load " : "Download ")+m_id);
     for (auto *label : findChildren<QLabel *>()) {
         label->setTextFormat(Qt::PlainText);
         label->setAttribute(Qt::WA_TransparentForMouseEvents);
     }
     connect(action,&QPushButton::clicked,this,[this]() { emit actionRequested(this); });
+    if (m_deleteButton)
+        connect(m_deleteButton,&QPushButton::clicked,this,[this]() { emit deleteRequested(this); });
+}
+
+QString ModelCard::localId() const {
+    if (!m_isHub) return m_id;
+    QString ref = m_id;
+    return QStringLiteral("huggingface:") + ref.replace('/', QStringLiteral("--"));
 }
 
 void ModelCard::appendProgressRow() {
-    auto *progressRow = new QHBoxLayout();
-    progressRow->setSpacing(8);
+    // Bar on its own line, then "size · percent" on the left and Cancel on the right,
+    // so the text never squeezes the bar on a narrow card.
+    auto *column = new QVBoxLayout();
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(6);
 
     m_progressBar = new QProgressBar(this);
     m_progressBar->setObjectName(QStringLiteral("cardProgress"));
@@ -140,27 +163,63 @@ void ModelCard::appendProgressRow() {
     m_progressBar->setValue(0);
     m_progressBar->setTextVisible(false);
     m_progressBar->setFixedHeight(4);
-    progressRow->addWidget(m_progressBar, 1);
+    column->addWidget(m_progressBar);
 
+    auto *detailRow = new QHBoxLayout();
+    detailRow->setSpacing(8);
     m_progressLabel = new QLabel("0%", this);
     m_progressLabel->setObjectName(QStringLiteral("monoLabel"));
-    progressRow->addWidget(m_progressLabel);
+    detailRow->addWidget(m_progressLabel, 1);
+
+    m_cancelButton = new QPushButton("Cancel", this);
+    m_cancelButton->setObjectName(QStringLiteral("secondaryBtn"));
+    m_cancelButton->setAccessibleName("Cancel download " + m_id);
+    m_cancelButton->setCursor(Qt::PointingHandCursor);
+    detailRow->addWidget(m_cancelButton);
+    column->addLayout(detailRow);
+    connect(m_cancelButton, &QPushButton::clicked, this, [this]() { emit cancelRequested(this); });
 
     m_progressRow = new QWidget(this);
-    m_progressRow->setLayout(progressRow);
+    m_progressRow->setLayout(column);
     (static_cast<QVBoxLayout *>(layout()))->addWidget(m_progressRow);
     m_progressRow->setVisible(false);
 }
 
-void ModelCard::setProgress(double percent) {
+QString ModelCard::formatSizeMb(double megabytes) {
+    if (megabytes <= 0) return QStringLiteral("-");
+    if (megabytes >= 1024) return QStringLiteral("%1 GB").arg(megabytes / 1024.0, 0, 'f', 1);
+    return QStringLiteral("%1 MB").arg(megabytes, 0, 'f', megabytes < 10 ? 1 : 0);
+}
+
+void ModelCard::setDeleteEnabled(bool enabled) {
+    if (m_deleteButton) m_deleteButton->setEnabled(enabled);
+}
+
+QString ModelCard::formatBytes(qint64 bytes) {
+    return QLocale().formattedDataSize(bytes < 0 ? 0 : bytes, 1, QLocale::DataSizeSIFormat);
+}
+
+void ModelCard::setProgress(double percent, qint64 bytesDone, qint64 bytesTotal) {
     if (!m_progressRow) return;
+    // While this card is downloading its main action would only repeat the download.
+    if (m_actionButton) m_actionButton->setEnabled(percent < 0);
     if (percent < 0) {
         m_progressRow->setVisible(false);
+        setCancelling(false);
         return;
     }
     m_progressRow->setVisible(true);
     m_progressBar->setValue(static_cast<int>(percent));
-    m_progressLabel->setText(QStringLiteral("%1%").arg(static_cast<int>(percent)));
+    const QString pct = QStringLiteral("%1%").arg(static_cast<int>(percent));
+    m_progressLabel->setText(bytesTotal > 0
+        ? QStringLiteral("%1 / %2 · %3").arg(formatBytes(bytesDone), formatBytes(bytesTotal), pct)
+        : pct);
+}
+
+void ModelCard::setCancelling(bool cancelling) {
+    if (!m_cancelButton) return;
+    m_cancelButton->setEnabled(!cancelling);
+    m_cancelButton->setText(cancelling ? QStringLiteral("Cancelling…") : QStringLiteral("Cancel"));
 }
 
 void ModelCard::setSelected(bool selected) {
