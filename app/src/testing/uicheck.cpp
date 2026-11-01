@@ -82,6 +82,10 @@ struct Fixture : QTcpServer {
     int cancelCalls = 0, cancelStatus = 202, pollCount = 0;
     // Local library: models can be deleted (DELETE /models/<id>); deleteStatus 204 succeeds.
     QStringList removedModels, deleteRequests;
+    // Download sizes for search results (/models/sizes): repo -> bytes; absent means "unknown".
+    QHash<QString,double> hubSizes;
+    QStringList sizesRequests;
+    int sizesStatus = 200;
     int deleteStatus = 204;
     QByteArray localModelsJson() const {
         QJsonArray all{
@@ -118,7 +122,17 @@ struct Fixture : QTcpServer {
                     const QString path = target.section('?',0,0);
                     QByteArray body = "{}", type = "application/json";
                     int status = 200;
-                    if (method == "DELETE" && path.startsWith("/models/")) {
+                    if (path == "/models/sizes") {
+                        sizesRequests << target;
+                        status = sizesStatus;
+                        if (sizesStatus == 200) {
+                            QJsonObject sizes;
+                            for (const auto &repo : QUrlQuery(target.section('?',1)).allQueryItemValues("repo",QUrl::FullyDecoded))
+                                sizes.insert(repo, hubSizes.contains(repo) ? QJsonValue(hubSizes.value(repo)) : QJsonValue());
+                            body = QJsonDocument(sizes).toJson(QJsonDocument::Compact);
+                        } else body = R"({"detail":"fixture sizes failure"})";
+                    }
+                    else if (method == "DELETE" && path.startsWith("/models/")) {
                         deleteRequests << path;
                         status = deleteStatus;
                         if (deleteStatus == 204) removedModels << path.mid(8);
@@ -378,6 +392,84 @@ int runUiCheck(const QString &captures) {
         pump(200);
         check(!loadMore() || !loadMore()->isVisible(),"switching to Local Models hides Load more");
         fixture.hubTotal=0; fixture.downloadedRepos.clear();
+    }
+    // ---- Download sizes in search results ------------------------------------
+    {
+        auto setQuery = [&models](const QString &text) {
+            for (auto *edit : models.findChildren<QLineEdit *>())
+                if (edit->accessibleName()=="Search models") edit->setText(text);
+        };
+        auto searchDone = [&models]() { for (auto *b : models.findChildren<QPushButton *>()) if (b->text()=="Search") return b->isEnabled(); return false; };
+        auto loadMore = [&models]() -> QPushButton * {
+            for (auto *b : models.findChildren<QPushButton *>()) if (b->accessibleName()=="Load more results") return b;
+            return nullptr;
+        };
+        auto stats = [&models](const QString &repo) {
+            for (auto *c : models.findChildren<ModelCard *>())
+                if (c->id()==repo)
+                    for (auto *l : c->findChildren<QLabel *>()) if (l->text().contains("downloads")) return l->text();
+            return QString();
+        };
+        auto cardCount = [&models]() { return models.findChildren<ModelCard *>().size(); };
+        QLocale::setDefault(QLocale(QLocale::English,QLocale::UnitedStates));
+
+        // The card on its own: nothing until known, then next to downloads and likes.
+        {
+            const QJsonObject hit{{"repo_id","a/b"},{"downloads",12},{"likes",3},{"license","mit"}};
+            ModelCard card(hit,true);
+            auto text=[&card]() { for (auto *l : card.findChildren<QLabel *>()) if (l->text().contains("downloads")) return l->text(); return QString(); };
+            check(text()=="12 downloads · 3 likes","a result shows no size until it is known");
+            card.setSize(1800000000);
+            check(text()=="12 downloads · 3 likes · 1.8 GB","size appears next to downloads and likes");
+            card.setSize(412000000);
+            check(text()=="12 downloads · 3 likes · 412.0 MB","a later size replaces the earlier one");
+            card.setSize(0);
+            check(text()=="12 downloads · 3 likes · size unknown","a size the Hub could not give reads size unknown");
+            ModelCard local(QJsonObject{{"id","studio/x"},{"source","local"},{"size_mb",5}},false);
+            local.setSize(123456789);
+            bool leaked=false; for (auto *l : local.findChildren<QLabel *>()) if (l->text().contains("123")) leaked=true;
+            check(!leaked,"local cards ignore Hub sizes");
+        }
+
+        fixture.hubTotal=120; fixture.downloadedRepos={"studio/hub-model-001"}; fixture.sizesRequests.clear(); fixture.sizesStatus=200;
+        fixture.hubSizes={{"studio/hub-model-000",412000000.0},{"studio/hub-model-001",1800000000.0},{"studio/hub-model-003",5000.0}};
+        setQuery("size"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        waitUntil([&]() { return stats("studio/hub-model-000").contains("412.0 MB"); });
+        check(fixture.sizesRequests.size()==1 && fixture.sizesRequests.first().count("repo=")==50,"one request asks for the sizes of all 50 results");
+        check(stats("studio/hub-model-000")=="1000 downloads · 0 likes · 412.0 MB","results show their download size");
+        check(stats("studio/hub-model-001").endsWith("· 1.8 GB"),"already-downloaded results show a size too");
+        check(stats("studio/hub-model-002").endsWith("· size unknown"),"a result the Hub gave no size for says so");
+        check(stats("studio/hub-model-003").endsWith("· 5.0 kB"),"small sizes use the right unit");
+        {   // On a card this wide the whole line fits; it must not wrap at a narrow default width.
+            bool oneLine=false;
+            for (auto *c : models.findChildren<ModelCard *>()) if (c->id()=="studio/hub-model-000")
+                for (auto *l : c->findChildren<QLabel *>()) if (l->text().contains("downloads"))
+                    oneLine = c->width() > 400 && l->height() < l->fontMetrics().lineSpacing()*3/2;
+            check(oneLine,"downloads, likes and size share one line when there is room");
+        }
+        { const QSize original=models.size(); models.resize(original.width(),900); pump(120);
+          capture(&models,"models-hub-sizes"); models.resize(original); pump(); }
+
+        // Load more asks only about the new page.
+        loadMore()->click(); waitUntil([&]() { return cardCount()==100; }); waitUntil([&]() { return fixture.sizesRequests.size()==2; });
+        const QString second=fixture.sizesRequests.value(1);
+        check(second.count("repo=")==50 && !second.contains("hub-model-000") && second.contains("hub-model-050"),"Load more asks for the new results' sizes only");
+        waitUntil([&]() { return stats("studio/hub-model-050").contains("size unknown"); });
+        check(stats("studio/hub-model-050").endsWith("· size unknown") && stats("studio/hub-model-000").contains("412.0 MB"),"sizes on earlier pages are kept");
+
+        // A failing size lookup never disturbs the results or the status line.
+        fixture.sizesStatus=500; fixture.sizesRequests.clear();
+        setQuery("size"); QMetaObject::invokeMethod(&models,"onSearch"); waitUntil(searchDone);
+        waitUntil([&]() { return fixture.sizesRequests.size()==1; }); pump(150);
+        check(cardCount()==50 && stats("studio/hub-model-000")=="1000 downloads · 0 likes","a failed size lookup leaves results without sizes");
+        check(models.findChild<QLabel *>("statusLabel")->property("state").toString()!="error","a failed size lookup is not reported as an error");
+
+        // Browsing the local library asks the Hub for nothing.
+        fixture.sizesStatus=200; fixture.sizesRequests.clear();
+        for (auto *combo : models.findChildren<QComboBox *>()) combo->setCurrentIndex(0);
+        pump(300);
+        check(fixture.sizesRequests.isEmpty(),"the local library makes no size requests");
+        fixture.hubTotal=0; fixture.downloadedRepos.clear(); fixture.hubSizes.clear();
     }
     // ---- Download progress, size and cancel --------------------------------
     {

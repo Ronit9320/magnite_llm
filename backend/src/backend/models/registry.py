@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import itertools
 import json
 import logging
@@ -18,6 +19,7 @@ from huggingface_hub import HfApi, scan_cache_dir
 from huggingface_hub.constants import HF_HUB_CACHE
 from huggingface_hub.errors import CacheNotFound
 
+from backend.models.hubsize import repo_size_bytes
 from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, model_id
 from backend.models.store import ModelStore
 
@@ -115,6 +117,10 @@ class ModelRegistry:
         self._controls: dict[str, _PullControl] = {}
         self._pull_lock = threading.Lock()
         self._pull_command = pull_command or _default_pull_command
+        # Hub repo sizes by lower-cased repo id; only successful lookups are kept.
+        self._size_cache: dict[str, int] = {}
+        self._size_cache_limit = 2000
+        self._size_lock = threading.Lock()
 
     # ---- Job management ------------------------------------------------
 
@@ -217,6 +223,50 @@ class ModelRegistry:
                 )
             )
         return results
+
+    def repo_sizes(self, repo_ids: list[str], timeout: float = 25.0) -> dict[str, Optional[int]]:
+        """Exact download size in bytes for each repo, or None where it cannot be found.
+
+        One metadata request per uncached repo, six at a time. A failure (offline,
+        gated, slow) is None for that repo only and is not cached, so a retry can
+        succeed; whatever is still running when the timeout hits finishes in the
+        background and lands in the cache for next time.
+        """
+        wanted = list(dict.fromkeys(r.strip() for r in repo_ids if r and r.strip()))
+        result: dict[str, Optional[int]] = {}
+        missing: list[str] = []
+        with self._size_lock:
+            for repo in wanted:
+                cached = self._size_cache.get(repo.lower())
+                if cached is None:
+                    missing.append(repo)
+                else:
+                    result[repo] = cached
+        if missing:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="hub-size")
+            futures = {pool.submit(self._fetch_repo_size, repo): repo for repo in missing}
+            done, pending = concurrent.futures.wait(futures, timeout=timeout)
+            for future in done:
+                result[futures[future]] = future.result()
+            for future in pending:
+                future.cancel()
+                result[futures[future]] = None
+            pool.shutdown(wait=False, cancel_futures=True)
+        return {repo: result[repo] for repo in wanted}
+
+    def _fetch_repo_size(self, repo: str) -> Optional[int]:
+        try:
+            size = repo_size_bytes(self._api, repo)
+        except Exception as exc:  # noqa: BLE001 -- a missing size must never break search
+            logger.debug("No size for %s: %s", repo, exc)
+            return None
+        if size <= 0:
+            return None
+        with self._size_lock:
+            if len(self._size_cache) >= self._size_cache_limit:
+                self._size_cache.pop(next(iter(self._size_cache)))
+            self._size_cache[repo.lower()] = size
+        return size
 
     def _downloaded_hub_repos(self) -> set[str]:
         """Lower-cased repo ids of ready Hugging Face models in the local library.

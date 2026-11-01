@@ -25,6 +25,8 @@ import time
 from huggingface_hub import HfApi, snapshot_download
 from tqdm import tqdm
 
+from backend.models.hubsize import repo_size_bytes
+
 _PARENT_POLL_SECONDS = 1.0
 _null_sink = None
 
@@ -119,8 +121,7 @@ def _progress_bar_class(reporter: Reporter):
 def _expected_bytes(repo_id: str) -> int:
     """Total repo size from metadata; 0 if unavailable (progress then uses the bar's total)."""
     try:
-        info = HfApi().model_info(repo_id, files_metadata=True)
-        return sum(int(s.size or 0) for s in (info.siblings or []))
+        return repo_size_bytes(HfApi(), repo_id)
     except Exception:  # noqa: BLE001 -- metadata is a nicety, never a reason to fail
         return 0
 

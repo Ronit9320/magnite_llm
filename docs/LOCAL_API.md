@@ -70,6 +70,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Operation | Route / body |
 | --- | --- |
 | Hub search | `GET /models/search?q=...&limit=50&offset=0` (`limit` 1-100, `offset` 0-1000; each result has `downloaded`; 502 if the Hub is unreachable) |
+| Hub download sizes | `GET /models/sizes?repo=owner/name&repo=...` (1-100 repos; exact bytes a download fetches, i.e. every file in the repo, or `null` if the Hub cannot say; never an error because the Hub is down) |
 | Pull model / poll / cancel | `POST /models/pull` with `source`, `ref` (409 if another download of that source is running; asking for the running one returns its job); `GET /models/pull/{job_id}` (`status`: queued, running, done, error, cancelled; `bytes_done`, `bytes_total`, `progress`); `POST /models/pull/{job_id}/cancel` (202 while stopping, 200 if already finished) |
 | Delete model | `DELETE /models/{model_id}` |
 | Ingest dataset | `POST /datasets/ingest` with absolute `path`, or `name`, `format`, `content` |

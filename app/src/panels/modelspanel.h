@@ -68,6 +68,7 @@ private:
     void resetDownload();
     void showDownloadProgress(const QJsonObject &job);
     void sendCancel();
+    void requestSizes(const QJsonArray &results);
     void confirmAndDelete(const QJsonObject &model, int dependentAdapters);
     bool isLocalView() const;
     QString selectedId() const;

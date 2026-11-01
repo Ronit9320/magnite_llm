@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+from typing import Annotated, Optional
+
 import httpx
+from pydantic import StringConstraints
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
@@ -54,6 +57,17 @@ def search_hub(
         return _get_registry().search_hub(q.strip(), limit=limit, offset=offset)
     except (httpx.HTTPError, OSError) as exc:  # includes huggingface_hub's HfHubHTTPError
         raise HTTPException(status_code=502, detail=f"Could not reach the Hugging Face Hub: {exc}") from exc
+
+
+@router.get("/sizes", response_model=dict[str, Optional[int]])
+def hub_sizes(
+    repo: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] = Query(
+        ..., min_length=1, max_length=100,
+        description="Hub repo ids; repeat the parameter. Returns exact download bytes, or null if unknown."),
+):
+    """Download sizes for search results. Never fails because the Hub does: a size
+    that cannot be found is null."""
+    return _get_registry().repo_sizes(repo)
 
 
 @router.get("/{model_id}", response_model=ModelRecord)

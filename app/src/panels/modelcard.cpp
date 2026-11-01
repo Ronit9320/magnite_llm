@@ -96,15 +96,16 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     licenseLabel->setObjectName(QStringLiteral("cardMeta"));
     footRow->addWidget(licenseLabel);
     if (isHub) {
-        auto *stats = new QLabel(
-            QStringLiteral("%1 downloads · %2 likes")
-                .arg(data.value("downloads").toInt())
-                .arg(data.value("likes").toInt()),
-            this);
-        stats->setObjectName(QStringLiteral("cardMeta"));
-        footRow->addWidget(stats);
+        m_statsBase = QStringLiteral("%1 downloads · %2 likes")
+                          .arg(data.value("downloads").toInt())
+                          .arg(data.value("likes").toInt());
+        m_statsLabel = new QLabel(m_statsBase, this);
+        m_statsLabel->setObjectName(QStringLiteral("cardMeta"));
+        m_statsLabel->setWordWrap(true);   // the size can make this long on a narrow card
+        footRow->addWidget(m_statsLabel, 1);   // takes the spare width so it only wraps when it must
+    } else {
+        footRow->addStretch(1);
     }
-    footRow->addStretch(1);
     layout->addLayout(footRow);
 
     licenseLabel->setWordWrap(true);
@@ -189,6 +190,12 @@ QString ModelCard::formatSizeMb(double megabytes) {
     if (megabytes <= 0) return QStringLiteral("-");
     if (megabytes >= 1024) return QStringLiteral("%1 GB").arg(megabytes / 1024.0, 0, 'f', 1);
     return QStringLiteral("%1 MB").arg(megabytes, 0, 'f', megabytes < 10 ? 1 : 0);
+}
+
+void ModelCard::setSize(qint64 bytes) {
+    if (!m_statsLabel) return;   // local cards already show their own size
+    m_statsLabel->setText(m_statsBase + QStringLiteral(" · ") +
+                          (bytes > 0 ? formatBytes(bytes) : QStringLiteral("size unknown")));
 }
 
 void ModelCard::setDeleteEnabled(bool enabled) {

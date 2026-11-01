@@ -42,6 +42,9 @@ public:
     static QString formatSizeMb(double megabytes);
     // The JSON this card was built from (id, ref, source, size_mb ...).
     const QJsonObject &data() const { return m_data; }
+    // Hub results only: the download size once known, shown next to downloads and likes.
+    // bytes <= 0 means the Hub could not say ("size unknown").
+    void setSize(qint64 bytes);
     // Local cards only: lets the panel lock Delete during a download or a delete.
     void setDeleteEnabled(bool enabled);
 
@@ -69,4 +72,6 @@ private:
     QPushButton *m_cancelButton = nullptr;
     QPushButton *m_actionButton = nullptr;
     QPushButton *m_deleteButton = nullptr;
+    QLabel *m_statsLabel = nullptr;   // Hub results: "N downloads · M likes[ · size]"
+    QString m_statsBase;
 };

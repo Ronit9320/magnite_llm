@@ -410,9 +410,28 @@ void ModelsPanel::appendSearchResults(const QJsonArray &results) {
     m_hubOffset += results.size();
     m_hasMoreResults = results.size() >= kSearchPageSize && m_hubOffset <= kMaxSearchOffset;
     addCards(fresh, true, append);
+    requestSizes(fresh);
     reportHubStatus();
     updateLoadMore();
     updateActionButtons();
+}
+
+// Ask the backend for the download size of newly shown results. Sizes need one Hub
+// request per model, so they arrive after the cards do and are purely additive: a
+// failure leaves the cards as they are.
+void ModelsPanel::requestSizes(const QJsonArray &results) {
+    if (results.isEmpty() || !m_client || !m_client->isReady()) return;
+    QUrlQuery q;
+    for (const auto &value : results)
+        q.addQueryItem("repo", value.toObject().value("repo_id").toString());
+    m_client->get("/models/sizes?" + q.toString(QUrl::FullyEncoded),
+                  [this](int status, const QJsonDocument &doc) {
+        if (status != 200 || !doc.isObject() || isLocalView()) return;
+        const QJsonObject sizes = doc.object();
+        for (auto it = sizes.begin(); it != sizes.end(); ++it)
+            if (ModelCard *card = cardById(it.key()))   // gone if the results were replaced meanwhile
+                card->setSize(it.value().isNull() ? 0 : static_cast<qint64>(it.value().toDouble()));
+    });
 }
 
 void ModelsPanel::updateLoadMore() {
