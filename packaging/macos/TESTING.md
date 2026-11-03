@@ -6,7 +6,10 @@ The app contains Qt, Python 3.12 and the backend, with llama.cpp (Metal), PyTorc
 It does not contain model weights; the first model or embedding download needs internet access. vLLM and Ollama are not bundled.
 
 **Requirements:** an Apple silicon Mac (M1 or later) running macOS 14 (Sonoma) or newer. Intel Macs are not supported. The build was
-tested only on an M1 with 8 GB under macOS 27.0.1; other versions and chips are untested.
+physically tested on an M1 with 8 GB under macOS 27.0.1. Integrated candidates
+also passed hosted macOS 15 bundle checks; those checks do not establish physical
+GPU behavior or the Gatekeeper flow on other chips/OS versions. See
+[native evidence](../../docs/development/NATIVE_PACKAGES.md).
 
 ## Install
 

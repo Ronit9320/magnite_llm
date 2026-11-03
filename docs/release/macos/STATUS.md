@@ -1,5 +1,7 @@
 # STATUS — macOS v0.1 packaging
 
+> Historical Mac-only phase log, retained as evidence. Its old branch/stop/no-commit instructions, uncommitted claims and resolved issue reminders do not govern current work. All three integrated native candidates passed the 2026-10-30 workflow; use [native package operations](../../development/NATIVE_PACKAGES.md) and [the current release plan](../../development/MULTIPLATFORM_RELEASE_PLAN.md).
+
 > Integration note, 2026-10-30: this file records the earlier Mac-only work.
 > The changes described as uncommitted below were committed through `8337e65`
 > and `86950a8` and pushed to `mac`. The owner has now started the

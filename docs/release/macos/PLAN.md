@@ -1,5 +1,7 @@
 # macOS v0.1 preview package (.app in .dmg) — phased plan
 
+> Historical Mac packaging plan and phase outcomes. Original risks and phase instructions describe that effort; they are not current unresolved findings or commands for integrated work. See [native package operations](../../development/NATIVE_PACKAGES.md) and [the integrated release plan](../../development/MULTIPLATFORM_RELEASE_PLAN.md).
+
 Status legend: TODO / IN-PROGRESS / DONE / BLOCKED. Update the status on a phase
 heading the moment it changes, and mirror it in `STATUS.md`.
 

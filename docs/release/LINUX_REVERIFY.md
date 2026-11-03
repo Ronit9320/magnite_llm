@@ -1,5 +1,7 @@
 # Linux re-verification after the macOS v0.1 fixes
 
+> Historical handoff/runbook written before the Mac fixes were committed and installed on Linux. The integrated source and full locked runtimes subsequently passed the 2026-10-30 native jobs. The uncommitted/never-installed statements below record the original handoff; use [native evidence](../development/NATIVE_PACKAGES.md) and the current reusable workflows for present operations.
+
 The macOS release work (branch `release/v0.1-macos`) changed code that the Linux AppImage shares. None of it has run on Linux yet.
 The last verified Linux build is the 2026-10-08 AppImage in [V0_1_LINUX_TESTING.md](V0_1_LINUX_TESTING.md). It predates every
 change below, so **rebuild before testing**. These steps take about an hour on a warm machine.

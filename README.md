@@ -101,7 +101,9 @@ macOS results for earlier builds are recorded separately.
 ## Development and release
 
 - [Contributing and verification](CONTRIBUTING.md)
-- [Current verification report](docs/release/VERIFICATION.md)
+- [Current native package evidence](docs/development/NATIVE_PACKAGES.md)
+- [Documentation consistency review](docs/development/DOCUMENTATION_REVIEW.md)
+- [Historical source verification](docs/release/VERIFICATION.md)
 - [Release checklist](RELEASE_CHECKLIST.md) and [draft release notes](docs/release/RELEASE_NOTES.md)
 - [Current theme rules and branch workflow](CONTRIBUTING.md)
 - [Security reporting](SECURITY.md)

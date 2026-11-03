@@ -1,5 +1,7 @@
 # Magnite v0.1-preview
 
+> Release-specific notes for the published Linux v0.1-preview; these describe that artifact, not subsequent integrated source. Later source adds authenticated desktop IPC, locks, and native Mac/Windows testing packages. See [native evidence](../development/NATIVE_PACKAGES.md) and [current limitations](../LIMITATIONS.md).
+
 First Linux x86-64 development preview, intended to test installation, local
 workflows, and the new release/update pipeline. The app is unfinished and the
 broader release checklist remains open by design for this preview.

@@ -1,5 +1,7 @@
 # ISSUES — macOS v0.1 packaging
 
+> Historical Mac-only findings/decisions. Fixes labeled uncommitted were committed and integrated; current POSIX/Windows locks, authentication and native-package evidence are described in [native package operations](../../development/NATIVE_PACKAGES.md). Earlier Linux/Windows verification limits apply to the original Mac session.
+
 Failures, limitations and workarounds. Each gets a root cause once known. Open
 issues must be reflected in `STATUS.md` blockers when they gate a phase.
 

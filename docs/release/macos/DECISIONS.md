@@ -1,5 +1,7 @@
 # DECISIONS — macOS v0.1 packaging
 
+> Historical Mac-only findings/decisions. Fixes labeled uncommitted were committed and integrated; current POSIX/Windows locks, authentication and native-package evidence are described in [native package operations](../../development/NATIVE_PACKAGES.md). Earlier Linux/Windows verification limits apply to the original Mac session.
+
 ADR index plus a running log of shared-file edits. One ADR per decision in `adr/`.
 
 ## ADR index

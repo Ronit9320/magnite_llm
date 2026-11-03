@@ -1,7 +1,10 @@
 # Installation from source
 
 Source installation uses the checkout layout below. A bundled Linux x86-64
-AppImage is available for v0.1-preview; Windows and macOS remain unverified.
+AppImage is available for v0.1-preview. Mac ARM DMG and Windows x86-64 CPU
+installer candidates passed hosted native integration checks on 2026-10-30;
+they remain testing artifacts rather than public releases. See
+[native packages and remaining acceptance gaps](development/NATIVE_PACKAGES.md).
 
 ## Linux preview package
 
@@ -43,14 +46,20 @@ cmake --build build -j2
 ```
 
 Use `python -m pip install -e backend` for the smaller GGUF inference setup.
-The base install still includes llama-cpp-python and NumPy. `[ml]` adds torch,
-transformers, PEFT, bitsandbytes, sentence-transformers, datasets, accelerate,
-safetensors, and pypdf. It does not install vLLM or the Ollama application.
-Dependencies currently have broad lower bounds rather than a tested lockfile.
+The base install still includes llama-cpp-python, NumPy and safetensors. `[ml]`
+adds torch, transformers, PEFT, bitsandbytes, sentence-transformers, datasets,
+accelerate and pypdf. It does not install vLLM or the Ollama application.
+Editable source dependencies have broad lower bounds. Packaged runtimes use
+platform-specific `requirements-*.txt` and full `constraints-*.txt` locks under
+`packaging/`, `packaging/macos/` and `packaging/windows/`; the native integration
+jobs installed and tested those locked runtimes. This does not lock an
+unconstrained editable install or establish every GPU configuration.
 
 Run from this layout: `<repo>/build/magnite-app` and `<repo>/.venv/bin/python`.
-The app looks for `backend/src` relative to the executable and falls back to
-`python3` if the repository venv is absent. An arbitrary copied executable is
+The app looks for `backend/src` relative to the executable. On POSIX it prefers
+`.venv/bin/python`, with `python3` as fallback. Windows probes `.venv312` and
+`.venv` interpreters before the `python`/`py` launchers; see
+[Windows source builds](../BUILD_WINDOWS.md). An arbitrary copied executable is
 not a complete installation.
 
 ## Engines and first downloads

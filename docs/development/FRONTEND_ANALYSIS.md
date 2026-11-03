@@ -99,16 +99,17 @@ Magnite enforces a strict division of responsibility:
 - **Class**: `BackendManager : public QObject`
 - **Qt Components**: `QProcess`, `QNetworkAccessManager`, `QNetworkReply`, `QTimer`, `QRegularExpression`, `QSettings`.
 - **Execution Flow**:
-  1. `start()`: Derives the repository root from `QCoreApplication::applicationDirPath() + "/../"`.
-  2. Resolves Python executable: Checks `<repo>/.venv/bin/python` (`.venv/Scripts/python.exe` on Windows); falls back to system `python3`.
+  1. `start()`: Prefers an isolated packaged runtime (macOS `Contents/Resources/runtime`, adjacent `runtime/` elsewhere), with no host fallback. Source mode searches upward for `backend/src/backend`.
+  2. Source Python selection: POSIX `.venv/bin/python` then `python3`; Windows `.venv312/Scripts/python.exe` then `.venv/Scripts/python.exe`, probing usability before `python`/`py` fallbacks.
   3. Prepares environment (`QProcessEnvironment`):
      - Sets `PYTHONPATH` with `<repo>/backend/src` prepended.
      - Reads `storage/dataDir` from `QSettings`; sets `MAGNITE_HOME` if not already in environment.
      - Reads `engine/override` from `QSettings`; sets `MAGNITE_ENGINE_OVERRIDE`.
+     - Resolves relative data overrides before changing child cwd and supplies a fresh `MAGNITE_API_TOKEN`; `BackendClient` adds its Bearer credential to JSON, streaming and download requests.
   4. Launches `python -m backend.main --port 0` as a child `QProcess`.
   5. **Discovery Protocol**: Connects `QProcess::readyReadStandardError` to `onProcessReadyRead()`. Buffers incoming stderr chunks into `m_stderrBuffer` across line boundaries. When Python outputs `Magnite backend starting on http://127.0.0.1:<port>`, extracts port via regex `http://127\.0\.0\.1:(\d+)`.
-  6. **Health Verification**: Initiates single-shot `QTimer` polling `GET http://127.0.0.1:<port>/health` via `QNetworkAccessManager`. Upon `QNetworkReply::NoError`, sets `m_started = true` and emits `started()`.
-  7. **Graceful Shutdown**: In `stop()` and `~BackendManager()`, disconnects process signals to avoid re-entrant emissions during UI teardown. Sends `terminate()` (`SIGTERM`), waits up to 15,000ms, and falls back to `kill()` (`SIGKILL`) if unresponsive.
+  6. **Health Verification**: Initiates single-shot `QTimer` polling `GET http://127.0.0.1:<port>/health` via raw `QTcpSocket`. Upon HTTP 200 with a matching application version, sets `m_started = true` and emits `started()`.
+  7. **Graceful Shutdown**: In `stop()` and `~BackendManager()`, disconnects process signals to avoid re-entrant emissions during UI teardown. Requests graceful exit (POSIX SIGTERM or authenticated Windows `/_desktop/shutdown`), waits up to 15,000ms, and falls back to `kill()` if unresponsive. Parent-death supervision uses Linux prctl, a Mac watcher, or a Windows kill-on-close Job Object.
 
 #### `src/backend_client.h` & `src/backend_client.cpp`
 - **Responsibility**: Asynchronous HTTP JSON and SSE communication layer between Qt panels and FastAPI.
@@ -256,7 +257,7 @@ Magnite enforces a strict division of responsibility:
   - `GET /models`: Lists local models.
   - `GET /models/search?q=...`: Searches Hugging Face hub.
   - `POST /models/pull`: Initiates download job.
-  - `GET /models/pull/status/{id}`: Polls download progress.
+  - `GET /models/pull/{id}`: Polls download progress.
   - `DELETE /models/{id}`: Deletes a model from local cache.
   - `GET /inference/status`, `GET /adapters`, `GET /rag/documents`, `GET /training/jobs`: Aggregated by `refreshOverview()` to update the 4 top `OverviewTile` widgets.
 - **Signals**:
@@ -280,6 +281,7 @@ Magnite enforces a strict division of responsibility:
   - Activity wheel (`Starfield` in `Training` mode) and progress bar.
 - **Backend Endpoints Used**:
   - `GET /models`, `GET /datasets`: Populates dropdowns.
+  - `GET /training/capabilities`: Gates quantization choices and displays the platform reason when unavailable.
   - `POST /training/start`: Dispatches training job configuration payload.
   - `GET /training/status/{job_id}`: Polled at 1000ms intervals by `m_pollTimer` for step progress, loss value, and log output.
   - `POST /training/cancel/{job_id}`: Aborts active training job.
@@ -291,7 +293,7 @@ Magnite enforces a strict division of responsibility:
 - **Child Components**: `RagDocCard`, `QFileDialog`, `QSpinBox` (chunk size, overlap, top_k), `QLineEdit` (query tester).
 - **Backend Endpoints Used**:
   - `GET /rag/documents`: Fetches list of ingested documents.
-  - `POST /rag/ingest`: Submits local file paths for text extraction and chunking.
+  - `POST /rag/documents`: Submits local file paths for text extraction and chunking.
   - `DELETE /rag/documents/{id}`: Deletes individual document chunks.
   - `POST /rag/clear`: Flushes entire local vector index.
   - `GET /rag/config` & `POST /rag/config`: Reads and synchronizes retrieval parameters.
@@ -303,15 +305,14 @@ Magnite enforces a strict division of responsibility:
 - **Features**: Displays file kind badge (PDF, TXT, MD, HTML), path, and chunk count. Supports multi-selection via Ctrl+Click or keyboard navigation for batch deletion.
 
 #### `src/panels/adapterspanel.h` & `src/panels/adapterspanel.cpp`
-- **Responsibility**: LoRA adapter registry workspace. Inspecting trained adapters, hot-activating adapters onto the active inference engine, zip export, and zip import.
+- **Responsibility**: LoRA adapter registry workspace. Inspecting trained adapters, activating them through a torch/PEFT model restart, zip export, and zip import.
 - **Class**: `AdaptersPanel : public BasePanel`
 - **Child Components**: `AdapterCard`, `QFileDialog`.
 - **Backend Endpoints Used**:
   - `GET /adapters`: Lists all registered adapters.
-  - `POST /adapters/activate`: Attaches adapter to current running model.
-  - `POST /adapters/deactivate`: Detaches active adapter.
+  - `POST /inference/adapter` with `adapter_id`: Restarts inference with the matching base and PEFT adapter. An empty ID clears the adapter and unloads inference.
   - `DELETE /adapters/{id}`: Removes adapter weights and metadata from database.
-  - `GET /adapters/{id}/export`: Downloads zip bundle via `BackendClient::download()` into a `QSaveFile`.
+  - `POST /adapters/export/{id}`: Creates a validated immutable archive URL; `BackendClient::download()` GETs that URL into a `QSaveFile`.
   - `POST /adapters/import`: Imports external adapter archive.
 - **Signals**: `adapterActivated()`: Notifies `ChatPanel` to refresh active engine status badges.
 

@@ -1,5 +1,7 @@
 # v0.1 Linux test AppImage — 2026-10-08
 
+> Historical pre-preview artifact report. Its glibc 2.43 requirement and platform status are not current package guidance. Current Linux CI gates at glibc 2.35; see [native package evidence](../development/NATIVE_PACKAGES.md).
+
 This is a local test artifact, not a public/stable release. Work is on
 `release/v0.1-testing`, branched from `dev` at `5ce5b37`. No tag, public release
 or remote publication is part of this build. Windows packaging is deferred at

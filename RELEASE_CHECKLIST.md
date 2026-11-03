@@ -7,6 +7,22 @@ macOS, and Linux. Subsequent milestones build toward a stable v1.0 local AI
 workbench. The roadmap below records planned work, not completed features or
 new platform verification.
 
+## Current integration status — 2026-11-02
+
+The public Linux `v0.1-preview` remains the published release. Linux AppImage,
+Mac ARM DMG, and Windows x86-64 installer candidates passed the 2026-10-30
+native workflow from clean source `3ee0a4c`; see
+[native evidence](docs/development/NATIVE_PACKAGES.md). The packages use full
+platform dependency constraints. Desktop-launched backends now require a
+per-launch Bearer token, enforce loopback Host values, and lock their data directory
+on POSIX and Windows. These completed changes supersede earlier no-package,
+unlocked-packaging, and unauthenticated-desktop descriptions.
+
+Historical evidence below remains dated. Unchecked broad acceptance gates do
+not imply that the underlying implementation or bounded hosted checks are absent.
+Mac notarization, Windows signing, platform updaters, consumer-machine/physical-GPU
+coverage, and the complete three-platform public rollout remain open.
+
 ## Documentation/repository pass — 2026-09-29
 
 Completed without application-source, build-configuration, or dependency changes:
@@ -38,7 +54,8 @@ are not claims of current support.
 
 Preview pipeline update — 2026-10-23: v0.1-preview is the first canonical application release. The owner has deferred the broader checklist while testing delivery and updates. See [release pipeline and implementation log](docs/development/RELEASE_PIPELINE.md); unchecked items below remain open.
 
-Historical testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages remain to be built. These are testing artifacts for the unfinished app; public release gates remain open.
+Historical testing-package update — 2026-10-09: the Linux v0.1 AppImage has been built and locally verified. Windows `.exe` and macOS `.dmg` packages had not yet been built at that date;
+all three native candidates now have hosted verification as linked above. These are testing artifacts for the unfinished app; public release gates remain open.
 
 ## v0.1 preview series — open-source desktop previews
 
@@ -191,7 +208,7 @@ Completion: licensing, provenance, contribution, and reporting information are a
 
 - [x] Verify an exported clean source tree and fresh base-only Python 3.12.12 environment on the development host: install, build, 24 regressions, theme, and desktop/IPC tests passed; package versions recorded in docs/release/base-environment.txt.
 - [ ] Verify a clean clone and fresh Python environment on the first supported OS; document tested distro, compiler, Qt, Python, and hardware versions plus system packages.
-- [ ] Provide tested dependency constraints or a reproducible environment per supported configuration. Current pyproject.toml uses broad lower bounds; a working developer venv is insufficient release evidence.
+- [x] Provide full dependency constraints for the packaged Linux CPU, Mac ARM and Windows CPU runtimes, installed/tested by the native jobs. Source pyproject bounds remain broad; GPU recipes need separate verification. See `packaging/constraints-cpu.txt`, `packaging/macos/constraints-macos-arm64.txt`, and `packaging/windows/constraints-windows-x86_64.txt`.
 - [ ] Verify/document CPU llama.cpp installation, including native build prerequisites, and the supported GPU setup. Document vLLM and Ollama installation separately because they are not supplied by the current ML extra.
 - [ ] Verify whether the single `[ml]` extra is suitable for each supported platform. Separate training/RAG/quantization extras if necessary, or publish explicit limits; do not promise QLoRA everywhere.
 - [x] Document the required `<repo>/build/magnite-app` and `<repo>/.venv` layout for source installs, with actionable diagnostics for missing Python, packages, or backend startup failure.
@@ -201,7 +218,8 @@ Completion: a new contributor can build and complete a small local workflow usin
 
 ### 4. Verify local boundaries and failure recovery
 
-- [ ] Review local IPC access: the backend binds to loopback but currently has no application authentication layer. Verify browser-origin/Host behavior and access to mutating/local-path endpoints; implement protections appropriate to the desktop boundary and document remaining local-user trust assumptions.
+- [x] Implement per-launch Bearer credentials for desktop backends (except `/health`), loopback Host checks, and POSIX/Windows data-directory locks. Regressions cover credential rejection, Host checks, maintenance controls, shutdown and lock release; native jobs run the backend suite. See `backend/tests/test_local_access.py` and `docs/development/NATIVE_PACKAGES.md`.
+- [ ] Complete broader IPC security review and cross-account/browser/native-machine acceptance. Tokenless standalone developer mode omits credential checks; these protections do not sandbox same-user code.
 - [ ] Verify backend crash, app exit, forced termination, restart, and subprocess cleanup while downloading, loading, generating, training, and ingesting. Check that incomplete work is not presented as successful or left registered as usable.
 - [ ] Exercise missing dependencies, invalid/incompatible models and adapters, missing/corrupt inputs, disk-full/permission errors, offline downloads, and OOM. Errors must be visible and leave controls usable.
 - [ ] Verify inference and training sharing a GPU. Training jobs are serialized with each other, but this alone does not establish safe resource sharing with inference; document or enforce the supported behavior.
@@ -213,7 +231,7 @@ Completion: no known data-loss, unauthorized local-file operation, orphan-proces
 
 - [x] Configure CI for offline backend regressions, CMake build, theme audit, and the bare desktop selftest with loopback access.
 - [x] Run hosted verification: [source CI](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267083) and [Linux preview package/publication](https://github.com/Ronit9320/magnite_llm/actions/runs/39993267559) passed on 2026-10-23.
-- [x] Verify the current baseline: 24 regressions, build, theme, bare desktop test, all five feature tests, and the combined real workflow pass; see docs/release/VERIFICATION.md.
+- [x] Verify the historical 2026-09-29 baseline: 24 regressions, build, theme, bare desktop test, all five feature tests, and combined workflow; see docs/release/VERIFICATION.md. Current native candidate evidence is in docs/development/NATIVE_PACKAGES.md; these are separate snapshots.
 - [x] Run all five feature selftests on the UI candidate with disposable MAGNITE_HOME and XDG_CONFIG_HOME: pull, inference, training, adapters, and RAG. Passed 2026-09-30; see docs/release/UI_POLISH.md. Rerun after subsequent functional changes.
 - [x] Run `backend/tests/live_workflow.py` for the combined train → adapter → RAG chat → export/import workflow. Passed locally and in the hosted v0.1-preview package job with disposable data.
 - [ ] Test representative usable models and a mixed document corpus in addition to tiny random models. Record memory, latency, cancellation, retrieval relevance, and context-limit behavior; token delivery alone does not establish answer quality.
@@ -259,19 +277,19 @@ These are prioritized improvements, not a reason to restart implemented systems 
 - [x] Make backend/Python/resource discovery work outside the repository layout and add CMake installation/AppImage packaging rules. The Linux package uses an adjacent isolated Python runtime; see [packaging instructions](packaging/README.md).
 - [x] Build the historical pre-preview AppImage with Qt, Python and CPU inference/LoRA/RAG dependencies (superseded; not the v0.1-preview artifact). Built 2026-10-08 on `release/v0.1-testing`, commit `6c83de5`; approximately 418 MiB. Model weights download separately.
 - [x] Verify relocated startup, theme/UI checks, GGUF inference and the combined CPU LoRA/adapter/RAG workflow. Record checksums, resolved dependencies and build provenance locally. See [Linux test-build verification](docs/release/V0_1_LINUX_TESTING.md).
-- [ ] Test on a clean second Linux machine, including native desktop integration, Qt plugins, backend process cleanup and removal behavior. Current build requires x86-64 and glibc 2.43+; build on an older distribution and verify separately before advertising broader compatibility.
+- [ ] Test on a clean second Linux desktop, including native integration, Qt plugins, backend process cleanup and removal behavior. Current CI packages target x86-64/Ubuntu 22.04 with a glibc 2.35 ceiling and passed hosted package checks. The glibc 2.43 requirement belongs to the historical Arch-built artifact only.
 
-### Windows .exe — pending
+### Windows .exe — native testing installer verified; public release pending
 
-- [ ] Prepare a Windows x64 build environment and compile the Qt client; bundle Qt DLLs/plugins, standalone Windows Python, the backend and tested CPU ML dependencies.
-- [ ] Produce a v0.1 testing installer `.exe`, with application shortcuts and uninstall support. Record exact source/dependency versions and a SHA-256 checksum.
+- [x] Build the Windows x64 Qt client with deployed Qt/OpenSSL/MSVC components and isolated Python/backend/locked CPU ML runtime in the native Windows Server job. See `packaging/windows/README.md` and native evidence.
+- [x] Produce an unsigned per-user Inno Setup testing installer with shortcuts/uninstall, checksums, and exact clean-source/dependency provenance. The 2026-10-30 native workflow passed installer startup, same-candidate reinstall, force-kill cleanup, and uninstall checks; consumer Windows and cross-version upgrade acceptance remain separate.
 - [ ] Verify installation and launch on a clean Windows machine without a developer checkout or system Python. Test inference, CPU LoRA, adapters, RAG, backend process cleanup, upgrade and uninstall while preserving user data.
 - [ ] Complete signing and installer verification for public distribution; identify unsigned testing builds explicitly.
 
 ### macOS .dmg — testing build produced; not release-ready
 
 - [x] Select and document the initial architecture (Apple Silicon and/or Intel) and minimum macOS version; prepare a native macOS build environment. *(Apple silicon arm64, macOS 14.0+: `docs/release/macos/adr/0001-target-architecture.md`, `0002-minimum-macos.md`, `environment-macos.txt`.)*
-- [x] Build a self-contained `.app` containing Qt frameworks/plugins, Python, the backend and platform-compatible ML dependencies; package it as a v0.1 testing `.dmg`. Record exact source/dependency versions and a SHA-256 checksum. *(`dist/Magnite-0.1.0-test.1-arm64.dmg`, SHA-256 `48050836…`; see `docs/release/macos/V0_1_MACOS_TESTING.md` and LOG.md Phases 5, 7 and the ISSUE-011 entry. Built from a modified tree, so not claimed reproducible from a commit.)*
+- [x] Build a self-contained `.app` containing Qt frameworks/plugins, Python, the backend and platform-compatible ML dependencies; package it as a v0.1 testing `.dmg`. Record exact source/dependency versions and a SHA-256 checksum. *(`dist/Magnite-0.1.0-test.1-arm64.dmg`, SHA-256 `48050836…`; see `docs/release/macos/V0_1_MACOS_TESTING.md` and LOG.md Phases 5, 7 and the ISSUE-011 entry. Built from a modified tree, so that earlier artifact is not claimed reproducible from a commit. The integrated 2026-10-30 DMG was rebuilt from clean `3ee0a4c` and passed native gates; see `docs/development/NATIVE_PACKAGES.md`.)*
 - [ ] Verify installation and launch on a clean Mac without a developer checkout or system Python. Test supported inference/training/RAG paths, backend process cleanup, upgrade and removal while preserving user data. Record Metal/MPS and quantization limits separately.
   *Not ticked: the app was verified from the dmg (11/11) and in a second standard account (6/6), with Metal/MPS and the QLoRA limit recorded in `ML_MATRIX.md`, but never on a Mac free of Homebrew/system Python, the Gatekeeper dialog wording was not captured, and the cross-account API check was skipped. See LOG.md Phases 8–10.*
 - [ ] Complete Developer ID signing, notarization and Gatekeeper verification before public distribution. *DEFERRED by the maintainer (2026-10-30); users approve the app via `docs/MACOS_FIRST_LAUNCH.md`. Would need an Apple Developer Program enrollment, a Developer ID Application certificate and a `notarytool` profile. The test build is ad-hoc signed.*

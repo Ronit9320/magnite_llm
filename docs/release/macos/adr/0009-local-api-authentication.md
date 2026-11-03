@@ -1,5 +1,7 @@
 # ADR 0009 — Authenticate the local backend API (per-launch secret + Host check + data-folder lock)
 
+> Historical Mac-only findings/decisions. Fixes labeled uncommitted were committed and integrated; current POSIX/Windows locks, authentication and native-package evidence are described in [native package operations](../../../development/NATIVE_PACKAGES.md). Earlier Linux/Windows verification limits apply to the original Mac session.
+
 - Date: 2026-10-28
 - Status: **Accepted and implemented** (2026-10-28, uncommitted) — see ISSUE-011 for the evidence
 

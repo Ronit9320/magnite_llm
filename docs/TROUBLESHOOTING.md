@@ -3,6 +3,9 @@
 | Symptom | Check / next step |
 | --- | --- |
 | Backend unavailable | Launch from a terminal; keep the binary at `build/magnite-app`; check `.venv/bin/python` and backend installation. Run `PYTHONPATH=backend/src .venv/bin/python -m backend.main --port 0` for startup details. |
+| API returns 401 | Desktop backends require the per-launch Bearer credential, except `/health`. Manual API examples use a separate backend; see [local API](LOCAL_API.md). |
+| API returns 400 Host not allowed | Use a loopback URL/Host. Direct or proxied non-loopback access is unsupported. |
+| Data folder already in use | Close the other backend using that `MAGNITE_HOME` or choose a disposable directory. POSIX/Windows locks release when the holder exits; deleting the lock file is not a fix. |
 | Qt not found by CMake | Install Qt 6 base and SVG development packages, not only runtime libraries. |
 | llama-cpp-python installation fails | Read the native build error; confirm CMake/compiler availability and the chosen package's hardware build requirements. |
 | Model cannot load | Match GGUF to llama.cpp and transformer weights to torch/vLLM. Check the saved global engine override and available RAM/VRAM. |

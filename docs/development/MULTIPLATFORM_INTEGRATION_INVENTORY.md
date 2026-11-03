@@ -1,5 +1,7 @@
 # Integration inventory — 2026-10-30
 
+> Historical Phase 0/initial-merge inventory. Native integration verification was subsequently completed through Phase 3; see [native package evidence](NATIVE_PACKAGES.md). Statements below about missing integrated verification describe the earlier inventory.
+
 This records Phase 0 of [the release plan](MULTIPLATFORM_RELEASE_PLAN.md) and
 the first Mac integration work. Native platform evidence from the source
 branches is historical; it does not verify this integrated source.

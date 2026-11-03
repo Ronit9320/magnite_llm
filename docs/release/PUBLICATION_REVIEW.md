@@ -1,5 +1,7 @@
 # Publication review — 2026-09-29
 
+> Historical publication review. Publication status and outstanding verification refer to the dated review; this document is not a current release inventory. See [current limitations](../LIMITATIONS.md), [release checklist](../../RELEASE_CHECKLIST.md), and [native evidence](../development/NATIVE_PACKAGES.md).
+
 Reviewed the local repository at base commit `e5bc399`, before the new release
 content was committed. No history was rewritten and no remote settings changed.
 

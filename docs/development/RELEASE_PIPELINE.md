@@ -15,11 +15,11 @@ retained until the Phase 6 coordinator replaces it.
 ## Scope and decisions
 
 The first application release is **v0.1-preview**. Linux x86-64 with the bundled
-CPU runtime is the initial package. Windows and macOS packaging/updaters follow
-later. This is an unfinished development preview intended to exercise release
+CPU runtime is the initial package. Windows and macOS testing packages now pass the native coordinator; their
+public release, signing and installed-app updater work remain later phases. This is an unfinished development preview intended to exercise release
 and update delivery while the original application's roadmap continues.
 
-Work is on the existing `release/v0.1-testing` branch. That branch contained the
+The original Linux implementation used the existing `release/v0.1-testing` branch. That branch contained the
 original AppImage work and was fast-forwarded to `dev` at `c00d93a` before this
 implementation. All original packaging commits were already ancestors of `dev`.
 At that initial Linux implementation inspection the remote `mac` branch contained

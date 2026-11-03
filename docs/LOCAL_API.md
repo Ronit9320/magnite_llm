@@ -75,6 +75,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Ingest dataset | `POST /datasets/ingest` with absolute `path`, or `name`, `format`, `content` |
 | List/read/delete datasets | `GET /datasets`, `GET /datasets/{id}`, `DELETE /datasets/{id}` |
 | Start training | `POST /training/start` with `base_model`, `dataset_id`, training settings |
+| Training capability probe | `GET /training/capabilities`; reports quantization availability and platform reason |
 | Training history/status/cancel | `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` |
 | List adapters | `GET /adapters` |
 | Activate / clear adapter | `POST /inference/adapter` with `adapter_id`; empty string clears |
@@ -86,6 +87,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
 | Runtime engine preference | `POST /inference/settings` with `engine_override`: 0 Auto, 1 vLLM, 2 llama.cpp |
 | Prepare application update | `POST /updates/quiesce` with `{}`; 200 when idle, 409 while work is active |
+| Desktop graceful shutdown | `POST /_desktop/shutdown`; requires a configured launch token; absent in tokenless developer mode |
 | Cancel update maintenance | `POST /updates/resume` with `{}`; 200 restores request admission |
 
 Update maintenance is implemented by ASGI middleware. Quiescing is refused while
@@ -93,7 +95,9 @@ HTTP responses/worker cleanup, training jobs or model pulls are active. Once
 quiesced, new application requests return 503; `/health` and the maintenance
 controls remain available. The desktop stops its backend before replacing the
 application bundle. These endpoints coordinate lifecycle and do not implement
-authentication. See [update architecture](development/RELEASE_PIPELINE.md).
+authentication themselves; the CLI access wrapper protects them when a token is
+configured. Direct `uvicorn backend.server:app` bypasses that wrapper and the
+data-directory lock. See [update architecture](development/RELEASE_PIPELINE.md).
 
 Training example body after dataset ingestion:
 

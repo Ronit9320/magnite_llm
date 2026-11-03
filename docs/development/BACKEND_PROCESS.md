@@ -15,44 +15,47 @@ sequenceDiagram
     participant S as Stores and supervisor
     UI->>BM: startBackend() → start()
     BM->>PY: .venv/bin/python -m backend.main --port 0
-    PY->>PY: parse arguments, apply --home, parent-death signal
+    PY->>PY: parse arguments, apply --home, parent supervision, consume token, lock data directory
     PY->>PY: find_free_port()
     PY-->>BM: stderr: starting on http://127.0.0.1:PORT
-    PY->>API: uvicorn.run(app, host=127.0.0.1, port=PORT)
+    PY->>API: uvicorn.Server(LocalAccessMiddleware(app), host=127.0.0.1)
     API->>S: server.startup()
     S-->>API: registry, training, adapters, RAG, supervisor ready
-    BM->>API: GET /health (retry until successful)
+    BM->>API: GET /health over QTcpSocket (retry; verify version)
     API-->>BM: 200
     BM-->>UI: started signal
     UI->>UI: onBackendStarted(): configure BackendClient and panels
 ```
 
 1. `app/src/mainwindow.cpp`: `startBackend()` calls `BackendManager::start()`.
-2. `app/src/backend_manager.cpp`: `launchBackend()` finds the repository relative
-   to `<repo>/build/magnite-app`, prepends `<repo>/backend/src` to `PYTHONPATH`,
-   chooses `.venv/bin/python` (Windows: `.venv/Scripts/python.exe`), and falls
-   back to `python3`. Working directory is the binary directory.
-3. The child inherits the desktop environment. Saved `storage/dataDir` becomes
-   `MAGNITE_HOME` only if the latter was not already set. The saved engine
-   preference becomes `MAGNITE_ENGINE_OVERRIDE` (0–2).
-4. `backend/main.py` imports `server.app`, then `main()` parses `--port` and
-   `--home`. `--home` updates `MAGNITE_HOME` before startup initializes stores.
-   Linux uses `prctl(PR_SET_PDEATHSIG, SIGTERM)` on a best-effort basis.
+2. `app/src/backend_manager.cpp`: packaged runtimes take priority (adjacent
+   `runtime/`, or macOS `Contents/Resources/runtime`) with isolated `-I -B`
+   Python and no host fallback. Source mode searches upward for `backend/src/backend`
+   and prepends it to `PYTHONPATH`. POSIX uses `.venv/bin/python` then `python3`;
+   Windows probes `.venv312` then `.venv`, then `python`/`py`.
+3. The child receives a fresh `MAGNITE_API_TOKEN`. Saved `storage/dataDir`
+   supplies `MAGNITE_HOME` only if absent; relative overrides are resolved before
+   changing the child cwd. The engine preference supplies `MAGNITE_ENGINE_OVERRIDE`.
+4. `backend/main.py` applies `--home`, configures parent supervision, consumes
+   the token from the environment, and acquires a data-directory lock (POSIX flock
+   or Windows CRT byte lock). A second backend exits 75. Linux uses a best-effort
+   parent-death signal; macOS polls its parent; the Windows desktop uses a Job Object.
 5. Port 0 means bind a temporary socket to obtain a free port, close it, print
    the startup address on stderr, and start Uvicorn on that port. There is a
    small bind race between those two socket operations; the printed line is
    not itself a readiness guarantee.
 6. `server.startup()` performs the setup sequence below. Uvicorn serves requests
    after startup completes. `BackendManager` parses complete stderr lines and
-   retries `/health`; success emits `started`.
+   retries `/health` using a raw `QTcpSocket`; HTTP 200 with a matching version
+   emits `started`. The client receives the per-launch Bearer credential.
 7. `MainWindow::onBackendStarted()` assigns the URL to `BackendClient` and gives
    that client to Models, Training, Knowledge/RAG, Adapters, and Chat panels.
    The local model refresh discovers cached models at this point.
 
 Standalone entry point: the `magnite-backend` script from `pyproject.toml` also
 calls `backend.main:main`. `python -m backend.main` uses the same path. Running
-Uvicorn directly on `backend.server:app` bypasses CLI argument and parent-death
-setup, although FastAPI startup still executes.
+Uvicorn directly on `backend.server:app` bypasses CLI arguments, parent supervision,
+access middleware, and the data-directory lock, although FastAPI startup still executes.
 
 ## 2. Startup objects and ownership
 
@@ -251,8 +254,10 @@ cancelled immediately; running work checks at preparation and training-step
 boundaries. Native loading/training may take time to return. Startup converts
 persisted queued/running jobs into interrupted errors, not resumable jobs.
 Terminal job records survive restart; intermediate progress is primarily in
-memory. `_resolve_base()` decodes HF registry IDs back to repo names rather than
-consulting the selected registry revision (a remaining limitation).
+memory. `_resolve_base()` delegates to `models.resolution.resolve_base()`, which
+preserves existing local paths and selected registered snapshot paths. History
+snapshots and SQLite commits are serialized together so a late shutdown write
+cannot replace a newer terminal record.
 
 ## 7. Adapters
 
@@ -296,8 +301,8 @@ chat with rag.enabled
 ```
 
 Text, Markdown, HTML, and text-extractable PDF files are supported. PDF parsing
-uses optional `pypdf`; there is no OCR. Inline `content` currently bypasses the
-file extraction/markup stripping path. Embeddings are normalized float32 vectors.
+uses optional `pypdf`; there is no OCR. Inline HTML/Markdown content shares the
+file extraction/markup stripping logic; PDF input requires a file path. Embeddings are normalized float32 vectors.
 There is one cached embedder per backend process and a lock around model changes.
 
 Config updates merge partial values. Changing the embedding model while indexed
@@ -319,7 +324,7 @@ removes indexed content and vectors, never the original source file.
 | `vllm.log` | vLLM subprocess stderr, appended when used |
 
 Default application home is `~/.magnite`; Windows has an APPDATA branch in
-`paths.app_home()`. There are no schema migration versions. Model weights and
+`paths.app_home()`. `DATA_SCHEMA` gates updater compatibility; no automatic migration framework exists. Model weights and
 embedding caches are separate Hub storage. Qt settings and in-memory desktop
 chat history are outside backend ownership.
 
@@ -327,12 +332,15 @@ Other environment inputs: `MAGNITE_ENGINE_OVERRIDE`, `MAGNITE_OLLAMA_URL`
 (default `http://127.0.0.1:11434`), Hub authentication/offline/cache variables,
 and ML library device/runtime variables. `MAGNITE_OLLAMA_URL` and Hub constants
 are read at import; restart after changing them. The service has local-path
-operations and no application authentication; it binds loopback in the CLI path.
+operations and binds loopback in the CLI path. The CLI access wrapper checks
+loopback Host values and requires the desktop launch token on all routes except
+`/health`; tokenless developer launches omit credential checks.
 
 ## 10. Shutdown and troubleshooting entry points
 
 Desktop teardown aborts pending replies and asks `BackendManager::stop()` to
-terminate the child. It waits 15 seconds, then kills it and waits another 3.
+request graceful shutdown: POSIX SIGTERM or authenticated Windows
+`POST /_desktop/shutdown`. It waits 15 seconds, then kills it and waits another 3.
 Uvicorn's FastAPI shutdown runs `TrainingJobManager.shutdown()` in a worker
 thread (sets events, persists status, joins its worker for up to 2 seconds),
 then runs `InferenceSupervisor.unload()` in a worker thread. vLLM teardown is

@@ -1,5 +1,7 @@
 # Release preparation verification — 2026-09-29
 
+> Historical 2026-09-29 verification snapshot. The results and pending statements below describe that run, not the current checkout. For subsequent authenticated three-platform package verification, see [native package evidence](../development/NATIVE_PACKAGES.md) and [current limitations](../LIMITATIONS.md).
+
 Base application commit: `e5bc39903d9738581043a209c3bd20d2767f3477`. Documentation, example inputs, license,
 repository templates, and CI configuration were added in the working tree. No
 application source, CMake configuration, or Python dependency declaration changed.

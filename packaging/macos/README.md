@@ -52,7 +52,7 @@ Planned contents:
 | `qt_notices.py` | fix ✔ | generate `licenses/qt/` (Qt LGPL/GPL texts + third-party notices for this Qt build) from Qt's `qt_attribution.json` at the pinned tag |
 | `check_dmg.sh` | 7 ✔ | mount read-only, check layout, run `smoke_bundle.sh` on the app inside the volume, detach |
 | `TESTING.md` | 12 ✔ | tester instructions, including the Gatekeeper steps |
-| `sign_and_notarize.sh` | 11 | Developer ID signing + notarization (**BLOCKED**, no certificate) |
+| `sign_and_notarize.sh` | 11 | Developer ID signing + notarization (**DEFERRED** by maintainer; requires certificate and native acceptance) |
 
 Requirements on the build host: Command Line Tools, CMake, `uv`, and the pinned
 official Qt referenced by `MAGNITE_QT_ROOT` (see

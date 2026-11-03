@@ -1,5 +1,7 @@
 # Backend audit and verification — 2026-10-05
 
+> Historical 2026-10-05 audit snapshot. Later fixes, authentication and native-package verification supersede its then-current gaps. See [current architecture](architecture.md), [documentation review](DOCUMENTATION_REVIEW.md), and [native evidence](NATIVE_PACKAGES.md).
+
 Scope: all Python modules under `backend/src/backend`, the backend test runners,
 backend packaging/CI configuration, and the Qt startup/IPC callers. This is a
 source review plus targeted automated and real-model verification, not a claim

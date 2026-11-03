@@ -1,7 +1,9 @@
 # Linux preview packaging
 
-The canonical first release is **v0.1-preview**. Work continues on the original
-`release/v0.1-testing` branch using current `dev`; `master` is untouched.
+The canonical first release is **v0.1-preview**. Current native package work
+is integrated on `release/integration`; the original Linux implementation used
+`release/v0.1-testing`. The public preview remains Linux-only; native Mac/Windows
+packages are testing artifacts. See [native evidence](../docs/development/NATIVE_PACKAGES.md).
 See [the release/update architecture and work log](../docs/development/RELEASE_PIPELINE.md)
 for CI, signing setup, updater behavior, deferred checklist work and later platforms.
 
@@ -66,7 +68,7 @@ and never falls back to a system Python once `Contents/Resources/runtime` exists
 `bash packaging/macos/run_regressions.sh` (a bare `unittest` run is affected by the `/var` symlink).
 
 These are **testing** builds: ad-hoc signed, not notarized, one architecture, minimum macOS 14.0. Developer ID signing and notarization
-are not done (blocked on a certificate). Tester instructions: [`macos/TESTING.md`](macos/TESTING.md). Evidence and limits:
+are deferred by the maintainer; a public signing path still needs credentials and acceptance. Tester instructions: [`macos/TESTING.md`](macos/TESTING.md). Evidence and limits:
 [`docs/release/macos/V0_1_MACOS_TESTING.md`](../docs/release/macos/V0_1_MACOS_TESTING.md).
 
 ## Native integration automation

@@ -1,6 +1,6 @@
 # Magnite LLM architecture
 
-This document describes the implementation in this checkout, reviewed on 2026-10-02. It is a code-oriented guide to responsibilities, process boundaries, data flows, persistence, and extension points. Planned features and historical design phases are not treated as implemented functionality.
+This document describes the implementation in this checkout, originally reviewed on 2026-10-02 and refreshed for integrated packaging, authentication, and lifecycle changes on 2026-11-02. It is a code-oriented guide to responsibilities, process boundaries, data flows, persistence, and extension points. Planned features and historical design phases are not treated as implemented functionality.
 
 Magnite is a native C++20/Qt 6 desktop application backed by a Python FastAPI service. The desktop owns presentation and interaction; Python owns model management, inference, adapter training, and document retrieval. The supported product scope is local inference, LoRA/QLoRA training, adapters, and RAG. Hosted inference and cloud training are outside that scope.
 
@@ -82,8 +82,9 @@ The HTTP contract is expressed in Python routes/Pydantic models and manually con
 
 ### Desktop startup
 
-Packaged Linux runs use the adjacent isolated Python runtime instead of the
-source-checkout lookup described below, with no fallback to a host interpreter.
+Packaged Linux/Windows runs use the adjacent isolated Python runtime; macOS
+uses `Contents/Resources/runtime`. These take priority over source discovery and
+do not fall back to a host interpreter if the packaged runtime is incomplete.
 Signed preview delivery and restart installation are described in
 [the release/update architecture](RELEASE_PIPELINE.md).
 
@@ -91,11 +92,11 @@ Signed preview delivery and restart installation are described in
 1. `main.cpp` creates `QApplication`, setting the QSettings organization to `Magnite` and application name to `Magnite LLM`.
 2. Theme resources and fonts are initialized. Special verification modes can run before a normal window is created.
 3. `MainWindow` constructs the workspace, shared `BackendClient`, and `BackendManager`, restores panel preferences, and starts the backend.
-4. `BackendManager` derives the repository root from the executable directory. The expected source layout is `<repo>/build/magnite-app`, `<repo>/backend/src`, and `<repo>/.venv`.
-5. It prefers `.venv/bin/python` (`.venv/Scripts/python.exe` on Windows), with `python3` as fallback, and launches `-m backend.main --port 0`. It prepends `backend/src` to `PYTHONPATH`.
-6. It passes the configured engine preference as `MAGNITE_ENGINE_OVERRIDE`. A saved data-directory preference supplies `MAGNITE_HOME` only if that environment variable is not already set.
+4. For source builds, `BackendManager` searches upward from the executable for `backend/src/backend`, including multi-config Windows layouts. The usual POSIX layout remains `<repo>/build/magnite-app` and `<repo>/.venv`.
+5. It prefers `.venv/bin/python` on POSIX, falling back to `python3`. Windows probes `.venv312/Scripts/python.exe` then `.venv/Scripts/python.exe`, then `python`/`py`. Source mode prepends `backend/src` to `PYTHONPATH`; packaged mode uses isolated `-I -B` Python.
+6. It passes `MAGNITE_ENGINE_OVERRIDE` and a fresh `MAGNITE_API_TOKEN`. A saved data-directory preference supplies `MAGNITE_HOME` only if absent; relative data overrides are made absolute before the child changes working directory. Python consumes/removes the token from its environment and locks the data directory before serving.
 7. Python selects a free loopback port and prints `Magnite backend starting on http://127.0.0.1:<port>` to stderr. The desktop buffers complete stderr lines, forwards logs, and extracts the port from this announcement.
-8. The desktop retries `GET /health` until successful while the process remains running. The `started` signal then gives the shared client its base URL and connects the panels to it.
+8. The desktop retries `GET /health` using a raw `QTcpSocket`, requiring HTTP 200 and a matching application version. The `started` signal wires the client base URL and Bearer token to the panels.
 
 The announcement is a discovery protocol, not a readiness guarantee. `/health` confirms the service can answer requests; it does not prove that weights are loaded or that a particular ML dependency/device works. Port selection probes and releases a socket before Uvicorn binds it, rather than passing an already-bound socket to the server.
 
@@ -115,7 +116,7 @@ The two adapter-store objects share durable records through SQLite, not a shared
 
 The FastAPI shutdown hook asks the training manager to cancel/shut down, then unloads inference using worker threads. Training shutdown sets cancellation events and waits up to two seconds for its daemon worker.
 
-The desktop requests Python termination and waits up to 15 seconds, then kills it if necessary and waits another three seconds. On Linux, Python makes a best-effort `prctl` parent-death-signal request so a dead desktop also terminates its backend. vLLM has its own terminate/kill cleanup and an `atexit` cleanup registration.
+The desktop requests graceful shutdown (SIGTERM on POSIX; authenticated `POST /_desktop/shutdown` on Windows), waits up to 15 seconds, then kills the child if necessary and waits another three seconds. Linux uses a best-effort `prctl` parent-death signal; macOS polls parent identity; Windows attaches the backend to a kill-on-close Job Object. vLLM has terminate/kill and `atexit` cleanup. These mechanisms do not establish safe interruption of every active ML operation.
 
 An unexpected backend exit causes the desktop to abort outstanding requests, clear the client base URL, and display an unavailable/error state. There is no automatic crash-restart loop. Forced termination does not guarantee that all native ML work or file writes complete cleanly.
 
@@ -278,7 +279,7 @@ The training method produces adapters, not merged full-model exports. Quantized 
 
 Jobs are persisted at submission, terminal completion, cancellation and shutdown; live metrics primarily mutate the in-memory job object. On startup, persisted `queued` or `running` records become `error` with an interruption message. Jobs are not automatically resumed, and intermediate metric updates are not continuously checkpointed. Trainer checkpoint saving is disabled in this workflow.
 
-Cancellation of a queued job is immediate in its status. Running cancellation is cooperative and may wait for a model load or training step. Dataset deletion has no equivalent active-job reference guard, so callers should not remove an input needed by queued/running work.
+Cancellation of a queued job is immediate in its status. Running cancellation is cooperative and may wait for a model load or training step. Dataset deletion is coordinated with job submission and returns 409 while queued/running jobs reference it. Cancellation during saving is honored before synchronized adapter publication; cancelled output is removed.
 
 ## Adapter lifecycle
 
@@ -290,7 +291,7 @@ The adapter router packages exports as ZIP archives containing `record.json` and
 
 Imported files go into a fresh directory under `adapters/imports/`; the stored path is replaced with that local destination. Adapter deletion requires a path inside the managed adapter root and refuses shared root/import/export directories. Export archives are separate artifacts and remain independently managed.
 
-Training output directories currently derive from the configured adapter name. Unique adapter record IDs therefore do not themselves guarantee unique weight directories for repeated names. Native multi-LoRA serving and conversion of PEFT adapters to GGUF are not implemented.
+Training output directories use unique `adapters/adapter-<job-id>` paths; display names cannot choose or overwrite weight directories. Exports validate source configuration/safetensors and publish independent immutable download URLs; pickle adapter imports are rejected. Native multi-LoRA serving and conversion of PEFT adapters to GGUF are not implemented.
 
 ## Retrieval and document processing
 
@@ -299,7 +300,7 @@ RAG is a local pipeline implemented by extraction/chunking helpers, a cached sen
 ### Ingestion
 
 1. Accept a local document path or named inline content.
-2. For paths, extract text from TXT, Markdown, HTML or PDF. Markdown processing retains code content; HTML stripping removes scripts/styles/tags; PDFs use `pypdf` text extraction without OCR. Inline content is used directly as text.
+2. For paths, extract text from TXT, Markdown, HTML or PDF. Markdown processing retains code content; HTML stripping removes scripts/styles/tags; PDFs use `pypdf` text extraction without OCR. Inline HTML/Markdown goes through the same extraction logic; inline PDFs are rejected and require a file path.
 3. Split into overlapping whitespace-separated word chunks. Defaults are 512 words with 64-word overlap; schema fields and stored counts sometimes call these “tokens,” but they are not tokenizer tokens.
 4. Lazily load the configured sentence-transformers model, defaulting to `all-MiniLM-L6-v2`, and encode normalized float32 vectors.
 5. Check cancellation and store document metadata, chunk text and vectors in one SQLite transaction.
@@ -379,17 +380,17 @@ HTTP validation errors, missing records, busy conflicts and execution errors are
 
 ## Trust and network boundaries
 
-The backend binds to `127.0.0.1` and has no application authentication layer. It runs with the user's filesystem permissions and can ingest local paths. This is a trusted local desktop service, not a public/LAN deployment architecture or an isolation boundary between untrusted local users/processes.
+The CLI binds to `127.0.0.1`. `LocalAccessMiddleware` requires a loopback Host and, when launched by the desktop, a per-launch Bearer credential on every route except `/health`. A standalone backend without `MAGNITE_API_TOKEN` logs a warning and omits credential checks. Direct `uvicorn backend.server:app` bypasses the CLI access wrapper and data-directory lock. The backend runs with the user's filesystem permissions and can ingest local paths; authentication does not sandbox same-user processes or make public/LAN deployment supported.
 
-Network activity includes Hugging Face search/download/metadata access, initial embedding-weight downloads, and communication with Ollama. `MAGNITE_OLLAMA_URL` defaults to `http://127.0.0.1:11434` but can point elsewhere, changing where Ollama inference and prompts go. vLLM is started locally. No application telemetry or encryption-at-rest feature is implemented.
+Network activity includes Hugging Face search/download/metadata access, initial embedding-weight downloads, GitHub preview update checks/downloads, and communication with Ollama. `MAGNITE_OLLAMA_URL` defaults to `http://127.0.0.1:11434` but can point elsewhere, changing where Ollama inference and prompts go. vLLM is started locally. No application telemetry or encryption-at-rest feature is implemented.
 
 Archive validation and managed deletion checks protect specific file operations; they do not sandbox ML dependencies, training, or the backend generally. Exports and logs can include local paths, model references and error details. Offline operation requires appropriate cached weights and dependencies, not merely a local GUI/backend connection.
 
 ## Build and verification
 
-The native build requires CMake 3.20+, C++20, and Qt 6 Widgets, Network and Svg. CMake enables AUTOMOC/AUTORCC/AUTOUIC and `-Wall -Wextra` for GCC/Clang. New C++ sources must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt`.
+The native build requires CMake 3.20+, C++20, Qt 6 Widgets, Network and Svg, and OpenSSL Crypto. CMake enables AUTOMOC/AUTORCC/AUTOUIC and `-Wall -Wextra` for GCC/Clang. New C++ sources must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt`.
 
-The Python package requires Python 3.10+. Base dependencies include FastAPI, Uvicorn, HTTPX, Pydantic, huggingface_hub, llama-cpp-python, tqdm, AnyIO and NumPy. The `[ml]` extra adds torch, Transformers, PEFT, bitsandbytes, sentence-transformers, datasets, accelerate, safetensors and pypdf. vLLM and Ollama require separate installation. Dependencies have lower bounds rather than a fully locked environment.
+The Python package requires Python 3.10+. Base dependencies include FastAPI, Uvicorn, HTTPX, Pydantic, huggingface_hub, llama-cpp-python, tqdm, AnyIO, NumPy and safetensors. The `[ml]` extra adds torch, Transformers, PEFT, bitsandbytes, sentence-transformers, datasets, accelerate and pypdf. vLLM and Ollama require separate installation. Editable dependencies have lower bounds; packaged Linux/macOS/Windows runtimes use platform-specific full constraints tested by the native jobs.
 
 ```bash
 python3 -m venv .venv
@@ -413,7 +414,7 @@ Verification layers are complementary:
 | Visual captures | `./build/magnite-app --screenshot <dir>` | Panel screenshots for manual review |
 | Additional live checks | [`backend/tests/live_workflow.py`](../../backend/tests/live_workflow.py) | Real-service workflow verification |
 
-The [CI workflow](../../.github/workflows/verify.yml) configures Ubuntu, Python 3.12, Qt offscreen mode, temporary application/settings storage, a base backend installation, backend regressions, native build, theme audit, UI checks and bare selftest. Its configuration is not evidence that a particular hosted run passed. Live vLLM/Ollama, platform packaging and hardware combinations require separate verification; see the [verification report](../release/VERIFICATION.md) and [release checklist](../../RELEASE_CHECKLIST.md).
+The [CI workflow](../../.github/workflows/verify.yml) configures Ubuntu, Python 3.12, Qt offscreen mode, temporary application/settings storage, a base backend installation, backend regressions, native build, theme audit, UI checks and bare selftest. Its configuration is not evidence that a particular hosted run passed. Live vLLM/Ollama, platform packaging and hardware combinations require separate verification; see [native package evidence](NATIVE_PACKAGES.md), the [historical verification report](../release/VERIFICATION.md), and [release checklist](../../RELEASE_CHECKLIST.md).
 
 ## Extension points and constraints
 
@@ -425,4 +426,4 @@ For a new workspace, derive from `BasePanel`, add navigation and backend wiring 
 
 For retrieval changes, preserve embedding-model/dimension consistency and atomic document/chunk insertion. Replacing the flat search with a scalable index would also require a durable synchronization/rebuild strategy, not just a different similarity function.
 
-Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, flat full-scan retrieval, and preview-only Linux packaging and incomplete macOS/Windows deployment. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).
+Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, flat full-scan retrieval, and remaining public-release/signing/updater work for Mac/Windows despite verified native testing packages. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).

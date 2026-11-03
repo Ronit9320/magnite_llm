@@ -6,10 +6,14 @@ This is expected. You approve the app once, in System Settings, and macOS rememb
 Only install a copy you got from the Magnite maintainers, and compare its checksum first:
 
 ```sh
-shasum -a 256 ~/Downloads/Magnite-0.1.0-test.1-arm64.dmg
+shasum -a 256 ~/Downloads/Magnite-v0.1-preview-arm64.dmg
 ```
 
-The result must match the published SHA-256.
+Use the actual filename supplied with your testing kit; earlier kits used
+`Magnite-0.1.0-test.1-arm64.dmg`. The result must match that artifact's SHA-256.
+Current integrated candidates and checksums come from the
+[native package workflow](development/NATIVE_PACKAGES.md); these are testing
+artifacts, not a public macOS release.
 
 ## Steps
 
@@ -26,7 +30,8 @@ The Open Anyway button only appears for a while after a blocked launch. If it is
 On a standard (non-administrator) account, copying the app into `/Applications` needs an administrator's name and password.
 
 The exact wording of the dialogs differs between macOS versions and has not been recorded for this build. This flow was completed on a
-standard account on macOS 27.0.1. Other versions have not been tested.
+standard account on macOS 27.0.1. That physical-account flow has not been recorded on other versions; later hosted
+macOS 15 bundle checks are separate evidence, not a native Gatekeeper walkthrough.
 
 ## If it still won't open
 
@@ -45,5 +50,7 @@ standard account on macOS 27.0.1. Other versions have not been tested.
 ## What approving means
 
 Approving the app tells macOS to run this one copy despite the missing Apple notarization. It doesn't change any other protection on
-your Mac. The app runs with your user's permissions, keeps its data in `~/.magnite`, and talks to Hugging Face only for model and
-embedding downloads (see [storage and privacy](STORAGE_AND_PRIVACY.md)).
+your Mac. The app runs with your user's permissions and keeps its data in
+`~/.magnite` unless overridden. Network activity can include Hugging Face searches,
+metadata and weight downloads, GitHub update checks, and a configured Ollama
+service. See [storage and privacy](STORAGE_AND_PRIVACY.md).

@@ -4,7 +4,7 @@
 
 | Data | Location / behavior |
 | --- | --- |
-| Linux application data | `~/.magnite`, overridden by `MAGNITE_HOME` |
+| Application data | Linux/macOS: `~/.magnite`; Windows: `%APPDATA%/Magnite` when APPDATA is set; overridden by `MAGNITE_HOME` |
 | Saved data-directory preference | Applied on next desktop start; MAGNITE_HOME takes precedence; does not move existing data |
 | Registry and datasets | SQLite databases and normalized dataset files under application data |
 | Training jobs and adapters | Durable job history and adapter files under application data |
@@ -21,7 +21,9 @@ then legacy `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then
 variables before starting the app. Refreshing the model library discovers
 existing base-model snapshots without downloading them. See the
 [backend process map](development/BACKEND_PROCESS.md) for selection and completeness rules.
-The code has a Windows APPDATA path branch, but Windows behavior is not verified.
+Windows package/lifecycle checks passed in the hosted Windows Server environment;
+consumer Windows 10/11 desktop acceptance remains separate. See
+[native package evidence](development/NATIVE_PACKAGES.md).
 
 ## Network activity
 
@@ -38,7 +40,11 @@ weights, and should be verified with the intended engines.
 
 No encryption-at-rest feature is implemented. The backend runs with the user's
 filesystem permissions. Requests to an app-launched backend need a per-launch secret
-(verified on macOS only); a backend started by hand has no credential check.
+on all platforms; `/health` is exempt. Non-loopback `Host` values are refused.
+A backend started by hand without `MAGNITE_API_TOKEN` has no credential check.
+POSIX and Windows file locks prevent two backends using the same data directory.
+Authentication and lifecycle regressions run in the native package jobs; earlier
+physical-Mac results are recorded separately in the release evidence.
 Keep it local and use operating-system account/storage protections as needed.
 Logs and exported adapter metadata may contain local paths, model identifiers,
 or error text. Inspect and redact them before sharing.

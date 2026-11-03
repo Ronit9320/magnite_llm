@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — integrated native testing candidates
+
+- Native Linux CPU AppImage, Mac ARM DMG and Windows x86-64 CPU installer
+  candidates passed the 2026-10-30 hosted integration workflow from clean source.
+  These do not replace the public Linux v0.1-preview assets.
+- Per-launch desktop API Bearer credentials, loopback Host checks, and POSIX/Windows
+  data-directory locks; platform backend supervision and graceful Windows shutdown.
+- Full platform Python dependency constraints and clean-source package provenance.
+- Training snapshot/commit serialization and native SQLite/archive lifetime fixes.
+- Current package, authentication, storage, and lifecycle documentation refreshed.
+
+See [native package evidence](docs/development/NATIVE_PACKAGES.md). Mac notarization,
+Windows signing, platform updater delivery and broader physical-machine/GPU
+acceptance remain separate work.
+
 ## v0.1-preview — Linux development preview
 
 ### Available workflows

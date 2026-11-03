@@ -1,5 +1,7 @@
 # Magnite extensive bug-testing report
 
+> Historical 2026-10-09 findings. BUG-001–013 were repaired; see the repair-verification section below. For current platform, API-security and packaging status, see [current limitations](docs/LIMITATIONS.md) and [native evidence](docs/development/NATIVE_PACKAGES.md).
+
 Tested **2026-10-09**, source commit **6c20082f319569b3e9c5388d05d5388bd59fb799**.
 
 **13 reproducible findings: 3 high, 10 medium.** No application fixes were made. This report, a reusable probe script, and evidence logs are the audit deliverables. Existing tests passing does not cover the failure cases below.
