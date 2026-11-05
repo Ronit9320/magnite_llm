@@ -105,6 +105,12 @@ QProgressBar::chunk { background: @accentPrimary; border-radius: 4px; }
 QFrame#chatBubbleUser { background: @surfaceFillHover; border: 1px solid @surfaceBorder; border-radius: 14px; }
 QFrame#chatBubbleAssistant { border-radius: 6px; background: transparent; border: none; }
 QLabel#chatBubbleText { color: @textPrimary; font-size: 14px; }
+QWidget#versionSwitcher QPushButton, QPushButton#editButton, QPushButton#retryButton { background: transparent; border: none; border-radius: 6px; padding: 0; min-height: 0; }
+QWidget#versionSwitcher QPushButton:hover:enabled, QPushButton#editButton:hover:enabled, QPushButton#retryButton:hover:enabled { background: @surfaceFillHover; }
+QPlainTextEdit#messageEditBox { background: @insetBackground; border: 1px solid @accentPrimary; border-radius: 10px; padding: 8px; font-size: 14px; }
+QPushButton#editSave { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
+QPushButton#editSave:hover { background: @accentHover; border-color: @textPrimary; }
+QLabel#versionLabel { color: @textMuted; font-size: 12px; }
 QStatusBar { background: @insetBackground; color: @textSecondary; font-size: 12px; border-top: 1px solid @surfaceBorder; }
 QToolTip { background: @textPrimary; color: @surfaceFill; padding: 6px 8px; border: none; border-radius: 6px; }
 QFrame#workspaceBar { border-bottom: 1px solid @surfaceBorder; background: @canvasBackground; }

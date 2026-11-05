@@ -68,6 +68,8 @@ set(MAGNITE_SOURCES
     src/widgets/overviewtile.h
     src/widgets/contextmeter.cpp
     src/widgets/contextmeter.h
+    src/widgets/versionswitcher.cpp
+    src/widgets/versionswitcher.h
     src/widgets/confirmation.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
@@ -76,6 +78,10 @@ set(MAGNITE_SOURCES
     src/panels/adapterspanel.cpp
     src/panels/chatpanel.cpp
     src/panels/chatbubble.cpp
+    src/panels/chattree.cpp
+    src/panels/chattree.h
+    src/panels/messagerow.cpp
+    src/panels/messagerow.h
     src/panels/settingspanel.cpp
     resources.qrc
 )

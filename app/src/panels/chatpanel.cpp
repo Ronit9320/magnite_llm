@@ -8,6 +8,7 @@
 #include "widgets/studiocanvas.h"
 #include "widgets/contextmeter.h"
 #include "panels/chatbubble.h"
+#include "panels/messagerow.h"
 
 #include <QSettings>
 #include <QStyle>
@@ -434,29 +435,146 @@ void ChatPanel::onSend() {
     if (m_loading || m_preparing) return;
     const QString text = m_input->toPlainText().trimmed();
     if (text.isEmpty() || m_streaming) return;
-    if (!m_client || !m_client->isReady()) {
-        setStatus("Backend not connected.", "error");
+    if (anyEditing()) {
+        setStatus("Finish or cancel your edit first.", "warn");
         return;
     }
-    // Only a conversation longer than what compaction keeps verbatim can be compacted.
-    const int uncompacted = m_history.size() - m_compaction.covered;
-    if (m_autoCompactPercent > 0 && m_modelLoaded && uncompacted + 1 > kKeepRecent)
-        measureThenSend(text);
-    else
-        startSend(text);
+    beginSend(PendingSend{PendingSend::NewMessage, ChatTree::kRoot, text});
 }
 
-void ChatPanel::measureThenSend(const QString &text) {
+bool ChatPanel::beginSend(const PendingSend &send) {
+    if (m_loading || m_preparing || m_streaming) return false;
+    if (!m_client || !m_client->isReady()) {
+        setStatus("Backend not connected.", "error");
+        return false;
+    }
+    m_activeSend = send;
+    // Only a conversation longer than what compaction keeps verbatim can be compacted.
+    const int prefix = prefixCount(send);
+    const int uncompacted = prefix - m_tree.compaction(prefix).covered + (send.kind == PendingSend::Retry ? 0 : 1);
+    if (m_autoCompactPercent > 0 && m_modelLoaded && uncompacted > kKeepRecent)
+        measureThenSend(send);
+    else
+        startSend(send);
+    return true;
+}
+
+MessageRow *ChatPanel::makeRow(ChatBubble::Role role, ChatTree::NodeId node, const QString &text) {
+    auto *row = new MessageRow(role, node, text, m_chatHost);
+    connect(row, &MessageRow::versionStep, this, &ChatPanel::onVersionStep);
+    connect(row, &MessageRow::retryClicked, this, &ChatPanel::onRetry);
+    connect(row, &MessageRow::editRequested, this, &ChatPanel::onEditRequested);
+    connect(row, &MessageRow::editSaved, this, &ChatPanel::onEditSaved);
+    connect(row, &MessageRow::editCancelled, this, [this]() { updateActions(); });
+    return row;
+}
+
+MessageRow *ChatPanel::rowForNode(ChatTree::NodeId node) const {
+    if (!m_chatHost) return nullptr;
+    for (MessageRow *row : m_chatHost->findChildren<MessageRow *>())
+        if (row->node() == node) return row;
+    return nullptr;
+}
+
+bool ChatPanel::anyEditing() const {
+    if (!m_chatHost) return false;
+    for (MessageRow *row : m_chatHost->findChildren<MessageRow *>())
+        if (row->isEditing()) return true;
+    return false;
+}
+
+void ChatPanel::refreshRows() {
+    if (!m_chatHost) return;
+    const bool busy = m_streaming || m_preparing || m_loading;
+    const bool editing = anyEditing();
+    const ChatTree::NodeId last = m_tree.lastOnPath();
+    const bool canRetry = !busy && !editing && last != ChatTree::kRoot && m_tree.role(last) == "assistant";
+    for (MessageRow *row : m_chatHost->findChildren<MessageRow *>()) {
+        row->setActionsEnabled(!busy);
+        row->setSwitcherEnabled(!busy && !editing);   // a redraw would destroy an open editor
+        row->setRetryAvailable(canRetry && row->node() == last);
+        row->setResendable(row->node() == last && m_tree.role(last) == "user");
+        if (row->node() != ChatTree::kRoot) row->setVersion(m_tree.versionIndex(row->node()), m_tree.versionCount(row->node()));
+    }
+}
+
+void ChatPanel::onVersionStep(ChatTree::NodeId node, int delta) {
+    if (m_streaming || m_preparing || m_loading || anyEditing()) return;
+    const QList<ChatTree::NodeId> versions = m_tree.versionsOf(node);
+    const int target = m_tree.versionIndex(node) + delta;
+    if (target < 0 || target >= versions.size()) return;
+    m_tree.activate(versions.at(target));
+    // Keep the reader where they were rather than jumping to the bottom.
+    QScrollBar *bar = m_chatScroll->verticalScrollBar();
+    const int position = bar->value();
+    renderTranscript();
+    QTimer::singleShot(0, this, [bar, position]() { bar->setValue(qMin(position, bar->maximum())); });
+    refreshContextUsage();
+}
+
+void ChatPanel::onEditRequested(ChatTree::NodeId node) {
+    if (m_streaming || m_preparing || m_loading) return;
+    for (MessageRow *row : m_chatHost->findChildren<MessageRow *>())
+        if (row->isEditing() && row->node() != node) row->cancelEdit();
+    if (MessageRow *row = rowForNode(node)) row->beginEdit(row->bubble()->text());
+    updateActions();
+}
+
+void ChatPanel::onEditSaved(ChatTree::NodeId node, const QString &text) {
+    // The editor has already closed. If the send cannot start, give the text back.
+    // Saving a message that never got a reply, unchanged, sends it again rather than adding a second copy.
+    const bool resend = node == m_tree.lastOnPath() && m_tree.role(node) == "user" && text == m_tree.content(node);
+    if (!beginSend(PendingSend{resend ? PendingSend::Retry : PendingSend::Edit, node, text})) {
+        if (MessageRow *row = rowForNode(node)) row->beginEdit(text);
+    }
+    updateActions();
+}
+
+int ChatPanel::prefixCount(const PendingSend &send) const {
+    if (send.kind == PendingSend::NewMessage) return m_tree.activePath().size();
+    // A retry anchored on a user message (one that never got a reply) keeps that message in the prefix.
+    return m_tree.pathIndexOf(send.anchor) + (send.kind == PendingSend::Retry && m_tree.role(send.anchor) == "user" ? 1 : 0);
+}
+
+bool ChatPanel::commitReply() {
+    const bool retry = m_streamKind == PendingSend::Retry;
+    const QStringList notes = m_pendingNotes;   // a retry's compaction dividers wait here until its reply exists
+    m_pendingNotes.clear();
+    m_pathLimit = -1;
+    const std::optional<ChatTree::Compaction> retryCompaction = m_retryCompaction;
+    m_retryCompaction.reset();
+    const QPointer<MessageRow> row = m_streamRow;
+    m_streamRow = nullptr;
+    if (m_pendingResponse.isEmpty()) {
+        if (retry) renderTranscript();   // nothing came back: put the previous reply back on screen
+        return false;
+    }
+    const ChatTree::NodeId reply = m_tree.addChild(m_replyParent, "assistant", m_pendingResponse);
+    if (retry) {
+        for (const QString &note : notes) m_tree.addNote(reply, note);
+        if (retryCompaction) m_tree.setCompaction(reply, *retryCompaction);
+    }
+    if (row) row->setNode(reply);
+    return true;
+}
+
+void ChatPanel::onRetry(ChatTree::NodeId reply) {
+    if (m_streaming || m_preparing || m_loading || anyEditing()) return;
+    if (reply == ChatTree::kRoot || reply != m_tree.lastOnPath() || m_tree.role(reply) != "assistant") return;
+    beginSend(PendingSend{PendingSend::Retry, reply, m_tree.content(m_tree.parentOf(reply))});
+}
+
+void ChatPanel::measureThenSend(const PendingSend &send) {
     m_preparing = true;
     updateActions();
     m_stopButton->setEnabled(true);
-    QJsonArray messages = effectiveMessages();
-    messages.append(QJsonObject{{"role", "user"}, {"content", text}});
+    QJsonArray messages = effectiveMessages(prefixCount(send));
+    if (send.kind != PendingSend::Retry) messages.append(QJsonObject{{"role", "user"}, {"content", send.text}});
     QJsonObject body;
     body["messages"] = messages;
     body["max_tokens"] = m_maxTokensSpin->value();
     const quint64 requestId = ++m_prepareRequest;
-    m_prepareReply = m_client->post("/inference/context-usage", body, [this, requestId, text](int status, const QJsonDocument &doc) {
+    m_prepareReply = m_client->post("/inference/context-usage", body, [this, requestId, send](int status, const QJsonDocument &doc) {
         if (requestId != m_prepareRequest) return;
         bool compact = false;
         if (status == 200) {
@@ -468,29 +586,32 @@ void ChatPanel::measureThenSend(const QString &text) {
                       double(usage["reserved"].toInt()) / limit < m_autoCompactPercent / 100.0;
         }
         if (compact) {
-            compactThenSend(text);
+            compactThenSend(send);
         } else {
             m_preparing = false;
             m_stopButton->setEnabled(false);
             updateActions();
-            startSend(text);
+            startSend(send);
         }
     });
 }
 
-void ChatPanel::compactThenSend(const QString &text) {
+void ChatPanel::compactThenSend(const PendingSend &send) {
     setStatus("Compacting…");
+    const int prefix = prefixCount(send);
+    const ChatTree::Compaction base = m_tree.compaction(prefix);
+    const QList<QJsonObject> path = m_tree.messages(prefix);
     QJsonArray posted;
-    for (int i = m_compaction.covered; i < m_history.size(); ++i) posted.append(m_history.at(i));
-    posted.append(QJsonObject{{"role", "user"}, {"content", text}});
+    for (int i = base.covered; i < path.size(); ++i) posted.append(path.at(i));
+    if (send.kind != PendingSend::Retry) posted.append(QJsonObject{{"role", "user"}, {"content", send.text}});
     QJsonObject body;
     body["messages"] = posted;
-    body["previous_summary"] = m_compaction.summary;
+    body["previous_summary"] = base.summary;
     body["max_tokens"] = m_maxTokensSpin->value();
     body["target_fill"] = m_autoCompactPercent / 100.0;
     body["keep_recent"] = kKeepRecent;
     const quint64 requestId = m_prepareRequest;
-    m_prepareReply = m_client->post("/inference/compact", body, [this, requestId, text](int status, const QJsonDocument &doc) {
+    m_prepareReply = m_client->post("/inference/compact", body, [this, requestId, send, base](int status, const QJsonDocument &doc) {
         if (requestId != m_prepareRequest) return;
         m_preparing = false;
         m_stopButton->setEnabled(false);
@@ -500,15 +621,18 @@ void ChatPanel::compactThenSend(const QString &text) {
             const int covered = result["covered"].toInt();
             if (covered > 0) {
                 const bool summarized = result["method"].toString() == "summary";
-                m_compaction.covered += covered;
-                if (summarized) m_compaction.summary = result["summary"].toString();
-                addContextDivider(summarized ? "Context compacted — earlier messages were summarized"
-                                             : "Context compacted — earlier messages were dropped to make room");
+                ChatTree::Compaction next = base;
+                next.covered += covered;
+                if (summarized) next.summary = result["summary"].toString();
+                m_pendingCompaction = next;
+                const QString note = summarized ? "Context compacted — earlier messages were summarized"
+                                                : "Context compacted — earlier messages were dropped to make room";
+                m_pendingNotes.append(note);
             }
         } else {
-            addContextDivider("Could not compact earlier messages; sent as is.");
+            m_pendingNotes.append("Could not compact earlier messages; sent as is.");
         }
-        startSend(text);
+        startSend(send);
     });
 }
 
@@ -519,6 +643,10 @@ void ChatPanel::cancelPreparing() {
     if (m_prepareReply) m_prepareReply->abort();
     m_preparing = false;
     m_stopButton->setEnabled(false);
+    if (m_activeSend.kind == PendingSend::Edit) {   // give the typed edit back
+        if (MessageRow *row = rowForNode(m_activeSend.anchor)) row->beginEdit(m_activeSend.text);
+    }
+    m_activeSend = PendingSend();
     updateActions();
     setStatus("Compaction stopped.");
 }
@@ -532,22 +660,72 @@ void ChatPanel::addContextDivider(const QString &text) {
     ensureTrailingStretch();
 }
 
-void ChatPanel::startSend(const QString &text) {
-    m_followOutput = true;
-    m_welcome->hide();
-    m_input->clear();
+void ChatPanel::renderTranscript(int pathCount, const QStringList &trailingNotes) {
+    // Remove everything but the welcome panel. Detach first so findChildren() never sees stale widgets.
+    while (QLayoutItem *item = m_chatLayout->takeAt(0)) {
+        if (QWidget *w = item->widget(); w && w != m_welcome) {
+            w->hide();
+            w->setParent(nullptr);
+            w->deleteLater();
+        }
+        delete item;
+    }
+    if (pathCount < 0) pathCount = m_pathLimit;
+    const QList<ChatTree::NodeId> path = m_tree.activePath();
+    const int count = pathCount < 0 ? path.size() : qMin(pathCount, int(path.size()));
+    if (count == 0 && trailingNotes.isEmpty()) {
+        m_welcome->show();
+        m_chatLayout->addWidget(m_welcome, 1);
+    } else {
+        m_welcome->hide();
+    }
+    for (int i = 0; i < count; ++i) {
+        const ChatTree::NodeId id = path.at(i);
+        for (const QString &note : m_tree.notes(id)) addContextDivider(note);
+        const auto role = m_tree.role(id) == "user" ? ChatBubble::User : ChatBubble::Assistant;
+        m_chatLayout->addWidget(makeRow(role, id, m_tree.content(id)));
+    }
+    for (const QString &note : trailingNotes) addContextDivider(note);
+    ensureTrailingStretch();
+    refreshRows();
+}
 
-    // User bubble — right aligned.
-    auto *userBubble = new ChatBubble(ChatBubble::User, text, m_chatHost);
-    m_chatLayout->addWidget(userBubble, 0, Qt::AlignRight);
-    // Assistant bubble — left aligned; streamed into below.
-    m_streamBubble = new ChatBubble(ChatBubble::Assistant, QString(), m_chatHost);
-    m_chatLayout->addWidget(m_streamBubble, 0, Qt::AlignLeft);
+void ChatPanel::redrawForTest() { renderTranscript(); }
+
+void ChatPanel::startSend(const PendingSend &send) {
+    const QString text = send.text;
+    m_activeSend = PendingSend();
+    m_followOutput = true;
+    if (send.kind == PendingSend::NewMessage) m_input->clear();   // an edit leaves the composer's draft alone
+
+    // Add the user message to the conversation (an edit becomes a new version of the message it
+    // replaces), with the compaction and dividers that led to it.
+    m_streamKind = send.kind;
+    if (send.kind == PendingSend::Retry) {
+        // No new user message: the reply is made for the existing one. Only the messages up to it
+        // count until the new reply exists, and the old reply is not drawn while it streams.
+        const bool onUserMessage = m_tree.role(send.anchor) == "user";
+        m_streamHadReply = !onUserMessage;
+        m_replyParent = onUserMessage ? send.anchor : m_tree.parentOf(send.anchor);
+        m_pathLimit = prefixCount(send);
+        m_retryCompaction = m_pendingCompaction;   // stored on the new reply once it has text
+        m_pendingCompaction.reset();
+        renderTranscript(m_pathLimit, m_pendingNotes);   // the dividers join the tree with the new reply
+    } else {
+        const ChatTree::NodeId parent = send.kind == PendingSend::Edit ? m_tree.parentOf(send.anchor) : m_tree.lastOnPath();
+        m_replyParent = m_tree.addChild(parent, "user", text);
+        if (m_pendingCompaction) m_tree.setCompaction(m_replyParent, *m_pendingCompaction);
+        for (const QString &note : m_pendingNotes) m_tree.addNote(m_replyParent, note);
+        m_pendingCompaction.reset();
+        m_pendingNotes.clear();
+        // Draw the conversation, then an empty reply row that is streamed into below.
+        renderTranscript();
+    }
+    m_streamRow = makeRow(ChatBubble::Assistant, ChatTree::kRoot, QString());
+    m_chatLayout->addWidget(m_streamRow);
+    m_streamBubble = m_streamRow->bubble();
     ensureTrailingStretch();
     scrollToBottom();
-
-    // Append to history
-    m_history.append(QJsonObject{{"role", "user"}, {"content", text}});
 
     m_pendingResponse.clear();
     m_streamFailed = false;
@@ -590,7 +768,8 @@ void ChatPanel::startSend(const QString &text) {
             }
             if (event.value("done").toBool()) {
                 updateStreamingBubble(m_pendingResponse, false);
-                m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
+                const bool committed = commitReply();
+                const bool retryFailed = !committed && m_streamKind == PendingSend::Retry;
                 m_streamBubble = nullptr;
                 m_streaming = false;
                 m_activity->hide();
@@ -599,7 +778,8 @@ void ChatPanel::startSend(const QString &text) {
                 m_cursorVisible = false;
                 updateActions();
                 m_stopButton->setEnabled(false);
-                setStatus("Ready.");
+                if (retryFailed) setStatus(m_streamHadReply ? "Retry failed; kept the previous reply." : "No reply received.", "warn");
+                else setStatus("Ready.");
                 refreshContextUsage();
             }
         },
@@ -617,8 +797,7 @@ void ChatPanel::startSend(const QString &text) {
             // If not already finalized by done event
             if (m_streaming) {
                 updateStreamingBubble(m_pendingResponse, false);
-                if (!m_pendingResponse.isEmpty())
-                    m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
+                commitReply();
                 m_streamBubble = nullptr;
                 m_streaming = false;
                 m_activity->hide();
@@ -641,10 +820,7 @@ void ChatPanel::onStop() {
     ++m_requestId;
     m_client->abortStream();
     updateStreamingBubble(m_pendingResponse, false);
-    if (!m_pendingResponse.isEmpty()) {
-        updateStreamingBubble(m_pendingResponse, false);
-        m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_pendingResponse}});
-    }
+    commitReply();   // keeps any text so far; for a retry with none, puts the previous reply back
     m_streamBubble = nullptr;
     m_streaming = false;
     m_activity->hide();
@@ -660,8 +836,15 @@ void ChatPanel::onStop() {
 void ChatPanel::onClearChat() {
     if (m_preparing) cancelPreparing();
     if (m_streaming) onStop();
-    m_history.clear();
-    m_compaction = Compaction();
+    m_tree.clear();
+    m_replyParent = ChatTree::kRoot;
+    m_pathLimit = -1;
+    m_retryCompaction.reset();
+    m_streamKind = PendingSend::NewMessage;
+    m_streamRow = nullptr;
+    m_pendingCompaction.reset();
+    m_pendingNotes.clear();
+    m_activeSend = PendingSend();
     // Tear down streaming state.
     m_streaming = false;
     m_activity->hide();
@@ -689,12 +872,15 @@ void ChatPanel::onClearChat() {
     refreshContextUsage();
 }
 
-QJsonArray ChatPanel::effectiveMessages() const {
+QJsonArray ChatPanel::effectiveMessages(int pathCount) const {
+    if (pathCount < 0) pathCount = m_pathLimit;
+    const QList<QJsonObject> path = m_tree.messages(pathCount);
+    const ChatTree::Compaction compaction = m_retryCompaction ? *m_retryCompaction : m_tree.compaction(pathCount);
     QJsonArray messages;
-    if (m_compaction.covered > 0 && !m_compaction.summary.isEmpty())
+    if (compaction.covered > 0 && !compaction.summary.isEmpty())
         messages.append(QJsonObject{{"role", "system"},
-                                    {"content", "Summary of the earlier conversation: " + m_compaction.summary}});
-    for (int i = m_compaction.covered; i < m_history.size(); ++i) messages.append(m_history.at(i));
+                                    {"content", "Summary of the earlier conversation: " + compaction.summary}});
+    for (int i = compaction.covered; i < path.size(); ++i) messages.append(path.at(i));
     return messages;
 }
 
@@ -774,13 +960,14 @@ void ChatPanel::scrollToBottom() {
 }
 
 void ChatPanel::updateActions() {
-    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_preparing && !m_input->toPlainText().trimmed().isEmpty());
+    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_preparing && !anyEditing() && !m_input->toPlainText().trimmed().isEmpty());
     m_loadButton->setEnabled(!m_streaming && !m_loading && !m_preparing);
     m_loadButton->setText(m_loading ? "Loading…" : "Load model");
     m_modelCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
     m_engineCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
     m_clearButton->setEnabled(!m_loading && !m_preparing);
     m_input->setReadOnly(m_preparing);
+    refreshRows();
 }
 
 void ChatPanel::setStatus(const QString &text, const QString &tone) {

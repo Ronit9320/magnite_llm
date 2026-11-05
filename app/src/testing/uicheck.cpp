@@ -10,16 +10,21 @@
 #include "panels/adaptercard.h"
 #include "panels/chatpanel.h"
 #include "panels/chatbubble.h"
+#include "panels/chattree.h"
+#include "panels/messagerow.h"
 #include "panels/settingspanel.h"
 #include "widgets/studiocanvas.h"
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
 #include "widgets/contextmeter.h"
+#include "widgets/versionswitcher.h"
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QEnterEvent>
+#include <QFocusEvent>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
@@ -120,6 +125,11 @@ struct Fixture : QTcpServer {
     QString compactMethod = "summary";
     bool holdCompact = false;
     QStringList compactRequests, chatRequests;
+    // What /inference/chat streams back; tests change it to tell a fresh reply from an old one.
+    // chatEmpty: the reply streams no text (just "done", or nothing at all while held); chatStatus: an HTTP error instead of a stream.
+    bool chatEmpty = false;
+    int chatStatus = 200;
+    QString chatReply = QStringLiteral("A local model can use your documents to give more useful answers.\n\nTry a specific question about your project.");
     QPointer<QTcpSocket> heldCompactSocket;
     // An unrelated request that stays in flight (/held-other), to prove cancelling a compaction leaves it alone.
     bool holdOther = false;
@@ -234,14 +244,17 @@ struct Fixture : QTcpServer {
                     else if (path == "/inference/status" || path == "/inference/load") body=R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})";
                     else if (path == "/inference/chat") {
                         chatRequests << QString::fromUtf8(bytes->mid(headerEnd+4));
-                        type="text/event-stream";
-                        body="data: {\"delta\":\"A local model can use your documents to give more useful answers.\\n\\nTry a specific question about your project.\"}\n\n";
-                        if (holdChat) {
-                            chatSocket=socket;
-                            socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body);
-                            return;
+                        if (chatStatus != 200) { status=chatStatus; body=R"({"detail":"fixture chat failure"})"; }
+                        else {
+                            type="text/event-stream";
+                            body=chatEmpty?QByteArray():"data: "+QJsonDocument(QJsonObject{{"delta",chatReply}}).toJson(QJsonDocument::Compact)+"\n\n";
+                            if (holdChat) {
+                                chatSocket=socket;
+                                socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body);
+                                return;
+                            }
+                            body+="data: {\"done\":true}\n\n";
                         }
-                        body+="data: {\"done\":true}\n\n";
                     }
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
@@ -1042,6 +1055,427 @@ int runUiCheck(const QString &captures) {
             fixture.releaseHeldCompact(); pump(300);
             check(fixture.chatRequests.size()==chatsBeforeClear && dividers().isEmpty() && sendButton->isEnabled(),"clearing the chat during compaction cancels it and a late reply changes nothing");
             fixture.holdCompact=false; input->clear();
+
+            // Transcript rows: the screen is a drawing of the conversation tree's active path.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            fixture.chatRequests.clear(); fixture.compactRequests.clear();
+            auto rows=[&chat]() { return chat.findChildren<MessageRow *>(); };
+            check(sendAndWait("row one") && sendAndWait("row two"),"two turns are sent for the row checks");
+            check(rows().size()==4 && rows().at(0)->bubble()->text()=="row one" && rows().at(2)->bubble()->text()=="row two" &&
+                  rows().at(1)->bubble()->text().startsWith("A local model") && rows().at(0)->bubble()->role()==ChatBubble::User && rows().at(1)->bubble()->role()==ChatBubble::Assistant,
+                  "messages render as rows, one per path message, bubble text matches");
+            {
+                QSet<int> ids; bool all=true; for (auto *row : rows()) { all&=row->node()!=0; ids.insert(row->node()); }
+                check(all && ids.size()==4,"every row knows its own conversation node, replies included once committed");
+            }
+            fixture.usageUsed=3600;
+            check(sendAndWait("row three") && fixture.compactRequests.size()==1 && dividers().size()==1,"a compaction draws its divider");
+            const QString dividerText=dividers().isEmpty()?QString():dividers().first()->text();
+            check(rows().size()==6 && chat.findChildren<ChatBubble *>().size()==6,"six rows and six bubbles after three turns");
+            QMetaObject::invokeMethod(&chat,"redrawForTest",Qt::DirectConnection); pump(100);
+            check(dividers().size()==1 && dividers().first()->text()==dividerText && dividerText.contains("summarized"),"a divider is shown again when the transcript is redrawn");
+            check(rows().size()==6 && chat.findChildren<ChatBubble *>().size()==6 && rows().at(4)->bubble()->text()=="row three","redrawing leaves no stale rows or bubbles");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(rows().isEmpty() && dividers().isEmpty(),"clearing the chat leaves no rows");
+
+            // Editing a message you already sent.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.holdCompact=false;
+            fixture.chatReply="reply A"; fixture.chatRequests.clear(); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            auto pencilOf=[](MessageRow *row) { return row->findChild<QPushButton *>("editButton"); };
+            auto boxOf=[](MessageRow *row) { return row->findChild<QPlainTextEdit *>("messageEditBox"); };
+            auto sendKey=[](QWidget *target,int key,Qt::KeyboardModifiers modifiers=Qt::NoModifier) { QKeyEvent press(QEvent::KeyPress,key,modifiers); QApplication::sendEvent(target,&press); };
+            auto openEditor=[&](int index) { const auto all=rows(); if (index>=all.size() || !pencilOf(all.at(index))) return false; pencilOf(all.at(index))->click(); pump(40); return all.at(index)->isEditing(); };
+            auto saveEdit=[&](int index,const QString &text) { auto *row=rows().at(index); boxOf(row)->setPlainText(text); row->findChild<QPushButton *>("editSave")->click(); };
+            auto waitDone=[&](int requestsBefore) { return waitUntil([&]{ return fixture.chatRequests.size()>requestsBefore && sendButton->text()=="Send  ↑"; }) && (pump(150),true); };
+            auto messagesOf=[](const QString &body) { return QJsonDocument::fromJson(body.toUtf8()).object().value("messages").toArray(); };
+            auto mentions=[](const QJsonArray &messages,const QString &text) { for (const auto &m : messages) if (m.toObject().value("content").toString().contains(text)) return true; return false; };
+
+            check(sendAndWait("turn one") && sendAndWait("turn two") && sendAndWait("turn three") && rows().size()==6,"three turns are on screen before editing");
+            {
+                int pencils=0, onReplies=0;
+                for (auto *row : rows()) if (pencilOf(row)) { ++pencils; if (row->bubble()->role()==ChatBubble::Assistant) ++onReplies; }
+                check(pencils==3 && onReplies==0,"every message you sent has an edit pencil, replies have none");
+            }
+            {
+                auto *row=rows().at(2); auto *pencil=pencilOf(row);
+                QEnterEvent enter(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(row,&enter); pump(20);
+                const bool shown=pencil->isVisibleTo(row);
+                QEvent leave(QEvent::Leave); QApplication::sendEvent(row,&leave); pump(20);
+                check(shown && !pencil->isVisibleTo(row),"hovering a row shows its pencil, leaving hides it");
+            }
+            check(openEditor(2) && boxOf(rows().at(2)) && boxOf(rows().at(2))->toPlainText()=="turn two" && !rows().at(2)->bubble()->isVisibleTo(rows().at(2)),"clicking the pencil opens the editor pre-filled and hides the bubble");
+            pump(80); capture(&chat,"chat-editing");
+            check(openEditor(0) && !rows().at(2)->isEditing() && rows().at(0)->isEditing(),"opening a second editor closes the first");
+            sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+            check(!rows().at(0)->isEditing() && rows().at(0)->bubble()->isVisibleTo(rows().at(0)) && rows().size()==6 && fixture.chatRequests.size()==3,"Esc cancels and changes nothing");
+            {
+                openEditor(2); saveEdit(2,"   \n "); pump(200);
+                const bool blankCancelled=!rows().at(2)->isEditing() && fixture.chatRequests.size()==3;
+                openEditor(2); rows().at(2)->findChild<QPushButton *>("editSave")->click(); pump(200);
+                check(blankCancelled && !rows().at(2)->isEditing() && fixture.chatRequests.size()==3 && rows().size()==6,"empty or unchanged text counts as cancel");
+            }
+            input->setPlainText("my draft"); pump(20);
+            check(openEditor(2) && !sendButton->isEnabled(),"while an editor is open the composer's Send is off, so a typed edit cannot be lost");
+            fixture.chatReply="reply to edit";
+            const int beforeEdit=fixture.chatRequests.size();
+            saveEdit(2,"  turn two edited\nsecond line é ✓  ");
+            check(waitDone(beforeEdit),"saving an edit sends it");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("content").toString()=="turn one" && sent.at(1).toObject().value("role").toString()=="assistant" &&
+                      sent.at(2).toObject().value("role").toString()=="user" && sent.at(2).toObject().value("content").toString()==QString("turn two edited\nsecond line é ✓"),
+                      "an edit sends the messages before it plus the edited text, with only outer whitespace trimmed");
+            }
+            check(rows().size()==4 && rows().at(2)->bubble()->text()==QString("turn two edited\nsecond line é ✓") && rows().at(3)->bubble()->text()=="reply to edit","the screen shows the edited message and a fresh reply");
+            {
+                bool gone=true; for (auto *row : rows()) gone&=!row->bubble()->text().contains("turn three");
+                check(gone,"the old continuation is gone from the screen");
+            }
+            check(input->toPlainText()=="my draft" && sendButton->isEnabled(),"the draft in the main composer is untouched by editing");
+            input->clear();
+            const int beforeFirst=fixture.chatRequests.size();
+            check(openEditor(0),"the first message can be edited too");
+            saveEdit(0,"turn one edited");
+            check(waitDone(beforeFirst),"editing the first message sends it");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==1 && sent.at(0).toObject().value("content").toString()=="turn one edited" && rows().size()==2 && rows().at(0)->bubble()->text()=="turn one edited",
+                      "editing the first message branches from the start: just it and its reply remain");
+            }
+
+            // A long chat, edited at the compaction threshold.
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.usageUsed=1000; fixture.chatReply="reply A";
+            bool grownLong=true; for (int i=1;i<=5;++i) grownLong&=sendAndWait(QString("long %1").arg(i));
+            check(grownLong && rows().size()==10,"a five-turn chat is built for the threshold checks");
+            pump(700); fixture.usageUsed=3600; fixture.usageRequests.clear(); fixture.compactRequests.clear();
+            const int beforeLong=fixture.chatRequests.size();
+            check(openEditor(6),"turn four can be edited");
+            saveEdit(6,"long 4 edited");
+            check(waitDone(beforeLong) && fixture.compactRequests.size()==1,"an edit at the threshold compacts first");
+            {
+                QJsonArray measured; for (const QString &body : fixture.usageRequests) if (measured.isEmpty() && mentions(messagesOf(body),"long 4 edited")) measured=messagesOf(body);   // the first one is the measurement made when the edit was saved
+                check(measured.size()==7 && !mentions(measured,"long 5") && measured.last().toObject().value("content").toString()=="long 4 edited","the usage request for an edit excludes the old continuation");
+                const QJsonObject compact=json(fixture.compactRequests); const QJsonArray posted=compact.value("messages").toArray();
+                check(posted.size()==7 && !mentions(posted,"long 5") && posted.last().toObject().value("content").toString()=="long 4 edited" && compact.value("previous_summary").toString().isEmpty(),
+                      "compaction for an edit uses only the messages before the edit point");
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==4 && sent.at(0).toObject().value("role").toString()=="system" && !mentions(sent,"long 5") && sent.last().toObject().value("content").toString()=="long 4 edited","the model gets the summary, the messages kept before the edit and the edited text");
+            }
+            check(dividers().size()==1 && rows().size()==8,"the compaction divider and the shortened conversation are on screen");
+
+            // Stop during a compaction started by an edit.
+            fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+            const int chatsBeforeEditStop=fixture.chatRequests.size(), compactsBeforeEditStop=fixture.compactRequests.size(), rowsBeforeEditStop=rows().size();
+            openEditor(6); saveEdit(6,"another try");
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeEditStop+1 && fixture.heldCompactSocket; }) && status().contains("Compacting"),"saving an edit at the threshold starts a compaction");
+            stopButton->click(); pump(300);
+            check(rows().size()==rowsBeforeEditStop && rows().at(6)->isEditing() && boxOf(rows().at(6))->toPlainText()=="another try" && rows().at(6)->bubble()->text()=="long 4 edited" && fixture.chatRequests.size()==chatsBeforeEditStop,
+                  "Stop during that compaction reopens the editor with the typed text and leaves the conversation unchanged");
+            // Clearing the chat while an edit is being compacted.
+            fixture.heldCompactSocket.clear();
+            rows().at(6)->findChild<QPushButton *>("editSave")->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeEditStop+2 && fixture.heldCompactSocket; }),"the edit is compacting again");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.releaseHeldCompact(); pump(300);
+            check(fixture.chatRequests.size()==chatsBeforeEditStop && rows().isEmpty() && dividers().isEmpty() && sendButton->isEnabled()==false,"clearing the chat while an edit is being compacted cancels it and a late reply changes nothing");
+            fixture.holdCompact=false; input->clear();
+
+            // Backend not ready.
+            fixture.usageUsed=1000;
+            check(sendAndWait("ready check") && rows().size()==2,"a chat exists for the offline check");
+            openEditor(0); client.setBaseUrl(QString());
+            saveEdit(0,"edited offline"); pump(100);
+            check(rows().at(0)->isEditing() && boxOf(rows().at(0))->toPlainText()=="edited offline" && status().contains("Backend not connected") && rows().at(0)->bubble()->text()=="ready check",
+                  "with the backend not ready the editor stays open with its text");
+            client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+            sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+
+            // Pencils follow the streaming state.
+            fixture.holdChat=true; input->setPlainText("stream me"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a held reply is streaming");
+            {
+                bool off=true; for (auto *row : rows()) if (auto *p=pencilOf(row)) off&=!p->isEnabled();
+                check(off,"pencils are disabled while a reply is streaming");
+            }
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+            {
+                bool on=true; for (auto *row : rows()) if (auto *p=pencilOf(row)) on&=p->isEnabled();
+                check(on,"pencils are enabled again once the reply ends");
+            }
+
+            // Clearing the chat while an editor is open.
+            openEditor(0);
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->setPlainText("after clear"); pump(20);
+            check(rows().isEmpty() && sendButton->isEnabled(),"clearing the chat while an editor is open leaves no rows and Send works");
+            input->clear();
+
+            // Switching between versions.
+            fixture.usageUsed=1000; fixture.chatReply="orig reply"; fixture.usageRequests.clear(); fixture.chatRequests.clear();
+            auto versionOf=[](MessageRow *row) { auto *sw=row->findChild<VersionSwitcher *>("versionSwitcher"); auto *l=sw?sw->findChild<QLabel *>("versionLabel"):nullptr; return (!sw || sw->isHidden() || !l)?QString():l->text(); };
+            auto arrow=[](MessageRow *row,const char *name) { return row->findChild<QPushButton *>(name); };
+            auto texts=[&]() { QStringList out; for (auto *row : rows()) out << row->bubble()->text(); return out; };
+            check(sendAndWait("s1") && sendAndWait("s2") && sendAndWait("s3") && rows().size()==6,"a three-turn chat exists for the version checks");
+            bool noneYet=true; for (auto *row : rows()) noneYet&=versionOf(row).isEmpty();
+            check(noneYet,"a message with one version shows no switcher");
+            input->setPlainText("draft stays"); pump(20);
+            fixture.chatReply="edit reply";
+            const int beforeV=fixture.chatRequests.size();
+            input->clear(); openEditor(2); saveEdit(2,"s2 edited"); input->setPlainText("draft stays"); // the composer's Send is off while editing, so the draft is typed after saving
+            check(waitDone(beforeV) && rows().size()==4,"editing turn two leaves its new version on screen");
+            check(versionOf(rows().at(2))=="2 / 2" && versionOf(rows().at(0)).isEmpty() && versionOf(rows().at(1)).isEmpty() && versionOf(rows().at(3)).isEmpty(),"an edited message shows 2 / 2 below its bubble, nothing else shows a switcher");
+            fixture.usageRequests.clear();
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(texts()==QStringList({"s1","orig reply","s2","orig reply","s3","orig reply"}) && versionOf(rows().at(2))=="1 / 2","previous shows the original message and its whole conversation");
+            check(waitUntil([&]{ return !fixture.usageRequests.isEmpty(); }) && messagesOf(fixture.usageRequests.last()).size()==7 && messagesOf(fixture.usageRequests.last()).last().toObject().value("content").toString()=="draft stays",
+                  "after a switch the usage request matches the conversation on screen (plus the draft)");
+            arrow(rows().at(2),"versionNext")->click(); pump(200);
+            check(texts()==QStringList({"s1","orig reply","s2 edited","edit reply"}) && versionOf(rows().at(2))=="2 / 2","next returns to the edit and its continuation");
+            { QEnterEvent hover(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(rows().at(2),&hover); pump(60); capture(&chat,"chat-versions"); QEvent unhover(QEvent::Leave); QApplication::sendEvent(rows().at(2),&unhover); }
+            check(input->toPlainText()=="draft stays","switching leaves the draft in the main composer alone");
+            input->clear();
+            const int beforeCont=fixture.chatRequests.size();
+            fixture.chatReply="edit branch reply";
+            check(sendAndWait("s4"),"a message is sent on the edited version");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==5 && sent.at(2).toObject().value("content").toString()=="s2 edited" && !mentions(sent,"s3") && sent.last().toObject().value("content").toString()=="s4" && fixture.chatRequests.size()==beforeCont+1,
+                      "the next send continues from the version on screen");
+            }
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            fixture.chatReply="orig branch reply";
+            check(sendAndWait("s5"),"a message is sent on the original version");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==7 && sent.at(2).toObject().value("content").toString()=="s2" && mentions(sent,"s3") && !mentions(sent,"s4") && !mentions(sent,"s2 edited"),"after switching back, the next send continues the original conversation");
+            }
+            fixture.chatReply="third reply";
+            openEditor(2); saveEdit(2,"s2 again");
+            check(waitDone(fixture.chatRequests.size()-1) && versionOf(rows().at(2))=="3 / 3" && rows().size()==4,"a second edit of the same message shows 3 / 3");
+            check(!arrow(rows().at(2),"versionNext")->isEnabled() && arrow(rows().at(2),"versionPrev")->isEnabled(),"next is off at the last version");
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(versionOf(rows().at(2))=="2 / 3" && texts()==QStringList({"s1","orig reply","s2 edited","edit reply","s4","edit branch reply"}),"stepping back goes through the middle version with its own continuation");
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(versionOf(rows().at(2))=="1 / 3" && !arrow(rows().at(2),"versionPrev")->isEnabled() && rows().size()==8,"previous is off at the first version and the original conversation is whole");
+
+            // Arrows follow what the panel is doing.
+            {
+                auto switchers=[&chat]() { QList<VersionSwitcher *> shown; for (auto *sw : chat.findChildren<VersionSwitcher *>()) if (!sw->isHidden()) shown << sw; return shown; };
+                auto allOff=[&]() { auto all=switchers(); if (all.isEmpty()) return false; for (auto *sw : all) if (sw->findChild<QPushButton *>("versionPrev")->isEnabled() || sw->findChild<QPushButton *>("versionNext")->isEnabled()) return false; return true; };
+                fixture.holdChat=true; input->setPlainText("hold me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }) && allOff(),"arrows are disabled while a reply is streaming");
+                fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+                waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+                check(!allOff() && !switchers().isEmpty(),"arrows work again once the reply ends");
+
+                fixture.usageUsed=3600; fixture.holdCompact=true; fixture.heldCompactSocket.clear();
+                const int compactsV=fixture.compactRequests.size();
+                input->setPlainText("compact me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.compactRequests.size()==compactsV+1 && fixture.heldCompactSocket; }) && allOff(),"arrows are disabled while a send is being prepared");
+                stopButton->click(); pump(300); fixture.holdCompact=false; fixture.heldCompactSocket.clear(); fixture.usageUsed=1000; input->clear();
+                check(!allOff(),"arrows work again after the compaction is stopped");
+
+                check(openEditor(0) && allOff(),"arrows are disabled while an editor is open, so the edit cannot be lost");
+                sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+                check(!allOff(),"arrows work again once the editor closes");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(chat.findChildren<VersionSwitcher *>().isEmpty(),"clearing the chat removes the switchers");
+
+            // A version switch brings back that version's compaction.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.chatReply="c reply";
+            bool grownC=true; for (int i=1;i<=5;++i) grownC&=sendAndWait(QString("c%1").arg(i));
+            fixture.usageUsed=3600;
+            check(grownC && sendAndWait("c6") && dividers().size()==1 && rows().size()==12,"a six-turn chat is compacted once");
+            fixture.usageUsed=1000;
+            const int beforeC=fixture.chatRequests.size();
+            openEditor(2); saveEdit(2,"c2 edited");
+            check(waitDone(beforeC) && rows().size()==4 && dividers().isEmpty(),"editing before the compaction leaves the divider behind");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("role").toString()=="user" && sent.last().toObject().value("content").toString()=="c2 edited","the edited version is sent without the other version's summary");
+            }
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(rows().size()==12 && dividers().size()==1 && dividers().first()->text().contains("summarized"),"switching back shows the compaction divider again");
+            check(sendAndWait("c7"),"a message is sent after switching back");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="system" && sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X." && sent.last().toObject().value("content").toString()=="c7",
+                      "switching back restores that version's summary for the next send");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Retrying the latest reply.
+            fixture.usageUsed=1000; fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
+            fixture.chatRequests.clear(); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            auto retryOf=[](MessageRow *row) { return row->findChild<QPushButton *>("retryButton"); };
+            auto clickRetry=[&](MessageRow *row) { if (auto *b=retryOf(row)) b->click(); };
+            auto retryOn=[&]() { QList<MessageRow *> on; for (auto *row : rows()) if (auto *b=retryOf(row)) if (b->isEnabled()) on << row; return on; };
+            fixture.chatReply="old reply";
+            check(sendAndWait("t1") && sendAndWait("t2") && rows().size()==4,"a two-turn chat exists for the retry checks");
+            check(retryOn().size()==1 && retryOn().first()==rows().last() && !retryOf(rows().at(0)),"only the latest reply has a retry button");
+            {
+                auto *row=rows().last(); auto *b=retryOf(row);
+                QEnterEvent enter(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(row,&enter); pump(20);
+                const bool shown=b && b->isVisibleTo(row);
+                QEvent leave(QEvent::Leave); QApplication::sendEvent(row,&leave); pump(20);
+                check(shown && b && !b->isVisibleTo(row),"hovering the latest reply shows its retry button, leaving hides it");
+            }
+            input->setPlainText("retry draft"); pump(20);
+            fixture.chatReply="new reply"; const int beforeRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeRetry),"retry sends a request");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("content").toString()=="t1" && sent.at(1).toObject().value("role").toString()=="assistant" && sent.at(2).toObject().value("role").toString()=="user" && sent.at(2).toObject().value("content").toString()=="t2",
+                      "retry sends the conversation up to the user message, with no extra user message");
+            }
+            check(rows().size()==4 && rows().last()->bubble()->text()=="new reply" && versionOf(rows().last())=="2 / 2" && versionOf(rows().at(2)).isEmpty(),"retry shows the new reply as version 2 / 2 and the message above keeps one version");
+            check(input->toPlainText()=="retry draft","retry leaves the draft in the main composer alone");
+            input->clear();
+            arrow(rows().last(),"versionPrev")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="old reply" && versionOf(rows().last())=="1 / 2","previous returns to the old reply");
+            arrow(rows().last(),"versionNext")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="new reply" && retryOn().size()==1,"next returns to the new reply, which can be retried again");
+
+            // While a retry streams.
+            fixture.chatReply="streaming retry"; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && rows().size()==4 && rows().last()->bubble()->text().contains("streaming retry"); }),"the retry streams into the place of the old reply");
+            check(!texts().contains("new reply") && retryOn().isEmpty(),"the old reply is not shown while the retry streams, and retry is off");
+            pump(500); fixture.usageRequests.clear();   // from here on every usage request is made while the retry streams
+            chat.refreshContextUsage();
+            check(waitUntil([&]{ return !fixture.usageRequests.isEmpty(); }) && messagesOf(fixture.usageRequests.last()).size()==3,"the usage request during a retry excludes the old reply");
+            { bool off=true; for (auto *sw : chat.findChildren<VersionSwitcher *>()) if (!sw->isHidden()) off&=!sw->findChild<QPushButton *>("versionNext")->isEnabled() && !sw->findChild<QPushButton *>("versionPrev")->isEnabled(); check(off,"version arrows are off while a retry streams"); }
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->write("data: {\"done\":true}\n\n"); fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry"),"the finished retry is the third version of the reply");
+
+            // A retry that gives nothing back keeps the previous reply.
+            fixture.chatEmpty=true;
+            clickRetry(rows().last());
+            waitUntil([&]{ return sendButton->text()=="Send  ↑" && fixture.chatRequests.size()>beforeRetry+1 && status().contains("Retry failed"); }); pump(150);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry") && status().contains("Retry failed"),"a retry that returns no text keeps the previous reply and its count");
+            fixture.chatEmpty=false;
+            fixture.chatStatus=500; fixture.usageStatus=409; const int errorsBefore=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            waitUntil([&]{ return fixture.chatRequests.size()>errorsBefore && sendButton->text()=="Send  ↑"; }); pump(150);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry"),"a failed retry request (no model loaded) keeps the previous reply");
+            fixture.chatStatus=200; fixture.usageStatus=200;
+
+            // Stop before any text, then after some text.
+            fixture.chatEmpty=true; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a silent retry is held open");
+            stopButton->click(); pump(300);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry") && retryOn().size()==1,"Stop before any text keeps the previous reply");
+            fixture.chatSocket.clear(); fixture.chatEmpty=false; fixture.chatReply="partial retry";
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && rows().last()->bubble()->text().contains("partial retry"); }),"a retry streams some text");
+            stopButton->click(); pump(300);
+            fixture.holdChat=false; fixture.chatSocket.clear();
+            check(rows().size()==4 && versionOf(rows().last())=="4 / 4" && rows().last()->bubble()->text().contains("partial retry"),"Stop after some text keeps the partial reply as a new version");
+
+            // Retry is not offered without a backend.
+            {
+                const int requestsBefore=fixture.chatRequests.size();
+                client.setBaseUrl(QString());
+                clickRetry(rows().last()); pump(100);
+                check(status().contains("Backend not connected") && fixture.chatRequests.size()==requestsBefore && rows().size()==4 && versionOf(rows().last())=="4 / 4","retry with the backend not connected changes nothing");
+                client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+            }
+
+            // Clearing the chat while a retry streams.
+            fixture.chatReply="held again"; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a retry is streaming before the chat is cleared");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(150);
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(150);
+            input->setPlainText("after retry clear"); pump(20);
+            check(rows().isEmpty() && dividers().isEmpty() && sendButton->isEnabled(),"clearing the chat while a retry streams leaves nothing behind");
+            input->clear();
+
+            // Retry at the compaction threshold.
+            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            bool grownR=true; for (int i=1;i<=4;++i) grownR&=sendAndWait(QString("r%1").arg(i));
+            fixture.chatReply="last old"; grownR&=sendAndWait("r5");
+            pump(700); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            check(grownR && rows().size()==10,"a five-turn chat exists for the retry-at-threshold check");
+            fixture.usageUsed=3600; fixture.chatReply="retry result";
+            const int beforeRC=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeRC) && fixture.compactRequests.size()==1,"retry at the threshold compacts first");
+            {
+                const QJsonObject compact=json(fixture.compactRequests); const QJsonArray posted=compact.value("messages").toArray();
+                check(posted.size()==9 && posted.last().toObject().value("content").toString()=="r5" && !mentions(posted,"last old"),"compaction for a retry posts only the messages up to the user message");
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==6 && sent.at(0).toObject().value("role").toString()=="system" && sent.last().toObject().value("content").toString()=="r5" && !mentions(sent,"last old"),"the retry request carries the summary and the kept messages");
+            }
+            check(dividers().size()==1 && rows().size()==10 && versionOf(rows().last())=="2 / 2","the compaction divider is shown and the reply is a new version");
+            fixture.usageUsed=1000; fixture.chatReply="follow up reply";
+            check(sendAndWait("r6"),"a message is sent after the retry");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="system" && mentions(sent,"retry result") && !mentions(sent,"last old") && sent.last().toObject().value("content").toString()=="r6",
+                      "the next send uses the new reply and the summary made during the retry");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Review fix 1: a retry that fails after compacting must leave the conversation exactly as it was,
+            // and a successful one must keep its summary with its own reply.
+            fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
+            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            bool grownF=true; for (int i=1;i<=5;++i) grownF&=sendAndWait(QString("f%1").arg(i));
+            pump(700); fixture.compactRequests.clear();
+            check(grownF && rows().size()==10,"a five-turn chat exists for the failed-retry checks");
+            fixture.usageUsed=3600; fixture.chatEmpty=true;
+            const int beforeFailedRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            waitUntil([&]{ return fixture.compactRequests.size()==1 && fixture.chatRequests.size()>beforeFailedRetry && sendButton->text()=="Send  ↑"; }); pump(250);
+            check(fixture.compactRequests.size()==1 && rows().size()==10 && dividers().isEmpty() && versionOf(rows().last()).isEmpty(),"a retry that compacts and then returns nothing leaves the conversation as it was");
+            fixture.chatEmpty=false; fixture.usageUsed=1000; fixture.chatReply="after failed retry";
+            check(sendAndWait("f6"),"a message is sent after the failed retry");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==11 && sent.at(0).toObject().value("role").toString()=="user" && !mentions(sent,"Summary of the earlier"),"a failed retry leaves no summary behind for the next send");
+            }
+            fixture.usageUsed=3600; fixture.chatReply="retry won"; fixture.compactRequests.clear();
+            const int beforeGoodRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeGoodRetry) && fixture.compactRequests.size()==1 && versionOf(rows().last())=="2 / 2" && dividers().size()==1,"a retry that compacts and succeeds is a new version with its divider");
+            arrow(rows().last(),"versionPrev")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="after failed retry" && dividers().isEmpty(),"the old reply comes back without the new reply's divider");
+            fixture.usageUsed=1000; fixture.chatReply="on the old reply";
+            check(sendAndWait("f7"),"a message is sent on the old reply");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="user" && !mentions(sent,"Summary of the earlier") && mentions(sent,"after failed retry"),"the old reply is not sent with the summary made for the other reply");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Review fix 2: a message that got no reply can be sent again from its editor, without a second copy.
+            fixture.chatStatus=500; fixture.usageStatus=409; fixture.usageUsed=1000;
+            const int beforeNoReply=fixture.chatRequests.size();
+            input->setPlainText("no reply yet"); pump(20); sendButton->click();
+            waitUntil([&]{ return fixture.chatRequests.size()>beforeNoReply && sendButton->text()=="Send  ↑"; }); pump(250);
+            fixture.chatStatus=200; fixture.usageStatus=200; fixture.chatReply="finally";
+            check(openEditor(0),"the unanswered message can be opened for editing");
+            rows().at(0)->findChild<QPushButton *>("editSave")->click();
+            check(waitDone(beforeNoReply+1),"saving it unchanged sends it again");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==1 && sent.at(0).toObject().value("content").toString()=="no reply yet","it is sent once, not as a second copy of the message");
+            }
+            check(rows().size()==2 && rows().at(1)->bubble()->text()=="finally" && versionOf(rows().at(0)).isEmpty(),"the reply arrives under the same message and it gets no new version");
+            openEditor(0); rows().at(0)->findChild<QPushButton *>("editSave")->click(); pump(200);
+            check(!rows().at(0)->isEditing() && fixture.chatRequests.size()==beforeNoReply+2,"once it has a reply, saving it unchanged is a cancel again");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
         }
         QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
         chat.hide();
@@ -1091,6 +1525,108 @@ int runUiCheck(const QString &captures) {
         QSvgGenerator svg; svg.setFileName(captures+"/konark-wheel.svg"); svg.setSize(QSize(216,216)); svg.setViewBox(QRect(0,0,216,216));
         svg.setTitle("Magnite · Konark-inspired wheel"); QPainter painter(&svg);
         BrandMark::paint(painter,QRectF(0,0,216,216),QColor(Theme::accentPrimary()));
+    }
+    {
+        using Ids=QList<ChatTree::NodeId>;
+        ChatTree tree;
+        check(tree.isEmpty() && tree.activePath().isEmpty() && tree.messages().isEmpty() && tree.lastOnPath()==ChatTree::kRoot,"chat tree: an empty tree has an empty path and no messages");
+        const auto q1=tree.addChild(ChatTree::kRoot,"user","q1"); const auto a1=tree.addChild(q1,"assistant","a1");
+        const auto q2=tree.addChild(a1,"user","q2"); const auto a2=tree.addChild(q2,"assistant","a2");
+        {
+            const auto msgs=tree.messages();
+            check(!tree.isEmpty() && tree.activePath()==Ids({q1,a1,q2,a2}) && msgs.size()==4 && msgs.at(0).value("role").toString()=="user" && msgs.at(0).value("content").toString()=="q1" &&
+                  msgs.at(3).value("role").toString()=="assistant" && msgs.at(3).value("content").toString()=="a2" && tree.lastOnPath()==a2 && tree.pathIndexOf(q2)==2 &&
+                  tree.parentOf(a1)==q1 && tree.parentOf(q1)==ChatTree::kRoot && tree.role(a1)=="assistant" && tree.content(q2)=="q2",
+                  "chat tree: messages added in turn form the path in order");
+            check(tree.messages(2).size()==2 && tree.messages(2).at(1).value("content").toString()=="a1" && tree.messages(0).isEmpty() && tree.messages(99).size()==4,
+                  "chat tree: messages(pathCount) returns only the leading messages");
+        }
+        const auto q2b=tree.addChild(a1,"user","q2 edited");
+        check(tree.activePath()==Ids({q1,a1,q2b}) && tree.versionCount(q2b)==2 && tree.versionIndex(q2b)==1 && tree.versionIndex(q2)==0 &&
+              tree.versionsOf(q2)==Ids({q2,q2b}) && tree.pathIndexOf(q2)==-1 && tree.messages().size()==3 && tree.versionCount(q1)==1 && tree.versionIndex(q1)==0,
+              "chat tree: a sibling becomes the newest, active version and counts n of n");
+        const auto q2c=tree.addChild(a1,"user","q2 again");
+        check(tree.versionCount(q2c)==3 && tree.versionIndex(q2c)==2 && tree.versionIndex(q2)==0,"chat tree: a second edit of the same message counts 3 of 3");
+        tree.activate(q2);
+        check(tree.activePath()==Ids({q1,a1,q2,a2}) && tree.versionIndex(q2)==0,"chat tree: activating an older version restores its whole continuation");
+        const auto q1b=tree.addChild(ChatTree::kRoot,"user","q1 edited");
+        check(tree.activePath()==Ids({q1b}) && tree.parentOf(q1b)==ChatTree::kRoot && tree.versionCount(q1)==2 && tree.versionIndex(q1b)==1,"chat tree: editing the first message branches from the root");
+        tree.activate(q1);
+        check(tree.activePath()==Ids({q1,a1,q2,a2}),"chat tree: switching the first message back restores the whole earlier conversation");
+        const auto a2c=tree.addChild(q2,"assistant","a2 retried");
+        const auto a2b=tree.addChild(q2b,"assistant","a2 for edit");
+        tree.activate(q2b);
+        check(tree.activePath()==Ids({q1,a1,q2b,a2b}) && tree.versionCount(a2c)==2 && tree.versionsOf(a2b)==Ids({a2b}) && tree.versionCount(a2b)==1,
+              "chat tree: an edit inside an older version branches again");
+        tree.activate(q2);
+        check(tree.activePath()==Ids({q1,a1,q2,a2c}) && tree.versionsOf(a2c)==Ids({a2,a2c}),"chat tree: each version remembers its own latest reply");
+
+        ChatTree t2;
+        const auto u1=t2.addChild(ChatTree::kRoot,"user","u1"); const auto r1=t2.addChild(u1,"assistant","r1");
+        const auto u2=t2.addChild(r1,"user","u2"); const auto r2=t2.addChild(u2,"assistant","r2"); const auto u3=t2.addChild(r2,"user","u3");
+        check(t2.compaction().covered==0 && t2.compaction().summary.isEmpty(),"chat tree: no snapshot means no compaction");
+        t2.setCompaction(u2,{"S0",1}); t2.setCompaction(u3,{"S",2});
+        check(t2.compaction().summary=="S" && t2.compaction().covered==2,"chat tree: compaction is the last snapshot on the path");
+        check(t2.compaction(4).summary=="S0" && t2.compaction(4).covered==1 && t2.compaction(3).summary=="S0" && t2.compaction(2).covered==0,
+              "chat tree: compaction(pathCount) ignores nodes at or after pathCount");
+        t2.addNote(u3,"Context compacted");
+        check(t2.notes(u3)==QStringList({"Context compacted"}) && t2.notes(u2).isEmpty(),"chat tree: notes stay with their node");
+        const auto u3b=t2.addChild(r2,"user","u3 edited");
+        check(t2.compaction().summary=="S0" && t2.compaction().covered==1 && t2.notes(u3b).isEmpty(),"chat tree: a snapshot on a node that left the path no longer applies");
+        t2.activate(u3);
+        check(t2.compaction().summary=="S" && t2.compaction().covered==2 && t2.notes(u3)==QStringList({"Context compacted"}),"chat tree: switching back restores the snapshot and the notes");
+
+        t2.clear();
+        check(t2.isEmpty() && t2.activePath().isEmpty() && t2.compaction().covered==0 && t2.addChild(ChatTree::kRoot,"user","fresh")==1,"chat tree: clear resets everything");
+    }
+    {
+        QWidget host; auto *hostLayout=new QVBoxLayout(&host);
+        auto *switcher=new VersionSwitcher(&host); hostLayout->addWidget(switcher);
+        auto *messageRow=new MessageRow(ChatBubble::User,5,"hello",&host); hostLayout->addWidget(messageRow);
+        host.resize(400,200); host.show(); pump();
+        auto *prev=switcher->findChild<QPushButton *>("versionPrev"); auto *next=switcher->findChild<QPushButton *>("versionNext"); auto *label=switcher->findChild<QLabel *>("versionLabel");
+        check(prev && next && label && switcher->objectName()=="versionSwitcher","switcher: has its previous, next and label parts");
+        if (prev && next && label) {
+            switcher->setVersion(0,1); pump();
+            check(switcher->isHidden(),"switcher: hidden for one version");
+            switcher->setVersion(1,3); pump();
+            check(!switcher->isHidden() && label->text()=="2 / 3" && prev->isEnabled() && next->isEnabled(),"switcher: shows '2 / 3' for index 1 of 3 with both arrows on");
+            switcher->setVersion(0,3); check(!prev->isEnabled() && next->isEnabled() && label->text()=="1 / 3","switcher: previous is disabled at the first version");
+            switcher->setVersion(2,3); check(prev->isEnabled() && !next->isEnabled() && label->text()=="3 / 3","switcher: next is disabled at the last version");
+            QList<int> steps; QObject::connect(switcher,&VersionSwitcher::step,[&steps](int delta) { steps << delta; });
+            switcher->setVersion(1,3); prev->click(); next->click();
+            check(steps==QList<int>({-1,1}),"switcher: step emits -1 and +1");
+            switcher->setEnabledForUse(false);
+            check(!prev->isEnabled() && !next->isEnabled(),"switcher: disabled for use disables both arrows");
+            switcher->setEnabledForUse(true); check(prev->isEnabled() && next->isEnabled(),"switcher: enabling for use restores the arrows by position");
+            check(prev->accessibleName()=="Previous version" && next->accessibleName()=="Next version","switcher: arrows have accessible names");
+        }
+        auto *replyRow=new MessageRow(ChatBubble::Assistant,6,"hi there",&host); hostLayout->addWidget(replyRow); host.resize(400,300); pump(40);
+        {
+            auto *pencil=messageRow->findChild<QPushButton *>("editButton"); auto *retry=replyRow->findChild<QPushButton *>("retryButton"); auto *box=messageRow->findChild<QPlainTextEdit *>("messageEditBox");
+            check(pencil && retry && box && pencil->accessibleName()=="Edit message" && retry->accessibleName()=="Retry reply" && box->accessibleName()=="Edit your message","row: pencil, retry and editor have accessible names");
+            check(pencil && retry && pencil->focusPolicy()!=Qt::NoFocus && retry->focusPolicy()!=Qt::NoFocus,"row: pencil and retry accept keyboard focus");
+            check(messageRow->focusPolicy()==Qt::TabFocus && replyRow->focusPolicy()==Qt::NoFocus,"row: a row with an action is a tab stop, one without is not");
+            replyRow->setRetryAvailable(true);
+            check(replyRow->focusPolicy()==Qt::TabFocus,"row: a reply that can be retried becomes a tab stop");
+            QFocusEvent in(QEvent::FocusIn,Qt::TabFocusReason); QApplication::sendEvent(messageRow,&in); QApplication::sendEvent(replyRow,&in); pump(20);
+            check(pencil && retry && pencil->isVisibleTo(messageRow) && retry->isVisibleTo(replyRow),"row: tabbing to a row reveals its pencil or retry button");
+            QFocusEvent out(QEvent::FocusOut,Qt::TabFocusReason); QApplication::sendEvent(messageRow,&out); QApplication::sendEvent(replyRow,&out); pump(40);
+            check(pencil && retry && !pencil->isVisibleTo(messageRow) && !retry->isVisibleTo(replyRow),"row: leaving a row with the keyboard hides them again");
+            replyRow->setRetryAvailable(false);
+        }
+        auto *rowSwitcher=messageRow->findChild<VersionSwitcher *>("versionSwitcher");
+        check(rowSwitcher && rowSwitcher->isHidden(),"row: no switcher is shown while a message has one version");
+        if (rowSwitcher) {
+            messageRow->setVersion(1,2); pump();
+            auto *rowLabel=rowSwitcher->findChild<QLabel *>("versionLabel");
+            check(!rowSwitcher->isHidden() && rowLabel && rowLabel->text()=="2 / 2" && rowSwitcher->y()>=messageRow->bubble()->geometry().bottom(),"row: shows '2 / 2' below its bubble");
+            QList<QPair<int,int>> stepped; QObject::connect(messageRow,&MessageRow::versionStep,[&stepped](ChatTree::NodeId node,int delta) { stepped << qMakePair(int(node),delta); });
+            rowSwitcher->findChild<QPushButton *>("versionPrev")->click();
+            check(stepped.size()==1 && stepped.first().first==5 && stepped.first().second==-1,"row: a version step reports the row's node and direction");
+            messageRow->setActionsEnabled(false);
+            check(!rowSwitcher->findChild<QPushButton *>("versionPrev")->isEnabled() && !rowSwitcher->findChild<QPushButton *>("versionNext")->isEnabled(),"row: disabling actions disables the arrows");
+        }
     }
     {
         using namespace ContextMeterLogic;

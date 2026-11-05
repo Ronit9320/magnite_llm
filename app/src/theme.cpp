@@ -264,7 +264,8 @@ int Theme::selfCheck() {
     const std::vector<const char *> kIcons = {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
-        "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down"};
+        "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
+        "pencil", "chevron-left", "chevron-right"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
