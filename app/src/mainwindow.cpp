@@ -274,6 +274,7 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_settingsPanel);
 
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
+    connect(m_settingsPanel, &SettingsPanel::settingsChanged, m_chatPanel, &ChatPanel::reloadContextSettings);
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, [this]() {
         if (m_backendClient->isReady()) {
             m_backendClient->post("/inference/settings",

@@ -25,6 +25,7 @@ Capture the current interface using the [screenshot instructions](docs/release/S
 - Export, import, and activate trained adapters through the PEFT/torch engine.
 - Run local streaming inference with llama.cpp, torch, or an optional vLLM installation.
 - Ingest PDF, text, Markdown, and HTML documents, test retrieval, and use RAG in chat.
+- Watch how full the model's context is (ring, bar or banner, set in Settings) and let Magnite compact older messages automatically when a chat gets long.
 - Use the Studio 03 interface with light/dark themes and reduced motion.
 
 ## Compatibility

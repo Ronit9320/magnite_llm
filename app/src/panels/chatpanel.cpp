@@ -6,6 +6,7 @@
 #include "backend_client.h"
 #include "widgets/surface.h"
 #include "widgets/studiocanvas.h"
+#include "widgets/contextmeter.h"
 #include "panels/chatbubble.h"
 
 #include <QSettings>
@@ -18,6 +19,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QNetworkReply>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -224,6 +226,8 @@ void ChatPanel::setupUi() {
     m_activity->hide();
     actions->addWidget(m_activity);
     actions->addStretch();
+    m_meter = new ContextMeter(this);
+    actions->addWidget(m_meter->ring());
     m_stopButton = new QPushButton("Stop", this);
     m_stopButton->setEnabled(false);
     actions->addWidget(m_stopButton);
@@ -231,7 +235,9 @@ void ChatPanel::setupUi() {
     m_sendButton->setObjectName("primaryBtn");
     actions->addWidget(m_sendButton);
     composer->addLayout(actions);
+    conversation->addWidget(m_meter->banner());
     conversation->addWidget(composer->parentWidget());
+    conversation->addWidget(m_meter->bar());
     auto *shortcutHint = new QLabel("Enter to send · Shift+Enter for a new line", this);
     shortcutHint->setAlignment(Qt::AlignCenter);
     shortcutHint->setObjectName("cardMeta");
@@ -258,6 +264,15 @@ void ChatPanel::setupUi() {
         if (m_streamBubble) m_streamBubble->setCursorVisible(m_cursorVisible);
     });
     connect(m_input,&QPlainTextEdit::textChanged,this,&ChatPanel::updateActions);
+    m_usageTimer = new QTimer(this);
+    m_usageTimer->setSingleShot(true);
+    m_usageTimer->setInterval(400);
+    connect(m_usageTimer, &QTimer::timeout, this, &ChatPanel::refreshContextUsage);
+    auto usageMayHaveChanged = [this]() { if (m_modelLoaded) m_usageTimer->start(); };
+    connect(m_input, &QPlainTextEdit::textChanged, this, usageMayHaveChanged);
+    connect(m_maxTokensSpin, qOverload<int>(&QSpinBox::valueChanged), this, usageMayHaveChanged);
+    connect(m_meter, &ContextMeter::newChatRequested, this, &ChatPanel::onClearChat);
+    reloadContextSettings();
     updateActions();
     setStatus("Choose and load a model to get started.");
 }
@@ -322,6 +337,8 @@ void ChatPanel::refreshEngineStatus() {
             m_modelPill->setText("model: —");
             m_adapterPill->setVisible(false);
             setStatus("Inference status unavailable.");
+            m_modelLoaded = false;
+            refreshContextUsage();
             return;
         }
         const QJsonObject obj = doc.object();
@@ -331,6 +348,8 @@ void ChatPanel::refreshEngineStatus() {
             m_modelPill->setText("model: —");
             m_adapterPill->setVisible(false);
             setStatus("No inference engine loaded. Load a model to begin.");
+            m_modelLoaded = false;
+            refreshContextUsage();
             return;
         }
         m_enginePill->setText(QString("engine: %1")
@@ -346,6 +365,8 @@ void ChatPanel::refreshEngineStatus() {
             m_adapterPill->setVisible(true);
         }
         setStatus("Engine ready.");
+        m_modelLoaded = true;
+        refreshContextUsage();
     });
 }
 
@@ -410,14 +431,108 @@ void ChatPanel::ensureTrailingStretch() {
 }
 
 void ChatPanel::onSend() {
-    if (m_loading) return;
+    if (m_loading || m_preparing) return;
     const QString text = m_input->toPlainText().trimmed();
     if (text.isEmpty() || m_streaming) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
     }
+    // Only a conversation longer than what compaction keeps verbatim can be compacted.
+    const int uncompacted = m_history.size() - m_compaction.covered;
+    if (m_autoCompactPercent > 0 && m_modelLoaded && uncompacted + 1 > kKeepRecent)
+        measureThenSend(text);
+    else
+        startSend(text);
+}
 
+void ChatPanel::measureThenSend(const QString &text) {
+    m_preparing = true;
+    updateActions();
+    m_stopButton->setEnabled(true);
+    QJsonArray messages = effectiveMessages();
+    messages.append(QJsonObject{{"role", "user"}, {"content", text}});
+    QJsonObject body;
+    body["messages"] = messages;
+    body["max_tokens"] = m_maxTokensSpin->value();
+    const quint64 requestId = ++m_prepareRequest;
+    m_prepareReply = m_client->post("/inference/context-usage", body, [this, requestId, text](int status, const QJsonDocument &doc) {
+        if (requestId != m_prepareRequest) return;
+        bool compact = false;
+        if (status == 200) {
+            const QJsonObject usage = doc.object();
+            const int limit = usage["limit"].toInt();
+            // Compaction cannot help when the reply reserve alone is already at the threshold.
+            compact = limit > 0 &&
+                      ContextMeterLogic::shouldCompact(usage["fill"].toDouble(), m_autoCompactPercent) &&
+                      double(usage["reserved"].toInt()) / limit < m_autoCompactPercent / 100.0;
+        }
+        if (compact) {
+            compactThenSend(text);
+        } else {
+            m_preparing = false;
+            m_stopButton->setEnabled(false);
+            updateActions();
+            startSend(text);
+        }
+    });
+}
+
+void ChatPanel::compactThenSend(const QString &text) {
+    setStatus("Compacting…");
+    QJsonArray posted;
+    for (int i = m_compaction.covered; i < m_history.size(); ++i) posted.append(m_history.at(i));
+    posted.append(QJsonObject{{"role", "user"}, {"content", text}});
+    QJsonObject body;
+    body["messages"] = posted;
+    body["previous_summary"] = m_compaction.summary;
+    body["max_tokens"] = m_maxTokensSpin->value();
+    body["target_fill"] = m_autoCompactPercent / 100.0;
+    body["keep_recent"] = kKeepRecent;
+    const quint64 requestId = m_prepareRequest;
+    m_prepareReply = m_client->post("/inference/compact", body, [this, requestId, text](int status, const QJsonDocument &doc) {
+        if (requestId != m_prepareRequest) return;
+        m_preparing = false;
+        m_stopButton->setEnabled(false);
+        updateActions();
+        if (status == 200) {
+            const QJsonObject result = doc.object();
+            const int covered = result["covered"].toInt();
+            if (covered > 0) {
+                const bool summarized = result["method"].toString() == "summary";
+                m_compaction.covered += covered;
+                if (summarized) m_compaction.summary = result["summary"].toString();
+                addContextDivider(summarized ? "Context compacted — earlier messages were summarized"
+                                             : "Context compacted — earlier messages were dropped to make room");
+            }
+        } else {
+            addContextDivider("Could not compact earlier messages; sent as is.");
+        }
+        startSend(text);
+    });
+}
+
+void ChatPanel::cancelPreparing() {
+    ++m_prepareRequest;
+    // Abort only the request being awaited (the backend cancels a compaction when its
+    // connection closes); other panels' requests share this client and must go on.
+    if (m_prepareReply) m_prepareReply->abort();
+    m_preparing = false;
+    m_stopButton->setEnabled(false);
+    updateActions();
+    setStatus("Compaction stopped.");
+}
+
+void ChatPanel::addContextDivider(const QString &text) {
+    auto *divider = new QLabel(text, m_chatHost);
+    divider->setObjectName("contextDivider");
+    divider->setAlignment(Qt::AlignCenter);
+    divider->setWordWrap(true);
+    m_chatLayout->addWidget(divider);
+    ensureTrailingStretch();
+}
+
+void ChatPanel::startSend(const QString &text) {
     m_followOutput = true;
     m_welcome->hide();
     m_input->clear();
@@ -449,11 +564,7 @@ void ChatPanel::onSend() {
     m_stopButton->setEnabled(true);
 
     QJsonObject body;
-    QJsonArray messages;
-    for (const QJsonObject &m : m_history) {
-        messages.append(m);
-    }
-    body["messages"] = messages;
+    body["messages"] = effectiveMessages();
     body["max_tokens"] = m_maxTokensSpin->value();
     body["temperature"] = m_tempSpin->value();
     body["stream"] = true;
@@ -489,6 +600,7 @@ void ChatPanel::onSend() {
                 updateActions();
                 m_stopButton->setEnabled(false);
                 setStatus("Ready.");
+                refreshContextUsage();
             }
         },
         // onDone
@@ -515,11 +627,16 @@ void ChatPanel::onSend() {
                 m_cursorVisible = false;
                 updateActions();
                 m_stopButton->setEnabled(false);
+                refreshContextUsage();
             }
         });
 }
 
 void ChatPanel::onStop() {
+    if (m_preparing) {
+        cancelPreparing();
+        return;
+    }
     if (!m_streaming || !m_client) return;
     ++m_requestId;
     m_client->abortStream();
@@ -537,11 +654,14 @@ void ChatPanel::onStop() {
     updateActions();
     m_stopButton->setEnabled(false);
     setStatus("Generation stopped.");
+    refreshContextUsage();
 }
 
 void ChatPanel::onClearChat() {
+    if (m_preparing) cancelPreparing();
     if (m_streaming) onStop();
     m_history.clear();
+    m_compaction = Compaction();
     // Tear down streaming state.
     m_streaming = false;
     m_activity->hide();
@@ -566,6 +686,72 @@ void ChatPanel::onClearChat() {
     updateActions();
     m_stopButton->setEnabled(false);
     setStatus("Chat cleared.");
+    refreshContextUsage();
+}
+
+QJsonArray ChatPanel::effectiveMessages() const {
+    QJsonArray messages;
+    if (m_compaction.covered > 0 && !m_compaction.summary.isEmpty())
+        messages.append(QJsonObject{{"role", "system"},
+                                    {"content", "Summary of the earlier conversation: " + m_compaction.summary}});
+    for (int i = m_compaction.covered; i < m_history.size(); ++i) messages.append(m_history.at(i));
+    return messages;
+}
+
+void ChatPanel::reloadContextSettings() {
+    using namespace ContextMeterLogic;
+    QSettings settings;
+    m_meter->setStyle(parseStyle(settings.value("chat/meterStyle").toString()));
+    m_autoCompactPercent = parseAutoCompact(settings.value("chat/autoCompactPercent"));
+    m_meter->setAutoCompact(m_autoCompactPercent);
+    applyMeterWarning();
+}
+
+void ChatPanel::refreshContextUsage() {
+    if (!m_client || !m_client->isReady() || !m_modelLoaded) {
+        ++m_usageRequest;
+        m_meter->clearUsage();
+        applyMeterWarning();
+        return;
+    }
+    QJsonArray messages = effectiveMessages();
+    const QString draft = m_input->toPlainText().trimmed();
+    if (!draft.isEmpty()) messages.append(QJsonObject{{"role", "user"}, {"content", draft}});
+    QJsonObject body;
+    body["messages"] = messages;
+    body["max_tokens"] = m_maxTokensSpin->value();
+    const quint64 requestId = ++m_usageRequest;
+    m_client->post("/inference/context-usage", body, [this, requestId](int status, const QJsonDocument &doc) {
+        if (requestId != m_usageRequest) return;
+        if (status == 200) {
+            const QJsonObject usage = doc.object();
+            m_meter->setUsage(usage["used"].toInt(), usage["reserved"].toInt(), usage["limit"].toInt(),
+                              usage["exact"].toBool(true));
+        } else {
+            m_meter->clearUsage();
+        }
+        applyMeterWarning();
+    });
+}
+
+// Mirrors the meter's warning in the status line (all styles except Off) without
+// ever replacing an error, and removes it again once the warning goes away.
+void ChatPanel::applyMeterWarning() {
+    // Off shows no warning at all; the banner already is the warning when it is visible.
+    const bool bannerShown = m_meter->style() == ContextMeter::Style::RingBanner &&
+                             m_meter->level() == ContextMeter::Level::Critical;
+    const QString warning = (m_meter->style() == ContextMeter::Style::Off || bannerShown)
+                                ? QString() : m_meter->warningText();
+    const bool ours = !m_shownWarning.isEmpty() && m_statusLabel->text() == m_shownWarning;
+    if (warning.isEmpty()) {
+        if (ours) setStatus("Ready.");
+        m_shownWarning.clear();
+        return;
+    }
+    if (m_streaming || m_loading) return;
+    if (!ours && m_statusLabel->property("state").toString() == "error") return;
+    setStatus(warning, "warn");
+    m_shownWarning = warning;
 }
 
 void ChatPanel::updateStreamingBubble(const QString &text, bool showCursor) {
@@ -588,12 +774,13 @@ void ChatPanel::scrollToBottom() {
 }
 
 void ChatPanel::updateActions() {
-    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_input->toPlainText().trimmed().isEmpty());
-    m_loadButton->setEnabled(!m_streaming && !m_loading);
+    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_preparing && !m_input->toPlainText().trimmed().isEmpty());
+    m_loadButton->setEnabled(!m_streaming && !m_loading && !m_preparing);
     m_loadButton->setText(m_loading ? "Loading…" : "Load model");
-    m_modelCombo->setEnabled(!m_streaming && !m_loading);
-    m_engineCombo->setEnabled(!m_streaming && !m_loading);
-    m_clearButton->setEnabled(!m_loading);
+    m_modelCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
+    m_engineCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
+    m_clearButton->setEnabled(!m_loading && !m_preparing);
+    m_input->setReadOnly(m_preparing);
 }
 
 void ChatPanel::setStatus(const QString &text, const QString &tone) {

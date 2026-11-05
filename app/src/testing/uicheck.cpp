@@ -14,6 +14,7 @@
 #include "widgets/studiocanvas.h"
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
+#include "widgets/contextmeter.h"
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -42,6 +43,8 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QVBoxLayout>
+#include <QVariant>
 #include <QUrlQuery>
 #include <QSet>
 #include <cstdio>
@@ -100,6 +103,35 @@ struct Fixture : QTcpServer {
             {"status",pullStatus},{"progress",pullProgress},{"bytes_done",double(pullDone)},{"bytes_total",double(pullTotal)},
             {"message","Downloading from HuggingFace Hub"},{"error",pullError.isEmpty()?QJsonValue():QJsonValue(pullError)}}).toJson(QJsonDocument::Compact);
     }
+    // Context usage (/inference/context-usage): the reply echoes the request's max_tokens as the reserve.
+    int usageUsed = 1000, usageLimit = 4096, usageStatus = 200;
+    bool holdUsageOnce = false;
+    QStringList usageRequests;
+    QPointer<QTcpSocket> heldUsageSocket;
+    QByteArray heldUsageBody;
+    void releaseHeldUsage() {
+        if (!heldUsageSocket) return;
+        heldUsageSocket->write("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: "+QByteArray::number(heldUsageBody.size())+"\r\nConnection: close\r\n\r\n"+heldUsageBody);
+        heldUsageSocket->disconnectFromHost();
+        heldUsageSocket.clear();
+    }
+    // Compaction (/inference/compact) and the chat requests the panel makes.
+    int compactStatus = 200, compactCovered = 4;
+    QString compactMethod = "summary";
+    bool holdCompact = false;
+    QStringList compactRequests, chatRequests;
+    QPointer<QTcpSocket> heldCompactSocket;
+    // An unrelated request that stays in flight (/held-other), to prove cancelling a compaction leaves it alone.
+    bool holdOther = false;
+    QPointer<QTcpSocket> heldOtherSocket;
+    static void finishHeld(QPointer<QTcpSocket> &socket, const QByteArray &body) {
+        if (!socket) return;
+        socket->write("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: "+QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);
+        socket->disconnectFromHost();
+        socket.clear();
+    }
+    void releaseHeldOther() { finishHeld(heldOtherSocket, "{}"); }
+    void releaseHeldCompact() { finishHeld(heldCompactSocket, R"({"summary":"late summary","covered":4,"method":"summary"})"); }
     QString trainingState = "running";
     QPointer<QTcpSocket> chatSocket;
     int starts = 0, clears = 0;
@@ -169,8 +201,39 @@ struct Fixture : QTcpServer {
                     else if (path == "/training/start") { ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
                     else if (path.startsWith("/training/cancel/")) { trainingState="cancelled"; }
                     else if (path.startsWith("/training/status/")) body=QJsonDocument(QJsonObject{{"status",trainingState},{"current_step",42},{"total_steps",100},{"progress",42},{"loss",1.28},{"message","Training fixture · learning from example conversations"}}).toJson();
+                    else if (path == "/held-other") {
+                        if (holdOther) { heldOtherSocket = socket; return; }
+                    }
+                    else if (path == "/inference/compact") {
+                        const QByteArray requestBody = bytes->mid(headerEnd+4);
+                        compactRequests << QString::fromUtf8(requestBody);
+                        if (holdCompact) { heldCompactSocket = socket; return; }
+                        status = compactStatus;
+                        if (compactStatus != 200) body = R"({"detail":"fixture compact failure"})";
+                        else {
+                            const QString previous = QJsonDocument::fromJson(requestBody).object().value("previous_summary").toString();
+                            body = QJsonDocument(QJsonObject{{"summary",compactMethod=="summary"?QString("The user asked about X."):previous},
+                                {"covered",compactCovered},{"method",compactMethod}}).toJson(QJsonDocument::Compact);
+                        }
+                    }
+                    else if (path == "/inference/context-usage") {
+                        const QByteArray requestBody = bytes->mid(headerEnd+4);
+                        usageRequests << QString::fromUtf8(requestBody);
+                        status = usageStatus;
+                        if (usageStatus != 200) body = R"({"detail":"No inference engine loaded. Load a model first."})";
+                        else {
+                            const int reserved = QJsonDocument::fromJson(requestBody).object().value("max_tokens").toInt(256);
+                            body = QJsonDocument(QJsonObject{{"used",usageUsed},{"reserved",reserved},{"limit",usageLimit},
+                                {"fill",double(usageUsed+reserved)/usageLimit},{"exact",true}}).toJson(QJsonDocument::Compact);
+                            if (holdUsageOnce) {
+                                holdUsageOnce = false; heldUsageSocket = socket; heldUsageBody = body;
+                                return;
+                            }
+                        }
+                    }
                     else if (path == "/inference/status" || path == "/inference/load") body=R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})";
                     else if (path == "/inference/chat") {
+                        chatRequests << QString::fromUtf8(bytes->mid(headerEnd+4));
                         type="text/event-stream";
                         body="data: {\"delta\":\"A local model can use your documents to give more useful answers.\\n\\nTry a specific question about your project.\"}\n\n";
                         if (holdChat) {
@@ -752,9 +815,241 @@ int runUiCheck(const QString &captures) {
     check(token.width()<=350 && token.height()>150,"long unbroken responses wrap without clipping height");
     host.hide(); chat.hide();
 
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.reloadContextSettings(); chat.show(); pump();
+        auto *ring=chat.findChild<QWidget *>("contextRing"); auto *bar=chat.findChild<QWidget *>("contextBar"); auto *banner=chat.findChild<QWidget *>("contextBanner");
+        auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *statusLine=chat.findChild<QLabel *>("statusLabel");
+        auto *tokensSpin=chat.findChild<QSpinBox *>(); auto *sendButton=button(&chat,"Send  ↑");
+        check(ring && bar && banner && input && statusLine && tokensSpin && sendButton,"chat panel hosts the context meter pieces");
+        if (ring && bar && banner && input && statusLine && tokensSpin && sendButton) {
+            auto lastUsage=[&fixture]() { return QJsonDocument::fromJson(fixture.usageRequests.value(fixture.usageRequests.size()-1).toUtf8()).object(); };
+            auto requests=[&fixture]() { return int(fixture.usageRequests.size()); };
+            auto status=[statusLine]() { return statusLine->text(); };
+            fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.usageStatus=200;
+            int before=requests();
+            chat.refreshEngineStatus();
+            check(waitUntil([&]{ return requests()>before && ring->isVisible(); }),"meter appears once a model is known to be loaded");
+            check(ring->toolTip().contains("1,000 of 4,096") && ring->toolTip().contains("256 reserved") && !bar->isVisible() && !banner->isVisible(),"default Ring shows the numbers on hover; bar and banner stay hidden");
+            check(lastUsage().value("max_tokens").toInt()==256,"usage request carries the Response tokens reserve");
+
+            fixture.usageUsed=3000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return status().contains("getting full"); }) && statusLine->property("state")=="warn","70-90% shows the warning in the status line");
+            fixture.usageUsed=3900; chat.refreshContextUsage();
+            check(waitUntil([&]{ return status().contains("almost full"); }),"above 90% the warning says it is almost full");
+
+            fixture.usageUsed=1000; before=requests();
+            input->setPlainText("a"); input->setPlainText("ab"); input->setPlainText("abc"); pump(100);
+            check(requests()==before,"typing waits for a pause before asking for usage");
+            check(waitUntil([&]{ return requests()==before+1; }),"typing asks for usage once after the pause");
+            pump(700);
+            check(requests()==before+1,"quick typing sends exactly one usage request");
+            const QJsonArray typed=lastUsage().value("messages").toArray();
+            check(!typed.isEmpty() && typed.last().toObject().value("content").toString()=="abc" && typed.last().toObject().value("role").toString()=="user","the typed draft is counted as a pending user message");
+            input->clear();
+
+            fixture.usageUsed=1000; fixture.holdUsageOnce=true; before=requests();
+            chat.refreshContextUsage(); waitUntil([&]{ return requests()==before+1; });
+            fixture.usageUsed=2000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return ring->toolTip().contains("2,000 of"); }),"the newer usage reply is shown");
+            fixture.releaseHeldUsage(); pump(300);
+            check(ring->toolTip().contains("2,000 of"),"a late, older usage reply is ignored");
+
+            fixture.usageStatus=409; chat.refreshContextUsage();
+            check(waitUntil([&]{ return !ring->isVisible(); }),"a backend that reports no model hides the meter");
+            input->setPlainText("still sendable"); pump(50);
+            check(sendButton->isEnabled() && statusLine->property("state")!="error","no usage never blocks sending or reports an error");
+            input->clear(); fixture.usageStatus=200;
+
+            QSettings().setValue("chat/meterStyle","bar"); chat.reloadContextSettings(); fixture.usageUsed=1000;
+            check(waitUntil([&]{ return bar->isVisible() && !ring->isVisible(); }),"switching the setting to Bar swaps the meter without restarting");
+            QSettings().setValue("chat/meterStyle","off"); chat.reloadContextSettings(); pump(100);
+            check(!bar->isVisible() && !ring->isVisible() && !banner->isVisible(),"Off hides every meter piece");
+            QSettings().setValue("chat/meterStyle","ringBanner"); chat.reloadContextSettings(); fixture.usageUsed=3900; chat.refreshContextUsage();
+            check(waitUntil([&]{ return banner->isVisible(); }),"Ring + banner shows the banner when nearly full");
+            pump(100); check(!status().contains("almost full"),"with the banner showing, the status line does not repeat the warning");
+            QSettings().remove("chat/meterStyle"); chat.reloadContextSettings(); fixture.usageUsed=1000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return ring->isVisible() && !banner->isVisible(); }),"removing the setting returns to Ring");
+
+            fixture.usageLimit=2048; tokensSpin->setValue(8192);
+            check(waitUntil([&]{ return status().contains("Reduce Response tokens"); }),"Response tokens larger than the window asks to reduce them");
+            fixture.usageLimit=4096; tokensSpin->setValue(256); pump(700);
+
+            before=requests();
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+            check(waitUntil([&]{ return requests()>before; }) && lastUsage().value("messages").toArray().isEmpty(),"clearing the chat measures an empty conversation");
+            if (!captures.isEmpty()) {
+                const bool wasDark=Theme::isDark();
+                chat.resize(1104,628);
+                struct Shot { const char *style; int used; const char *name; };
+                for (bool dark : {true,false}) {
+                    Theme::setDark(dark);
+                    for (const Shot &shot : {Shot{"ring",1000,"ring-ok"},Shot{"ring",3000,"ring-warn"},Shot{"ringBanner",3900,"banner-critical"},Shot{"bar",3000,"bar-warn"}}) {
+                        QSettings().setValue("chat/meterStyle",shot.style); chat.reloadContextSettings();
+                        fixture.usageUsed=shot.used; const int n=requests(); chat.refreshContextUsage();
+                        waitUntil([&]{ return requests()>n; }); pump(150);
+                        capture(&chat,QString("chat-meter-%1-%2").arg(shot.name,dark?"dark":"light"));
+                    }
+                }
+                Theme::setDark(wasDark);
+                QSettings().remove("chat/meterStyle"); chat.reloadContextSettings();
+            }
+        }
+        chat.hide();
+    }
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        chat.reloadContextSettings();
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.show(); pump();
+        auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *statusLine=chat.findChild<QLabel *>("statusLabel");
+        auto *sendButton=button(&chat,"Send  ↑"); auto *stopButton=button(&chat,"Stop"); auto *ring=chat.findChild<QWidget *>("contextRing");
+        auto *tokensSpin=chat.findChild<QSpinBox *>();
+        check(input && statusLine && sendButton && stopButton && ring && tokensSpin,"compaction checks can find the chat controls");
+        if (input && statusLine && sendButton && stopButton && ring && tokensSpin) {
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            fixture.usageStatus=200; fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.compactStatus=200;
+            fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.holdCompact=false;
+            fixture.compactRequests.clear(); fixture.chatRequests.clear();
+            auto sendAndWait=[&](const QString &text) {
+                const int n=fixture.chatRequests.size();
+                input->setPlainText(text); pump(20); sendButton->click();
+                const bool sent=waitUntil([&]{ return fixture.chatRequests.size()>n && sendButton->text()=="Send  ↑"; });
+                pump(150); return sent;
+            };
+            auto json=[](const QStringList &list) { return QJsonDocument::fromJson(list.value(list.size()-1).toUtf8()).object(); };
+            auto dividers=[&chat]() { return chat.findChildren<QLabel *>("contextDivider"); };
+            auto status=[statusLine]() { return statusLine->text(); };
+
+            bool seeded=true; for (int i=0;i<4;++i) seeded&=sendAndWait(QString("turn %1").arg(i));
+            check(seeded && fixture.chatRequests.size()==4,"four ordinary turns are sent");
+            check(fixture.compactRequests.isEmpty() && dividers().isEmpty(),"below the threshold nothing is compacted");
+
+            fixture.usageUsed=3600; // (3600+256)/4096 = 94%, above the 85% default
+            check(sendAndWait("turn 4"),"a send at the threshold still goes through");
+            check(fixture.compactRequests.size()==1,"a send at or above the threshold compacts exactly once");
+            {
+                const QJsonObject request=json(fixture.compactRequests); const QJsonArray posted=request.value("messages").toArray();
+                check(request.value("keep_recent").toInt()==4 && qAbs(request.value("target_fill").toDouble()-0.85)<1e-9 && request.value("previous_summary").toString().isEmpty() && request.value("max_tokens").toInt()==256,
+                      "compact request carries keep_recent 4, the 85% target, no earlier summary and the reserve");
+                check(posted.size()==9 && posted.last().toObject().value("content").toString()=="turn 4","the new message is part of what is compacted, as the last message");
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==6 && sent.at(0).toObject().value("role").toString()=="system" &&
+                      sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X." &&
+                      sent.at(1).toObject().value("content").toString()=="turn 2" && sent.last().toObject().value("content").toString()=="turn 4",
+                      "the model receives the summary plus only the messages after the compacted ones");
+            }
+            check(dividers().size()==1 && dividers().first()->text().contains("summarized"),"a divider says the earlier messages were summarized");
+            check(chat.findChildren<ChatBubble *>().size()==10,"every earlier message stays on screen");
+
+            fixture.compactCovered=3;
+            check(sendAndWait("turn 5"),"a second compaction goes through");
+            {
+                const QJsonObject request=json(fixture.compactRequests); const QJsonArray posted=request.value("messages").toArray();
+                check(fixture.compactRequests.size()==2 && request.value("previous_summary").toString()=="The user asked about X." && posted.size()==7 && posted.at(0).toObject().value("content").toString()=="turn 2",
+                      "a repeat compaction posts only the uncompacted tail and the earlier summary");
+                check(json(fixture.chatRequests).value("messages").toArray().size()==5,"covered messages accumulate across compactions");
+            }
+
+            fixture.compactMethod="dropped"; fixture.compactCovered=2;
+            check(sendAndWait("turn 6"),"a fallback that drops old messages still sends");
+            check(dividers().size()==3 && dividers().last()->text().contains("dropped"),"the divider says messages were dropped when the fallback ran");
+            {
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==5 && sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X.","dropping keeps the earlier summary and advances the covered count");
+            }
+
+            fixture.compactMethod="summary"; fixture.compactCovered=0;
+            const int dividersBefore=dividers().size();
+            check(sendAndWait("turn 7") && dividers().size()==dividersBefore,"a compaction that covers nothing adds no divider");
+
+            fixture.compactCovered=4; fixture.compactStatus=500;
+            check(sendAndWait("turn 8") && dividers().size()==dividersBefore+1 && dividers().last()->text().contains("Could not compact"),"a failed compaction says so in the transcript and sends anyway");
+            check(json(fixture.chatRequests).value("messages").toArray().at(0).toObject().value("role").toString()=="system","after a failed compaction the earlier summary is still sent");
+            fixture.compactStatus=200;
+
+            const int compactsBeforeUnknown=fixture.compactRequests.size();
+            fixture.usageStatus=409;
+            check(sendAndWait("turn 9") && fixture.compactRequests.size()==compactsBeforeUnknown,"when usage is unknown the message is sent without compacting");
+            check(json(fixture.chatRequests).value("messages").toArray().at(0).toObject().value("role").toString()=="system","the existing summary survives a model/usage hiccup");
+            fixture.usageStatus=200;
+
+            QSettings().setValue("chat/autoCompactPercent",0); chat.reloadContextSettings(); fixture.usageUsed=3900;
+            const int compactsBeforeOff=fixture.compactRequests.size();
+            check(sendAndWait("turn 10") && fixture.compactRequests.size()==compactsBeforeOff,"auto-compact Off never compacts, even when nearly full");
+            QSettings().setValue("chat/autoCompactPercent",90); chat.reloadContextSettings(); fixture.usageUsed=3600; // (3600+256)/4096 = 94% still >= 90
+            const int compactsAt90=fixture.compactRequests.size();
+            check(sendAndWait("turn 11") && fixture.compactRequests.size()==compactsAt90+1 && qAbs(json(fixture.compactRequests).value("target_fill").toDouble()-0.90)<1e-9,"the chosen percentage is used as the target");
+            QSettings().remove("chat/autoCompactPercent"); chat.reloadContextSettings();
+
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(dividers().isEmpty(),"clearing the chat removes the dividers");
+            check(sendAndWait("fresh start"),"a new chat sends");
+            {
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==1 && sent.at(0).toObject().value("role").toString()=="user","clearing the chat also forgets the summary");
+            }
+
+            fixture.usageUsed=3900;
+            const int compactsShort=fixture.compactRequests.size();
+            check(sendAndWait("short one") && fixture.compactRequests.size()==compactsShort,"a short history is never compacted, even when nearly full");
+
+            bool grown=true; fixture.usageUsed=1000; for (int i=0;i<3;++i) grown&=sendAndWait(QString("more %1").arg(i));
+            fixture.usageLimit=2048; tokensSpin->setValue(8192); pump(700); fixture.usageUsed=3900;
+            const int compactsReserve=fixture.compactRequests.size();
+            check(grown && sendAndWait("reserve too big") && fixture.compactRequests.size()==compactsReserve,"Response tokens at or above the window never start a compaction");
+            fixture.usageLimit=4096; tokensSpin->setValue(256); pump(700);
+
+            fixture.usageUsed=3600; fixture.holdCompact=true;
+            const int chatsBeforeStop=fixture.chatRequests.size(), compactsBeforeStop=fixture.compactRequests.size();
+            input->setPlainText("stop me"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeStop+1 && fixture.heldCompactSocket; }) && status().contains("Compacting") && stopButton->isEnabled() && !sendButton->isEnabled(),
+                  "while compacting, status says so, Stop is available and Send is not");
+            stopButton->click(); pump(300);
+            check(input->toPlainText()=="stop me" && sendButton->isEnabled() && status().contains("Compaction stopped") && fixture.chatRequests.size()==chatsBeforeStop,
+                  "Stop during compaction keeps the typed text, re-enables Send and sends nothing");
+            fixture.holdCompact=false; fixture.heldCompactSocket.clear();
+            check(sendAndWait("stop me") && fixture.compactRequests.size()==compactsBeforeStop+2 && json(fixture.chatRequests).value("messages").toArray().last().toObject().value("content").toString()=="stop me",
+                  "after stopping a compaction the same message can be sent");
+
+            QSettings().setValue("chat/meterStyle","off"); chat.reloadContextSettings(); fixture.usageUsed=3600; fixture.holdCompact=true;
+            const int compactsOff=fixture.compactRequests.size();
+            input->setPlainText("quiet compaction"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsOff+1; }) && status().contains("Compacting") && !ring->isVisible(),
+                  "with the meter Off, compaction still says Compacting… and shows no meter");
+            stopButton->click(); pump(300); fixture.holdCompact=false; fixture.heldCompactSocket.clear();
+            QSettings().remove("chat/meterStyle"); chat.reloadContextSettings();
+
+            // Cancelling a compaction aborts only that request.
+            fixture.usageUsed=3600; fixture.holdCompact=true; fixture.holdOther=true; fixture.heldCompactSocket.clear();
+            int otherStatus=-1; client.get("/held-other",[&otherStatus](int code,const QJsonDocument &){ otherStatus=code; });
+            const int compactsNarrow=fixture.compactRequests.size();
+            input->setPlainText("cancel narrowly"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.heldOtherSocket && fixture.compactRequests.size()==compactsNarrow+1 && fixture.heldCompactSocket; }),"a compaction and an unrelated request are in flight together");
+            stopButton->click(); pump(300);
+            check(otherStatus==-1,"stopping a compaction leaves other in-flight requests alone");
+            fixture.releaseHeldOther(); pump(200);
+            check(otherStatus==200,"the unrelated request still completes normally");
+            fixture.holdOther=false; fixture.holdCompact=false; input->clear();
+
+            // Starting a new chat while compacting cancels the compaction; the late reply changes nothing.
+            fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+            const int chatsBeforeClear=fixture.chatRequests.size(), compactsBeforeClear=fixture.compactRequests.size();
+            input->setPlainText("clear while compacting"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeClear+1 && fixture.heldCompactSocket; }),"a compaction is in flight before the chat is cleared");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.releaseHeldCompact(); pump(300);
+            check(fixture.chatRequests.size()==chatsBeforeClear && dividers().isEmpty() && sendButton->isEnabled(),"clearing the chat during compaction cancels it and a late reply changes nothing");
+            fixture.holdCompact=false; input->clear();
+        }
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.hide();
+    }
     settings.show(); pump();
     bool hosted=false; for(auto *edit:settings.findChildren<QLineEdit *>()) hosted|=edit->echoMode()==QLineEdit::Password;
-    check(!hosted && settings.findChild<QComboBox *>()->count()==3,"Settings exposes only supported local engines");
+    QComboBox *engineCombo=nullptr; for(auto *combo:settings.findChildren<QComboBox *>()) if(combo->accessibleName()=="Default inference engine") engineCombo=combo;
+    check(!hosted && engineCombo && engineCombo->count()==3,"Settings exposes only supported local engines");
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
     settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
@@ -796,6 +1091,80 @@ int runUiCheck(const QString &captures) {
         QSvgGenerator svg; svg.setFileName(captures+"/konark-wheel.svg"); svg.setSize(QSize(216,216)); svg.setViewBox(QRect(0,0,216,216));
         svg.setTitle("Magnite · Konark-inspired wheel"); QPainter painter(&svg);
         BrandMark::paint(painter,QRectF(0,0,216,216),QColor(Theme::accentPrimary()));
+    }
+    {
+        using namespace ContextMeterLogic;
+        check(levelFor(0.69)==Level::Ok && levelFor(0.70)==Level::Warn && levelFor(0.90)==Level::Warn &&
+              levelFor(0.91)==Level::Critical && levelFor(1.5)==Level::Critical,"meter levels switch at 70% and above 90%");
+        check(!shouldCompact(0.84,85) && shouldCompact(0.85,85) && !shouldCompact(0.99,0) &&
+              !shouldCompact(0.99,86) && shouldCompact(0.70,70),"auto-compact fires at or above the chosen percentage only");
+        check(parseAutoCompact(QVariant())==85 && parseAutoCompact(QVariant("abc"))==85 && parseAutoCompact(60)==85 &&
+              parseAutoCompact(95)==85 && parseAutoCompact(0)==0 && parseAutoCompact(75)==75 && parseAutoCompact(QVariant("90"))==90,
+              "stored auto-compact values outside Off/70-90 step 5 fall back to 85");
+        check(parseStyle("bar")==Style::Bar && parseStyle("")==Style::Ring && parseStyle("garbage")==Style::Ring &&
+              parseStyle(styleKey(Style::RingBanner))==Style::RingBanner && parseStyle("off")==Style::Off,"meter style keys round-trip; unknown keys mean Ring");
+        check(usageText(1390,256,4096,true)=="1,390 / 4,096 tokens" && usageText(1390,256,4096,false)=="~1,390 / 4,096 tokens","usage text groups digits and marks estimates with ~");
+
+        ContextMeter meter; QWidget host; auto *hostLayout=new QVBoxLayout(&host);
+        hostLayout->addWidget(meter.ring()); hostLayout->addWidget(meter.bar()); hostLayout->addWidget(meter.banner());
+        host.show(); pump();
+        check(meter.ring()->objectName()=="contextRing" && meter.bar()->objectName()=="contextBar" && meter.banner()->objectName()=="contextBanner","meter widgets have stable object names");
+        check(!meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"meter shows nothing before the first usage");
+        meter.setUsage(1400,256,4096,true);
+        check(meter.level()==Level::Ok && meter.warningText().isEmpty(),"under 70% is quiet");
+        meter.setUsage(3000,256,4096,true);
+        check(meter.level()==Level::Warn && !meter.warningText().isEmpty(),"70-90% warns");
+        meter.setUsage(3900,256,4096,true);
+        check(meter.level()==Level::Critical,"over 90% is critical");
+        meter.setAutoCompact(85); check(meter.warningText().contains("compact",Qt::CaseInsensitive),"critical warning mentions auto-compact when on");
+        meter.setAutoCompact(0); check(!meter.warningText().contains("will compact",Qt::CaseInsensitive) && meter.warningText().contains("fail",Qt::CaseInsensitive),"critical warning says the next message may fail when auto-compact is off");
+        meter.setUsage(0,5000,2048,true);
+        check(meter.warningText()=="Reduce Response tokens","reserve larger than the window asks to reduce Response tokens");
+        meter.setStyle(Style::Ring); meter.setUsage(1400,256,4096,true); pump();
+        check(meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"Ring style shows only the ring");
+        check(meter.ring()->toolTip().contains("1,400 of 4,096") && meter.ring()->toolTip().contains("256 reserved"),"ring tooltip gives the exact numbers");
+        meter.setStyle(Style::Bar); pump();
+        check(!meter.ring()->isVisible() && meter.bar()->isVisible(),"Bar style shows only the bar");
+        auto *barLabel=meter.bar()->findChild<QLabel *>("contextBarText");
+        check(barLabel && barLabel->text().contains("1,400 / 4,096 tokens") && barLabel->text().contains("256 reserved"),"bar shows the numbers without hovering");
+        meter.setStyle(Style::RingBanner); meter.setUsage(3900,256,4096,true); pump();
+        check(meter.ring()->isVisible() && meter.banner()->isVisible(),"Ring + banner shows the banner when critical");
+        meter.setUsage(1400,256,4096,true); pump();
+        check(meter.ring()->isVisible() && !meter.banner()->isVisible(),"Ring + banner hides the banner below critical");
+        meter.setStyle(Style::Ring); meter.setUsage(3900,256,4096,true); pump();
+        check(!meter.banner()->isVisible(),"Ring style never shows the banner");
+        meter.setStyle(Style::Off); pump();
+        check(!meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"Off hides every meter widget");
+        meter.setStyle(Style::Ring); meter.clearUsage(); pump();
+        check(!meter.ring()->isVisible() && meter.warningText().isEmpty() && !meter.hasUsage(),"clearing usage hides the meter and its warning");
+        bool asked=false; QObject::connect(&meter,&ContextMeter::newChatRequested,[&asked](){ asked=true; });
+        meter.setStyle(Style::RingBanner); meter.setUsage(3900,256,4096,true); pump();
+        if (auto *button=meter.banner()->findChild<QPushButton *>("contextBannerNewChat")) button->click();
+        check(asked,"banner offers Start new chat");
+        host.hide();
+    }
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        SettingsPanel chatSettings;
+        auto *styleCombo=chatSettings.findChild<QComboBox *>("meterStyleCombo");
+        auto *compactCombo=chatSettings.findChild<QComboBox *>("autoCompactCombo");
+        check(styleCombo && compactCombo,"Settings has a Chat card with meter style and auto-compact");
+        if (styleCombo && compactCombo) {
+            check(styleCombo->currentData().toString()=="ring" && compactCombo->currentText()=="85%","chat settings default to Ring and 85%");
+            check(styleCombo->count()==4 && compactCombo->count()==6 && compactCombo->itemText(0)=="Off","meter styles and auto-compact choices are offered");
+            int changes=0; QObject::connect(&chatSettings,&SettingsPanel::settingsChanged,[&changes](){ ++changes; });
+            styleCombo->setCurrentIndex(styleCombo->findData("bar"));
+            check(QSettings().value("chat/meterStyle").toString()=="bar" && changes==1,"changing the meter style saves immediately and notifies once");
+            compactCombo->setCurrentIndex(compactCombo->findData(0));
+            check(QSettings().value("chat/autoCompactPercent").toInt()==0 && changes==2,"turning auto-compact Off saves 0 and notifies once");
+            compactCombo->setCurrentIndex(compactCombo->findData(70));
+            check(QSettings().value("chat/autoCompactPercent").toInt()==70,"auto-compact accepts 70%");
+            QSettings().setValue("chat/autoCompactPercent",61); QSettings().setValue("chat/meterStyle","nonsense");
+            SettingsPanel reopened;
+            auto *reopenedStyle=reopened.findChild<QComboBox *>("meterStyleCombo"); auto *reopenedCompact=reopened.findChild<QComboBox *>("autoCompactCombo");
+            check(reopenedStyle && reopenedCompact && reopenedStyle->currentData().toString()=="ring" && reopenedCompact->currentText()=="85%","invalid stored chat settings load as the defaults");
+        }
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
     }
     ClickFeedback feedback(qApp);
     QPushButton click("Run"); click.resize(120,44); click.show(); click.activateWindow(); pump();

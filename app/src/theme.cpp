@@ -228,6 +228,7 @@ int Theme::selfCheck() {
     check("statusSuccess", Theme::statusSuccess() == "#276749");
     check("statusWarning", Theme::statusWarning() == "#855C14");
     check("statusError", Theme::statusError() == "#B13D24");
+    check("meterTrack valid", QColor(Theme::meterTrack()).isValid() && Theme::meterTrack() == Theme::surfaceBorder());
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());

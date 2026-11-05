@@ -42,6 +42,7 @@ QLabel#panelSubtitle { color: @textSecondary; font-size: 12px; }
 QLabel#subtitle { color: @textSecondary; font-size: 12px; }
 QLabel#statusLabel { color: @textSecondary; font-size: 12px; }
 QLabel#cardMeta { color: @textSecondary; font-size: 12px; }
+QLabel#contextDivider { color: @textMuted; font-size: 12px; padding: 6px 0; }
 QLabel#cardDownloaded { color: @statusSuccess; font-size: 12px; font-weight: 600; }
 QLabel#headingLabel { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#cardTitle { font-family: @headingFont; font-size: 14px; font-weight: 600; }

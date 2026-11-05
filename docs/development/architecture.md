@@ -161,6 +161,7 @@ Paths below are relative to the dynamically discovered loopback base URL. `{id}`
 | Inference preferences | `POST /inference/settings` | Set runtime engine override for subsequent selection |
 | Adapter selection | `POST /inference/adapter` | Activate an adapter; empty `adapter_id` clears/unloads it |
 | Generation | `POST /inference/chat`, `POST /inference/completion` | SSE by default; collected JSON when `stream=false` |
+| Context window | `POST /inference/context-usage`, `POST /inference/compact` | Token usage against the loaded model's limit; summarize older messages (see Context meter and compaction) |
 | Datasets | `POST /datasets/ingest`, `GET /datasets`, `GET /datasets/{id}`, `DELETE /datasets/{id}` | Normalize/import, list, inspect, remove |
 | Training | `POST /training/start`, `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` | Submit with HTTP 202, inspect, cooperatively cancel |
 | Adapter registry | `GET /adapters`, `GET /adapters/{id}`, `DELETE /adapters/{id}` | List/filter, inspect, remove weights/metadata |
@@ -256,6 +257,15 @@ Failures after streaming begins use `data: {"error": "..."}`. Fetching the first
 With `stream=false`, the route consumes the same generator and returns a JSON completion object with `choices`, timestamps, model and an ID. Chat choices contain an assistant message; completion choices contain text.
 
 Context validation reserves the requested output budget. Torch uses its tokenizer and formatted chat prompt; llama.cpp supplies token counts but inherits message-overhead estimation. Engines without specialized counting inherit a conservative UTF-8 byte count and a 2048 context fallback. These checks are not exact upstream token accounting for every engine.
+
+### Context meter and compaction
+
+The chat shows how full the loaded model's context is and, when asked, shrinks it. The backend stays stateless; the client owns the history.
+
+- **Fill** is `(tokens(messages) + max_tokens) / context_size`, the same quantity `/inference/chat` rejects on, so 100% means the next request fails. `POST /inference/context-usage` returns `used`, `reserved`, `limit`, `fill` and `exact` (true only for torch; llama.cpp counts message overhead by estimate and Ollama/vLLM use the 2048 fallback). It only reads token counts and never takes the supervisor operation lock, so it works while a reply is streaming.
+- **Compaction** is `POST /inference/compact` (`messages`, `previous_summary`, `max_tokens`, `target_fill`, `keep_recent`). It keeps the last `keep_recent` messages (the split moves earlier so the kept part starts at a user message), asks the loaded model for a summary of the rest, and answers `{summary, covered, method}`. `covered` is relative to the posted messages. If the summary fails, is empty, or does not bring the chat below `target_fill`, it falls back to `method: "dropped"` (oldest messages) and returns the previous summary unchanged. It returns `covered: 0` without summarizing when nothing is older than the kept messages, when the kept messages alone already exceed `target_fill`, or when `max_tokens` is at or above the window. It takes the operation lock, so it answers 409 while a reply is generating, and a client disconnect cancels it (499).
+- **Client:** `ChatPanel::m_history` is never trimmed. `m_compaction {summary, covered}` decides what is sent: a leading `system` "Summary of the earlier conversation: …" message plus `m_history[covered:]`. On Send, if auto-compact is on and the measured fill reaches the chosen percentage, the panel compacts first (posting the uncompacted tail plus the new message), adds a divider to the transcript and continues. Stop cancels it and leaves the typed text. The persistent shape `{summary, covered}` is what a future chat-history feature needs to store.
+- **Settings** (`QSettings`, applied immediately): `chat/meterStyle` (`ring`, `bar`, `ringBanner`, `off`; default `ring`) and `chat/autoCompactPercent` (`0` = off, otherwise 70–90 in steps of 5; default 85). The meter is green below 70%, amber to 90%, red above.
 
 ## Datasets and training
 

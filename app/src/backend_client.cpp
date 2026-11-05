@@ -32,8 +32,8 @@ void BackendClient::get(const QString &path, Callback onDone) {
     send("GET", path, QJsonObject(), onDone);
 }
 
-void BackendClient::post(const QString &path, const QJsonObject &body, Callback onDone) {
-    send("POST", path, body, onDone);
+QNetworkReply *BackendClient::post(const QString &path, const QJsonObject &body, Callback onDone) {
+    return send("POST", path, body, onDone);
 }
 
 void BackendClient::remove(const QString &path, Callback onDone) {
@@ -47,8 +47,8 @@ QNetworkRequest BackendClient::request(const QString &path) const {
     return req;
 }
 
-void BackendClient::send(const QString &method, const QString &path,
-                         const QJsonObject &body, Callback onDone) {
+QNetworkReply *BackendClient::send(const QString &method, const QString &path,
+                                   const QJsonObject &body, Callback onDone) {
     QNetworkRequest req = request(path);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     // Model initialization and embedding can outlast vLLM's 240s startup budget.
@@ -62,7 +62,7 @@ void BackendClient::send(const QString &method, const QString &path,
     } else if (method == "DELETE") {
         reply = m_nam->deleteResource(req);
     } else {
-        return;
+        return nullptr;
     }
 
     connect(reply, &QNetworkReply::finished, this, [reply, onDone]() {
@@ -84,6 +84,7 @@ void BackendClient::send(const QString &method, const QString &path,
             onDone(status, doc);
         }
     });
+    return reply;
 }
 
 void BackendClient::streamPost(const QString &path, const QJsonObject &body,

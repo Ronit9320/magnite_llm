@@ -34,6 +34,8 @@ private:
     QLineEdit *m_dataDir;
     QCheckBox *m_grid = nullptr;
     QCheckBox *m_reducedMotion = nullptr;
+    QComboBox *m_meterStyle = nullptr;
+    QComboBox *m_autoCompact = nullptr;
     QPushButton *m_saveButton;
     QLabel *m_statusLabel;
     QLabel *m_updateStatus = nullptr;

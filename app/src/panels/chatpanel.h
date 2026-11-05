@@ -3,6 +3,8 @@
 #include "panels/basepanel.h"
 
 #include <QList>
+#include <QPointer>
+#include <QJsonArray>
 #include <QJsonObject>
 
 class StudioCanvas;
@@ -18,6 +20,8 @@ class QVBoxLayout;
 class QTimer;
 class BackendClient;
 class ChatBubble;
+class ContextMeter;
+class QNetworkReply;
 
 // Chat / Inference panel: converse with the active model.
 // Presentation: real chat bubbles (Variant B) in a scroll area, with a pinned
@@ -40,6 +44,10 @@ protected:
 public slots:
     void refreshEngineStatus();
     void loadModel(const QString &id);
+    // Re-read the chat/meterStyle and chat/autoCompactPercent settings and apply them.
+    void reloadContextSettings();
+    // Ask the backend how full the context is (history + typed draft + reserved reply).
+    void refreshContextUsage();
 
 private slots:
     void onLoadModel();
@@ -55,6 +63,15 @@ private:
     void updateActions();
     void ensureTrailingStretch();
     QString currentEngineName() const;
+    // What is sent to the model: the compaction summary (if any) plus the uncompacted history.
+    QJsonArray effectiveMessages() const;
+    void applyMeterWarning();
+    // Send flow: onSend decides whether to measure/compact first, startSend streams the reply.
+    void startSend(const QString &text);
+    void measureThenSend(const QString &text);
+    void compactThenSend(const QString &text);
+    void cancelPreparing();
+    void addContextDivider(const QString &text);
 
     BackendClient *m_client;
     QComboBox *m_modelCombo;
@@ -88,6 +105,23 @@ private:
 
     // Streaming state (presentation only — plumbing untouched).
     QList<QJsonObject> m_history;
+
+    // Context meter and compaction. m_history is never trimmed (the transcript stays);
+    // `covered` leading messages are represented by `summary` when sending.
+    struct Compaction {
+        QString summary;
+        int covered = 0;
+    } m_compaction;
+    ContextMeter *m_meter = nullptr;
+    QTimer *m_usageTimer = nullptr;
+    quint64 m_usageRequest = 0;
+    bool m_modelLoaded = false;
+    int m_autoCompactPercent = 85;
+    bool m_preparing = false;          // measuring or compacting before a send
+    quint64 m_prepareRequest = 0;
+    QPointer<QNetworkReply> m_prepareReply;   // the usage/compact request being awaited
+    static constexpr int kKeepRecent = 4;   // messages kept verbatim when compacting
+    QString m_shownWarning;
     ChatBubble *m_streamBubble;
     QString m_pendingResponse;
     bool m_streaming;

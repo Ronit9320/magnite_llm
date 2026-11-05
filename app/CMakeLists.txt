@@ -66,6 +66,8 @@ set(MAGNITE_SOURCES
     src/widgets/logoanimation.h
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
+    src/widgets/contextmeter.cpp
+    src/widgets/contextmeter.h
     src/widgets/confirmation.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
