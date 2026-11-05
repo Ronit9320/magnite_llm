@@ -165,7 +165,7 @@ class SuccessfulPullTests(PullFixture):
 
 class CancelTests(PullFixture):
     def before(self):
-        return [p for p in tree(self.cache) if p != "blobs" and not p.startswith("blobs/")]
+        return [p for p in tree(self.cache) if Path(p).parts[0] != "blobs"]
 
     def test_cancel_stops_the_download_and_removes_partial_files(self):
         before = self.before()

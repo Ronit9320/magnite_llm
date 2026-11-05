@@ -71,7 +71,7 @@ jobs:
         run: |
           bash packaging/macos/build_dmg.sh > build/packaging/macos/hosted/dmg.log 2>&1
           version="$(python3 packaging/release_metadata.py --print-version)"
-          bash packaging/macos/check_dmg.sh "dist/Magnite-$version-arm64.dmg" >> build/packaging/macos/hosted/dmg.log 2>&1
+          bash packaging/macos/check_dmg.sh "dist/Magnite-$version-arm64.dmg" build/packaging/macos/hosted/dmg-smoke >> build/packaging/macos/hosted/dmg.log 2>&1
       - name: Record exact tested package provenance
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
