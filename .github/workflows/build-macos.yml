@@ -57,7 +57,7 @@ jobs:
       - name: Relocated bundle smoke and UI
         run: |
           ditto build/packaging/macos/stage/Magnite.app "$RUNNER_TEMP/Relocated App/Magnite.app"
-          bash packaging/macos/smoke_bundle.sh "$RUNNER_TEMP/Relocated App/Magnite.app" build/packaging/macos/hosted/smoke
+          MAGNITE_SELFTEST_PULL=1 bash packaging/macos/smoke_bundle.sh "$RUNNER_TEMP/Relocated App/Magnite.app" build/packaging/macos/hosted/smoke
           env PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent MAGNITE_HOME="$RUNNER_TEMP/ui-data" \
             "$RUNNER_TEMP/Relocated App/Magnite.app/Contents/MacOS/Magnite" --ui-check \
             > build/packaging/macos/hosted/ui.log 2>&1

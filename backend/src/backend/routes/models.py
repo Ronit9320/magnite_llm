@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
-import httpx
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+import httpx
+from pydantic import StringConstraints
+
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from backend.models.registry import ModelRegistry
 from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, PullRequest
@@ -45,11 +48,26 @@ def list_models(
 @router.get("/search", response_model=list[HubSearchResult])
 def search_hub(
     q: str = Query(..., description="Search query"),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100, description="Page size"),
+    offset: int = Query(default=0, ge=0, le=1000, description="Results to skip, for paging"),
 ):
     if not q.strip():
         return []
-    return _get_registry().search_hub(q.strip(), limit=limit)
+    try:
+        return _get_registry().search_hub(q.strip(), limit=limit, offset=offset)
+    except (httpx.HTTPError, OSError) as exc:  # includes huggingface_hub's HfHubHTTPError
+        raise HTTPException(status_code=502, detail=f"Could not reach the Hugging Face Hub: {exc}") from exc
+
+
+@router.get("/sizes", response_model=dict[str, Optional[int]])
+def hub_sizes(
+    repo: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] = Query(
+        ..., min_length=1, max_length=100,
+        description="Hub repo ids; repeat the parameter. Returns exact download bytes, or null if unknown."),
+):
+    """Download sizes for search results. Never fails because the Hub does: a size
+    that cannot be found is null."""
+    return _get_registry().repo_sizes(repo)
 
 
 @router.get("/{model_id}", response_model=ModelRecord)
@@ -66,11 +84,14 @@ def pull_model(body: PullRequest):
     reg = _get_registry()
     if body.source not in ("huggingface", "ollama"):
         raise HTTPException(status_code=400, detail=f"Unknown source '{body.source}'")
-    if body.source == "ollama":
-        job_id = reg.pull_ollama(body.ref)
-    else:
-        job_id = reg.pull_hf(body.ref)
-    return reg.job_status(job_id) or HTTPException(status_code=500, detail="Job lost")
+    try:
+        job_id = reg.pull_ollama(body.ref) if body.source == "ollama" else reg.pull_hf(body.ref)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    job = reg.job_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=500, detail="Job lost")
+    return job
 
 
 @router.get("/pull/{job_id}", response_model=PullJob)
@@ -78,6 +99,20 @@ def pull_status(job_id: str):
     job = _get_registry().job_status(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"No pull job '{job_id}'")
+    return job
+
+
+@router.post("/pull/{job_id}/cancel", response_model=PullJob, status_code=202)
+def cancel_pull(job_id: str, response: Response):
+    """Stop a download and remove its partial files. 202 while it is being cancelled;
+    200 with the unchanged job if it had already finished."""
+    reg = _get_registry()
+    before = reg.job_status(job_id)
+    if before is None:
+        raise HTTPException(status_code=404, detail=f"No pull job '{job_id}'")
+    job = reg.cancel_pull(job_id)
+    if before.status not in ("queued", "running"):
+        response.status_code = 200
     return job
 
 

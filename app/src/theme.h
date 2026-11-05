@@ -4,6 +4,7 @@
 #include <QString>
 
 class QIcon;
+class QPixmap;
 
 // Current design tokens. This is the single source of
 // truth for every color, font, radius and spacing value in the UI. Panels and
@@ -76,6 +77,11 @@ void loadFonts();
 // must use stroke="currentColor"; we substitute the requested color so a single
 // source icon works for every state (accent-primary active / text-secondary idle).
 QIcon coloredIcon(const QString &lucideName, const QColor &color, int size = 18);
+
+// The pixmap behind coloredIcon(): `size` logical pixels square, backed by
+// size*dpr device pixels. Exposed with an explicit ratio so HiDPI rendering can
+// be verified on any machine (the offscreen test platform always reports 1x).
+QPixmap iconPixmap(const QString &lucideName, const QColor &color, int size, qreal dpr);
 
 // Theme verification: checks active design tokens, the embedded qrc assets
 // and the registered font families to stderr. Returns the number of failures

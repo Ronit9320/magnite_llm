@@ -33,15 +33,16 @@ QPushButton#primaryBtn:pressed { background: @accentActive; }
 QPushButton#cardPrimary:pressed { background: @accentActive; }
 QPushButton#primaryBtn:disabled { background: @insetBackground; color: @textMuted; border-color: @surfaceBorder; }
 QPushButton#cardPrimary:disabled { background: @insetBackground; color: @textMuted; border-color: @surfaceBorder; }
-QPushButton#destructiveBtn { color: @statusError; }
+QPushButton#destructiveBtn, QPushButton#cancelDownload { color: @statusError; }
 QPushButton#cardDanger { color: @statusError; }
-QPushButton#destructiveBtn:hover { background: @dangerHover; }
+QPushButton#destructiveBtn:hover, QPushButton#cancelDownload:hover { background: @dangerHover; }
 QPushButton#cardDanger:hover { background: @dangerHover; }
 QLabel#panelTitle { font-family: @headingFont; font-size: 24px; font-weight: 600; }
 QLabel#panelSubtitle { color: @textSecondary; font-size: 12px; }
 QLabel#subtitle { color: @textSecondary; font-size: 12px; }
 QLabel#statusLabel { color: @textSecondary; font-size: 12px; }
 QLabel#cardMeta { color: @textSecondary; font-size: 12px; }
+QLabel#cardDownloaded { color: @statusSuccess; font-size: 12px; font-weight: 600; }
 QLabel#headingLabel { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#cardTitle { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#metricValue { font-family: @headingFont; font-size: 20px; color: @textPrimary; }
@@ -162,7 +163,7 @@ QLabel#chatEyebrow { color: @accentLabel; font-size: 10px; letter-spacing: 2px; 
 QPushButton#promptSuggestion { background: @surfaceFill; border: 1px solid @surfaceBorder; color: @textSecondary; text-align: left; padding: 12px; border-radius: 12px; }
 QPushButton#promptSuggestion:hover { color: @textPrimary; border-color: @textSecondary; background: @surfaceFillHover; }
 QPushButton#promptSuggestion:focus { border-color: @accentPrimary; }
-QPushButton#destructiveBtn:disabled, QPushButton#cardDanger:disabled { color: @textMuted; background: @insetBackground; }
+QPushButton#destructiveBtn:disabled, QPushButton#cancelDownload:disabled, QPushButton#cardDanger:disabled { color: @textMuted; background: @insetBackground; }
 QFrame#chatComposer[focused="true"] { border-color: @accentPrimary; }
 QFrame#ragDocCard:hover { border-color: @surfaceBorderHover; }
 QFrame#ragDocCard[selected="true"] { border-color: @accentPrimary; background: @surfaceFillHover; }

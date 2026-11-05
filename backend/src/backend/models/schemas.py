@@ -30,6 +30,7 @@ class HubSearchResult(BaseModel):
     license: str = ""
     tags: list[str] = Field(default_factory=list)
     source: str = "huggingface"
+    downloaded: bool = Field(default=False, description="Already available in the local library")
 
 
 class PullRequest(BaseModel):
@@ -41,8 +42,10 @@ class PullJob(BaseModel):
     id: str
     ref: str
     source: str
-    status: str = Field(description="queued|running|done|error")
+    status: str = Field(description="queued|running|done|error|cancelled")
     progress: float = 0.0
+    bytes_done: int = Field(default=0, description="Bytes downloaded so far (0 if unknown)")
+    bytes_total: int = Field(default=0, description="Expected total bytes (0 if unknown)")
     message: str = ""
     error: Optional[str] = None
 

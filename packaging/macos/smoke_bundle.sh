@@ -19,9 +19,12 @@ rm -rf "$home"
 failures=0
 fail() { echo "FAIL  $*"; failures=$((failures + 1)); }
 pass() { echo "PASS  $*"; }
+pull_env=()
+if [[ -n "${MAGNITE_SELFTEST_PULL:-}" ]]; then pull_env=(MAGNITE_SELFTEST_PULL=1); fi
 run_clean() {
     env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent \
-        MAGNITE_HOME="$home" QT_QPA_PLATFORM=offscreen "$@"
+        MAGNITE_HOME="$home" HF_HOME="$log_dir/hf-cache" \
+        "${pull_env[@]}" QT_QPA_PLATFORM=offscreen "$@"
 }
 
 if codesign --verify --deep --strict --verbose=4 "$app" 2>"$log_dir/codesign-before.log"; then pass "signature before run"

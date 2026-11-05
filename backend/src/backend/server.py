@@ -23,6 +23,9 @@ async def shutdown():
     from backend.inference.supervisor import get_supervisor
     from backend.routes.training import _get_manager
     await asyncio.to_thread(_get_manager().shutdown)
+    from backend.routes import models as model_routes
+    if model_routes._registry is not None:
+        await asyncio.to_thread(model_routes._registry.shutdown)
     await asyncio.to_thread(get_supervisor().unload)
 
 

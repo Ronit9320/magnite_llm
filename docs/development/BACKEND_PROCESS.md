@@ -88,7 +88,7 @@ must explicitly move blocking operations off the event loop.
 | Work | Execution / coordination |
 | --- | --- |
 | SQLite stores | Short synchronous calls, connection per operation; instance locks; SQLite transactions |
-| Hub/Ollama model pulls | One daemon thread per pull; in-memory job state, polled by ID |
+| Hub/Ollama model pulls | One job thread per pull (HF downloads in a killable child process); in-memory job state, polled by ID |
 | Training | One serialized daemon queue thread; durable job history, cooperative cancel event |
 | Load model / activate adapter / ingest document | `request_work()` → `asyncio.to_thread`, plus disconnect watcher |
 | llama.cpp generation | Native generator in a background thread via `threaded_stream()` |
@@ -159,19 +159,26 @@ Discovery rules:
   library even though chat uses causal language model loaders. Split GGUF and
   multi-quantization repositories need additional selection support.
 
-`POST /models/pull` creates a `PullJob`, starts a daemon thread, and returns 202.
-For HF: `snapshot_download()` → inspect → `HfApi.model_info()` → SQLite upsert →
-job done. Ollama uses streaming `/api/pull`, then refreshes `/api/tags`.
-`GET /models/pull/{id}` polls process-local progress. Pull history is lost on
-restart; there is no pull cancellation endpoint.
+`POST /models/pull` creates a `PullJob`, starts a job thread, and returns 202.
+For HF: a `pull_worker` child process runs `snapshot_download()` and streams byte
+progress → inspect → `HfApi.model_info()` → SQLite upsert → job done. Ollama uses
+streaming `/api/pull`, then refreshes `/api/tags`. `GET /models/pull/{id}` polls
+process-local progress (`bytes_done`, `bytes_total`). `POST /models/pull/{id}/cancel`
+kills the worker and removes the partial files it created (see architecture.md).
+Pull history is lost on restart.
 
-`DELETE /models/{id}` checks current inference/training references. HF deletion
-uses `scan_cache_dir().delete_revisions(...).execute()` before removing the row;
-Ollama deletion calls its `/api/delete`. **This deletes the selected cached
-revision, including models discovered from other applications. It is not merely
-an “unregister” operation.** Shared blobs needed by other revisions remain.
-Another cached revision may be discovered on the next refresh. Tests never
-perform this operation on the user's real cache.
+`DELETE /models/{id}` refuses (409, with the reason) while the model is loaded for
+inference, used by a queued/running training job, or still being downloaded.
+HF deletion removes the repo's **every cached revision** with the Hub cache API
+(scoped to that one repo, because `delete_revisions` matches by commit hash across
+all repos it is given and forks share hashes), then its lock folder, then the row;
+removing only one revision would let an older one reappear on the next refresh.
+Ollama deletion calls its `/api/delete` (a 404 there counts as already gone; an
+unreachable Ollama is a 502 and the row is kept). **This deletes the cached files,
+including models discovered from other applications, and the Hugging Face cache is
+shared with other tools. It is not merely an "unregister" operation.** The desktop's
+confirmation says so, and says how many adapters were trained on the model. Tests
+never perform this operation on the user's real cache.
 
 ## 5. Inference and streaming
 
