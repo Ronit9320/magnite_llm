@@ -224,6 +224,34 @@ class CancelTests(PullFixture):
         self.assertEqual(self.registry.cancel_pull(done.id).status, "done")
         self.assertIsNotNone(self.registry.get_model(model_id("huggingface", "org/ok")))
 
+    def test_cancel_waits_for_atomic_publication_then_reports_done(self):
+        publishing = threading.Event()
+        release = threading.Event()
+        cancelled = threading.Event()
+        result = []
+        real_upsert = self.store.upsert
+        def upsert(record):
+            publishing.set()
+            if not release.wait(5):
+                raise RuntimeError("publication test timed out")
+            return real_upsert(record)
+        with patch.object(self.store, "upsert", upsert):
+            job_id = self.registry.pull_hf("org/ok")
+            self.assertTrue(publishing.wait(5))
+            def cancel():
+                result.append(self.registry.cancel_pull(job_id))
+                cancelled.set()
+            thread = threading.Thread(target=cancel)
+            thread.start()
+            try:
+                self.assertFalse(cancelled.wait(0.1), "cancel must serialize with publication")
+            finally:
+                release.set()
+                thread.join(5)
+            self.assertTrue(cancelled.is_set())
+            self.assertEqual(result[0].status, "done")
+            self.assertFalse(self.registry._controls[job_id].cancel.is_set())
+
     def test_cancel_unknown_job_returns_none(self):
         self.assertIsNone(self.registry.cancel_pull("nope"))
 
@@ -370,6 +398,17 @@ class CacheTransactionTests(unittest.TestCase):
         self.make("models--org--m/blobs/a.incomplete", "models--org--m/refs/main", ".locks/models--org--m/a.lock")
         txn.rollback()
         self.assertEqual(tree(self.cache), [])  # .locks existed only because of the job
+
+    def test_cancelled_repull_restores_reference_to_existing_snapshot(self):
+        self.make("models--org--m/snapshots/old/config.json")
+        self.make("models--org--m/refs/main", content="old")
+        txn = self.transaction()
+        self.make("models--org--m/snapshots/new/config.json")
+        self.make("models--org--m/refs/main", content="new")
+        txn.rollback()
+        self.assertEqual((self.cache / "models--org--m/refs/main").read_text(), "old")
+        self.assertTrue((self.cache / "models--org--m/snapshots/old/config.json").exists())
+        self.assertFalse((self.cache / "models--org--m/snapshots/new").exists())
 
     def test_existing_files_survive_and_only_new_ones_go(self):
         self.make("models--org--m/blobs/old", "models--org--m/snapshots/r0/config.json", ".locks/keep/other.lock")

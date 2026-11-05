@@ -73,6 +73,13 @@ class CacheTransaction:
         self.locks_root = self.cache / ".locks"
         self.locks = self.locks_root / folder
         self._before = self._scan()
+        self._refs = {}
+        for path in self._before:
+            if path.is_relative_to(self.repo / "refs") and path.is_file() and not path.is_symlink():
+                try:
+                    self._refs[path] = path.read_bytes()
+                except OSError:
+                    pass  # A concurrent cache client may have removed the ref.
 
     def _scan(self) -> set[Path]:
         found: set[Path] = set()
@@ -101,6 +108,16 @@ class CacheTransaction:
                 continue
             except OSError as exc:
                 logger.warning("Cannot remove partial download %s: %s", path, exc)
+        # Hub downloads can overwrite refs/main before all files arrive. A
+        # cancelled repull must not leave it pointing at a removed snapshot.
+        for ref, content in self._refs.items():
+            try:
+                revision = ref.read_text().strip()
+                if (revision and "/" not in revision and "\\" not in revision
+                        and not (self.repo / "snapshots" / revision).exists()):
+                    ref.write_bytes(content)
+            except OSError as exc:
+                logger.warning("Cannot restore cached reference %s: %s", ref, exc)
 
 
 class ModelRegistry:
@@ -177,10 +194,13 @@ class ModelRegistry:
         job, control = self._jobs.get(job_id), self._controls.get(job_id)
         if job is None:
             return None
-        if control is not None and job.status in ("queued", "running"):
-            control.cancel.set()
-            job.message = "Cancelling…"
-            control.kill()
+        if control is not None:
+            with control.lock:
+                if job.status in ("queued", "running"):
+                    control.cancel.set()
+                    job.message = "Cancelling…"
+            if control.cancel.is_set():
+                control.kill()
         return job.model_copy()
 
     def shutdown(self, timeout: float = 10.0) -> None:
@@ -474,13 +494,14 @@ class ModelRegistry:
                 downloaded_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 status="ready",
             )
-            if control.cancel.is_set():
-                raise _Cancelled()
-            self._store.upsert(rec)
-            job.status = "done"
-            job.progress = 100.0
-            job.bytes_done = job.bytes_total = max(job.bytes_total, job.bytes_done)
-            job.message = f"Ready — {rec.name} ({size_mb} MB)"
+            with control.lock:
+                if control.cancel.is_set():
+                    raise _Cancelled()
+                self._store.upsert(rec)
+                job.status = "done"
+                job.progress = 100.0
+                job.bytes_done = job.bytes_total = max(job.bytes_total, job.bytes_done)
+                job.message = f"Ready — {rec.name} ({size_mb} MB)"
         except _Cancelled:
             self._finish_cancelled(job, transaction, identifier, had_record)
         except Exception as exc:  # noqa: BLE001
@@ -628,15 +649,16 @@ class ModelRegistry:
                     if total:
                         job.progress = min(99.0, round(100.0 * completed / total, 1))
                         job.bytes_total, job.bytes_done = int(total), int(completed)
-            if control.cancel.is_set():
-                # Ollama keeps the layers it already fetched and resumes them next time.
-                job.status = "cancelled"
-                job.message = "Cancelled."
-                return
-            self._record_ollama_models()
-            job.status = "done"
-            job.progress = 100.0
-            job.message = f"Ready — {model_name}"
+            with control.lock:
+                if control.cancel.is_set():
+                    # Ollama keeps fetched layers and resumes them next time.
+                    job.status = "cancelled"
+                    job.message = "Cancelled."
+                    return
+                self._record_ollama_models()
+                job.status = "done"
+                job.progress = 100.0
+                job.message = f"Ready — {model_name}"
         except Exception as exc:  # noqa: BLE001
             job.status = "error"
             job.error = str(exc)
