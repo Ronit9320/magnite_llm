@@ -2,12 +2,11 @@ name: Verify local app
 
 on:
   push:
-    # `mac` is the macOS working line and runs no hosted CI. Listing only
-    # branches-ignore would also stop tag pushes from triggering, so tags stay explicit.
-    branches-ignore: [mac]
-    tags: ['**']
+    branches: [dev, master]
+    paths: ['app/**', 'backend/**', 'packaging/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
   pull_request:
-    branches-ignore: [mac]   # PRs whose base is `mac`; PRs from it into other branches still run
+    branches: [dev, master]
+    paths: ['app/**', 'backend/**', 'packaging/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
 
 permissions:

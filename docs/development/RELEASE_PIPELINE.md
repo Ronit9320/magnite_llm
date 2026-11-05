@@ -3,14 +3,12 @@
 Multi-platform integration has started on `release/integration`; see the
 [current plan](MULTIPLATFORM_RELEASE_PLAN.md) and
 [source inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md). The Linux publication
-workflow described here remains active and has not yet been replaced by a
-three-platform coordinator. Its publisher is now restricted to `dev`;
-`release/**` pushes and manual runs on those branches build/test artifacts only.
-No new preview or stable publication is part of the initial integration work.
-Native artifact-only builds now use the reusable Linux/Mac/Windows jobs in
-[the native packaging guide](NATIVE_PACKAGES.md). The existing Linux preview
-workflow delegates its build to `build-linux.yml`; its dev-only publisher is
-retained until the Phase 6 coordinator replaces it.
+workflow described here is retained as a **manual-only legacy Linux publisher**
+until Phase 6 replaces it. Publication requires an explicit `publish=true`
+dispatch on `dev`; its default is artifact-only. Automatic `dev`/`master` and
+pull-request checks never publish. Native artifact builds use the reusable
+Linux/Mac/Windows jobs in [the native packaging guide](NATIVE_PACKAGES.md).
+No new preview or stable publication is part of this integration work.
 
 ## Scope and decisions
 
@@ -35,12 +33,12 @@ features, security repairs, licensing reviews, or platform support as complete.
 
 ```mermaid
 flowchart TD
-    A[Push dev or release branch] --> B[GitHub Actions: Ubuntu 22.04]
+    A[Manual legacy Linux dispatch] --> B[GitHub Actions: Ubuntu 22.04]
     B --> C[Build Qt client and isolated Python CPU runtime]
     C --> D[AppImage plus glibc audit]
     D --> E[Backend, UI, updater and relocated real-model checks]
     E --> F[Upload tested build artifact]
-    F --> G[Sign update metadata in a separate publishing job]
+    F --> G[Explicit publish opt-in: sign update metadata in a separate job]
     G --> H[GitHub prerelease: v0.1-preview]
     H --> I[Qt updater checks published preview releases]
     I --> J[Verify Ed25519 metadata, download, verify SHA-256]
@@ -81,10 +79,16 @@ the highest successfully started sequence stored in QSettings.
 
 ## Workflow and branch behavior
 
-`.github/workflows/linux-preview.yml` runs on pushes to `dev` and `release/**`.
-Documentation-only pushes skip the expensive package workflow. Manual dispatch
-is also guarded to those branches. There is no master/tag push
-trigger, master merge, or production promotion step.
+`.github/workflows/native-packages.yml` builds three-platform artifacts on
+relevant `dev`/`master` pushes, PRs targeting them, and manual `release/**` runs.
+Regular docs-only changes skip automatic checks; packaging files remain inputs.
+Platform/feature branches do not run on push. `verify.yml` follows the same
+automatic branch/path policy and also supports manual dispatch.
+
+`.github/workflows/linux-preview.yml` is manual-only on `dev` or `release/**`.
+It builds artifacts by default. A separate `publish=true` opt-in on `dev` enables
+the legacy Linux-only publisher below. No branch merge, tag push or normal CI
+run implicitly authorizes publication or stable promotion.
 
 1. Build on Ubuntu 22.04, targeting glibc 2.35 or older requirements.
 2. Bundle Python 3.12.12 and the CPU dependencies; build portable CPU llama.cpp.
@@ -93,7 +97,7 @@ trigger, master merge, or production promotion step.
 5. Run signature/manifest tests, real installer transaction tests, backend
    regressions, theme/UI/startup tests, and relocated tiny-model workflows.
 6. Upload the exact tested AppImage and verification evidence as Actions artifacts.
-7. On `dev` only, download that artifact in a separate job with release-write permission.
+7. On an explicit `publish=true` dispatch on `dev`, download that artifact in a separate job with release-write permission.
 8. Sign metadata, checking that the private key matches the shipped public key.
 9. Create a draft tagged at the workflow commit, upload all assets, then publish
    it as a prerelease with `latest=false`.
@@ -106,9 +110,9 @@ seeing a different binary under a version they already installed.
 
 A push to the working release branch originally published the first preview
 without merging into `dev`. Release branches are now artifact-only. Subsequent reviewed work can follow the normal merge into
-`dev`; a new canonical version then publishes a new preview. Neither requires
-changing `master`. Publishing the preview is authorized by the owner despite
-the deferred general release checklist.
+`dev` for app testing without publishing. A future coordinated preview needs the
+remaining release-plan work, a new canonical identity and an explicit rollout.
+Neither ordinary development nor native artifact testing changes `master`.
 
 The release assets are:
 

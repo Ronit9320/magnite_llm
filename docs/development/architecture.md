@@ -114,7 +114,7 @@ The two adapter-store objects share durable records through SQLite, not a shared
 
 ### Shutdown and unexpected exit
 
-The FastAPI shutdown hook asks the training manager to cancel/shut down, then unloads inference using worker threads. Training shutdown sets cancellation events and waits up to two seconds for its daemon worker.
+The FastAPI shutdown hook asks the training manager to cancel/shut down, stops model downloads (up to ten seconds), then unloads inference using worker threads. Training shutdown sets cancellation events and waits up to two seconds for its daemon worker.
 
 The desktop requests graceful shutdown (SIGTERM on POSIX; authenticated `POST /_desktop/shutdown` on Windows), waits up to 15 seconds, then kills the child if necessary and waits another three seconds. Linux uses a best-effort `prctl` parent-death signal; macOS polls parent identity; Windows attaches the backend to a kill-on-close Job Object. vLLM has terminate/kill and `atexit` cleanup. These mechanisms do not establish safe interruption of every active ML operation.
 
@@ -193,7 +193,7 @@ For a Hugging Face pull:
 3. The registry inspects the snapshot and Hub metadata, then upserts a ready model record.
 4. The desktop polls the job until `done`, `error` or `cancelled`, then refreshes its model list.
 
-`POST /models/pull/{id}/cancel` kills the worker process, which stops even a native Xet transfer at once (callbacks cannot interrupt one). The job then removes exactly the files the download created: a `CacheTransaction` records what existed in the repo's cache folder, its lock folder and the shared `blobs` folder before the download and deletes anything new afterwards. Models that were already cached are never touched. A download that fails keeps its partial files so a retry resumes. Ollama pulls cancel by ceasing to read the stream; Ollama keeps its own partial layers.
+`POST /models/pull/{id}/cancel` kills the worker process, which stops even a native Xet transfer at once (callbacks cannot interrupt one). A `CacheTransaction` records the repo and its lock folder before download, then removes newly created files there. Shared cache-root blobs remain because concurrent external Hub clients may own them; pre-existing repo files remain too, and overwritten refs are restored if they would otherwise point to a removed snapshot. Final registration is serialized with cancellation. Download workers inherit packaged Python isolation and disable bytecode writes, and exit when their parent backend dies (a process-handle wait on Windows, parent-identity polling on POSIX). A download that fails keeps its partial files so a retry resumes. Ollama pulls cancel by ceasing to read the stream; Ollama keeps its own partial layers.
 
 Pull jobs are in memory and disappear on backend restart; there is no durable download queue. Pulls request repository snapshots, not a UI-selected individual weight file, so a repository's total size can be much larger than the weights alone.
 
@@ -368,7 +368,7 @@ Records can contain absolute paths. Backup and relocation must account for appli
 | --- | --- |
 | Supervisor nonblocking `threading.Lock` | One inference lifecycle/generation operation at a time; competing operations fail as busy rather than queue |
 | Training queue + one daemon worker | Serial training jobs within one backend; independent of inference resource use |
-| Per-pull daemon threads | Downloads run off request threads; jobs have no durable queue/cancellation API |
+| Per-pull daemon threads | Downloads run off request threads; in-memory jobs support cancellation but have no durable queue |
 | Store locks + SQLite transactions | Protect individual store operations; locks do not span every store instance or the entire application |
 | `request_work()` | Runs long operations in a thread, monitors HTTP disconnects, signals cancellation, retains ownership until native work exits |
 | `threaded_stream()` / `run_blocking()` | Bridge blocking ML calls to async iteration and keep engine ownership during cleanup |

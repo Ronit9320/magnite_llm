@@ -1,10 +1,13 @@
 name: Linux preview release
 
 on:
-  push:
-    branches: [dev, 'release/**']
-    paths-ignore: ['**/*.md']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Explicitly publish a Linux-only preview from dev (legacy path)'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,15 +18,14 @@ concurrency:
 
 jobs:
   package:
-    if: (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/release/')) && github.ref != 'refs/heads/release/integration'
+    if: (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/release/'))
     uses: ./.github/workflows/build-linux.yml
     with:
       source_sha: ${{ github.sha }}
 
   publish:
-    # Integration/release branches build artifacts only. The coordinated
-    # multi-platform publisher will replace this dev-only path later.
-    if: github.ref == 'refs/heads/dev'
+    # Manual opt-in only. Normal CI never publishes; Phase 6 adds the coordinated publisher.
+    if: github.ref == 'refs/heads/dev' && inputs.publish
     needs: package
     runs-on: ubuntu-22.04
     timeout-minutes: 10

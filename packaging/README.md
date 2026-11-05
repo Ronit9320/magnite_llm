@@ -25,8 +25,10 @@ venv, personal store or model caches are copied.
 
 `requirements-cpu.txt` pins direct runtime requirements and `constraints-cpu.txt`
 pins their resolved versions. Review both when updating dependencies. AppImage
-tool digests and source commits are in `tools.lock.json`; a changed upstream
-continuous-channel binary is rejected rather than silently trusted. The build
+tool asset-ID URLs, digests and source commits are in `tools.lock.json`. Immutable
+GitHub asset IDs avoid silently following a rebuilt `continuous` URL. Every download
+is checksum-verified before replacing a cached tool; a stale cache is refreshed
+against the current pin, and failed verification preserves the previous file. The build
 is not claimed byte-for-byte reproducible: native distribution packages, Python
 build dependencies and remote artifact availability still affect reproduction.
 

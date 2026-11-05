@@ -744,3 +744,74 @@ behaviour changes; this plan must not become the sole source of user instruction
 - Next task, outside this completed request: Phase 4 (stable identity/update
   channels). Phases 4–9 remain NOT STARTED; no stable version/promotion/public
   release was performed by this work.
+
+
+### 2026-11-06 — follow-up Mac integration and CI policy
+
+- Integrated `mac` through `2164dc7` into `release/integration`, preserving the
+  owner's documentation commit `25a913f`. The Mac branch retained `verify.yml`
+  with an exclusion for `mac`; workflow deletion is unnecessary with central
+  branch filters. Features include Retina icons, paged model search, byte-level
+  progress/cancellation, per-card deletion and exact repository sizes.
+- Diagnosed Linux failure in run `41627228364`: upstream rebuilt the mutable
+  linuxdeploy `continuous` asset on November 1. The pinned checksum correctly
+  rejected the replacement. Reviewed official asset `699514588`, same upstream
+  source commit, SHA-256 `df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5`.
+  Pinned asset-ID URLs for all three tools; checksum validation now happens
+  before cache replacement and safely refreshes stale cached pins.
+- Review fixes preserve isolated/no-bytecode Python flags in download workers,
+  use a Windows parent process handle for orphan cleanup, preserve ambiguous
+  shared cache blobs on cancel, and protect blobs referenced by other models
+  during deletion. Added regressions and a real relocated Mac download with
+  bundle signature/content checks. Further cancellation regressions preserve
+  existing refs/main when a repull is cancelled, and serialize terminal model
+  publication with cancellation so an accepted cancel cannot later become done.
+  The real tiny-model desktop download passed locally; 50 focused pull tests passed.
+  Live Hub paging returned two disjoint three-result pages; the exact-size lookup
+  for `sshleifer/tiny-gpt2` returned 4,734,064 bytes. Evidence:
+  `build/mac-integration-live-hub.json`.
+- Final app acceptance candidate: `57d6be0125905f8cbd1d3ddbee3abd7713a37f0b`,
+  [native run 42117841134](https://github.com/Ronit9320/magnite_llm/actions/runs/42117841134).
+  Run `42114611761` passed Linux and Mac relocated/CPU acceptance, but caught a
+  Windows-only slash assumption in a cancellation test and an empty optional
+  array in the Mac smoke helper (Bash 3.2 strict mode). Fixed both; DMG smoke logs
+  now live under uploaded hosted evidence rather than an uncollected temp dir.
+  Reproduced the Mac shell failure with a locally compiled GNU Bash 3.2: the old
+  helper fails on an unset pull option; the fixed helper succeeds both with and
+  without that option. Proof: `build/mac-integration-bash32-proof.log`.
+  Earlier follow-up run `42113054052` was superseded/cancelled when the final
+  cancellation fixes were pushed; shared verification of `03c3523` passed.
+  Local C++ build, theme audit, UI interaction/layout checks and desktop selftest
+  passed. Final backend suite: 202 tests, 201 passed and one Mac-only skip;
+  model deletion regressions: 25 tests passed. Packaging/helper suite: 12 passed; updater CTest: 1 passed.
+- Final CI policy: automatic relevant changes on `dev`/`master` pushes and PRs
+  targeting them; ordinary documentation-only changes skip. Manual native runs
+  remain available for `release/**`. Legacy Linux preview is manual-only with
+  default `publish=false`; publication also requires `dev`. No automatic
+  publisher, release identity/schema/trust-key change, or public release.
+- Merging tested integration into `dev` does not require Phases 4–9. Those remain
+  open for channels, installed-app updates/signing, coordinated publication and
+  rollout. New app changes should branch from updated `dev` after integration
+  lands, then return through a PR. This session does not merge `dev` or `master`.
+
+- Final native acceptance **PASS**: all three native jobs and the complete-set
+  gate passed in [run 42117841134](https://github.com/Ronit9320/magnite_llm/actions/runs/42117841134)
+  from clean source `57d6be0125905f8cbd1d3ddbee3abd7713a37f0b`.
+  [Shared source verification](https://github.com/Ronit9320/magnite_llm/actions/runs/42117841057)
+  also passed. Linux exercised relocated AppImage and real-model workflows; Mac
+  passed Retina/UI checks, backend regressions, poisoned-host real download,
+  signatures/content inventories, CPU feature workflows and read-only DMG
+  execution; Windows passed backend regressions and installed-app, upgrade,
+  crash cleanup, restart and uninstall/data retention checks.
+- Public status receipt:
+  `build/packaging/multiplatform/phase3/mac-followup-observed-status.json`.
+  Public API quota was exhausted after all jobs were confirmed green, before
+  a full metadata/annotation export. The receipt records observed job states;
+  exact new package hashes/provenance are in the uploaded native artifacts and
+  were verified by the combined gate. The failed-run metadata remains at
+  `build/packaging/multiplatform/phase3/mac-followup-failed-evidence.json`.
+- The final CI filter/documentation commit changes no application code.
+  Actionlint 1.7.7, branch/path/publication checks, Bash 3.2 proof and diff checks
+  passed. `origin/dev` remains an ancestor; `origin/mac` still points at the
+  integrated `2164dc7`. Ready for a PR into `dev` and ordinary app development;
+  Phases 4–9 remain open and no public release/promotion was performed.

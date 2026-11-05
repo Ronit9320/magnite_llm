@@ -1,8 +1,13 @@
 name: Native integration packages
 on:
   push:
-    branches: ['release/integration']
+    branches: [dev, master]
+    paths: ['app/**', 'backend/**', 'packaging/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
+  pull_request:
+    branches: [dev, master]
+    paths: ['app/**', 'backend/**', 'packaging/**', '.github/workflows/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
+
 permissions:
   contents: read
 concurrency:
@@ -10,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   source:
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-22.04
     outputs:
       sha: ${{ steps.source.outputs.sha }}
