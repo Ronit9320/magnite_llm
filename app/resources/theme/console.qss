@@ -25,6 +25,14 @@ QPushButton:disabled { color: @textMuted; background: @insetBackground; border-c
 QPushButton#navBtn { padding: 8px 10px; border: 1px solid transparent; background: transparent; font-family: @bodyFont; text-align: left; border-radius: 8px; color: @textSecondary; border-left: 3px solid transparent; font-size: 12px; }
 QPushButton#navBtn:hover { border-color: @surfaceBorder; background: @surfaceFillHover; }
 QPushButton#navBtn:checked { border: 1px solid @surfaceBorder; background: @surfaceFill; color: @textPrimary; border-color: @surfaceBorder; border-left: 3px solid @accentPrimary; }
+QWidget#sidebar[collapsed="true"] QPushButton#navBtn { padding: 0; text-align: center; }
+QPushButton#sidebarToggle { padding: 0; border: 1px solid @surfaceBorder; border-radius: 6px; background: @surfaceFill; }
+QPushButton#sidebarToggle:hover { background: @surfaceFillHover; }
+QPushButton#sidebarToggle:focus { border-color: @accentPrimary; }
+QPushButton#sidebarNewChat { padding: 0; border: 1px solid @surfaceBorder; border-radius: 13px; background: @surfaceFill; }
+QPushButton#sidebarNewChat:hover { background: @surfaceFillHover; }
+QPushButton#sidebarNewChat:focus { border-color: @accentPrimary; }
+QPushButton#sidebarNewChat:disabled { background: transparent; }
 QPushButton#primaryBtn { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#cardPrimary { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#primaryBtn:hover { background: @accentHover; border-color: @textPrimary; }

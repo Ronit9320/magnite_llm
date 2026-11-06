@@ -27,6 +27,7 @@ class QLabel;
 class UpdateManager;
 class ChatStore;
 class ChatHistoryList;
+class Sidebar;
 class ChatHistoryController;
 class QTemporaryDir;
 
@@ -55,7 +56,6 @@ private:
     // First launch only: asks what to call the user (for the greeting). Never during verification runs.
     void askForNameIfNeeded();
     void loadPanelSettings();
-    void refreshNavIcons();
     void startPanelFade();
     void setPillState(const char *state, const QString &text);
     void captureNextPanel(int index);
@@ -93,7 +93,7 @@ private:
     std::unique_ptr<QTemporaryDir> m_chatTemp;   // verification runs keep their chats here, never in the real data folder
     SettingsPanel *m_settingsPanel;
 
-    QList<QPushButton*> m_sideButtons;
+    Sidebar *m_sidebar = nullptr;
     QLabel *m_statusPill;
     QLabel *m_connectionDot = nullptr;
     QPropertyAnimation *m_crossfade;

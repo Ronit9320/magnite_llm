@@ -15,6 +15,8 @@
 #include "panels/greeting.h"
 #include "widgets/namedialog.h"
 #include "widgets/chathistorylist.h"
+#include "widgets/sidebarstate.h"
+#include "widgets/sidebar.h"
 #include "panels/chathistorycontroller.h"
 #include "panels/messagerow.h"
 #include "panels/settingspanel.h"
@@ -36,6 +38,7 @@
 #include <QJsonDocument>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -48,6 +51,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSvgGenerator>
@@ -2006,6 +2010,235 @@ int runUiCheck(const QString &captures) {
         QSettings().remove("profile/name"); QSettings().remove("profile/nameAsked");
         const QString suggestion=Greeting::accountNameSuggestion();
         check(suggestion.isEmpty() || suggestion.at(0).isUpper() || !suggestion.at(0).isLetter(),"greeting: the account name suggestion starts with a capital letter");
+    }
+    {
+        // Sidebar state: the decisions behind the collapsible left menu.
+        const QString key=SidebarState::kSettingsKey;
+        QSettings().remove(key);
+        SidebarState s;
+        check(!s.collapsed() && s.width()==176 && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
+        s.setCollapsed(true);
+        check(s.width()==52 && !s.showLabels() && !s.showHistory(true) && s.showNewChatButton(true) && !s.showNewChatButton(false),"sidebar state: collapsed hides labels and list, offers + only on Playground");
+        check(s.toggleTooltip()=="Expand sidebar \u00b7 Ctrl+B","sidebar state: the collapsed toggle offers to expand");
+        check(s.toggle()==false && !s.collapsed() && s.toggleTooltip()=="Collapse sidebar \u00b7 Ctrl+B" && s.toggle()==true && s.collapsed(),"sidebar state: toggle returns the new state and flips back and forth");
+        check(!SidebarState::load().collapsed(),"sidebar state: nothing stored means expanded");
+        SidebarState(true).save();
+        check(SidebarState::load().collapsed() && QSettings().value(key).toBool(),"sidebar state: a collapsed choice is stored and loaded");
+        SidebarState(false).save();
+        check(!SidebarState::load().collapsed(),"sidebar state: an expanded choice is stored and loaded");
+        QSettings().setValue(key,"true");
+        check(SidebarState::load().collapsed(),"sidebar state: a stored text \"true\" counts as collapsed");
+        QSettings().setValue(key,"banana");
+        check(!SidebarState::load().collapsed(),"sidebar state: a garbage value counts as expanded");
+        QSettings().remove(key);
+    }
+    {
+        // The sidebar widget, expanded: the left menu as the main window used to build it inline.
+        const bool wasDark=Theme::isDark();
+        QSettings().remove(SidebarState::kSettingsKey);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        Sidebar sidebar(items,{"Settings","settings",5},4);
+        QList<int> requested; QObject::connect(&sidebar,&Sidebar::panelRequested,[&](int panel){ requested<<panel; });
+        QList<ChatSummary> saved; for (int i=0;i<7;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        sidebar.history()->setChats(saved,QString());
+        sidebar.resize(176,680); sidebar.show(); pump();
+        auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto nav=navButtons();
+        const QStringList tips={"Library \u00b7 Ctrl+1","Training \u00b7 Ctrl+2","Knowledge \u00b7 Ctrl+3","Adapters \u00b7 Ctrl+4","Playground \u00b7 Ctrl+5","Settings \u00b7 Ctrl+6"};
+        bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
+        check(tipsOk&&sidebar.width()==176,"sidebar: six nav buttons with today's tooltips in a 176px column");
+        nav[1]->click();
+        check(requested==QList<int>({1}),"sidebar: clicking a button asks for its panel");
+        requested.clear(); bool shortcutsOk=true;
+        for (int n=1;n<=6;++n) {
+            QShortcut *found=nullptr; for (auto *sc : sidebar.findChildren<QShortcut *>()) if (sc->key().toString()==QString("Ctrl+%1").arg(n)) found=sc;
+            shortcutsOk&=found!=nullptr; if (found) emit found->activated();
+        }
+        check(shortcutsOk&&requested==QList<int>({0,1,2,3,4,5}),"sidebar: Ctrl+1..6 ask for their panels");
+        sidebar.setCurrentPanel(4);
+        bool onlyChat=true; for (auto it=nav.begin();it!=nav.end();++it) onlyChat&=it.value()->isChecked()==(it.key()==4);
+        check(onlyChat&&sidebar.history()->isVisibleTo(&sidebar),"sidebar: the open workspace is checked and Playground shows the chat list");
+        sidebar.setCurrentPanel(1);
+        bool onlyTraining=true; for (auto it=nav.begin();it!=nav.end();++it) onlyTraining&=it.value()->isChecked()==(it.key()==1);
+        check(onlyTraining&&!sidebar.history()->isVisibleTo(&sidebar),"sidebar: other workspaces hide the chat list");
+        bool iconsOk=true;
+        for (bool dark : {true,false}) {
+            Theme::setDark(dark); sidebar.refreshIcons();
+            iconsOk&=nav[1]->icon().pixmap(18,18).toImage()!=nav[0]->icon().pixmap(18,18).toImage();
+        }
+        check(iconsOk,"sidebar: the open workspace's icon is tinted differently in both themes");
+        sidebar.setCurrentPanel(4); pump();
+        bool fits=true; QList<QWidget *> column; for (int i=0;i<5;++i) column<<nav[i]; column<<sidebar.history();
+        for (int i=0;i<column.size();++i) {
+            fits&=sidebar.rect().contains(column[i]->geometry());
+            if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
+        }
+        fits&=sidebar.rect().contains(nav[5]->geometry())&&sidebar.history()->geometry().bottom()<nav[5]->geometry().top();
+        check(fits,"sidebar: everything fits 176x680 with a populated chat list, nothing overlapping");
+        check(sidebar.brandSeal()&&sidebar.brandSeal()->property("brandMark").toBool(),"sidebar: the brand seal is the animated brand mark");
+        Theme::setDark(wasDark);
+    }
+    {
+        // The sidebar widget, collapsed into a slim icon strip.
+        const bool wasDark=Theme::isDark();
+        const QString key=SidebarState::kSettingsKey;
+        QSettings().remove(key);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        const QStringList labels={"Library","Training","Knowledge","Adapters","Playground","Settings"};
+        Sidebar strip(items,{"Settings","settings",5},4);
+        QList<ChatSummary> saved; for (int i=0;i<3;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        strip.history()->setChats(saved,QString());
+        strip.show(); strip.setCurrentPanel(4); pump();
+        int collapsedSignals=0; bool lastCollapsed=false;
+        QObject::connect(&strip,&Sidebar::collapsedChanged,[&](bool c){ ++collapsedSignals; lastCollapsed=c; });
+        auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : strip.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto *toggle=strip.findChild<QPushButton *>("sidebarToggle");
+        check(toggle&&!strip.isCollapsed()&&strip.width()==176&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
+        strip.setCollapsed(true); pump();
+        auto buttons=nav();
+        bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
+        for (int i=0;i<6&&strippedOk;++i) strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&buttons[i]->toolTip().startsWith(labels[i]+" \u00b7 Ctrl+");
+        check(strippedOk,"sidebar: collapsing makes a 52px icon strip; the labels stay as tooltips and accessible names");
+        bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
+        for (auto *tag : strip.findChildren<QLabel *>("studioTag")) hidden&=!tag->isVisibleTo(&strip);
+        check(hidden&&strip.brandSeal()->width()<=32&&strip.brandSeal()->isVisibleTo(&strip),"sidebar: the strip hides the wordmark and tags and shrinks the logo to a small mark");
+        strip.setCurrentPanel(4);
+        check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
+        check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
+        strip.setCollapsed(false); pump();
+        buttons=nav(); bool backOk=strip.width()==176&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==76;
+        for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];
+        check(backOk,"sidebar: expanding brings back the text, the logo, the wordmark and the chat list");
+        strip.setCollapsed(true); pump();
+        for (bool dark : {true,false}) {
+            Theme::setDark(dark); strip.refreshIcons(); pump();
+            buttons=nav(); strip.setCurrentPanel(4);
+            strip.resize(52,680); pump();
+            QList<QWidget *> column={strip.brandSeal(),toggle}; for (int i=0;i<5;++i) column<<buttons[i];
+            bool fits=true; for (int i=0;i<column.size();++i) {
+                fits&=strip.rect().contains(column[i]->geometry());
+                if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
+            }
+            fits&=strip.rect().contains(buttons[5]->geometry())&&buttons[4]->geometry().bottom()<buttons[5]->geometry().top();
+            check(fits,QString("sidebar: the strip fits 52x680 in %1 mode").arg(dark?"dark":"light"));
+            const QImage shot=strip.grab().toImage();
+            auto hasAccent=[&](QPushButton *b) {
+                const QColor accent(Theme::accentPrimary()); const qreal dpr=shot.devicePixelRatio(); const QRect r=b->geometry();
+                for (int x=qRound(r.left()*dpr);x<qRound((r.left()+5)*dpr);++x) for (int y=qRound(r.top()*dpr);y<=qRound(r.bottom()*dpr);++y) {
+                    const QColor c=shot.pixelColor(x,y);
+                    if (qAbs(c.red()-accent.red())<=12&&qAbs(c.green()-accent.green())<=12&&qAbs(c.blue()-accent.blue())<=12) return true;
+                }
+                return false;
+            };
+            check(hasAccent(buttons[4])&&!hasAccent(buttons[0]),QString("sidebar: the open workspace keeps the orange marker in the strip (%1)").arg(dark?"dark":"light"));
+            {
+                // Icon centring: the ink of an idle button's icon sits in the middle of the button.
+                const qreal dpr=shot.devicePixelRatio(); const QRect r=buttons[0]->geometry();
+                const QColor back=shot.pixelColor(qRound((r.left()+2)*dpr),qRound((r.top()-4)*dpr));
+                int minX=100000,maxX=-1;
+                for (int x=qRound((r.left()+4)*dpr);x<qRound((r.right()-2)*dpr);++x) for (int y=qRound((r.top()+4)*dpr);y<qRound((r.bottom()-4)*dpr);++y) {
+                    const QColor c=shot.pixelColor(x,y);
+                    if (qAbs(c.red()-back.red())+qAbs(c.green()-back.green())+qAbs(c.blue()-back.blue())>90) { minX=qMin(minX,x); maxX=qMax(maxX,x); }
+                }
+                const qreal inkCentre=(minX+maxX)/2.0/dpr, buttonCentre=r.left()+r.width()/2.0;
+                check(maxX>minX&&qAbs(inkCentre-buttonCentre)<=2.5,QString("sidebar: the strip's icons sit in the middle of their buttons (%1)").arg(dark?"dark":"light"));
+            }
+            check(buttons[4]->icon().pixmap(18,18).toImage()!=buttons[0]->icon().pixmap(18,18).toImage(),QString("sidebar: the strip's icons are re-tinted after a theme switch (%1)").arg(dark?"dark":"light"));
+        }
+        Theme::setDark(wasDark);
+        strip.setCollapsed(false); collapsedSignals=0; QSettings().remove(key);
+        const QImage openChevron=toggle->icon().pixmap(14,14).toImage();
+        toggle->click(); pump();
+        check(strip.isCollapsed()&&collapsedSignals==1&&QSettings().value(key).toBool()&&strip.width()==52,"sidebar: clicking the toggle collapses, announces it and stores the choice");
+        check(toggle->icon().pixmap(14,14).toImage()!=openChevron,"sidebar: the toggle's arrow flips with the state");
+        toggle->click(); pump();
+        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==176,"sidebar: clicking again expands and stores the choice");
+        QShortcut *ctrlB=nullptr; for (auto *sc : strip.findChildren<QShortcut *>()) if (sc->key().toString()=="Ctrl+B") ctrlB=sc;
+        bool ctrlBOk=ctrlB&&ctrlB->context()==Qt::WindowShortcut;
+        if (ctrlB) { emit ctrlB->activated(); pump(); ctrlBOk&=strip.isCollapsed(); emit ctrlB->activated(); pump(); ctrlBOk&=!strip.isCollapsed(); }
+        check(ctrlBOk,"sidebar: Ctrl+B toggles the sidebar from anywhere in the window");
+        QPlainTextEdit box; QKeyEvent override(QEvent::ShortcutOverride,Qt::Key_B,Qt::ControlModifier); override.ignore();
+        QApplication::sendEvent(&box,&override);
+        check(!override.isAccepted(),"sidebar: the chat box does not swallow Ctrl+B");
+        QSettings().setValue(key,true);
+        Sidebar saved1(items,{"Settings","settings",5},4); saved1.show();
+        bool startOk=saved1.width()==52&&saved1.isCollapsed();
+        for (auto *b : saved1.findChildren<QPushButton *>("navBtn")) startOk&=b->text().isEmpty();
+        check(startOk,"sidebar: a stored collapsed choice shows at once, before anything is processed");
+        QSettings().setValue(key,"banana");
+        Sidebar garbage(items,{"Settings","settings",5},4); garbage.show();
+        check(!garbage.isCollapsed()&&garbage.width()==176,"sidebar: a garbage stored value starts expanded");
+        QSettings().remove(key);
+    }
+    {
+        // The + under Playground, the busy state, focus and the slide.
+        const QString key=SidebarState::kSettingsKey, reducedKey="appearance/studio3ReducedMotion";
+        QSettings().remove(key); QSettings().remove(reducedKey);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        Sidebar bar(items,{"Settings","settings",5},4);
+        bar.setAnimationsEnabled(false);
+        QList<ChatSummary> saved; for (int i=0;i<3;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        bar.history()->setChats(saved,QString());
+        bar.show(); pump();
+        auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto *plus=bar.findChild<QPushButton *>("sidebarNewChat");
+        bool matrix=plus!=nullptr;
+        for (bool collapsed : {false,true}) for (int panel : {1,4}) {
+            bar.setCollapsed(collapsed); bar.setCurrentPanel(panel);
+            matrix&=plus&&plus->isVisibleTo(&bar)==(collapsed&&panel==4);
+        }
+        check(matrix,"sidebar: the + shows only while collapsed and Playground is open");
+        bar.setCollapsed(true); bar.setCurrentPanel(4); pump();
+        auto buttons=nav();
+        const QRect pr=plus->geometry(), play=buttons[4]->geometry(), settings=buttons[5]->geometry();
+        check(plus->toolTip()=="New chat"&&plus->accessibleName()=="New chat"&&pr.top()>play.bottom()&&pr.bottom()<settings.top()&&qAbs(pr.center().x()-bar.width()/2)<=2,"sidebar: the + sits just under Playground, centred, named New chat");
+        int asked=0; QObject::connect(&bar,&Sidebar::newChatRequested,[&]{ ++asked; });
+        plus->click();
+        check(asked==1,"sidebar: the + asks for a new chat");
+        auto *listNew=bar.history()->findChild<QPushButton *>("historyNew");
+        bar.setBusy(true);
+        check(listNew&&!plus->isEnabled()&&!listNew->isEnabled(),"sidebar: busy turns off the + and the list's New chat row together");
+        bar.setBusy(false);
+        check(plus->isEnabled()&&listNew->isEnabled(),"sidebar: not busy turns both back on");
+        bar.setCollapsed(false); bar.setCurrentPanel(4); pump();
+        bar.history()->findChild<QListWidget *>("historyList")->setFocus(); pump();
+        check(bar.focusWidget()==bar.history()->findChild<QListWidget *>("historyList"),"sidebar: the chat list can hold focus (setup for the next check)");
+        bar.setCollapsed(true); pump();
+        check(bar.focusWidget()==nav()[4],"sidebar: collapsing moves focus off the hidden chat list to Playground");
+        bar.setCollapsed(false); bar.setCurrentPanel(4); nav()[0]->setFocus(); bar.setCollapsed(true); pump();
+        check(bar.focusWidget()==nav()[0],"sidebar: collapsing leaves focus alone when it was not in the chat list");
+        {
+            // Focus that moved out of the sidebar after the chat list had it must stay where it is (e.g. the chat box).
+            QWidget host; auto *row=new QHBoxLayout(&host); row->setContentsMargins(0,0,0,0);
+            Sidebar inner(items,{"Settings","settings",5},4); inner.setAnimationsEnabled(false); inner.history()->setChats(saved,QString());
+            auto *box=new QLineEdit; row->addWidget(&inner); row->addWidget(box);
+            host.resize(600,680); host.show(); inner.setCurrentPanel(4); pump();
+            inner.history()->findChild<QListWidget *>("historyList")->setFocus(); box->setFocus(); pump();
+            inner.setCollapsed(true); pump();
+            check(host.focusWidget()==box,"sidebar: collapsing does not steal focus that already moved to the chat box");
+        }
+        // The slide.
+        bar.setCollapsed(false); pump();
+        bar.setAnimationsEnabled(true);
+        bar.toggle();
+        check(bar.isCollapsed()&&bar.width()==176,"sidebar: a slide starts from the current width (state flips at once)");
+        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=176; }
+        check(waitUntil([&]{ return bar.width()==52; },1000)&&inRange&&bar.minimumWidth()==52&&bar.maximumWidth()==52,"sidebar: collapsing slides down to exactly 52px");
+        bar.toggle();
+        check(!bar.isCollapsed()&&bar.width()==52,"sidebar: expanding starts from the strip width");
+        check(waitUntil([&]{ return bar.width()==176&&bar.maximumWidth()==176; },1000),"sidebar: expanding slides up to exactly 176px");
+        bool textBack=true; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) textBack&=!b->text().isEmpty();
+        check(textBack&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar),"sidebar: the text and wordmark are back once the slide ends");
+        bar.toggle(); bar.toggle(); pump(300);
+        bool looksExpanded=bar.width()==176&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==76&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
+        for (auto *b : bar.findChildren<QPushButton *>("navBtn")) looksExpanded&=!b->text().isEmpty();
+        check(looksExpanded,"sidebar: two quick toggles end expanded, 176px, drawn expanded (text, wordmark, full logo), stored as expanded");
+        bar.toggle(); bar.toggle(); bar.toggle();
+        check(waitUntil([&]{ return bar.width()==52; },1000)&&bar.isCollapsed()&&QSettings().value(key).toBool(),"sidebar: three quick toggles end collapsed, 52px, stored as collapsed");
+        QSettings().setValue(reducedKey,true);
+        bar.toggle();
+        check(!bar.isCollapsed()&&bar.width()==176,"sidebar: with reduced motion the change is instant");
+        QSettings().remove(reducedKey); QSettings().remove(key);
     }
     {
         // The first-launch question.

@@ -74,6 +74,10 @@ set(MAGNITE_SOURCES
     src/widgets/namedialog.h
     src/widgets/chathistorylist.cpp
     src/widgets/chathistorylist.h
+    src/widgets/sidebar.cpp
+    src/widgets/sidebar.h
+    src/widgets/sidebarstate.cpp
+    src/widgets/sidebarstate.h
     src/widgets/confirmation.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp

@@ -290,6 +290,16 @@ Chats are saved automatically and listed under Playground in the left menu. This
 - **Greeting.** A blank chat greets by name and time of day ([`Greeting`](../../app/src/panels/greeting.h): 05–11 morning, 12–16 afternoon, 17–21 evening, 22–04 late night, three wordings each, never the same one twice in a row). The name is `profile/name` in `QSettings`, asked once at first launch by `NameDialog` (`profile/nameAsked`) and editable in Settings → Chat → You. It is never sent anywhere.
 - **Update compatibility.** The `chats/` folder is new and additive (an older app simply ignores it, and no existing format changed), so `DATA_SCHEMA` was not bumped. A future change to the chat file format must raise the file `version`; a layout the updater should refuse is a `DATA_SCHEMA` decision.
 
+### Collapsible sidebar
+
+The left menu folds into a slim icon strip and opens again. It is client-only and changes no route or data format.
+
+- **Pieces.** [`SidebarState`](../../app/src/widgets/sidebarstate.h) holds every decision with no widgets (collapsed or not, width 176 expanded / 52 collapsed, what is visible for the open workspace, the toggle tooltip, the stored choice `appearance/sidebarCollapsed`; a missing or garbage value means expanded). [`Sidebar`](../../app/src/widgets/sidebar.h) is the widget `MainWindow` creates: brand block, collapse button, the nav buttons, the saved-chats list under Playground, a small + under Playground and Settings. It only asks through signals (`panelRequested`, `newChatRequested`, `collapsedChanged`).
+- **Collapsed.** The same nav buttons lose their text (the label stays as tooltip and accessible name), the logo shrinks, the wordmark, tags and chat list are hidden (the list stays hidden even on Playground), and the + shows while Playground is open. The QSS keys on `QWidget#sidebar[collapsed="true"]`.
+- **Toggling.** The button and Ctrl+B (window-wide, even in the chat box) call `Sidebar::toggle()`, which slides the width over about 180 ms and stores the choice. The slide snaps with reduced motion and in `--ui-check`, `--selftest` and `--screenshot` runs. Collapsing moves focus off the chat list to the Playground button. Ctrl+1 to Ctrl+6 work in both states.
+- **Busy.** `MainWindow` connects `ChatPanel::busyChanged` to `Sidebar::setBusy`, which turns the list's New chat row and the + off together.
+- **Looking at it.** `MAGNITE_SCREENSHOT_SIDEBAR=collapsed` and `MAGNITE_SCREENSHOT_THEME=dark` change what `--screenshot` captures without storing anything.
+
 ## Datasets and training
 
 [`DatasetStore`](../../backend/src/backend/training/datasets.py) accepts UTF-8 JSONL, CSV and plain text, normalizes usable samples into text or chat-message objects, writes `datasets/<id>.jsonl`, and stores metadata in `datasets.db`. Instruction/input/output examples are converted into user/assistant messages. Invalid structures and empty datasets are rejected. Original source files remain separate from normalized copies.
