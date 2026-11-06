@@ -1,7 +1,11 @@
 #include <QPlainTextEdit>
+#include <QTime>
+#include <QRandomGenerator>
 #include <QKeyEvent>
 #include <QTextCursor>
 #include "panels/chatpanel.h"
+#include "panels/chatstore.h"
+#include "panels/greeting.h"
 
 #include "backend_client.h"
 #include "widgets/surface.h"
@@ -46,7 +50,6 @@ ChatPanel::ChatPanel(QWidget *parent)
     , m_input(nullptr)
     , m_sendButton(nullptr)
     , m_stopButton(nullptr)
-    , m_clearButton(nullptr)
     , m_statusLabel(nullptr)
     , m_streamBubble(nullptr)
     , m_streaming(false)
@@ -55,6 +58,14 @@ ChatPanel::ChatPanel(QWidget *parent)
 {
     setHeaderSubtitle("Your model, connected to your knowledge.");
     setupUi();
+    showBlankChat();
+}
+
+void ChatPanel::showBlankChat() {
+    const int hour = m_hourProvider ? m_hourProvider() : QTime::currentTime().hour();
+    m_greetingName = Greeting::userName();
+    m_greeting = Greeting::pick(Greeting::variants(hour, m_greetingName), m_greeting, int(QRandomGenerator::global()->generate() & 0x7fffffff));
+    m_emptyConversation->setText(m_greeting);
 }
 
 void ChatPanel::setupUi() {
@@ -73,8 +84,6 @@ void ChatPanel::setupUi() {
     optionsBtn->setObjectName("chatSettingsToggle");
     optionsBtn->setCheckable(true);
     toolbar->addWidget(optionsBtn);
-    m_clearButton = new QPushButton("+  New chat", this);
-    toolbar->addWidget(m_clearButton);
     layout->addLayout(toolbar);
 
     auto *controls = Surface::card(this);
@@ -251,7 +260,10 @@ void ChatPanel::setupUi() {
     conversation->addWidget(m_statusLabel);
     connect(m_sendButton, &QPushButton::clicked, this, &ChatPanel::onSend);
     connect(m_stopButton, &QPushButton::clicked, this, &ChatPanel::onStop);
-    connect(m_clearButton, &QPushButton::clicked, this, &ChatPanel::onClearChat);
+    m_saveTimer = new QTimer(this);
+    m_saveTimer->setSingleShot(true);
+    m_saveTimer->setInterval(150);
+    connect(m_saveTimer, &QTimer::timeout, this, &ChatPanel::flushSave);
     m_cursorTimer = new QTimer(this);
     m_cursorTimer->setInterval(500);
     connect(m_cursorTimer, &QTimer::timeout, this, [this]() {
@@ -504,6 +516,7 @@ void ChatPanel::onVersionStep(ChatTree::NodeId node, int delta) {
     const int target = m_tree.versionIndex(node) + delta;
     if (target < 0 || target >= versions.size()) return;
     m_tree.activate(versions.at(target));
+    markDirty();
     // Keep the reader where they were rather than jumping to the bottom.
     QScrollBar *bar = m_chatScroll->verticalScrollBar();
     const int position = bar->value();
@@ -555,6 +568,7 @@ bool ChatPanel::commitReply() {
         if (retryCompaction) m_tree.setCompaction(reply, *retryCompaction);
     }
     if (row) row->setNode(reply);
+    markDirty();
     return true;
 }
 
@@ -718,6 +732,7 @@ void ChatPanel::startSend(const PendingSend &send) {
         for (const QString &note : m_pendingNotes) m_tree.addNote(m_replyParent, note);
         m_pendingCompaction.reset();
         m_pendingNotes.clear();
+        markDirty();
         // Draw the conversation, then an empty reply row that is streamed into below.
         renderTranscript();
     }
@@ -833,9 +848,23 @@ void ChatPanel::onStop() {
     refreshContextUsage();
 }
 
-void ChatPanel::onClearChat() {
+void ChatPanel::stopActivity() {
     if (m_preparing) cancelPreparing();
     if (m_streaming) onStop();
+}
+
+void ChatPanel::onClearChat() {
+    // "New chat": the chat on screen stays saved, a blank one takes its place.
+    stopActivity();
+    flushSave();
+    m_chatId.clear();
+    resetConversation();
+    setStatus("New chat.");
+    refreshContextUsage();
+    emit currentChatChanged(QString());
+}
+
+void ChatPanel::resetConversation(bool showBlank) {
     m_tree.clear();
     m_replyParent = ChatTree::kRoot;
     m_pathLimit = -1;
@@ -853,7 +882,7 @@ void ChatPanel::onClearChat() {
     m_cursorVisible = false;
     m_streamBubble = nullptr;
     m_pendingResponse.clear();
-    // Remove every bubble.
+    // Remove every bubble and show the welcome panel.
     while (QLayoutItem *item = m_chatLayout->takeAt(0)) {
         if (QWidget *w = item->widget(); w && w != m_welcome) {
             w->hide();
@@ -866,10 +895,91 @@ void ChatPanel::onClearChat() {
     m_chatLayout->addWidget(m_welcome, 1);
     m_chatLayout->invalidate();
     m_chatHost->updateGeometry();
+    if (showBlank) showBlankChat();   // opening a saved chat does not use up a greeting nobody sees
     updateActions();
     m_stopButton->setEnabled(false);
-    setStatus("Chat cleared.");
+}
+
+void ChatPanel::setChatStore(ChatStore *store) {
+    if (m_store == store) return;
+    flushSave();
+    m_store = store;
+    // Whatever is on screen belongs to the previous store (or to none): it is not saved into the new one.
+    m_saveDirty = false;
+    m_saveTimer->stop();
+    m_chatId.clear();
+}
+
+bool ChatPanel::isBusy() const { return m_streaming || m_preparing || m_loading || anyEditing(); }
+
+void ChatPanel::markDirty() {
+    if (!m_store || m_tree.isEmpty()) return;
+    m_saveDirty = true;
+    if (m_chatId.isEmpty()) {
+        // The first change of a new chat is written at once, so a crash never loses the first message.
+        m_chatId = m_store->create();
+        flushSave();
+        emit currentChatChanged(m_chatId);
+        return;
+    }
+    m_saveTimer->start();
+}
+
+void ChatPanel::flushSave() {
+    if (!m_store || m_chatId.isEmpty() || !m_saveDirty) return;
+    m_saveTimer->stop();
+    m_saveDirty = false;
+    if (!m_store->save(m_chatId, m_tree)) {
+        m_saveDirty = true;   // still unsaved: the next flush (switching chats, closing) tries again
+        setStatus("Could not save this chat: " + m_store->lastError(), "warn");
+    }
+}
+
+bool ChatPanel::openChat(const QString &id) {
+    if (!m_store || isBusy()) return false;
+    if (id == m_chatId) return true;
+    const std::optional<ChatTree> loaded = m_store->load(id);
+    if (!loaded) {
+        setStatus("That chat could not be opened.", "error");
+        return false;
+    }
+    flushSave();
+    resetConversation(false);
+    m_tree = *loaded;
+    m_chatId = id;
+    renderTranscript();
+    scrollToBottom();
+    updateActions();
+    setStatus("Ready.");
     refreshContextUsage();
+    emit currentChatChanged(m_chatId);
+    return true;
+}
+
+bool ChatPanel::renameChat(const QString &id, const QString &title) {
+    if (!m_store || (id == m_chatId && isBusy())) return false;
+    if (m_store->rename(id, title)) return true;
+    setStatus("Could not rename that chat" + (m_store->lastError().isEmpty() ? QString(".") : ": " + m_store->lastError()), "warn");
+    return false;
+}
+
+bool ChatPanel::deleteChat(const QString &id) {
+    if (!m_store) return false;
+    auto removeOrReport = [this](const QString &target) {
+        if (m_store->remove(target)) return true;
+        setStatus("Could not delete that chat" + (m_store->lastError().isEmpty() ? QString(".") : ": " + m_store->lastError()), "warn");
+        return false;
+    };
+    if (id != m_chatId || m_chatId.isEmpty()) return removeOrReport(id);
+    if (isBusy() || !removeOrReport(id)) return false;
+    m_saveDirty = false;
+    m_saveTimer->stop();
+    m_chatId.clear();
+    resetConversation();
+    setStatus("Chat deleted.");
+    refreshContextUsage();
+    emit currentChatChanged(QString());
+    return true;
 }
 
 QJsonArray ChatPanel::effectiveMessages(int pathCount) const {
@@ -891,6 +1001,8 @@ void ChatPanel::reloadContextSettings() {
     m_autoCompactPercent = parseAutoCompact(settings.value("chat/autoCompactPercent"));
     m_meter->setAutoCompact(m_autoCompactPercent);
     applyMeterWarning();
+    // A new name in Settings changes the greeting of a blank chat straight away.
+    if (m_emptyConversation && m_tree.isEmpty() && Greeting::userName() != m_greetingName) showBlankChat();
 }
 
 void ChatPanel::refreshContextUsage() {
@@ -965,9 +1077,13 @@ void ChatPanel::updateActions() {
     m_loadButton->setText(m_loading ? "Loading…" : "Load model");
     m_modelCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
     m_engineCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
-    m_clearButton->setEnabled(!m_loading && !m_preparing);
     m_input->setReadOnly(m_preparing);
     refreshRows();
+    const bool busy = isBusy();
+    if (busy != m_busyReported) {
+        m_busyReported = busy;
+        emit busyChanged(busy);
+    }
 }
 
 void ChatPanel::setStatus(const QString &text, const QString &tone) {

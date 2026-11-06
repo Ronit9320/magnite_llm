@@ -12,6 +12,11 @@
 #include "panels/ragpanel.h"
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
+#include "panels/chathistorycontroller.h"
+#include "panels/chatstore.h"
+#include "panels/greeting.h"
+#include "widgets/chathistorylist.h"
+#include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
 #include "widgets/studiocanvas.h"
@@ -37,6 +42,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
@@ -47,6 +53,14 @@
 #include <QSaveFile>
 
 #include <memory>
+
+namespace {
+// Runs that must never touch the user's real chats or ask questions.
+bool verificationRun() {
+    const auto args = QCoreApplication::arguments();
+    return args.contains("--selftest") || args.contains("--screenshot") || args.contains("--ui-check");
+}
+}  // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -124,9 +138,11 @@ MainWindow::MainWindow(QWidget *parent)
     const bool verification = m_selfTest || args.contains("--ui-check") || args.contains("--screenshot");
     if (!verification && QSettings().value("updates/checkOnStartup", true).toBool())
         QTimer::singleShot(5000, m_updater, &UpdateManager::check);
+    if (!verificationRun()) QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
 }
 
 MainWindow::~MainWindow() {
+    m_chatPanel->flushSave();   // before anything is torn down: the last change must reach disk
     // Settle replies while the panels referenced by their callbacks still exist.
     m_backendClient->abortAll();
     savePanelSettings();
@@ -217,8 +233,16 @@ void MainWindow::setupUi() {
         {"Adapters", "layers",         PanelAdapters},
         {"Playground",     "message-circle", PanelChat},
     };
-    for (const auto &info : navs)
+    for (const auto &info : navs) {
         navigation->addWidget(makeNavButton(info));
+        if (info.panel == PanelChat) {
+            // Saved chats nest under Playground and only show while it is the open workspace.
+            m_history = new ChatHistoryList(sidebar);
+            m_history->setContentsMargins(10, 0, 0, 0);
+            m_history->hide();
+            navigation->addWidget(m_history);
+        }
+    }
 
     navigation->addStretch();
 
@@ -258,6 +282,11 @@ void MainWindow::setupUi() {
     m_ragPanel = new RagPanel();
     m_adaptersPanel = new AdaptersPanel();
     m_chatPanel = new ChatPanel();
+    // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
+    m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
+    m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
+    m_chatPanel->setChatStore(m_chatStore);
+    m_historyController = new ChatHistoryController(m_chatStore, m_chatPanel, m_history, this, this);
     m_settingsPanel = new SettingsPanel();
 
     connect(m_modelsPanel,&ModelsPanel::workspaceRequested,this,&MainWindow::switchPanel);
@@ -329,6 +358,7 @@ void MainWindow::setupUi() {
     new ClickFeedback(this);
 
     refreshNavIcons();
+    m_history->setVisible(m_stack->currentIndex() == PanelChat);
 }
 
 void MainWindow::switchPanel(int index) {
@@ -338,6 +368,7 @@ void MainWindow::switchPanel(int index) {
     m_stack->setCurrentIndex(index);
     for (auto *btn : m_sideButtons)
         btn->setChecked(btn->property("panel").toInt() == index);
+    if (m_history) m_history->setVisible(index == PanelChat);
     refreshNavIcons();
     startPanelFade();
     savePanelSettings();
@@ -353,6 +384,15 @@ void MainWindow::refreshNavIcons() {
         btn->setIcon(Theme::coloredIcon(name, color, 18));
         btn->setIconSize(QSize(18, 18));
     }
+    if (m_history) m_history->refreshIcons();
+}
+
+void MainWindow::askForNameIfNeeded() {
+    if (Greeting::nameAsked()) return;
+    NameDialog dialog(Greeting::accountNameSuggestion(), this);
+    if (dialog.exec() == QDialog::Accepted) Greeting::setUserName(dialog.name());
+    Greeting::setNameAsked(true);   // Save and Skip both end the question for good
+    m_chatPanel->reloadContextSettings();   // a blank chat picks up the name at once
 }
 
 void MainWindow::startPanelFade() {

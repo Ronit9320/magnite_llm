@@ -25,6 +25,10 @@ class SettingsPanel;
 class QPropertyAnimation;
 class QLabel;
 class UpdateManager;
+class ChatStore;
+class ChatHistoryList;
+class ChatHistoryController;
+class QTemporaryDir;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -48,6 +52,8 @@ private:
     void chatErrorSelfTest(std::shared_ptr<int> failures, std::function<void()> finish, int scenario = 0);
     void setupUi();
     void startBackend();
+    // First launch only: asks what to call the user (for the greeting). Never during verification runs.
+    void askForNameIfNeeded();
     void loadPanelSettings();
     void refreshNavIcons();
     void startPanelFade();
@@ -81,6 +87,10 @@ private:
     RagPanel *m_ragPanel;
     AdaptersPanel *m_adaptersPanel;
     ChatPanel *m_chatPanel;
+    ChatStore *m_chatStore = nullptr;
+    ChatHistoryList *m_history = nullptr;
+    ChatHistoryController *m_historyController = nullptr;
+    std::unique_ptr<QTemporaryDir> m_chatTemp;   // verification runs keep their chats here, never in the real data folder
     SettingsPanel *m_settingsPanel;
 
     QList<QPushButton*> m_sideButtons;

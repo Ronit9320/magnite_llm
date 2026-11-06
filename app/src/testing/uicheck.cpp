@@ -11,6 +11,11 @@
 #include "panels/chatpanel.h"
 #include "panels/chatbubble.h"
 #include "panels/chattree.h"
+#include "panels/chatstore.h"
+#include "panels/greeting.h"
+#include "widgets/namedialog.h"
+#include "widgets/chathistorylist.h"
+#include "panels/chathistorycontroller.h"
 #include "panels/messagerow.h"
 #include "panels/settingspanel.h"
 #include "widgets/studiocanvas.h"
@@ -32,11 +37,14 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -1476,6 +1484,224 @@ int runUiCheck(const QString &captures) {
             check(!rows().at(0)->isEditing() && fixture.chatRequests.size()==beforeNoReply+2,"once it has a reply, saving it unchanged is a cancel again");
             QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
             input->clear();
+
+            // Chat history: the panel saves every change and can open, rename and delete saved chats.
+            {
+                QTemporaryDir historyDir; const QString chatsPath=historyDir.path()+"/chats"; ChatStore history(chatsPath);
+                chat.setChatStore(&history);
+                fixture.chatReply="reply A"; fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+                fixture.holdChat=false; fixture.holdCompact=false;
+                QStringList announced; const auto announcedLink=QObject::connect(&chat,&ChatPanel::currentChatChanged,[&announced](const QString &id) { announced << id; });
+                int busyFlips=0; const auto busyLink=QObject::connect(&chat,&ChatPanel::busyChanged,[&busyFlips](bool) { ++busyFlips; });
+                auto chatFiles=[&]() { return QDir(chatsPath).entryList({"*.json"},QDir::Files); };
+                auto savedTexts=[&](const QString &id) { QStringList out; if (const auto t=history.load(id)) for (const auto &m : t->messages()) out << m.value("content").toString(); return out; };
+                auto releaseChat=[&]() { fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(100); };
+                auto usageMessages=[&]() {
+                    const int n=fixture.usageRequests.size(); chat.refreshContextUsage(); waitUntil([&]{ return fixture.usageRequests.size()>n; });
+                    return QJsonDocument::fromJson(fixture.usageRequests.last().toUtf8()).object().value("messages").toArray();
+                };
+                auto newChat=[&]() { QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(60); };
+                auto versions=[&]() { QStringList out; for (auto *row : rows()) out << versionOf(row); return out; };
+                auto dividerTexts=[&]() { QStringList out; for (auto *label : dividers()) out << label->text(); return out; };
+
+                newChat();
+                check(chat.currentChatId().isEmpty() && chatFiles().isEmpty() && history.list().isEmpty() && button(&chat,"+  New chat")==nullptr,"history: a blank chat writes nothing, and the toolbar has no New chat button any more");
+
+                // The first message creates the file at once; a half-streamed reply is not saved.
+                fixture.holdChat=true; input->setPlainText("history one"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"history: the first reply is streaming");
+                const QString id1=chat.currentChatId();
+                check(!id1.isEmpty() && chatFiles()==QStringList({id1+".json"}) && savedTexts(id1)==QStringList({"history one"}) && announced.size()==2 && announced.last()==id1,"history: the first message creates the chat file at once, ending at the user's message");
+                pump(400);
+                check(savedTexts(id1)==QStringList({"history one"}) && history.list().at(0).title=="history one","history: a reply still streaming is not saved");
+                stopButton->click(); pump(400);
+                check(savedTexts(id1)==QStringList({"history one","reply A"}),"history: Stop keeps the partial reply and saves it");
+                releaseChat();
+
+                // Every kind of change is saved.
+                check(sendAndWait("history two") && savedTexts(id1).size()==4 && savedTexts(id1).at(2)=="history two","history: a finished reply is saved");
+                fixture.chatReply="reply B"; int before=fixture.chatRequests.size();
+                check(openEditor(2),"history: the second message can be edited"); saveEdit(2,"history two edited"); check(waitDone(before),"history: the edit is sent"); pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && savedTexts(id1)==QStringList({"history one","reply A","history two edited","reply B"}) && t->versionCount(t->activePath().at(2))==2,"history: an edit is saved with both versions");
+                }
+                fixture.chatReply="reply C"; before=fixture.chatRequests.size();
+                clickRetry(rows().last()); check(waitDone(before),"history: the reply is retried"); pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && savedTexts(id1).last()=="reply C" && t->versionCount(t->activePath().last())==2,"history: a retry is saved with both versions");
+                }
+                arrow(rows().last(),"versionPrev")->click(); pump(400);
+                check(savedTexts(id1).last()=="reply B","history: switching to an older version is saved");
+                arrow(rows().last(),"versionNext")->click(); pump(400);
+                check(savedTexts(id1).last()=="reply C","history: switching back is saved");
+                fixture.usageUsed=3600; fixture.chatReply="reply D";
+                check(sendAndWait("history three") && dividers().size()==1,"history: a compaction happens in the chat to be saved");
+                fixture.usageUsed=1000; pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && t->compaction().covered>0 && !t->compaction().summary.isEmpty(),"history: the compaction snapshot is saved");
+                    int noteCount=0; if (t) for (auto id : t->activePath()) noteCount+=t->notes(id).size();
+                    check(noteCount==1,"history: the compaction divider note is saved");
+                }
+
+                // Reopening restores the chat exactly.
+                const QStringList beforeTexts=texts(), beforeVersions=versions(), beforeDividers=dividerTexts();
+                const QJsonArray beforeRequest=usageMessages();
+                newChat();
+                check(rows().isEmpty() && chat.currentChatId().isEmpty() && history.list().size()==1 && announced.last().isEmpty(),"history: starting a new chat keeps the old one saved");
+                input->setPlainText("my draft"); pump(20);
+                check(chat.openChat(id1) && chat.currentChatId()==id1 && announced.last()==id1,"history: a saved chat can be opened");
+                check(texts()==beforeTexts && versions()==beforeVersions && dividerTexts()==beforeDividers && input->toPlainText()=="my draft","history: the reopened chat shows the same messages, versions and dividers, and the draft is untouched");
+                input->clear(); pump(20);
+                check(usageMessages()==beforeRequest && beforeRequest.size()>0 && beforeRequest.at(0).toObject().value("role").toString()=="system","history: the reopened chat would send exactly what it sent before, summary included");
+                arrow(rows().at(2),"versionPrev")->click(); pump(300);
+                check(texts().at(2)=="history two","history: older versions are still reachable after reopening");
+                arrow(rows().at(2),"versionNext")->click(); pump(300);
+                check(chat.openChat(id1),"history: opening the chat that is already open is fine");
+
+                // A second chat, then the busy guards.
+                newChat(); fixture.chatReply="reply A";
+                check(sendAndWait("second chat") && history.list().size()==2,"history: a second chat is saved next to the first");
+                const QString id2=chat.currentChatId();
+                check(!id2.isEmpty() && id2!=id1 && history.list().at(0).id==id2,"history: the newest chat is listed first");
+                fixture.holdChat=true; input->setPlainText("busy one"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }) && chat.isBusy(),"history: a reply is streaming and the chat is busy");
+                const QStringList rowsBusy=texts();
+                check(!chat.openChat(id1) && chat.currentChatId()==id2 && texts()==rowsBusy,"history: a chat cannot be opened while a reply streams");
+                check(!chat.deleteChat(id2) && history.list().size()==2 && !chat.renameChat(id2,"nope"),"history: the busy chat can neither be deleted nor renamed");
+                auto titleOf=[&](const QString &id) { for (const auto &row : history.list()) if (row.id==id) return row.title; return QString("<missing>"); };
+                check(chat.renameChat(id1,"First chat") && titleOf(id1)=="First chat","history: another, idle chat can be renamed meanwhile");
+                stopButton->click(); pump(300); releaseChat();
+                check(!chat.isBusy() && busyFlips>=2,"history: busy turns on and off");
+                check(openEditor(0) && !chat.openChat(id1) && chat.isBusy(),"history: a chat cannot be opened while a message editor is open");
+                sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(60);
+                check(!rows().at(0)->isEditing() && !chat.isBusy(),"history: closing the editor ends the busy state");
+                QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(60);
+                check(chat.openChat(id1),"history: the first chat is opened again");
+                check(sendAndWait("pad 1") && sendAndWait("pad 2") && sendAndWait("pad 3"),"history: the chat is long enough to be compacted");
+                fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+                input->setPlainText("prepare me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.heldCompactSocket; }) && chat.isBusy() && !chat.openChat(id2) && chat.currentChatId()==id1,"history: a chat cannot be opened while a send is being prepared");
+                newChat(); fixture.releaseHeldCompact(); pump(200); fixture.holdCompact=false; fixture.usageUsed=1000; input->clear();
+
+                // Rename and delete.
+                check(chat.openChat(id1) && chat.renameChat(id1,"  Renamed chat ") && titleOf(id1)=="Renamed chat" && !chat.renameChat(id1,"   ") && !chat.renameChat("not-an-id","x"),"history: a chat can be renamed; an empty title or unknown id cannot");
+                fixture.chatReply="reply E";
+                check(sendAndWait("history four"),"history: the renamed chat continues");
+                pump(300);
+                bool renamedKept=false; for (const auto &row : history.list()) if (row.id==id1) renamedKept=row.title=="Renamed chat" && row.customTitle;
+                check(renamedKept,"history: a renamed chat keeps its name as it grows");
+                arrow(rows().last(),"versionPrev")->click();   // a change that is still waiting to be saved ...
+                check(chat.deleteChat(id1) && !history.load(id1) && chat.currentChatId().isEmpty() && rows().isEmpty() && announced.last().isEmpty(),"history: deleting the open chat leaves a blank chat");
+                pump(500);
+                check(!chatFiles().contains(id1+".json") && history.list().size()==1 && history.list().at(0).id==id2,"history: a deleted chat is not brought back by a late save");
+                check(sendAndWait("after delete") && chat.currentChatId()!=id1 && !chat.currentChatId().isEmpty() && history.list().size()==2,"history: the next message starts a new chat, not the deleted one");
+                const QString id3=chat.currentChatId();
+                check(chat.deleteChat(id2) && chat.currentChatId()==id3 && rows().size()==2 && history.list().size()==1,"history: deleting another chat leaves the open one alone");
+                check(!chat.deleteChat(id2) && !chat.deleteChat("../x"),"history: deleting an unknown chat does nothing");
+
+                // Bad files and failures.
+                newChat(); input->setPlainText("keep this draft"); pump(20);
+                { QFile f(chatsPath+"/"+id3+".json"); f.open(QIODevice::WriteOnly|QIODevice::Truncate); f.write("junk"); }
+                const QStringList rowsBefore=texts();
+                check(!chat.openChat(id3) && chat.currentChatId().isEmpty() && texts()==rowsBefore && status().contains("could not be opened") && !chat.openChat("0b6c3a52-9d0e-4f1c-8a77-0123456789ab"),"history: an unreadable chat does not open and nothing changes");
+                check(input->toPlainText()=="keep this draft","history: the draft survives a failed open"); input->clear();
+                history.remove(id3);
+                ChatTree victimTree; victimTree.addChild(victimTree.addChild(ChatTree::kRoot,"user","victim chat"),"assistant","ok");
+                const QString victim=history.create(); history.save(victim,victimTree);
+                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+                check(sendAndWait("cannot be saved") && rows().size()==2 && !history.lastError().isEmpty(),"history: a chat that cannot be saved still works");
+                const QString id4=chat.currentChatId();
+                {   // a failure to rename or delete is reported, not silent
+                    const bool renamedOk=chat.renameChat(victim,"cannot rename"); const QString renameStatus=status();
+                    const bool deletedOk=chat.deleteChat(victim); const QString deleteStatus=status();
+                    check(!renamedOk && renameStatus.contains("Could not rename") && statusLine->property("state")=="warn","history: a rename that fails says so");
+                    check(!deletedOk && deleteStatus.contains("Could not delete") && statusLine->property("state")=="warn" && history.list().size()>=1,"history: a delete that fails says so and keeps the chat");
+                }
+                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
+                chat.flushSave(); pump(100);
+                check(savedTexts(id4).size()==2,"history: a save that failed is tried again when the chat is flushed (switching chats or closing)");
+                check(sendAndWait("now it can"),"history: the next message after the folder is fixed is sent"); pump(300);
+                check(chat.currentChatId()==id4 && savedTexts(id4).size()==4,"history: the chat is saved in full once the folder is writable again");
+
+                // The meter's prompt starts a new chat and keeps the old one.
+                if (auto *meter=chat.findChild<ContextMeter *>()) {
+                    emit meter->newChatRequested(); pump(60);
+                    check(rows().isEmpty() && chat.currentChatId().isEmpty() && !savedTexts(id4).isEmpty(),"history: the meter's new-chat prompt starts a new chat and keeps the old one");
+                }
+
+                // Without a store nothing is written and nothing breaks.
+                chat.setChatStore(nullptr); newChat();
+                const int filesBefore=chatFiles().size();
+                check(sendAndWait("no store") && chat.currentChatId().isEmpty() && rows().size()==2,"history: without a store a chat still works");
+                fixture.chatReply="reply F"; before=fixture.chatRequests.size();
+                clickRetry(rows().last()); check(waitDone(before) && rows().last()->bubble()->text()=="reply F","history: retry works without a store");
+                check(openEditor(0),"history: editing works without a store"); sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(60);
+                check(chatFiles().size()==filesBefore && !chat.openChat(id4) && !chat.renameChat(id4,"x") && !chat.deleteChat(id4),"history: without a store nothing is written and nothing can be opened, renamed or deleted");
+                newChat();
+                QObject::disconnect(announcedLink); QObject::disconnect(busyLink);
+            }
+
+            // The greeting on every blank chat.
+            {
+                QSettings().remove("profile/name"); Greeting::setUserName("Archit");
+                int hour=9; chat.setHourProviderForTest([&hour]() { return hour; });
+                auto greeting=[&chat]() { auto *label=chat.findChild<QLabel *>("emptyConversation"); return label?label->text():QString(); };
+                auto blank=[&]() { QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(40); };
+                blank();
+                check(Greeting::variants(9,"Archit").contains(greeting()) && !greeting().contains("Your model. Your way.") && chat.findChild<QLabel *>("emptyConversation")->isVisible(),"greeting: a blank chat greets by name for the time of day");
+                bool repeated=false; QString previous=greeting();
+                for (int i=0;i<12;++i) { blank(); repeated|=greeting()==previous; previous=greeting(); }
+                check(!repeated,"greeting: a new blank chat never repeats the previous wording");
+                blank(); const QString fixedText=greeting();
+                QMetaObject::invokeMethod(&chat,"redrawForTest",Qt::DirectConnection); chat.resize(900,640); Theme::setDark(!Theme::isDark()); pump(60); Theme::setDark(!Theme::isDark()); pump(60);
+                check(greeting()==fixedText,"greeting: the wording stays put while the blank chat is on screen (redraw, resize, theme change)");
+                hour=23; blank();
+                check(Greeting::variants(23,"Archit").contains(greeting()),"greeting: a late-night chat says so");
+                hour=14; fixture.chatReply="hello there";
+                check(sendAndWait("greeting test") && !chat.findChild<QLabel *>("emptyConversation")->isVisible(),"greeting: a chat with messages shows no greeting");
+                blank();
+                check(chat.findChild<QLabel *>("emptyConversation")->isVisible() && Greeting::variants(14,"Archit").contains(greeting()),"greeting: going back to a blank chat greets again");
+                // Changing the name in Settings re-greets the blank chat.
+                SettingsPanel nameSettings;
+                auto *nameEdit=nameSettings.findChild<QLineEdit *>("profileName");
+                check(nameEdit && nameEdit->text()=="Archit" && nameEdit->accessibleName()=="Your name","greeting: Settings shows the stored name in a 'Your name' box");
+                if (nameEdit) {
+                    const auto link=QObject::connect(&nameSettings,&SettingsPanel::settingsChanged,&chat,&ChatPanel::reloadContextSettings);
+                    nameEdit->setText("  Ada  "); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName()=="Ada" && Greeting::variants(14,"Ada").contains(greeting()),"greeting: renaming yourself in Settings changes the greeting at once");
+                    nameEdit->setText(""); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName().isEmpty() && Greeting::variants(14,"").contains(greeting()),"greeting: clearing the name drops it from the greeting");
+                    nameEdit->setText(QString(60,'n')); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName().size()==40,"greeting: a very long name is capped at 40 characters");
+                    QObject::disconnect(link);
+                }
+                // A name saved after the panel was built (the first-launch question) shows up in Settings.
+                {
+                    QSettings().remove("profile/name"); SettingsPanel late; Greeting::setUserName("Zed");
+                    auto *edit=late.findChild<QLineEdit *>("profileName");
+                    late.show(); pump(40);
+                    check(edit && edit->text()=="Zed","settings: the name box shows a name saved after the panel was built");
+                    if (edit) { edit->setFocus(); emit edit->editingFinished(); pump(20); check(Greeting::userName()=="Zed","settings: pressing Return in the name box keeps the name"); }
+                    late.hide(); Greeting::setUserName("Archit");
+                }
+                // Opening a saved chat does not use up a greeting: New chat afterwards never repeats the one last shown.
+                {
+                    QTemporaryDir greetDir; ChatStore greetStore(greetDir.path()+"/chats"); chat.setChatStore(&greetStore);
+                    blank(); fixture.chatReply="hi";
+                    check(sendAndWait("greet me"),"greeting: a chat to reopen is sent");
+                    const QString greetId=chat.currentChatId();
+                    bool repeated2=false;
+                    for (int i=0;i<30;++i) { blank(); const QString shown=greeting(); chat.openChat(greetId); blank(); repeated2|=greeting()==shown; }
+                    check(!repeated2,"greeting: opening a saved chat between two blank chats does not make the greeting repeat");
+                    chat.setChatStore(nullptr); blank();
+                }
+                chat.setHourProviderForTest({}); QSettings().remove("profile/name");
+                blank();
+            }
+            input->clear();
         }
         QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
         chat.hide();
@@ -1578,6 +1804,346 @@ int runUiCheck(const QString &captures) {
 
         t2.clear();
         check(t2.isEmpty() && t2.activePath().isEmpty() && t2.compaction().covered==0 && t2.addChild(ChatTree::kRoot,"user","fresh")==1,"chat tree: clear resets everything");
+
+        // JSON round-trip: the whole tree, including versions that are not on screen, comes back unchanged.
+        {
+            ChatTree c; // compacted conversation with an edited first message, an edited reply branch and a retried reply
+            const auto c1=c.addChild(ChatTree::kRoot,"user","c1 é世 \"quoted\"\nline2"); const auto d1=c.addChild(c1,"assistant","d1");
+            const auto c2=c.addChild(d1,"user","c2"); const auto d2=c.addChild(c2,"assistant","d2"); const auto c3=c.addChild(d2,"user","c3");
+            c.setCompaction(c3,{"summary of c1..d1",2}); c.addNote(c3,"Context compacted"); c.addNote(c3,"second note");
+            c.addChild(c2,"assistant","d2 retried"); c.addChild(d1,"user","c2 edited"); c.addChild(ChatTree::kRoot,"user","c1 edited");
+            c.activate(c1); c.activate(c2); // a non-trivial active choice: older versions active, newer ones parked
+            const QJsonObject json=c.toJson();
+            const auto back=ChatTree::fromJson(json);
+            check(back.has_value() && back->toJson()==json,"chat tree json: a reloaded tree writes exactly the same json");
+            if (back) {
+                bool same=back->activePath()==c.activePath() && back->lastOnPath()==c.lastOnPath() && back->messages()==c.messages() &&
+                          back->compaction().summary==c.compaction().summary && back->compaction().covered==c.compaction().covered;
+                for (ChatTree::NodeId id=1; id<=12; ++id)
+                    same &= back->role(id)==c.role(id) && back->content(id)==c.content(id) && back->parentOf(id)==c.parentOf(id) &&
+                            back->versionsOf(id)==c.versionsOf(id) && back->versionIndex(id)==c.versionIndex(id) && back->notes(id)==c.notes(id);
+                check(same,"chat tree json: path, messages, versions, notes and compaction match after a reload");
+                ChatTree reloaded=*back;
+                c.activate(d2); reloaded.activate(d2);
+                check(reloaded.activePath()==c.activePath() && reloaded.messages()==c.messages() && reloaded.compaction().covered==c.compaction().covered && reloaded.compaction().covered==2,
+                      "chat tree json: the request a reloaded conversation would send equals the original's, after switching versions too");
+                reloaded.activate(ChatTree::NodeId(8)); c.activate(ChatTree::NodeId(8)); // the edited first message: another branch
+                check(reloaded.messages()==c.messages() && reloaded.compaction().covered==0,"chat tree json: a parked first-message version comes back with its own continuation");
+                check(reloaded.addChild(reloaded.lastOnPath(),"assistant","after reload")==9,"chat tree json: new messages continue the ids after a reload");
+            }
+            ChatTree empty;
+            const auto emptyBack=ChatTree::fromJson(empty.toJson());
+            check(emptyBack.has_value() && emptyBack->isEmpty() && emptyBack->activePath().isEmpty(),"chat tree json: an empty tree round-trips");
+
+            ChatTree g; const auto gq=g.addChild(ChatTree::kRoot,"user","hi"); const auto gr=g.addChild(gq,"assistant","yo");
+            g.addNote(gq,"n"); g.setCompaction(gr,{"S",1});
+            const QJsonObject good=g.toJson();
+            check(ChatTree::fromJson(good).has_value(),"chat tree json: the small good tree is accepted");
+            auto withNode=[&good](int index,const QString &name,const QJsonValue &value) {
+                QJsonObject o=good; QJsonArray nodes=o.value("nodes").toArray(); QJsonObject n=nodes.at(index).toObject();
+                n.insert(name,value); nodes.replace(index,n); o.insert("nodes",nodes); return o;
+            };
+            auto withTop=[&good](const QString &name,const QJsonValue &value) { QJsonObject o=good; o.insert(name,value); return o; };
+            auto rejects=[&check](const QJsonObject &o,const QString &why) { check(!ChatTree::fromJson(o).has_value(),"chat tree json: rejects "+why); };
+            rejects(withNode(1,"parent",99),"a parent id out of range");
+            rejects(withNode(1,"parent",0),"a child whose parent field disagrees with its parent's child list");
+            rejects(withNode(0,"children",QJsonArray{2,2}),"a child listed twice");
+            rejects(withNode(0,"children",QJsonArray{1}),"a node that is its own child");
+            rejects(withNode(0,"activeChild",5),"an active child that is not one of the children");
+            rejects(withNode(0,"activeChild",0),"a node with children but no active child");
+            rejects(withTop("rootActive",7),"a root active child that is not a root child");
+            rejects(withTop("rootChildren",QJsonArray()),"nodes that cannot be reached from the root");
+            rejects(withTop("rootChildren",QJsonArray{1,2}),"a root child that is not parented by the root");
+            rejects(withNode(0,"role","robot"),"an unknown role");
+            rejects(withNode(0,"content",5),"a content that is not text");
+            rejects(withNode(0,"notes",QJsonArray{1}),"a note that is not text");
+            rejects(withNode(1,"compaction",QJsonObject{{"summary","x"},{"covered",-1}}),"a negative covered count");
+            rejects(withNode(1,"compaction",QJsonObject{{"summary","x"},{"covered",5}}),"a covered count larger than the conversation up to that message");
+            rejects(withNode(0,"id",9),"a node whose id is not its position");
+            rejects(withTop("nodes","nope"),"nodes of the wrong type");
+            rejects(QJsonObject(),"an object with nothing in it");
+            QJsonObject missing=good; missing.remove("nodes"); rejects(missing,"a missing nodes list");
+            QJsonObject missingRoot=good; missingRoot.remove("rootChildren"); rejects(missingRoot,"missing rootChildren");
+        }
+    }
+    {
+        // ChatStore: one json file per chat, atomic writes, bad files skipped and never touched.
+        QTemporaryDir tmp; const QString dir=tmp.path()+"/chats";
+        auto makeTree=[](const QString &question,const QString &answer) { ChatTree t; const auto q=t.addChild(ChatTree::kRoot,"user",question); if(!answer.isEmpty()) t.addChild(q,"assistant",answer); return t; };
+        auto files=[&dir]() { return QDir(dir).entryList(QDir::Files|QDir::NoDotAndDotDot,QDir::Name); };
+        auto ids=[](const QList<ChatSummary> &rows) { QStringList out; for(const auto &r:rows) out<<r.id; return out; };
+        auto loneSurrogate=[](const QString &text) {
+            for(int i=0;i<text.size();++i) { if(text.at(i).isHighSurrogate()) { if(i+1>=text.size()||!text.at(i+1).isLowSurrogate()) return true; ++i; } else if(text.at(i).isLowSurrogate()) return true; }
+            return false;
+        };
+        int changes=0;
+        ChatStore store(dir);
+        QObject::connect(&store,&ChatStore::changed,[&changes]() { ++changes; });
+        check(store.list().isEmpty() && !QDir(dir).exists(),"chat store: a new store on a fresh folder is empty and creates nothing yet");
+        check(ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789ab") && !ChatStore::validId("") && !ChatStore::validId("../x") && !ChatStore::validId("a/b") &&
+              !ChatStore::validId("0B6C3A52-9D0E-4F1C-8A77-0123456789AB") && !ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789a") && !ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789ab.json"),
+              "chat store: only real lowercase uuids are valid ids");
+        const QString idA=store.create();
+        check(ChatStore::validId(idA) && idA!=store.create() && store.list().isEmpty() && !QDir(dir).exists() && changes==0,"chat store: create gives a fresh valid id and writes nothing");
+        const ChatTree treeA=makeTree("How do I join two tables?","Use JOIN.");
+        check(store.save(idA,treeA) && files()==QStringList({idA+".json"}) && changes==1,"chat store: saving writes exactly one file and announces the change");
+        check(store.list().size()==1 && store.list().at(0).id==idA && store.list().at(0).title=="How do I join two tables?" && !store.list().at(0).customTitle && store.list().at(0).created.isValid() && store.list().at(0).updated.isValid(),
+              "chat store: the saved chat is listed with a title from its first message");
+        const auto loadedA=store.load(idA);
+        check(loadedA.has_value() && loadedA->toJson()==treeA.toJson(),"chat store: a saved chat loads back identical");
+        const QString idB=store.create(); store.save(idB,makeTree("Second chat",""));
+        check(ids(store.list())==QStringList({idB,idA}),"chat store: the chat saved most recently is listed first");
+        ChatTree longer=treeA; longer.addChild(longer.lastOnPath(),"user","and left joins?");
+        const QDateTime createdA=store.list().at(1).created;
+        store.save(idA,longer);
+        check(ids(store.list())==QStringList({idA,idB}) && store.list().at(0).created==createdA && store.list().at(0).updated>store.list().at(1).updated,"chat store: saving again moves the chat to the top and keeps its creation time");
+        changes=0;
+        check(store.rename(idB,"  My renamed chat  ") && changes==1 && ids(store.list())==QStringList({idA,idB}),"chat store: renaming changes the title but not the order");
+        {
+            const auto row=store.list().at(1);
+            check(row.title=="My renamed chat" && row.customTitle,"chat store: a renamed chat is trimmed and marked custom");
+        }
+        ChatTree moreB=makeTree("Second chat","reply"); store.save(idB,moreB);
+        check(store.list().at(0).id==idB && store.list().at(0).title=="My renamed chat","chat store: a renamed chat keeps its name when saved again");
+        check(!store.rename(idB,"   ") && !store.rename(idB,"") && !store.rename("not-an-id","x") && !store.rename("0b6c3a52-9d0e-4f1c-8a77-0123456789ab","x") && store.list().at(0).title=="My renamed chat",
+              "chat store: an empty title, a bad id or an unknown chat cannot rename");
+        check(!store.remove("0b6c3a52-9d0e-4f1c-8a77-0123456789ab") && !store.remove("../x"),"chat store: removing an unknown or invalid id does nothing");
+        {
+            ChatStore again(dir);
+            check(ids(again.list())==ids(store.list()) && again.list().at(0).title==store.list().at(0).title && again.list().at(0).updated==store.list().at(0).updated && again.list().at(1).created==store.list().at(1).created,
+                  "chat store: a new store on the same folder lists the same chats in the same order");
+        }
+        check(files().size()==2 && files().filter(QRegularExpression("\\.json$")).size()==2,"chat store: no temporary files are left behind");
+
+        // titles
+        check(ChatStore::titleFor(ChatTree())=="New chat" && ChatStore::titleFor(makeTree("   \n\t ",""))=="New chat","chat store: an empty chat or a blank first message is titled New chat");
+        check(ChatStore::titleFor(makeTree("a\n\nb\t\tc   d",""))=="a b c d","chat store: line breaks and runs of spaces collapse in a title");
+        check(ChatStore::titleFor(makeTree(QString(40,'x'),""))==QString(40,'x') && ChatStore::titleFor(makeTree(QString(100,'y'),""))==QString(40,'y')+QString::fromUtf8("\u2026"),"chat store: a title is cut to 40 characters plus an ellipsis only when longer");
+        {
+            QString emoji; for(int i=0;i<100;++i) emoji+=QString::fromUtf8("\U0001F600");
+            const QString cut=ChatStore::titleFor(makeTree(emoji,""));
+            check(!loneSurrogate(cut) && cut.endsWith(QString::fromUtf8("\u2026")) && cut.size()<=41,"chat store: a long title of non-ASCII characters is never cut inside a character");
+            check(ChatStore::titleFor(makeTree("Caf\u00e9 \u4e16\u754c \"quoted\"",""))=="Caf\u00e9 \u4e16\u754c \"quoted\"","chat store: accents, CJK and quotes survive in a title");
+        }
+        {
+            ChatTree edited=makeTree("original first message","r"); edited.addChild(ChatTree::kRoot,"user","edited first message");
+            check(ChatStore::titleFor(edited)=="original first message","chat store: the title comes from the first version of the first message");
+        }
+
+        // removal
+        check(store.remove(idA) && !files().contains(idA+".json") && ids(store.list())==QStringList({idB}) && !store.load(idA).has_value(),"chat store: removing a chat deletes its file and its row");
+
+        // bad files
+        {
+            const QString good=store.create(); store.save(good,makeTree("good chat","ok"));
+            auto write=[&dir](const QString &name,const QByteArray &bytes) { QFile f(dir+"/"+name); f.open(QIODevice::WriteOnly); f.write(bytes); };
+            const QString idJunk="11111111-1111-4111-8111-111111111111", idEmpty="22222222-2222-4222-8222-222222222222", idNewer="33333333-3333-4333-8333-333333333333",
+                          idMismatch="44444444-4444-4444-8444-444444444444", idBroken="55555555-5555-4555-8555-555555555555";
+            write("garbage.json","not json at all"); write(idJunk+".json","{ truncated"); write(idEmpty+".json","");
+            QJsonObject newer; { QFile f(dir+"/"+good+".json"); f.open(QIODevice::ReadOnly); newer=QJsonDocument::fromJson(f.readAll()).object(); }
+            QJsonObject n2=newer; n2["version"]=99; n2["id"]=idNewer; write(idNewer+".json",QJsonDocument(n2).toJson());
+            QJsonObject n3=newer; n3["id"]="66666666-6666-4666-8666-666666666666"; write(idMismatch+".json",QJsonDocument(n3).toJson());
+            QJsonObject n4=newer; n4["id"]=idBroken; QJsonObject tree=n4["tree"].toObject(); tree["rootActive"]=42; n4["tree"]=tree; write(idBroken+".json",QJsonDocument(n4).toJson());
+            const int before=files().size();
+            ChatStore withBad(dir);
+            const QStringList listed=ids(withBad.list());
+            check(listed.contains(good) && listed.contains(idB) && listed.size()==2,"chat store: unreadable, empty, newer-version, mismatched and broken files are left out of the list");
+            check(!withBad.load(idJunk) && !withBad.load(idEmpty) && !withBad.load(idNewer) && !withBad.load(idMismatch) && !withBad.load(idBroken) && withBad.load(good).has_value(),"chat store: loading a bad file gives nothing, loading a good one still works");
+            check(files().size()==before && files().contains("garbage.json") && files().contains(idJunk+".json") && files().contains(idEmpty+".json") && files().contains(idNewer+".json"),"chat store: bad files stay on disk untouched");
+            check(withBad.save(good,makeTree("good chat","ok again")) && withBad.rename(good,"still works"),"chat store: saving and renaming still work next to bad files");
+            for(const auto &name:{"garbage.json"}) QFile::remove(dir+"/"+name);
+            for(const auto &id:{idJunk,idEmpty,idNewer,idMismatch,idBroken}) QFile::remove(dir+"/"+id+".json");
+        }
+
+        // failures
+        {
+            QFile blocker(tmp.path()+"/blocker"); blocker.open(QIODevice::WriteOnly); blocker.write("x"); blocker.close();
+            ChatStore blocked(tmp.path()+"/blocker/chats");
+            check(!blocked.save(blocked.create(),makeTree("x","y")) && !blocked.lastError().isEmpty() && blocked.list().isEmpty(),"chat store: a folder that cannot be created fails the save with a message");
+            const QString keep=ids(store.list()).first();
+            const auto before=store.load(keep);
+            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+            const bool saved=store.save(keep,makeTree("changed","changed"));
+            const QString error=store.lastError();
+            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
+            const auto after=store.load(keep);
+            check(!saved && !error.isEmpty() && before.has_value() && after.has_value() && before->toJson()==after->toJson(),"chat store: a failed save reports an error and leaves the previous file intact");
+        }
+    }
+    {
+        // Greeting: time-of-day wording and the stored name.
+        QSettings().remove("profile/name"); QSettings().remove("profile/nameAsked");
+        const QStringList morning=Greeting::variants(5,"Archit");
+        check(morning.size()==3 && morning.at(0)=="Good morning, Archit" && morning.at(1)=="Morning, Archit" && morning.at(2)=="Rise and shine, Archit","greeting: the morning wordings use the name");
+        check(Greeting::variants(14,"Archit")==QStringList({"Good afternoon, Archit","Afternoon, Archit","Hope your day is going well, Archit"}),"greeting: the afternoon wordings");
+        check(Greeting::variants(19,"Archit")==QStringList({"Good evening, Archit","Evening, Archit","Winding down, Archit?"}),"greeting: the evening wordings");
+        check(Greeting::variants(23,"Archit")==QStringList({"Up late, Archit?","Burning the midnight oil, Archit?","Still up, Archit?"}),"greeting: the late-night wordings, ending in a question");
+        const QMap<int,QString> bands={{0,"Up late"},{3,"Up late"},{4,"Up late"},{5,"Good morning"},{11,"Good morning"},{12,"Good afternoon"},{16,"Good afternoon"},{17,"Good evening"},{21,"Good evening"},{22,"Up late"},{23,"Up late"}};
+        bool edges=true; for(auto it=bands.begin();it!=bands.end();++it) edges&=Greeting::variants(it.key(),"A").at(0).startsWith(it.value());
+        check(edges,"greeting: every hour lands in the right band, including 4/5, 11/12, 16/17, 21/22 and midnight");
+        check(Greeting::variants(-3,"A").at(0).startsWith("Up late") && Greeting::variants(27,"A").at(0).startsWith("Up late"),"greeting: an hour outside 0-23 does not crash");
+        check(Greeting::variants(5,"").at(0)=="Good morning" && Greeting::variants(5,"   ").at(1)=="Morning" && Greeting::variants(5,"").at(2)=="Rise and shine","greeting: without a name the wording drops it");
+        check(Greeting::variants(23,"").at(0)=="Up late?" && Greeting::variants(23,"").at(1)=="Burning the midnight oil?" && Greeting::variants(19,"").at(2)=="Winding down?","greeting: without a name the question marks stay");
+        {
+            const QStringList options=Greeting::variants(5,"A");
+            bool never=true; for(int r=0;r<=20;++r) for(const QString &previous:options) never&=Greeting::pick(options,previous,r)!=previous;
+            check(never,"greeting: pick never repeats the previous wording");
+            check(Greeting::pick({"only"},"only",7)=="only" && Greeting::pick(options,QString(),1)==options.at(1) && Greeting::pick(options,QString(),4)==options.at(1),"greeting: pick uses the random number, and a single option is returned even if repeated");
+            check(!Greeting::pick(options,"x",-5).isEmpty() && !Greeting::pick(options,"x",2000000000).isEmpty() && Greeting::pick({}, "x", 3).isEmpty(),"greeting: pick copes with negative, huge and empty input");
+        }
+        check(Greeting::cleanName("  Ada  ")=="Ada" && Greeting::cleanName("   ").isEmpty() && Greeting::cleanName(QString(60,'n')).size()==40 && Greeting::cleanName("Zo\u00eb \u4e16\u754c")=="Zo\u00eb \u4e16\u754c","greeting: names are trimmed, capped at 40 characters and keep non-ASCII");
+        {
+            QString emoji; for(int i=0;i<30;++i) emoji+=QString::fromUtf8("\U0001F600");
+            const QString cut=Greeting::cleanName(emoji);
+            bool lone=false; for(int i=0;i<cut.size();++i) { if(cut.at(i).isHighSurrogate()) { if(i+1>=cut.size()||!cut.at(i+1).isLowSurrogate()) lone=true; ++i; } else if(cut.at(i).isLowSurrogate()) lone=true; }
+            check(!lone && cut.size()<=40,"greeting: a long name is never cut inside a character");
+        }
+        check(Greeting::userName().isEmpty() && !Greeting::nameAsked(),"greeting: no name and not asked before anything is stored");
+        Greeting::setUserName("  Archit "); Greeting::setNameAsked(true);
+        check(Greeting::userName()=="Archit" && Greeting::nameAsked() && QSettings().value("profile/name").toString()=="Archit","greeting: the name and the asked flag are stored in Settings");
+        Greeting::setUserName("   ");
+        check(Greeting::userName().isEmpty(),"greeting: a blank name clears it");
+        QSettings().remove("profile/name"); QSettings().remove("profile/nameAsked");
+        const QString suggestion=Greeting::accountNameSuggestion();
+        check(suggestion.isEmpty() || suggestion.at(0).isUpper() || !suggestion.at(0).isLetter(),"greeting: the account name suggestion starts with a capital letter");
+    }
+    {
+        // The first-launch question.
+        NameDialog asked("Archit");
+        auto *edit=asked.findChild<QLineEdit *>("nameInput"); auto *save=button(&asked,"Save"); auto *skip=button(&asked,"Skip");
+        bool heading=false; for (auto *label : asked.findChildren<QLabel *>()) heading|=label->text()=="What should I call you?";
+        check(edit && save && skip && heading && edit->text()=="Archit" && edit->accessibleName()=="Your name","name dialog: asks 'What should I call you?' with the suggestion filled in, plus Save and Skip");
+        asked.show(); pump(40);
+        if (edit && save && skip) {
+            edit->setText("  Ada  "); save->click(); pump(20);
+            check(asked.result()==QDialog::Accepted && asked.name()=="Ada","name dialog: Save accepts the trimmed name");
+            NameDialog skipped("Archit"); skipped.show(); button(&skipped,"Skip")->click(); pump(20);
+            check(skipped.result()==QDialog::Rejected,"name dialog: Skip rejects");
+            NameDialog escaped("Archit"); escaped.show(); key(&escaped,Qt::Key_Escape); pump(20);
+            check(escaped.result()==QDialog::Rejected,"name dialog: Esc counts as Skip");
+            NameDialog longName(QString(60,'z')); check(longName.name().size()==40 && NameDialog("").name().isEmpty(),"name dialog: a long suggestion is capped and an empty one stays empty");
+            NameDialog blank(""); blank.show(); button(&blank,"Save")->click(); pump(20);
+            check(blank.name().isEmpty(),"name dialog: saving an empty name gives no name");
+        }
+    }
+    {
+        // The saved-chats list under Playground.
+        ChatHistoryList list; list.resize(220,420);
+        auto *newButton=list.findChild<QPushButton *>("historyNew"); auto *view=list.findChild<QListWidget *>("historyList");
+        check(newButton && view && view->accessibleName()=="Saved chats" && newButton->accessibleName()=="New chat" && !newButton->icon().isNull(),"history list: has a New chat button and a Saved chats list");
+        if (newButton && view) {
+            auto makeChats=[](int n) { QList<ChatSummary> out; for (int i=0;i<n;++i) { ChatSummary c; c.id=QString("id%1").arg(i); c.title=QString("Chat number %1").arg(i); out << c; } return out; };
+            QStringList opened, renamed, deleted; int newRequests=0;
+            QObject::connect(&list,&ChatHistoryList::openRequested,[&opened](const QString &id) { opened << id; });
+            QObject::connect(&list,&ChatHistoryList::renameRequested,[&renamed](const QString &id) { renamed << id; });
+            QObject::connect(&list,&ChatHistoryList::deleteRequested,[&deleted](const QString &id) { deleted << id; });
+            QObject::connect(&list,&ChatHistoryList::newChatRequested,[&newRequests]() { ++newRequests; });
+            auto clickRow=[&](int row) {
+                const QPoint pos=view->visualItemRect(view->item(row)).center(); const QPoint global=view->viewport()->mapToGlobal(pos);
+                QMouseEvent press(QEvent::MouseButtonPress,QPointF(pos),QPointF(global),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+                QMouseEvent release(QEvent::MouseButtonRelease,QPointF(pos),QPointF(global),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(view->viewport(),&press); QApplication::sendEvent(view->viewport(),&release); pump(20);
+            };
+            auto currentId=[&]() { return view->currentItem()?view->currentItem()->data(Qt::UserRole).toString():QString(); };
+            list.setChats({},QString()); list.show(); pump(40);
+            check(view->count()==0 && !view->isVisibleTo(&list) && newButton->isVisibleTo(&list),"history list: with no chats only the New chat button shows");
+            list.setChats(makeChats(12),"id2"); pump(60);
+            check(view->count()==12 && view->item(0)->text()=="Chat number 0" && view->item(11)->data(Qt::UserRole).toString()=="id11" && currentId()=="id2","history list: rows appear in the order given and the open chat is the current one");
+            check(view->height()==ChatHistoryList::kVisibleRows*ChatHistoryList::kRowHeight && view->verticalScrollBar()->maximum()>0,"history list: with many chats it shows five rows and scrolls");
+            {
+                int fullyVisible=0; for (int i=0;i<view->count();++i) if (view->viewport()->rect().contains(view->visualItemRect(view->item(i)))) ++fullyVisible;
+                check(fullyVisible==5,"history list: exactly five rows are visible at once");
+            }
+            view->verticalScrollBar()->setValue(60); list.setChats(makeChats(12),"id2"); pump(30);
+            check(view->verticalScrollBar()->value()==60,"history list: refreshing the same chats keeps the scroll position");
+            list.setChats(makeChats(3),"id1"); pump(60);
+            check(view->height()==3*ChatHistoryList::kRowHeight && view->verticalScrollBar()->maximum()==0 && currentId()=="id1","history list: with three chats the list is three rows tall and does not scroll");
+            list.setChats(makeChats(12),"id2"); pump(60);
+
+            clickRow(3);
+            check(opened==QStringList({"id3"}),"history list: clicking a row asks to open that chat, once");
+            newButton->click(); check(newRequests==1,"history list: New chat asks for a new chat");
+            view->setCurrentRow(5); key(view,Qt::Key_Return); key(view,Qt::Key_Delete);
+            check(opened==QStringList({"id3","id5"}) && deleted==QStringList({"id5"}),"history list: Enter opens the current row and Delete asks to delete it");
+            {
+                QMenu *menu=list.contextMenuFor("id4"); QStringList names; for (auto *a : menu->actions()) names << a->text();
+                check(names==QStringList({"Rename","Delete"}),"history list: the row menu offers Rename and Delete");
+                menu->actions().at(0)->trigger(); menu->actions().at(1)->trigger();
+                check(renamed==QStringList({"id4"}) && deleted==QStringList({"id5","id4"}),"history list: the menu actions ask to rename and delete that chat");
+                delete menu;
+            }
+
+            opened.clear(); deleted.clear(); renamed.clear(); list.setBusy(true);
+            clickRow(3); view->setCurrentRow(5); key(view,Qt::Key_Return); view->setCurrentRow(2); key(view,Qt::Key_Delete);
+            check(!newButton->isEnabled() && opened.isEmpty() && deleted.isEmpty(),"history list: while busy nothing can be opened or deleted from the keyboard, and New chat is off");
+            list.setChats(makeChats(12),"id2"); clickRow(4);
+            check(opened.isEmpty() && currentId()=="id2","history list: a refused click does not move the highlight off the open chat");
+            {
+                QMenu *openMenu=list.contextMenuFor("id2"); QMenu *otherMenu=list.contextMenuFor("id4");
+                check(!openMenu->actions().at(0)->isEnabled() && !openMenu->actions().at(1)->isEnabled() && otherMenu->actions().at(0)->isEnabled() && otherMenu->actions().at(1)->isEnabled(),"history list: while busy the open chat's menu is off, other chats' menus still work");
+                delete openMenu; delete otherMenu;
+            }
+            view->setCurrentRow(7); key(view,Qt::Key_Delete);
+            check(deleted==QStringList({"id7"}),"history list: another chat can still be deleted while busy");
+            list.setBusy(false); clickRow(6);
+            check(newButton->isEnabled() && opened==QStringList({"id6"}),"history list: busy off restores opening and New chat");
+
+            {
+                QList<ChatSummary> long1=makeChats(2); long1[0].title=QString(200,'w'); list.setChats(long1,"id1"); pump(40);
+                check(view->item(0)->toolTip()==QString(200,'w') && view->textElideMode()==Qt::ElideRight && view->horizontalScrollBarPolicy()==Qt::ScrollBarAlwaysOff,"history list: a very long title is elided on the row and complete in its tooltip");
+            }
+            for (bool dark : {true,false}) { Theme::setDark(dark); list.setChats(makeChats(9),"id3"); list.refreshIcons(); pump(80); capture(&list,dark?"history-list-dark":"history-list-light"); }
+            Theme::setDark(true); list.hide();
+        }
+    }
+    {
+        // The controller joins store, panel and list; dialogs are replaceable so no window pops up.
+        QTemporaryDir dir; ChatStore store(dir.path()+"/chats");
+        auto sample=[](const QString &question) { ChatTree t; const auto q=t.addChild(ChatTree::kRoot,"user",question); t.addChild(q,"assistant","answer to "+question); return t; };
+        QStringList savedIds; for (const QString &question : {"alpha chat","beta chat","gamma chat"}) { const QString id=store.create(); store.save(id,sample(question)); savedIds << id; }
+        ChatPanel hostedChat; hostedChat.setBackendClient(&client); hostedChat.setChatStore(&store);
+        ChatHistoryList historyList; QWidget dialogParent;
+        ChatHistoryController controller(&store,&hostedChat,&historyList,&dialogParent);
+        auto *view=historyList.findChild<QListWidget *>("historyList"); auto *newButton=historyList.findChild<QPushButton *>("historyNew");
+        historyList.resize(220,400); historyList.show(); pump(40);
+        auto titles=[&]() { QStringList out; for (int i=0;i<view->count();++i) out << view->item(i)->text(); return out; };
+        auto titleOf=[&](const QString &id) { for (const auto &row : store.list()) if (row.id==id) return row.title; return QString("<missing>"); };
+        check(view && newButton && view->count()==3 && titles()==QStringList({"gamma chat","beta chat","alpha chat"}) && view->selectedItems().isEmpty(),"history controller: the list shows exactly what the store holds, newest first, with nothing open");
+        const QString idNew=store.create(); store.save(idNew,sample("delta chat")); pump(20);
+        check(view->count()==4 && view->item(0)->text()=="delta chat","history controller: a chat saved later appears in the list");
+        emit historyList.openRequested(savedIds.at(0)); pump(40);
+        check(hostedChat.currentChatId()==savedIds.at(0) && view->currentItem() && view->currentItem()->data(Qt::UserRole).toString()==savedIds.at(0) && hostedChat.findChildren<MessageRow *>().size()==2,"history controller: opening from the list opens the chat and highlights its row");
+        emit historyList.newChatRequested(); pump(40);
+        check(hostedChat.currentChatId().isEmpty() && view->selectedItems().isEmpty() && view->count()==4 && hostedChat.findChildren<MessageRow *>().isEmpty(),"history controller: New chat shows a blank chat and keeps every saved chat listed");
+        QString askedWith; QString answer="Renamed by check";
+        controller.askTitle=[&](const QString &current) { askedWith=current; return answer; };
+        emit historyList.renameRequested(savedIds.at(1)); pump(40);
+        check(askedWith=="beta chat" && titleOf(savedIds.at(1))=="Renamed by check" && titles().contains("Renamed by check"),"history controller: rename asks with the current title and applies the answer");
+        answer="  "; emit historyList.renameRequested(savedIds.at(1)); pump(40);
+        check(titleOf(savedIds.at(1))=="Renamed by check","history controller: an empty answer changes nothing");
+        QString confirmedFor; bool agree=false;
+        controller.confirmDelete=[&](const QString &title) { confirmedFor=title; return agree; };
+        emit historyList.deleteRequested(savedIds.at(2)); pump(40);
+        check(confirmedFor=="gamma chat" && titleOf(savedIds.at(2))=="gamma chat" && view->count()==4,"history controller: a refused delete changes nothing");
+        agree=true; emit historyList.deleteRequested(savedIds.at(2)); pump(40);
+        check(titleOf(savedIds.at(2))=="<missing>" && view->count()==3,"history controller: a confirmed delete removes the chat and its row");
+        emit historyList.openRequested(savedIds.at(0)); pump(40); emit historyList.deleteRequested(savedIds.at(0)); pump(40);
+        check(hostedChat.currentChatId().isEmpty() && titleOf(savedIds.at(0))=="<missing>" && view->count()==2 && hostedChat.findChildren<MessageRow *>().isEmpty(),"history controller: deleting the open chat leaves a blank chat");
+        // Busy state reaches the list.
+        {
+            fixture.holdChat=true; fixture.chatReply="held";
+            auto *typed=hostedChat.findChild<QPlainTextEdit *>("chatInput"); typed->setPlainText("a held question"); pump(20);
+            QMetaObject::invokeMethod(&hostedChat,"onSend",Qt::DirectConnection);
+            check(waitUntil([&]{ return fixture.chatSocket && !newButton->isEnabled(); }),"history controller: while a reply streams the list's New chat is off");
+            const QString streaming=hostedChat.currentChatId(); emit historyList.openRequested(savedIds.at(1)); pump(40);
+            check(hostedChat.currentChatId()==streaming,"history controller: opening another chat while a reply streams is refused");
+            QMetaObject::invokeMethod(&hostedChat,"onClearChat",Qt::DirectConnection); pump(60);
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(100);
+            check(newButton->isEnabled() && hostedChat.currentChatId().isEmpty(),"history controller: when the reply ends the list is usable again");
+        }
+        QMetaObject::invokeMethod(&hostedChat,"onClearChat",Qt::DirectConnection);
+        historyList.hide();
+        hostedChat.setBackendClient(nullptr); pump(500); client.abortAll(); pump(100);   // no request may outlive the panel it reports to
     }
     {
         QWidget host; auto *hostLayout=new QVBoxLayout(&host);

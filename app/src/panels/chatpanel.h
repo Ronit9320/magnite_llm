@@ -4,6 +4,7 @@
 #include "panels/chatbubble.h"
 #include "panels/chattree.h"
 
+#include <functional>
 #include <optional>
 
 #include <QList>
@@ -26,6 +27,7 @@ class BackendClient;
 class ChatBubble;
 class MessageRow;
 class ContextMeter;
+class ChatStore;
 class QNetworkReply;
 
 // Chat / Inference panel: converse with the active model.
@@ -42,6 +44,22 @@ public:
 
     QString settingsJson() const override;
 
+    // Saved chats. Without a store (the default) nothing is saved and nothing can be opened.
+    void setChatStore(ChatStore *store);
+    QString currentChatId() const { return m_chatId; }   // empty for a blank, unsaved chat
+    // Streaming, preparing a send, loading a model, or a message editor open.
+    bool isBusy() const;
+    // Writes any pending change now.
+    void flushSave();
+    // Test hook: the hour the greeting uses (default: the clock). An empty function restores the clock.
+    void setHourProviderForTest(std::function<int()> provider) { m_hourProvider = std::move(provider); }
+    // Open a saved chat. False, changing nothing, when busy, unknown or unreadable.
+    bool openChat(const QString &id);
+    // False for an empty title, an unknown chat, or the open chat while busy.
+    bool renameChat(const QString &id, const QString &title);
+    // False for an unknown chat, or the open chat while busy. Deleting the open chat leaves a blank one.
+    bool deleteChat(const QString &id);
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void applySettingsJson(const QString &json) override;
@@ -53,6 +71,10 @@ public slots:
     void reloadContextSettings();
     // Ask the backend how full the context is (history + typed draft + reserved reply).
     void refreshContextUsage();
+
+signals:
+    void currentChatChanged(const QString &id);   // "" when a blank chat is shown
+    void busyChanged(bool busy);
 
 private slots:
     void onLoadModel();
@@ -75,6 +97,14 @@ private:
     };
 
     void setupUi();
+    // Shows the blank chat's welcome with a fresh greeting (a different wording from the last one).
+    void showBlankChat();
+    // Stops whatever is streaming or being prepared.
+    void stopActivity();
+    // Empties the conversation and every piece of send state, and shows the blank chat (with a fresh greeting when showBlank).
+    void resetConversation(bool showBlank = true);
+    // Call after any change to the tree: the first change of a new chat saves at once, later ones shortly after.
+    void markDirty();
     void setStatus(const QString &text, const QString &tone = QString());
     void updateStreamingBubble(const QString &text, bool showCursor);
     void scrollToBottom();
@@ -134,7 +164,6 @@ private:
     bool m_loading = false;
     bool m_followOutput = true;
     QPushButton *m_stopButton;
-    QPushButton *m_clearButton;
     QLabel *m_statusLabel;
     StudioCanvas *m_activity = nullptr;
 
@@ -142,6 +171,14 @@ private:
     // sent. Compaction snapshots (`covered` leading messages represented by `summary`) live on
     // the tree nodes, so the transcript itself is never trimmed.
     ChatTree m_tree;
+    std::function<int()> m_hourProvider;   // test hook; empty = the clock
+    QString m_greeting;                    // the greeting on the blank chat, and the name it was made for
+    QString m_greetingName;
+    ChatStore *m_store = nullptr;
+    QString m_chatId;                    // the saved chat on screen; empty until its first message
+    QTimer *m_saveTimer = nullptr;
+    bool m_saveDirty = false;
+    bool m_busyReported = false;
     ChatTree::NodeId m_replyParent = ChatTree::kRoot;   // the user message the streaming reply answers
     // While a retry streams, only this many path messages count (the user message, not the reply
     // being replaced); -1 otherwise.

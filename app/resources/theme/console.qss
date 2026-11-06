@@ -183,3 +183,14 @@ QCheckBox:disabled { color: @textMuted; }
 QCheckBox::indicator:disabled { background: @insetBackground; border-color: @surfaceBorder; }
 QComboBox::drop-down:disabled { background: transparent; }
 QLabel#sectionHint { color: @textSecondary; font-size: 12px; }
+
+/* Saved chats under Playground */
+QPushButton#historyNew { padding: 5px 10px; border: 1px solid transparent; background: transparent; font-family: @bodyFont; text-align: left; border-radius: 8px; color: @accentLabel; font-size: 12px; }
+QPushButton#historyNew:hover { border-color: @surfaceBorder; background: @surfaceFillHover; }
+QPushButton#historyNew:focus { border-color: @accentPrimary; }
+QPushButton#historyNew:disabled { color: @textMuted; }
+QListWidget#historyList { background: transparent; border: none; outline: none; font-family: @bodyFont; font-size: 12px; }
+QListWidget#historyList::item { padding: 4px 10px; border-radius: 8px; color: @textSecondary; border: 1px solid transparent; }
+QListWidget#historyList::item:hover { background: @surfaceFillHover; }
+QListWidget#historyList::item:selected { background: @surfaceFill; color: @textPrimary; border: 1px solid @surfaceBorder; }
+QListWidget#historyList:focus { border: none; }

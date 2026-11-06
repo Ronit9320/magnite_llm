@@ -7,6 +7,7 @@ class QCheckBox;
 class QLineEdit;
 class QLabel;
 class QPushButton;
+class QShowEvent;
 class UpdateManager;
 
 // Settings panel: app-level configuration with persistence via QSettings.
@@ -21,6 +22,10 @@ public:
 signals:
     void settingsChanged();
 
+protected:
+    // The name may have been saved elsewhere since the panel was built (the first-launch question).
+    void showEvent(QShowEvent *event) override;
+
 private slots:
     void onSave();
     void onBrowseDataDir();
@@ -34,6 +39,7 @@ private:
     QLineEdit *m_dataDir;
     QCheckBox *m_grid = nullptr;
     QCheckBox *m_reducedMotion = nullptr;
+    QLineEdit *m_profileName = nullptr;
     QComboBox *m_meterStyle = nullptr;
     QComboBox *m_autoCompact = nullptr;
     QPushButton *m_saveButton;

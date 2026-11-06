@@ -6,6 +6,8 @@
 #include <QStringList>
 #include <QVector>
 
+#include <optional>
+
 // The conversation as a tree of messages. Siblings are the versions of a message
 // (edited user messages, retried replies); exactly one child per node is "active",
 // and following the active children from the root gives the path shown on screen.
@@ -51,6 +53,13 @@ public:
 
     bool isEmpty() const;
     void clear();
+
+    // The whole tree as plain JSON, every version included, ids preserved:
+    // {"nodes":[{id,parent,role,content,children,activeChild,notes,compaction}],"rootChildren":[…],"rootActive":id}.
+    QJsonObject toJson() const;
+    // nullopt unless the JSON is a complete, self-consistent tree (ids, parent/child links, reachability,
+    // active children, roles, snapshots). Nothing half-valid is ever returned.
+    static std::optional<ChatTree> fromJson(const QJsonObject &json);
 
 private:
     struct Node {

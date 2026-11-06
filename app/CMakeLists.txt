@@ -70,6 +70,10 @@ set(MAGNITE_SOURCES
     src/widgets/contextmeter.h
     src/widgets/versionswitcher.cpp
     src/widgets/versionswitcher.h
+    src/widgets/namedialog.cpp
+    src/widgets/namedialog.h
+    src/widgets/chathistorylist.cpp
+    src/widgets/chathistorylist.h
     src/widgets/confirmation.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
@@ -80,6 +84,12 @@ set(MAGNITE_SOURCES
     src/panels/chatbubble.cpp
     src/panels/chattree.cpp
     src/panels/chattree.h
+    src/panels/chatstore.cpp
+    src/panels/chatstore.h
+    src/panels/greeting.cpp
+    src/panels/greeting.h
+    src/panels/chathistorycontroller.cpp
+    src/panels/chathistorycontroller.h
     src/panels/messagerow.cpp
     src/panels/messagerow.h
     src/panels/settingspanel.cpp

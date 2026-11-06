@@ -1,5 +1,6 @@
 #include <QTabWidget>
 #include "panels/settingspanel.h"
+#include "panels/greeting.h"
 #include "update_manager.h"
 #include <QCoreApplication>
 
@@ -149,6 +150,19 @@ void SettingsPanel::setupUi() {
     contextHint->setObjectName("cardMeta");
     contextCard->addWidget(contextHint);
     chatColumn->addWidget(contextCard->parentWidget());
+
+    auto *youCard = Surface::card(this,"You");
+    m_profileName = new QLineEdit(this);
+    m_profileName->setObjectName("profileName");
+    m_profileName->setAccessibleName("Your name");
+    m_profileName->setPlaceholderText("Your name (optional)");
+    m_profileName->setMaxLength(80);
+    Surface::field(youCard,"Your name",m_profileName);
+    auto *youHint = new QLabel("Shown only in the greeting on a new chat. It stays on this computer. Leave it empty for no name.",this);
+    youHint->setWordWrap(true);
+    youHint->setObjectName("cardMeta");
+    youCard->addWidget(youHint);
+    chatColumn->addWidget(youCard->parentWidget());
     chatColumn->addStretch();
 
     auto *local = Surface::card(this,"Local by default");
@@ -193,6 +207,11 @@ void SettingsPanel::setupUi() {
         s.setValue("chat/autoCompactPercent",m_autoCompact->currentData().toInt());
         emit settingsChanged();
     };
+    connect(m_profileName,&QLineEdit::editingFinished,this,[this]() {
+        Greeting::setUserName(m_profileName->text());
+        m_profileName->setText(Greeting::userName());
+        emit settingsChanged();
+    });
     connect(m_meterStyle,qOverload<int>(&QComboBox::currentIndexChanged),this,chatChanged);
     connect(m_autoCompact,qOverload<int>(&QComboBox::currentIndexChanged),this,chatChanged);
     connect(m_reducedMotion,&QCheckBox::toggled,this,appearanceChanged);
@@ -203,11 +222,17 @@ void SettingsPanel::loadFromSettings() {
     s.remove("hosted/apiKey");
     m_engineOverride->setCurrentIndex(qBound(0, s.value("engine/override", 0).toInt(), 2));
     m_dataDir->setText(s.value("storage/dataDir").toString());
+    m_profileName->setText(Greeting::userName());
     s.remove("hosted/endpoint");
     m_grid->setChecked(s.value("appearance/studio3Ambient",true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
     m_meterStyle->setCurrentIndex(qMax(0, m_meterStyle->findData(ContextMeterLogic::styleKey(ContextMeterLogic::parseStyle(s.value("chat/meterStyle").toString())))));
     m_autoCompact->setCurrentIndex(qMax(0, m_autoCompact->findData(ContextMeterLogic::parseAutoCompact(s.value("chat/autoCompactPercent")))));
+}
+
+void SettingsPanel::showEvent(QShowEvent *event) {
+    BasePanel::showEvent(event);
+    if (m_profileName && !m_profileName->hasFocus()) m_profileName->setText(Greeting::userName());
 }
 
 void SettingsPanel::onBrowseDataDir() {
