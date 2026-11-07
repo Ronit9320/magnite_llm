@@ -18,6 +18,7 @@ class BackendClient;
 class BasePanel;
 class ModelsPanel;
 class TrainingPanel;
+class TrainingRunPanel;
 class RagPanel;
 class AdaptersPanel;
 class ChatPanel;
@@ -72,6 +73,9 @@ private:
 
     StudioCanvas *m_background = nullptr;
     QStackedWidget *m_stack;
+    QStackedWidget *m_workspacePages = nullptr;
+    TrainingRunPanel *m_runPanel = nullptr;
+    int m_runReturnPanel = 1;
     BackendManager *m_backend;
     BackendClient *m_backendClient;
     UpdateManager *m_updater;

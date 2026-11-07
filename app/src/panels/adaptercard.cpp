@@ -85,6 +85,14 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     metaRow->addStretch(1);
     layout->addLayout(metaRow);
 
+    const auto trainingJob=data.value("training_job_id").toString();
+    if (!trainingJob.isEmpty()) {
+        auto *run=new QPushButton("View run data",this); run->setObjectName("cardBtn");
+        run->setAccessibleName("View training run for "+m_id);
+        layout->addWidget(run,0,Qt::AlignLeft);
+        connect(run,&QPushButton::clicked,this,[this,trainingJob] { emit runDetailsRequested(trainingJob); });
+    }
+
     // Row 3: activation, export and deletion actions.
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(6);

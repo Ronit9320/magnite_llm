@@ -8,8 +8,7 @@ later merge into `dev`.
 ## Page layout
 
 The page uses two columns. The left side contains numbered cards for base model,
-dataset, training settings, and adapter output. The right side contains the run
-setup, active run and charts, saved runs, and an expandable event log. Settings
+dataset and training settings. The adapter name is under expandable Output options. The right side contains a resource estimate, active run and charts, saved runs, and an expandable event log. Settings
 remain visible and scroll when necessary. Both existing themes, keyboard model
 selection and reduced-motion preferences remain supported.
 
@@ -23,17 +22,66 @@ selection and reduced-motion preferences remain supported.
   behavior: no validation, dropout 0.05, rank 8, alpha 16 and three epochs.
 - **Save preset…** exports settings to JSON using an atomic save. **Load preset…**
   restores settings while idle. Existing session settings remain compatible.
-- **Start Training** locks setup and past-run selection until the job is terminal.
+- **Start Training** locks setup until the job is terminal. Past runs remain
+  available for review while training continues.
   **Stop** requests cooperative cancellation; it does not pretend to pause or
   support resuming an optimiser checkpoint.
-- Select a past run to inspect its persisted curves, metrics and result message.
-  Refresh/reopening the page reattaches to an existing queued or running job.
+- Past runs are compact rows with a name and result, rather than serialized job
+  records. Click a row (or activate it using the keyboard) to open run review.
+  Refresh/reopening Training reattaches to an existing queued or running job.
+- Visualisation starts enabled on app startup. Turn it off to show the raw job
+  JSON, including configuration, history, timestamps and errors. This switch is
+  available in both Training and run review and does not alter captured data.
 
-The sketch's cloud fine-tuning mode is outside the local release scope. Pause,
-VRAM prediction, adapter-size prediction and pre-run duration prediction are not
-implemented. The run setup shows recorded model disk size and dataset metadata;
-disk size is not presented as required VRAM. The summary tooltip explains that
-VRAM/duration estimates are unavailable.
+The sketch's cloud fine-tuning mode is outside the local release scope. Pause
+and checkpoint resume remain unsupported; Stop uses cooperative cancellation.
+
+## Contextual run review
+
+`TrainingRunPanel` is a page inside the workspace, with no new sidebar entry.
+Training's past-run rows and the **View run data** button on locally trained
+adapter cards both open this page with a training job ID. Imported adapters
+without a linked training job do not show this button. Back returns to the page
+that opened review; selecting a sidebar destination exits review normally.
+
+Review contains a run overview, training/validation loss, learning rate,
+gradient norm, configuration and timing. It also has a raw-data switch. Active
+runs refresh once per second while review is visible; terminal runs stop
+polling. Missing/deleted run history is explained in the page. The existing
+six sidebar panels remain unchanged.
+
+## Resource estimates
+
+`POST /training/estimate` accepts a `TrainingConfig` and reads the selected
+imported dataset and local model configuration. It never downloads weights or
+loads an ML runtime. Changes to the inputs debounce estimate requests; stale
+replies are ignored. The card shows an approximate memory range, available
+memory, expected adapter weight size, optimiser steps and a duration range
+when local timing calibration exists.
+
+The budget supports common Llama/Mistral/Qwen/Gemma and GPT-2 configurations.
+It approximates base projection/embedding parameter counts from model dimensions
+and LoRA parameters from rank and selected projections. Unknown target names
+use an all-linear budget, matching the trainer fallback. Base weights are
+budgeted as FP32 for LoRA, or quantized weights with overhead for QLoRA. The
+adapter estimate assumes FP32 storage; optimizer/gradient and activation budgets
+are added to memory, with a range for allocator/kernel/attention uncertainty.
+These are advisory architecture budgets, not a guarantee that a run will fit.
+Missing/unsupported configuration is reported explicitly rather than treating
+model download size as VRAM.
+
+Available NVIDIA memory is read with `nvidia-smi` using one GPU's capacity,
+never the sum of multiple cards. Without that probe the card reports Linux or
+Windows system RAM; macOS reports unified/system total memory with available
+memory marked unknown. Memory labels distinguish RAM from VRAM. This probe is
+an advisory machine capacity reading; it does not choose the trainer's device.
+
+Pre-run duration needs a completed local run for the same model, batch size,
+sequence length, quantization, rank and target modules, with at least two timed
+training samples. The range scales measured step time to the selected workload
+(0.7–1.5×), excludes initial loading/final saving and may change with hardware or
+concurrent work. Without calibration the card says it calibrates after a
+matching run. No fixed GPU speed or invented completion time is used.
 
 ## Raw telemetry and charts
 
@@ -54,7 +102,11 @@ and the scalar values actually logged by Transformers:
 | `grad_norm` | Gradient norm when supplied by the trainer; separate tab |
 
 `TrainingChart` uses Qt's painter and existing theme tokens, with no additional
-chart dependency. Samples are sorted by step and placed using their true step
+chart dependency. New history reveals measured line segments over 550 ms with
+an eased animation; opening a chart reveals its retained curve. Unchanged polls
+do not replay the animation. Hidden charts stop their animation, completed
+animations settle, and reduced motion displays samples immediately. No artificial
+loss samples or continuous motion are introduced. Samples are sorted by step and placed using their true step
 coordinates. Axis bounds follow the measured values; the x-axis extends to the
 known total steps. A single sample is drawn as a point. Hover over the plot to
 read exact measured values at the nearest recorded step. Accessible descriptions
@@ -136,20 +188,24 @@ history, seeded splitting, configuration bounds and rejecting one-row validation
 UI checks exercise historical curves, live charts, repeat-poll deduplication,
 empty telemetry, HTTP outages, cancellation, submission recovery, completion,
 reattaching to active jobs, compact layout, keyboard navigation and both themes.
+Additional checks cover run review from Training/Adapters, raw-data switching,
+animation frame changes/settling/reduced motion, resource budgets and measured
+duration calibration.
 Generated screenshots/logs live under ignored `build/`.
 
 Verified on Linux for this implementation:
 
 - CMake configure/build passed with no compiler warnings in the final build.
-- Backend suite: **209 tests**, **208 passed**, **1 platform-specific skip**.
+- Backend suite after the polish update: **216 tests**, **215 passed**, **1 platform-specific skip**.
 - Theme audit: **0 failures**.
 - UI checks at normal and 2× scale: **0 failures** each.
 - Desktop backend startup/selftest: **0 failures**.
 - Real offline CPU LoRA smoke: **6 training samples**, **2 validation samples**,
   successful adapter registration.
 - Populated dark/light captures inspected; see
-  `build/training-ui/training-running-full.png` and
-  `build/training-ui/training-running-full-light.png`.
+  `build/training-polish-ui/training-running-full.png`,
+  `build/training-polish-ui/training-running-full-light.png` and
+  `build/training-polish-ui/training-run-review.png`.
 
 Native Windows, macOS, CUDA QLoRA, long-run memory behavior and training quality
 require further manual testing on the corresponding hardware before promotion.

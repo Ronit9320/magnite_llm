@@ -22,7 +22,6 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -151,33 +150,42 @@ void TrainingPanel::setupUi() {
 
     setupHyperparameters(setup);
     left->addWidget(m_hyperBox);
-    auto *output = Surface::card(setup,"4. Output");
-    left->addWidget(output->parentWidget());
-    Surface::field(output, "Adapter name", m_adapterNameEdit = new QLineEdit(this));
-    m_adapterNameEdit->setPlaceholderText("Auto-named from job if empty");
-    auto *savedHint = new QLabel("Completed adapters appear in your Adapters workspace.",this);
-    savedHint->setObjectName("cardMeta"); savedHint->setWordWrap(true);
-    output->addWidget(savedHint);
+    auto *outputOptions = new QPushButton("Output options ▾",this);
+    outputOptions->setCheckable(true); outputOptions->setObjectName("secondaryBtn");
+    auto *output = new QWidget(this);
+    auto *outputLayout = new QVBoxLayout(output);
+    outputLayout->setContentsMargins(0,0,0,0);
+    Surface::field(outputLayout,"Adapter name",m_adapterNameEdit=new QLineEdit(this));
+    m_adapterNameEdit->setPlaceholderText("Auto-named when empty");
+    auto *settingsLayout=qobject_cast<QVBoxLayout *>(m_hyperBox->layout());
+    settingsLayout->addWidget(outputOptions); settingsLayout->addWidget(output);
+    output->hide();
+    connect(outputOptions,&QPushButton::toggled,output,&QWidget::setVisible);
     left->addStretch();
 
-    auto *resources = Surface::card(monitor,"Run setup");
+    auto *resources = Surface::card(monitor,"Resource estimate");
     right->addWidget(resources->parentWidget());
     m_inputSummary = new QLabel(this);
     m_inputSummary->setObjectName("cardMeta"); m_inputSummary->setWordWrap(true);
     m_inputSummary->setTextFormat(Qt::PlainText);
     resources->addWidget(m_inputSummary);
-    auto *estimateHint = new QLabel("VRAM and duration estimates are unavailable. Time remaining appears once measured steps are available.",this);
-    estimateHint->setObjectName("cardMeta"); estimateHint->setWordWrap(true);
-    m_inputSummary->setToolTip(estimateHint->text());
-    delete estimateHint;
+    m_estimateLabel=new QLabel("Select a model and dataset to estimate resources.",this);
+    m_estimateLabel->setObjectName("cardMeta"); m_estimateLabel->setWordWrap(true);
+    m_estimateLabel->setTextFormat(Qt::PlainText); resources->addWidget(m_estimateLabel);
+    m_memoryBar=new QProgressBar(this); m_memoryBar->setRange(0,100);
+    m_memoryBar->setFixedHeight(6); m_memoryBar->setTextVisible(false);
+    resources->addWidget(m_memoryBar); m_memoryBar->hide();
+    m_estimateTimer=new QTimer(this); m_estimateTimer->setSingleShot(true); m_estimateTimer->setInterval(300);
+    connect(m_estimateTimer,&QTimer::timeout,this,&TrainingPanel::requestEstimate);
     m_startButton = new QPushButton("Start Training", this);
     m_startButton->setObjectName("primaryBtn");
     m_startButton->setIcon(Theme::coloredIcon("play", QColor(Theme::accentText())));
-    resources->addWidget(m_startButton);
+
     auto *presets = new QHBoxLayout();
     auto *savePreset = new QPushButton("Save preset…",this);
     auto *loadPreset = m_loadPreset = new QPushButton("Load preset…",this);
-    presets->addWidget(savePreset); presets->addWidget(loadPreset);
+    presets->addWidget(m_startButton,1); presets->addWidget(savePreset);
+    outputLayout->addWidget(loadPreset);
     resources->addLayout(presets);
     connect(savePreset,&QPushButton::clicked,this,[this] {
         const auto path=QFileDialog::getSaveFileName(this,"Save training preset",QString(),"JSON (*.json)");
@@ -222,8 +230,13 @@ void TrainingPanel::setupUi() {
     m_progressLabel = new QLabel("Ready to train",this);
     m_progressLabel->setObjectName("metricValue");
     m_progressLabel->setWordWrap(true);
-    run->addWidget(m_progressLabel);
+
+    m_visualise=new QCheckBox("Visualisation",this); m_visualise->setChecked(true);
+    m_visualise->setToolTip("Switch off to inspect the raw job data.");
+    auto *viewRow=new QHBoxLayout();
+    viewRow->addWidget(m_progressLabel,1); viewRow->addWidget(m_visualise); run->addLayout(viewRow);
     auto *charts = new QTabWidget(this);
+    m_chartTabs=charts;
     charts->setObjectName("trainingCharts");
     m_lossChart = new TrainingChart("loss",this);
     m_lossChart->setObjectName("trainingLossChart");
@@ -233,11 +246,18 @@ void TrainingPanel::setupUi() {
     charts->addTab(m_lrChart,"Learning rate");
     charts->addTab(m_gradChart,"Gradient norm");
     run->addWidget(charts);
+    m_rawData=new QPlainTextEdit(this); m_rawData->setReadOnly(true);
+    m_rawData->setObjectName("trainingRawData"); m_rawData->setMinimumHeight(180);
+    m_rawData->setMaximumHeight(260); run->addWidget(m_rawData); m_rawData->hide();
+    connect(m_visualise,&QCheckBox::toggled,this,[this](bool enabled) {
+        m_chartTabs->setVisible(enabled); m_rawData->setVisible(!enabled);
+    });
     auto *legend = new QLabel("Solid: training  ·  Dashed: validation (when enabled)",this);
     legend->setObjectName("cardMeta"); legend->setWordWrap(true);
+    connect(m_visualise,&QCheckBox::toggled,legend,&QWidget::setVisible);
     run->addWidget(legend);
     m_metrics = new QLabel("Waiting for a training job.",this);
-    m_metrics->setObjectName("monoLabel"); m_metrics->setWordWrap(true);
+    m_metrics->setObjectName("cardMeta"); m_metrics->setWordWrap(true);
     m_metrics->setTextFormat(Qt::PlainText);
     run->addWidget(m_metrics);
     m_progress = new QProgressBar(this);
@@ -257,7 +277,10 @@ void TrainingPanel::setupUi() {
     right->addWidget(history->parentWidget());
     m_runs = new QListWidget(this);
     m_runs->setObjectName("trainingRuns"); m_runs->setAccessibleName("Past training runs");
-    m_runs->setMinimumHeight(90); m_runs->setMaximumHeight(145);
+    m_runs->setMinimumHeight(100); m_runs->setMaximumHeight(175);
+    m_runs->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    connect(m_runs,&QListWidget::itemClicked,this,[this](QListWidgetItem *item) { emit runDetailsRequested(item->data(Qt::UserRole).toString()); });
+    connect(m_runs,&QListWidget::itemActivated,this,[this](QListWidgetItem *item) { emit runDetailsRequested(item->data(Qt::UserRole).toString()); });
     history->addWidget(m_runs);
     connect(m_runs,&QListWidget::currentRowChanged,this,[this](int row) {
         if (!m_jobId.isEmpty() || !m_startButton->isEnabled() || row<0 || row>=m_jobs.size()) return;
@@ -290,12 +313,18 @@ void TrainingPanel::setupUi() {
     connect(m_batchSpin,&QSpinBox::valueChanged,this,&TrainingPanel::updateInputSummary);
     connect(m_epochsSpin,&QSpinBox::valueChanged,this,&TrainingPanel::updateInputSummary);
     connect(m_validationSpin,&QDoubleSpinBox::valueChanged,this,&TrainingPanel::updateInputSummary);
+    for (auto *spin : {m_rankSpin,m_alphaSpin,m_maxLengthSpin})
+        connect(spin,&QSpinBox::valueChanged,this,&TrainingPanel::updateInputSummary);
+    connect(m_quantCombo,&QComboBox::currentIndexChanged,this,&TrainingPanel::updateInputSummary);
+    connect(m_targetModules,&QComboBox::currentIndexChanged,this,&TrainingPanel::updateInputSummary);
     updateInputSummary();
 }
 
 void TrainingPanel::setupHyperparameters(QWidget *parent) {
-    m_hyperBox = new QGroupBox("3. Settings", parent);
-    auto *grid = new QGridLayout(m_hyperBox);
+    auto *card=Surface::card(parent,"3. Settings");
+    m_hyperBox=card->parentWidget();
+    auto *grid = new QGridLayout();
+    card->addLayout(grid);
     grid->setHorizontalSpacing(8);
     auto field = [grid](int row,int col,const QString &title,QWidget *editor) {
         auto *label=new QLabel(title,editor->parentWidget()); label->setObjectName("cardMeta");
@@ -513,7 +542,6 @@ void TrainingPanel::onStart() {
     m_setup->setEnabled(false);
     m_progress->setValue(0);
     m_log->clear();
-    m_runs->setEnabled(false);
     m_lossChart->setHistory({}); m_lrChart->setHistory({}); m_gradChart->setHistory({});
     m_metrics->setText("Waiting for measured samples.");
     m_runName->setText(m_adapterNameEdit->text().trimmed().isEmpty() ? "New training run" : m_adapterNameEdit->text().trimmed());
@@ -605,6 +633,7 @@ void TrainingPanel::onPollStatus() {
 }
 
 void TrainingPanel::displayJob(const QJsonObject &job) {
+    m_rawData->setPlainText(QString::fromUtf8(QJsonDocument(job).toJson(QJsonDocument::Indented)));
     const auto history=job["history"].toArray();
     const int total=job["total_steps"].toInt();
     const int step=job["current_step"].toInt();
@@ -666,10 +695,23 @@ void TrainingPanel::refreshJobs() {
         for (const auto &v : m_jobs) {
             const auto job=v.toObject();
             const auto st=job["status"].toString();
-            auto *item=new QListWidgetItem(QString("%1 · %2%3").arg(job["name"].toString(),st,
-                job["loss"].isDouble() ? QString(" · loss %1").arg(job["loss"].toDouble(),0,'f',4) : QString()),m_runs);
+            auto *item=new QListWidgetItem(m_runs);
             item->setData(Qt::UserRole,job["id"].toString());
-            item->setToolTip(job["message"].toString());
+            item->setToolTip("Review "+job["name"].toString());
+            auto *row=new QWidget(m_runs); row->setObjectName("trainingRunRow");
+            auto *line=new QHBoxLayout(row); line->setContentsMargins(8,7,8,7);
+            auto *name=new QLabel(job["name"].toString(),row);
+            name->setTextFormat(Qt::PlainText); name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+            line->addWidget(name,1);
+            QString result=st=="done" ? "Done" : st=="error" ? "Failed" : st=="cancelled" ? "Stopped" : "In progress";
+            if (st=="done" && job["loss"].isDouble()) result+=QString(" · loss %1").arg(job["loss"].toDouble(),0,'f',2);
+            auto *state=new QLabel(result,row); state->setObjectName("runState");
+            state->setProperty("state",st=="done" ? "ok" : st=="error" ? "error" : "warn");
+            line->addWidget(state); line->addWidget(new QLabel("›",row));
+            row->setAttribute(Qt::WA_TransparentForMouseEvents);
+            item->setSizeHint(QSize(0,42));
+            item->setData(Qt::AccessibleTextRole,name->text()+", "+result+", open run details");
+            m_runs->setItemWidget(item,row);
             if (job["id"].toString()==selected) m_runs->setCurrentItem(item);
             if (active.isEmpty() && (st=="running" || st=="queued")) active=job["id"].toString();
         }
@@ -677,7 +719,7 @@ void TrainingPanel::refreshJobs() {
         // Reattach to a job still running after switching/reopening the page.
         if (m_jobId.isEmpty() && m_startButton->isEnabled() && !active.isEmpty()) {
             m_jobId=active; m_lastMessage.clear();
-            m_setup->setEnabled(false); m_runs->setEnabled(false);
+            m_setup->setEnabled(false);
             m_startButton->setEnabled(false); m_startButton->setText("Training…");
             m_loadPreset->setEnabled(false);
             m_stopButton->setEnabled(true);
@@ -704,6 +746,41 @@ void TrainingPanel::updateInputSummary() {
     m_datasetSummary->setText(details);
     m_inputSummary->setText(QString("%1 · %2\n%3 epochs · batch %4 · %5% validation")
         .arg(size,details).arg(m_epochsSpin->value()).arg(m_batchSpin->value()).arg(m_validationSpin->value(),0,'f',0));
+    if (m_estimateTimer) { ++m_estimateRequest; m_estimateTimer->start(); }
+}
+
+void TrainingPanel::requestEstimate() {
+    if (!m_client || !m_client->isReady()) return;
+    const int di=m_datasetCombo->findText(m_datasetCombo->currentText());
+    if (di<0 || m_modelCombo->currentText().trimmed().isEmpty()) return;
+    const int mi=m_modelCombo->findText(m_modelCombo->currentText());
+    QJsonObject body{{"base_model",mi<0 ? m_modelCombo->currentText() : m_modelCombo->itemData(mi).toString()},
+        {"dataset_id",m_datasetCombo->itemData(di).toString()},{"rank",m_rankSpin->value()},
+        {"epochs",m_epochsSpin->value()},{"batch_size",m_batchSpin->value()},
+        {"max_length",m_maxLengthSpin->value()},{"target_modules",m_targetModules->currentText()},
+        {"quantization",quantizationCode()},{"validation_split",m_validationSpin->value()/100.0}};
+    const int request=m_estimateRequest;
+    m_client->post("/training/estimate",body,[this,request](int status,const QJsonDocument &doc) {
+        if (request!=m_estimateRequest) return;
+        m_memoryBar->hide();
+        if (status!=200 || !doc.isObject()) { m_estimateLabel->setText("Resource estimate unavailable. Refresh to retry."); return; }
+        const auto e=doc.object();
+        auto gb=[](double bytes) { return QString::number(bytes/(1024.0*1024*1024),'f',1)+" GB"; };
+        const auto memory=e["memory"].toObject();
+        const double available=memory["available_bytes"].toDouble();
+        const double low=e["memory_low_bytes"].toDouble(), high=e["memory_high_bytes"].toDouble();
+        QStringList lines;
+        lines << (high>0 ? "Memory needed: ~"+gb(low)+"–"+gb(high) : "Memory needed: unavailable for this model");
+        lines << (available>0 ? memory["kind"].toString()+" available: "+gb(available) : memory["kind"].toString()+": available memory unknown");
+        if (e["adapter_bytes"].toDouble()>0) lines << QString("Adapter: ~%1 MB").arg(e["adapter_bytes"].toDouble()/(1024*1024),0,'f',1);
+        if (e["duration_high_seconds"].toDouble()>0)
+            lines << QString("Estimated time: ~%1–%2 min").arg(qMax(1.0,std::ceil(e["duration_low_seconds"].toDouble()/60.0)),0,'f',0).arg(qMax(1.0,std::ceil(e["duration_high_seconds"].toDouble()/60.0)),0,'f',0);
+        else lines << "Estimated time: calibrates after a matching run";
+        if (e["steps"].isDouble()) lines << QString("%1 optimiser steps").arg(e["steps"].toInt());
+        m_estimateLabel->setText(lines.join('\n'));
+        m_estimateLabel->setToolTip(e["assumptions"].toString()+"\n"+e["detail"].toString());
+        if (available>0 && high>0) { m_memoryBar->setValue(qBound(0,qRound(high/available*100),100)); m_memoryBar->show(); }
+    });
 }
 
 void TrainingPanel::finishJob(const QString &message, const QString &tone) {

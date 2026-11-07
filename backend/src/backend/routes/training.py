@@ -63,6 +63,15 @@ def start_training(cfg: TrainingConfig):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@training_router.post("/estimate")
+def training_estimate(cfg: TrainingConfig):
+    from backend.training.estimates import estimate
+    dataset = _get_datasets().get(cfg.dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=400, detail="Select an imported dataset")
+    return estimate(cfg, dataset.rows, _get_manager().list())
+
+
 @training_router.get("/capabilities")
 def training_capabilities():
     supported, reason = quantization_support()

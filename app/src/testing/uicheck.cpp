@@ -4,6 +4,7 @@
 #include "panels/modelspanel.h"
 #include "panels/modelcard.h"
 #include "panels/trainingpanel.h"
+#include "panels/trainingrunpanel.h"
 #include "panels/ragpanel.h"
 #include "panels/ragdoccard.h"
 #include "panels/adapterspanel.h"
@@ -116,6 +117,9 @@ struct Fixture : QTcpServer {
         }
         history.append(QJsonObject{{"step",42},{"eval_loss",1.36},{"epoch",1.05},{"elapsed_seconds",64.0}});
         return QJsonObject{{"id","fixture-job"},{"name","support-tone-v2"},{"status",trainingState},
+            {"base_model","studio/sample-model"},{"dataset_id","fixture-data"},
+            {"config",QJsonObject{{"rank",8},{"alpha",16},{"dropout",0.05},{"epochs",3},{"batch_size",1},
+                {"learning_rate",0.0002},{"max_length",512},{"quantization","none"},{"validation_split",0.1},{"seed",42}}},
             {"current_step",42},{"total_steps",100},{"progress",42},{"loss",1.28},
             {"history",omitTrainingHistory ? QJsonArray() : history},
             {"message","Training fixture · learning from example conversations"}};
@@ -184,6 +188,7 @@ struct Fixture : QTcpServer {
                     else if (path == "/models/pull/job1") { ++pollCount; body=pullJson(); }
                     else if (path == "/models/pull/job1/cancel") { ++cancelCalls; status=cancelStatus; body=cancelStatus==202?pullJson():QByteArray(R"({"detail":"fixture cancel failure"})"); }
                     else if (path == "/datasets") body = R"([{"id":"fixture-data","name":"Example conversations.jsonl","format":"jsonl","rows":4812}])";
+                    else if (path == "/training/estimate") body=R"({"memory":{"kind":"VRAM","available_bytes":25769803776},"memory_low_bytes":17179869184,"memory_high_bytes":22548578304,"adapter_bytes":167772160,"steps":1800,"duration_low_seconds":7200,"duration_high_seconds":8400,"assumptions":"Fixture advisory budget"})";
                     else if (path == "/training/jobs") {
                         auto past=trainingJob(); past["id"]="past-job"; past["name"]="support-tone-v1"; past["status"]="done";
                         QJsonArray jobs{past};
@@ -204,7 +209,7 @@ struct Fixture : QTcpServer {
                         }
                         body+="data: {\"done\":true}\n\n";
                     }
-                    else if (path == "/adapters") body=R"([{"id":"fixture-adapter","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
+                    else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
                     else if (path == "/rag/status") body=R"({"documents":2,"chunks":36,"engine_ready":true,"model":"local embeddings"})";
                     else if (path == "/rag/config") body=R"({"chunk_size":512,"chunk_overlap":64,"top_k":4})";
@@ -742,6 +747,9 @@ int runUiCheck(const QString &captures) {
     auto *start=button(&training,"Start Training");
     auto *lossChart=training.findChild<TrainingChart *>("trainingLossChart");
     auto *runs=training.findChild<QListWidget *>("trainingRuns");
+    auto *visualise=training.findChildren<QCheckBox *>().last();
+    for (auto *box : training.findChildren<QCheckBox *>()) if (box->text()=="Visualisation") visualise=box;
+    check(visualise->isChecked(),"training defaults to visualisation");
     runs->setCurrentRow(0); pump();
     check(lossChart->sampleCount()==6,"past runs restore raw training and validation samples");
     const auto preset=QJsonDocument::fromJson(training.settingsJson().toUtf8()).object();
@@ -749,11 +757,17 @@ int runUiCheck(const QString &captures) {
     training.applySettingsJson(QString::fromUtf8(QJsonDocument(changed).toJson()));
     QMetaObject::invokeMethod(&training,"onStart"); QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(fixture.starts==1 && !start->isEnabled(),"training ignores duplicate starts");
+    check(runs->isEnabled(),"past run review remains available during active training");
     check(lossChart->sampleCount()==6 && lossChart->accessibleDescription().contains("measured samples"),"live loss chart uses raw history including validation");
     check(fixture.trainingRequest["dropout"].toDouble()==0.12 && fixture.trainingRequest["validation_split"].toDouble()==0.1,"training sends configured dropout and validation fraction");
     QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(lossChart->sampleCount()==6,"repeated status polls do not duplicate chart samples");
+    pump(600);
     capture(&training,"training-running");
+    visualise->setChecked(false); pump();
+    check(training.findChild<QPlainTextEdit *>("trainingRawData")->isVisible() && !lossChart->isVisible(),"raw data toggle replaces visualisation");
+    check(QJsonDocument::fromJson(training.findChild<QPlainTextEdit *>("trainingRawData")->toPlainText().toUtf8()).object()["history"].toArray().size()==6,"raw view contains actual run history");
+    visualise->setChecked(true); pump(600);
     training.resize(1104,1020); pump();
     capture(&training,"training-running-full");
     Theme::setDark(false); pump(); capture(&training,"training-running-full-light");
@@ -797,6 +811,34 @@ int runUiCheck(const QString &captures) {
     }
     check(trainingFits,"expanded training settings fit without horizontal scrolling");
     capture(&training,"training-expanded-compact"); training.hide();
+    TrainingRunPanel runReview; runReview.setBackendClient(&client);
+    QString requestedRun;
+    QObject::connect(&training,&TrainingPanel::runDetailsRequested,[&](const QString &id) { requestedRun=id; });
+    QMetaObject::invokeMethod(runs,"itemActivated",Q_ARG(QListWidgetItem *,runs->item(0)));
+    check(requestedRun=="past-job","past run activation opens run review by job identity");
+    QObject::connect(&adapters,&AdaptersPanel::runDetailsRequested,[&](const QString &id) { requestedRun=id; });
+    if (auto *viewRun=button(&adapters,"View run data")) viewRun->click();
+    check(requestedRun=="fixture-job","adapter action opens its linked training run");
+    fixture.trainingState="done";
+    runReview.resize(1104,1000); runReview.show(); runReview.openRun("fixture-job"); pump(650);
+    check(runReview.findChild<QPlainTextEdit *>("runRawData")->toPlainText().contains("support-tone-v2"),"run review loads the requested run and configuration");
+    capture(&runReview,"training-run-review");
+    for (auto *box : runReview.findChildren<QCheckBox *>()) if (box->text()=="Visualisation") box->setChecked(false);
+    check(runReview.findChild<QPlainTextEdit *>("runRawData")->isVisible(),"run review supports raw data mode");
+    runReview.hide();
+    TrainingChart animated("loss"); animated.resize(420,180); animated.show();
+    QSettings().setValue("appearance/studio3ReducedMotion",false);
+    QJsonArray animationSamples{QJsonObject{{"step",1},{"loss",2.0}},QJsonObject{{"step",10},{"loss",1.0}}};
+    animated.setHistory(animationSamples,10); pump(60);
+    check(animated.isAnimating(),"new measurements animate into the chart");
+    const auto early=animated.grab().toImage(); pump(650);
+    check(!animated.isAnimating() && early!=animated.grab().toImage(),"chart animation changes frames and settles");
+    animated.setHistory(animationSamples,10);
+    check(!animated.isAnimating(),"unchanged polls do not replay animation");
+    QSettings().setValue("appearance/studio3ReducedMotion",true);
+    animationSamples.append(QJsonObject{{"step",11},{"loss",0.9}}); animated.setHistory(animationSamples,12);
+    check(!animated.isAnimating(),"reduced motion displays measurements immediately");
+    QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     chat.show(); pump();
     auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *send=chat.findChild<QPushButton *>("primaryBtn");

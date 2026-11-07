@@ -21,6 +21,7 @@ public:
 
 signals:
     void activateRequested(AdapterCard *card);
+    void runDetailsRequested(const QString &jobId);
     void exportRequested(AdapterCard *card);
     void deleteRequested(AdapterCard *card);
 

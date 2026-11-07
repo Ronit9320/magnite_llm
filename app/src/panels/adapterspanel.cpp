@@ -124,6 +124,7 @@ void AdaptersPanel::refresh() {
             if (!value.isObject()) continue;
             const QJsonObject adapter = value.toObject();
             auto *card = new AdapterCard(adapter, m_cardHost);
+            connect(card, &AdapterCard::runDetailsRequested, this, &AdaptersPanel::runDetailsRequested);
             connect(card, &AdapterCard::activateRequested, this, &AdaptersPanel::onActivate);
             connect(card, &AdapterCard::exportRequested, this, &AdaptersPanel::onExportAdapter);
             connect(card, &AdapterCard::deleteRequested, this, &AdaptersPanel::onDeleteAdapter);

@@ -8,7 +8,6 @@ class StudioCanvas;
 class TrainingChart;
 class QListWidget;
 class QComboBox;
-class QGroupBox;
 class QLineEdit;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -35,6 +34,7 @@ public:
 
 signals:
     void trainingCompleted();
+    void runDetailsRequested(const QString &jobId);
 
 public slots:
     // Re-syncs the base-model and dataset lists from the backend.
@@ -53,6 +53,7 @@ private:
     void refreshJobs();
     void displayJob(const QJsonObject &job);
     void updateInputSummary();
+    void requestEstimate();
     void setupHyperparameters(QWidget *parent);
     void refreshModels();
     void refreshDatasets(const QString &selectId = QString());
@@ -72,7 +73,7 @@ private:
     QComboBox *m_modelCombo;
     QComboBox *m_datasetCombo;
     QLineEdit *m_adapterNameEdit;
-    QGroupBox *m_hyperBox;
+    QWidget *m_hyperBox;
     QComboBox *m_targetModules;
     QSpinBox *m_rankSpin;
     QSpinBox *m_alphaSpin;
@@ -103,6 +104,13 @@ private:
     QLabel *m_runName = nullptr;
     QDoubleSpinBox *m_dropoutSpin = nullptr;
     QDoubleSpinBox *m_validationSpin = nullptr;
+    QTimer *m_estimateTimer = nullptr;
+    QLabel *m_estimateLabel = nullptr;
+    QProgressBar *m_memoryBar = nullptr;
+    QCheckBox *m_visualise = nullptr;
+    QWidget *m_chartTabs = nullptr;
+    QPlainTextEdit *m_rawData = nullptr;
+    int m_estimateRequest = 0;
     QJsonArray m_jobs;
     QJsonArray m_models;
     QJsonArray m_datasets;

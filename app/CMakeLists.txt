@@ -70,6 +70,8 @@ set(MAGNITE_SOURCES
     src/widgets/trainingchart.cpp
     src/widgets/trainingchart.h
     src/widgets/surface.h
+    src/panels/trainingrunpanel.cpp
+    src/panels/trainingrunpanel.h
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp
     src/panels/ragdoccard.cpp

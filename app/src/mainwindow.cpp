@@ -9,6 +9,7 @@
 #include "panels/basepanel.h"
 #include "panels/modelspanel.h"
 #include "panels/trainingpanel.h"
+#include "panels/trainingrunpanel.h"
 #include "panels/ragpanel.h"
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
@@ -308,7 +309,17 @@ void MainWindow::setupUi() {
     m_background = new StudioCanvas(workspace);
     auto *canvasLayout = new QVBoxLayout(m_background);
     canvasLayout->setContentsMargins(0,0,0,0);
-    canvasLayout->addWidget(m_stack);
+    m_workspacePages=new QStackedWidget(this);
+    m_runPanel=new TrainingRunPanel();
+    m_workspacePages->addWidget(m_stack); m_workspacePages->addWidget(m_runPanel);
+    auto openRun=[this](const QString &id) {
+        m_runReturnPanel=m_stack->currentIndex();
+        m_workspacePages->setCurrentWidget(m_runPanel); m_runPanel->openRun(id);
+    };
+    connect(m_trainingPanel,&TrainingPanel::runDetailsRequested,this,openRun);
+    connect(m_adaptersPanel,&AdaptersPanel::runDetailsRequested,this,openRun);
+    connect(m_runPanel,&TrainingRunPanel::backRequested,this,[this] { switchPanel(m_runReturnPanel); });
+    canvasLayout->addWidget(m_workspacePages);
     workspaceLayout->addWidget(m_background,1);
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this, brandSeal]() {
@@ -334,6 +345,7 @@ void MainWindow::switchPanel(int index) {
     // Persist whichever panel we're leaving, then show the new one. The nav
     // buttons mirror the active panel (also on programmatic switches, e.g.
     // selftest), then the incoming panel crossfades in.
+    m_workspacePages->setCurrentWidget(m_stack);
     m_stack->setCurrentIndex(index);
     for (auto *btn : m_sideButtons)
         btn->setChecked(btn->property("panel").toInt() == index);
@@ -467,6 +479,7 @@ void MainWindow::onBackendStarted() {
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
+    m_runPanel->setBackendClient(m_backendClient);
     m_ragPanel->setBackendClient(m_backendClient);
     m_adaptersPanel->setBackendClient(m_backendClient);
     m_chatPanel->setBackendClient(m_backendClient);
@@ -584,6 +597,17 @@ void MainWindow::runSelfTest() {
 
         checkC(m_stack->currentIndex() == PanelSettings, "navigated through all panels");
         checkC(m_stack->count() == PanelCount, "panel count");
+
+        switchPanel(PanelTraining);
+        m_trainingPanel->runDetailsRequested("selftest-missing-run");
+        checkC(m_workspacePages->currentWidget()==m_runPanel,"training opens contextual run page");
+        m_runPanel->backRequested();
+        checkC(m_workspacePages->currentWidget()==m_stack && m_stack->currentIndex()==PanelTraining,"run review returns to training");
+        switchPanel(PanelAdapters);
+        m_adaptersPanel->runDetailsRequested("selftest-missing-run");
+        checkC(m_workspacePages->currentWidget()==m_runPanel,"adapters opens contextual run page");
+        switchPanel(PanelSettings);
+        checkC(m_workspacePages->currentWidget()==m_stack,"sidebar exits run review");
 
         // Settings round-trips.
         const QList<BasePanel*> panels = {

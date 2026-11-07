@@ -176,3 +176,12 @@ QCheckBox:disabled { color: @textMuted; }
 QCheckBox::indicator:disabled { background: @insetBackground; border-color: @surfaceBorder; }
 QComboBox::drop-down:disabled { background: transparent; }
 QLabel#sectionHint { color: @textSecondary; font-size: 12px; }
+
+/* Training run summaries keep the same compact hierarchy as the setup cards. */
+QWidget#trainingRunRow { background: transparent; }
+QListWidget#trainingRuns { border: none; background: transparent; }
+QListWidget#trainingRuns::item { border-bottom: 1px solid @surfaceBorder; }
+QListWidget#trainingRuns::item:hover, QListWidget#trainingRuns::item:selected { background: @surfaceFillHover; }
+QLabel#runState[state="ok"] { color: @statusSuccess; }
+QLabel#runState[state="error"] { color: @statusError; }
+QLabel#runState[state="warn"] { color: @statusWarning; }

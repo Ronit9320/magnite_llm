@@ -76,6 +76,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Ingest dataset | `POST /datasets/ingest` with absolute `path`, or `name`, `format`, `content` |
 | List/read/delete datasets | `GET /datasets`, `GET /datasets/{id}`, `DELETE /datasets/{id}` |
 | Start training | `POST /training/start` with `base_model`, `dataset_id`, training settings |
+| Training resource estimate | `POST /training/estimate` with training settings; advisory local model/memory budget and measured-history duration calibration |
 | Training capability probe | `GET /training/capabilities`; reports quantization availability and platform reason |
 | Training history/status/cancel | `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` |
 | List adapters | `GET /adapters` |

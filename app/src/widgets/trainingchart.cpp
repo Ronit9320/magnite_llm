@@ -2,6 +2,8 @@
 #include "theme.h"
 
 #include <QHelpEvent>
+#include <QVariantAnimation>
+#include <QSettings>
 #include <QJsonObject>
 #include <QPainter>
 #include <QPainterPath>
@@ -11,7 +13,17 @@
 #include <limits>
 
 TrainingChart::TrainingChart(const QString &metric, QWidget *parent)
-    : QWidget(parent), m_metric(metric) {
+    : QWidget(parent), m_metric(metric), m_animation(new QVariantAnimation(this)) {
+    m_animation->setDuration(550);
+    m_animation->setStartValue(0.0); m_animation->setEndValue(1.0);
+    m_animation->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_animation,&QVariantAnimation::valueChanged,this,[this](const QVariant &value) {
+        m_reveal=value.toDouble();
+        if (QSettings().value("appearance/studio3ReducedMotion",false).toBool()) {
+            m_animation->stop(); m_reveal=1.0;
+        }
+        update();
+    });
     setMinimumHeight(150);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setAccessibleName(metric == "loss" ? "Training and validation loss" :
@@ -20,6 +32,10 @@ TrainingChart::TrainingChart(const QString &metric, QWidget *parent)
 }
 
 void TrainingChart::setHistory(const QJsonArray &history, int totalSteps) {
+    if (m_history == history && m_totalSteps == qMax(0,totalSteps)) return;
+    const auto previous=samples();
+    m_fromStep=previous.isEmpty() ? 0 : previous.last().step;
+    m_animation->stop();
     m_history = history;
     m_totalSteps = qMax(0, totalSteps);
     const auto values = samples();
@@ -27,7 +43,22 @@ void TrainingChart::setHistory(const QJsonArray &history, int totalSteps) {
         QString("%1 measured samples. Latest: step %2, %3 = %4.")
             .arg(values.size()).arg(values.last().step).arg(values.last().key)
             .arg(values.last().value, 0, 'g', 6));
+    m_reveal=1.0;
+    if (!values.isEmpty() && isVisible() && !QSettings().value("appearance/studio3ReducedMotion",false).toBool())
+        { m_reveal=0.0; m_animation->start(); }
     update();
+}
+
+bool TrainingChart::isAnimating() const { return m_animation->state()==QAbstractAnimation::Running; }
+void TrainingChart::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    if (sampleCount()>0 && !QSettings().value("appearance/studio3ReducedMotion",false).toBool()) {
+        m_fromStep=0; m_reveal=0.0; m_animation->start();
+    }
+}
+void TrainingChart::hideEvent(QHideEvent *event) {
+    m_animation->stop(); m_reveal=1.0;
+    QWidget::hideEvent(event);
 }
 
 QList<TrainingChart::Sample> TrainingChart::samples() const {
@@ -74,10 +105,18 @@ void TrainingChart::paintEvent(QPaintEvent *) {
     auto point = [&](const Sample &s) { return QPointF(area.left()+s.step/maxStep*area.width(), area.bottom()-(s.value-low)/(high-low)*area.height()); };
     for (int i=0; i<3; ++i) {
         const double y = area.top()+area.height()*i/2;
-        p.drawText(QRectF(0,y-9,51,18), Qt::AlignRight|Qt::AlignVCenter, QString::number(high-(high-low)*i/2,'g',3));
+        const double value=high-(high-low)*i/2;
+        const bool scientific=value!=0 && (std::abs(value)<0.001 || std::abs(value)>=10000);
+        p.drawText(QRectF(0,y-9,51,18), Qt::AlignRight|Qt::AlignVCenter,
+                   QString::number(value,scientific?'e':'g',scientific?1:3));
     }
     p.drawText(QRectF(area.left(),area.bottom()+7,80,20),Qt::AlignLeft,"Step 0");
     p.drawText(QRectF(area.right()-90,area.bottom()+7,90,20),Qt::AlignRight,QString::number(maxStep,'g',6));
+    double latest=values.last().step;
+    const double revealStep=qMin(m_fromStep,latest)+(latest-qMin(m_fromStep,latest))*m_reveal;
+    p.save();
+    p.setOpacity(0.55+0.45*m_reveal);
+    p.setClipRect(QRectF(area.left()-3,area.top()-3,area.width()*revealStep/maxStep+6,area.height()+6));
     for (const QString &key : {m_metric, m_metric == "loss" ? QString("eval_loss") : QString()}) {
         if (key.isEmpty()) continue;
         const QColor color(key == "eval_loss" ? Theme::statusSuccess() : Theme::accentLabel());
@@ -93,6 +132,7 @@ void TrainingChart::paintEvent(QPaintEvent *) {
         for (const auto &s : values) if (s.key == key) p.drawEllipse(point(s),2,2);
         p.setBrush(Qt::NoBrush);
     }
+    p.restore();
 }
 
 bool TrainingChart::event(QEvent *event) {
