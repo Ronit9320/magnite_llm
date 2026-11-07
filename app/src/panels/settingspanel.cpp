@@ -4,7 +4,7 @@
 #include "update_manager.h"
 #include <QCoreApplication>
 
-#include <QCheckBox>
+#include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
 #include <QDir>
 #include <QFileDialog>
@@ -75,7 +75,7 @@ void SettingsPanel::setupUi() {
         updateCard->addWidget(button);
         button->setEnabled(false);
     }
-    auto *automatic = new QCheckBox("Check for preview updates on startup", this);
+    auto *automatic = new ToggleSwitch("Check for preview updates on startup", this);
     automatic->setObjectName("automaticUpdatesToggle");
     automatic->setChecked(QSettings().value("updates/checkOnStartup", true).toBool());
     connect(automatic, &QCheckBox::toggled, this, [](bool enabled) { QSettings().setValue("updates/checkOnStartup", enabled); });
@@ -119,9 +119,9 @@ void SettingsPanel::setupUi() {
     auto *theme = new QLabel("Magnite · paper, graphite & orange",this);
     theme->setObjectName("bodyLabel");
     appearance->addWidget(theme);
-    m_grid = new QCheckBox("Instrument grid",this);
+    m_grid = new ToggleSwitch("Instrument grid",this);
     m_grid->setObjectName("gridToggle");
-    m_reducedMotion = new QCheckBox("Reduce motion",this);
+    m_reducedMotion = new ToggleSwitch("Reduce motion",this);
     m_reducedMotion->setObjectName("reducedMotionToggle");
     appearance->addWidget(m_grid);
     appearance->addWidget(m_reducedMotion);

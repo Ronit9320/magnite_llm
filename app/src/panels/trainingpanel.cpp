@@ -17,7 +17,7 @@
 #include <QSettings>
 #include <QScrollArea>
 
-#include <QCheckBox>
+#include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -231,7 +231,7 @@ void TrainingPanel::setupUi() {
     m_progressLabel->setObjectName("metricValue");
     m_progressLabel->setWordWrap(true);
 
-    m_visualise=new QCheckBox("Visualisation",this); m_visualise->setChecked(true);
+    m_visualise=new ToggleSwitch("Visualisation",this); m_visualise->setChecked(true);
     m_visualise->setToolTip("Switch off to inspect the raw job data.");
     auto *viewRow=new QHBoxLayout();
     viewRow->addWidget(m_progressLabel,1); viewRow->addWidget(m_visualise); run->addLayout(viewRow);
@@ -356,7 +356,7 @@ void TrainingPanel::setupHyperparameters(QWidget *parent) {
     m_quantCombo->addItems({"None","4-bit (NF4)","8-bit (bitsandbytes)"});
     m_quantCombo->setAccessibleName("Quantization");
     grid->addWidget(m_quantCombo,6,0,1,3);
-    m_qloraCheck=new QCheckBox("Use 4-bit QLoRA",m_hyperBox);
+    m_qloraCheck=new ToggleSwitch("Use 4-bit QLoRA",m_hyperBox);
     m_qloraCheck->setChecked(true);
     grid->addWidget(m_qloraCheck,7,0,1,3);
     connect(m_qloraCheck,&QCheckBox::toggled,this,&TrainingPanel::onQuantizationToggled);

@@ -2,7 +2,7 @@
 #include "backend_client.h"
 #include "widgets/surface.h"
 #include "widgets/trainingchart.h"
-#include <QCheckBox>
+#include "widgets/toggleswitch.h"
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QJsonDocument>
@@ -17,7 +17,7 @@ TrainingRunPanel::TrainingRunPanel(QWidget *parent) : BasePanel("Training run",p
     auto *back=new QPushButton("‹ Back",this); back->setObjectName("secondaryBtn");
     connect(back,&QPushButton::clicked,this,&TrainingRunPanel::backRequested);
     toolbar->addWidget(back); toolbar->addStretch();
-    m_visualise=new QCheckBox("Visualisation",this); m_visualise->setChecked(true);
+    m_visualise=new ToggleSwitch("Visualisation",this); m_visualise->setChecked(true);
     toolbar->addWidget(m_visualise); contentLayout()->addLayout(toolbar);
     auto *overview=Surface::card(this,"Run overview"); contentLayout()->addWidget(overview->parentWidget());
     m_summary=new QLabel(this); m_summary->setObjectName("cardTitle"); m_summary->setWordWrap(true);

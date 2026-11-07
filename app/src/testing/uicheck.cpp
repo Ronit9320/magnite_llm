@@ -31,6 +31,8 @@
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
+#include <QAccessible>
+#include "widgets/toggleswitch.h"
 #include <QComboBox>
 #include <QDir>
 #include <QEnterEvent>
@@ -324,12 +326,39 @@ int runUiCheck(const QString &captures) {
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+    {
+        ToggleSwitch toggle("Enable feature"); toggle.resize(toggle.sizeHint()); toggle.show(); toggle.activateWindow(); pump();
+        QSettings().setValue("appearance/studio3ReducedMotion",false);
+        toggle.setFocus(Qt::TabFocusReason); key(&toggle,Qt::Key_Space); pump(35);
+        check(toggle.isChecked() && toggle.isAnimating(),"switch: Space changes state and animates the thumb");
+        auto *accessible=QAccessible::queryAccessibleInterface(&toggle);
+        check(accessible && accessible->state().checkable && accessible->state().checked && accessible->text(QAccessible::Name)=="Enable feature","switch: screen readers retain label and checked state");
+        const auto moving=toggle.grab().toImage(); pump(220);
+        check(!toggle.isAnimating() && moving!=toggle.grab().toImage(),"switch: animation changes frames and settles");
+        toggle.setEnabled(false); key(&toggle,Qt::Key_Space); toggle.click();
+        check(toggle.isChecked(),"switch: disabled controls cannot be toggled");
+        toggle.setEnabled(true); QSettings().setValue("appearance/studio3ReducedMotion",true);
+        key(&toggle,Qt::Key_Space);
+        check(!toggle.isChecked() && !toggle.isAnimating(),"switch: reduced motion changes state immediately");
+        const QPointF labelPoint(toggle.width()-5,toggle.height()/2.0);
+        QMouseEvent down(QEvent::MouseButtonPress,labelPoint,toggle.mapToGlobal(labelPoint.toPoint()),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QMouseEvent up(QEvent::MouseButtonRelease,labelPoint,toggle.mapToGlobal(labelPoint.toPoint()),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(&toggle,&down); QApplication::sendEvent(&toggle,&up);
+        check(toggle.isChecked(),"switch: clicking the label activates the control");
+        toggle.setLayoutDirection(Qt::RightToLeft);
+        check(toggle.minimumSizeHint().height()>=32 && toggle.minimumSizeHint().width()>=42,"switch: target size accommodates the track and text in RTL");
+        QSettings().setValue("appearance/studio3ReducedMotion",false); toggle.hide();
+    }
     ModelsPanel models; TrainingPanel training; RagPanel knowledge;
     AdaptersPanel adapters; ChatPanel chat; SettingsPanel settings;
     models.setBackendClient(&client); training.setBackendClient(&client);
     knowledge.setBackendClient(&client); adapters.setBackendClient(&client); chat.setBackendClient(&client);
     pump(200);
     const QList<QPair<QString,QWidget *>> panels={{"library",&models},{"training",&training},{"knowledge",&knowledge},{"adapters",&adapters},{"chat",&chat},{"settings",&settings}};
+    bool allSwitches=true;
+    for (const auto &entry : panels)
+        for (auto *checkbox : entry.second->findChildren<QCheckBox *>()) allSwitches &= qobject_cast<ToggleSwitch *>(checkbox)!=nullptr;
+    check(allSwitches,"every checkbox setting uses the shared switch presentation");
     if (!captures.isEmpty()) QDir().mkpath(captures);
     auto capture = [&](QWidget *widget,const QString &name) {
         if (!captures.isEmpty()) check(widget->grab().save(captures+"/"+name+".png"),"capture "+name);
@@ -900,6 +929,7 @@ int runUiCheck(const QString &captures) {
     check(trainingFits,"expanded training settings fit without horizontal scrolling");
     capture(&training,"training-expanded-compact"); training.hide();
     TrainingRunPanel runReview; runReview.setBackendClient(&client);
+    check(runReview.findChild<ToggleSwitch *>()!=nullptr,"run review uses the shared switch presentation");
     QString requestedRun;
     QObject::connect(&training,&TrainingPanel::runDetailsRequested,[&](const QString &id) { requestedRun=id; });
     QMetaObject::invokeMethod(runs,"itemActivated",Q_ARG(QListWidgetItem *,runs->item(0)));

@@ -105,9 +105,6 @@ QScrollBar::add-line:vertical { height: 0; }
 QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical { background: transparent; }
 QScrollBar::sub-page:vertical { background: transparent; }
-QCheckBox { spacing: 7px; }
-QCheckBox::indicator { width: 17px; height: 17px; background: @surfaceFill; border: 1px solid @textMuted; border-radius: 5px; }
-QCheckBox::indicator:checked { background: @accentPrimary; border-color: @accentPrimary; image: url(:/icons/check.svg); }
 QProgressBar { background: @insetBackground; border: none; text-align: center; min-height: 8px; border-radius: 4px; }
 QProgressBar::chunk { background: @accentPrimary; border-radius: 4px; }
 QFrame#chatBubbleUser { background: @surfaceFillHover; border: 1px solid @surfaceBorder; border-radius: 14px; }
@@ -145,7 +142,6 @@ QPushButton#overviewTile:pressed { background: @surfaceFillActive; }
 QLabel#statusLabel[state="error"] { color: @statusError; }
 QLabel#statusLabel[state="ok"] { color: @statusSuccess; }
 QTabBar::tab:focus { color: @accentPrimary; }
-QCheckBox:focus { color: @accentPrimary; }
 QSpinBox::up-button { width: 18px; background: @accentPrimary; border: none; border-top-right-radius: 7px; }
 QSpinBox::up-button:hover { background: @accentHover; }
 QSpinBox::up-button:disabled { background: @insetBackground; }
@@ -187,8 +183,6 @@ QPushButton#primaryBtn:focus, QPushButton#cardPrimary:focus, QPushButton#themeTo
 QPushButton#primaryBtn:disabled, QPushButton#cardPrimary:disabled { background: @insetBackground; color: @textMuted; border-color: @surfaceBorder; }
 QLabel#statusLabel[state="warn"] { color: @statusWarning; }
 QLabel#activeBadge { color: @statusSuccess; font-weight: 600; }
-QCheckBox:disabled { color: @textMuted; }
-QCheckBox::indicator:disabled { background: @insetBackground; border-color: @surfaceBorder; }
 QComboBox::drop-down:disabled { background: transparent; }
 QLabel#sectionHint { color: @textSecondary; font-size: 12px; }
 

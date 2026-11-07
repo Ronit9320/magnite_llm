@@ -56,6 +56,8 @@ set(MAGNITE_SOURCES
     src/widgets/flowlayout.cpp
     src/widgets/combobox.cpp
     src/widgets/combobox.h
+    src/widgets/toggleswitch.cpp
+    src/widgets/toggleswitch.h
     src/widgets/clickfeedback.cpp
     src/widgets/clickfeedback.h
     src/widgets/brandmark.cpp

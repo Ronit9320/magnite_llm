@@ -16,7 +16,7 @@
 
 #include <QSettings>
 #include <QStyle>
-#include <QCheckBox>
+#include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
@@ -225,7 +225,7 @@ void ChatPanel::setupUi() {
     m_input->installEventFilter(this);
     composer->addWidget(m_input);
     auto *actions = new QHBoxLayout();
-    m_ragCheck = new QCheckBox("Your knowledge", this);
+    m_ragCheck = new ToggleSwitch("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
     m_activity = new StudioCanvas(this);
