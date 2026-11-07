@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QVBoxLayout>
 
 NameDialog::NameDialog(const QString &suggestion, QWidget *parent)
@@ -31,9 +32,9 @@ NameDialog::NameDialog(const QString &suggestion, QWidget *parent)
     layout->addWidget(m_input);
     auto *buttons = new QHBoxLayout();
     buttons->addStretch();
-    auto *skip = new QPushButton("Skip", this);
+    auto *skip = new Button("Skip", this);
     skip->setObjectName("secondaryBtn");
-    auto *save = new QPushButton("Save", this);
+    auto *save = new Button("Save", this);
     save->setObjectName("primaryBtn");
     save->setDefault(true);
     buttons->addWidget(skip);

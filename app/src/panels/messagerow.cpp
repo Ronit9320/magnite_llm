@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTimer>
@@ -40,7 +41,7 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
     m_bubble = new ChatBubble(role, text, m_lineHost);
     m_bubble->setWidthReference(parent);   // size against the chat area, as before rows existed
     if (role == ChatBubble::User) {
-        m_editButton = new QPushButton(m_lineHost);
+        m_editButton = new Button(m_lineHost);
         m_editButton->setObjectName(QStringLiteral("editButton"));
         m_editButton->setIcon(Theme::coloredIcon(QStringLiteral("pencil"), QColor(Theme::textMuted()), 14));
         m_editButton->setFixedSize(24, 24);
@@ -55,7 +56,7 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
         line->addWidget(m_bubble);
         connect(m_editButton, &QPushButton::clicked, this, [this]() { emit editRequested(m_node); });
     } else {
-        m_retryButton = new QPushButton(m_lineHost);
+        m_retryButton = new Button(m_lineHost);
         m_retryButton->setObjectName(QStringLiteral("retryButton"));
         m_retryButton->setIcon(Theme::coloredIcon(QStringLiteral("refresh-cw"), QColor(Theme::textMuted()), 14));
         m_retryButton->setFixedSize(24, 24);
@@ -89,9 +90,9 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
         auto *buttons = new QHBoxLayout;
         buttons->setSpacing(8);
         buttons->addStretch(1);
-        auto *cancel = new QPushButton(QStringLiteral("Cancel"), m_editor);
+        auto *cancel = new Button(QStringLiteral("Cancel"), m_editor);
         cancel->setObjectName(QStringLiteral("editCancel"));
-        auto *save = new QPushButton(QStringLiteral("Save && send"), m_editor);   // "&&" is a literal ampersand in a button label
+        auto *save = new Button(QStringLiteral("Save && send"), m_editor);   // "&&" is a literal ampersand in a button label
         save->setObjectName(QStringLiteral("editSave"));
         buttons->addWidget(cancel);
         buttons->addWidget(save);

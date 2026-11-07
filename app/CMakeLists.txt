@@ -54,6 +54,16 @@ set(MAGNITE_SOURCES
     src/panels/modelcard.cpp
     src/panels/adaptercard.cpp
     src/widgets/flowlayout.cpp
+    src/widgets/componentfocus.cpp
+    src/widgets/componentfocus.h
+    src/widgets/progressbar.cpp
+    src/widgets/progressbar.h
+    src/widgets/spinbox.h
+    src/widgets/motion.h
+    src/widgets/button.cpp
+    src/widgets/button.h
+    src/widgets/tabwidget.cpp
+    src/widgets/tabwidget.h
     src/widgets/combobox.cpp
     src/widgets/combobox.h
     src/widgets/toggleswitch.cpp

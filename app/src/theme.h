@@ -60,6 +60,8 @@ inline int spacingBase()           { return 6; }
 inline int panelPadding()          { return 16; }
 inline int minWindowWidth()        { return 1024; }
 inline int minWindowHeight()       { return 680; }
+inline int motionFastMs() { return 140; }
+inline int motionStandardMs() { return 180; }
 inline int cornerRadiusSmall()     { return 8; }
 
 // ---- Runtime helpers ----

@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 
@@ -48,8 +49,8 @@ void AdaptersPanel::setupUi() {
     rackLabel->setObjectName("heroKicker");
     toolbar->addWidget(rackLabel);
     toolbar->addStretch();
-    auto *refreshButton = new QPushButton("Refresh registry",this);
-    auto *importButton = new QPushButton("Import archive…",this);
+    auto *refreshButton = new Button("Refresh registry",this);
+    auto *importButton = new Button("Import archive…",this);
     importButton->setObjectName("primaryBtn");
     toolbar->addWidget(refreshButton);
     toolbar->addWidget(importButton);

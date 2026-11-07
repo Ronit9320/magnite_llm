@@ -33,6 +33,11 @@
 #include <QCheckBox>
 #include <QAccessible>
 #include "widgets/toggleswitch.h"
+#include "widgets/button.h"
+#include "widgets/tabwidget.h"
+#include "widgets/combobox.h"
+#include "widgets/progressbar.h"
+#include "widgets/spinbox.h"
 #include <QComboBox>
 #include <QDir>
 #include <QEnterEvent>
@@ -363,6 +368,68 @@ int runUiCheck(const QString &captures) {
     auto capture = [&](QWidget *widget,const QString &name) {
         if (!captures.isEmpty()) check(widget->grab().save(captures+"/"+name+".png"),"capture "+name);
     };
+    {
+        QWidget components; components.setObjectName("componentPreview");
+        auto *layout=new QVBoxLayout(&components); layout->setContentsMargins(20,20,20,20); layout->setSpacing(14);
+        auto *title=new QLabel("Magnite · shared components",&components); title->setObjectName("panelTitle"); layout->addWidget(title);
+        auto *description=new QLabel("Short transitions, quiet surfaces and clear keyboard focus.",&components); description->setObjectName("cardMeta"); layout->addWidget(description);
+        auto *actions=new QHBoxLayout();
+        auto *primary=new Button("Primary action",&components); primary->setObjectName("primaryBtn");
+        auto *secondary=new Button("Secondary",&components);
+        auto *danger=new Button("Remove",&components); danger->setObjectName("destructiveBtn");
+        auto *disabled=new Button("Unavailable",&components); disabled->setEnabled(false);
+        for (auto *action : {primary,secondary,danger,disabled}) actions->addWidget(action);
+        layout->addLayout(actions);
+        auto *fields=new QHBoxLayout();
+        auto *input=new QLineEdit(&components); input->setPlaceholderText("Search models…"); input->setAccessibleName("Search models");
+        auto *select=new ComboBox(&components); select->addItems({"Balanced","Fast","Quality"});
+        auto *number=new SpinBox(&components); number->setRange(1,128); number->setValue(16);
+        fields->addWidget(input,2); fields->addWidget(select,1); fields->addWidget(number,1); layout->addLayout(fields);
+        auto *tabs=new TabWidget(&components);
+        tabs->addTab(new QLabel("Overview of the selected run."),"Overview");
+        tabs->addTab(new QLabel("Measured training and validation metrics."),"Metrics");
+        tabs->addTab(new QLabel("Settings are saved using the existing controls."),"Settings");
+        layout->addWidget(tabs);
+        auto *switcher=new ToggleSwitch("Live visualisation",&components); switcher->setChecked(true); layout->addWidget(switcher);
+        auto *progress=new ProgressBar(&components); progress->setTextVisible(false); progress->setFixedHeight(8); progress->setValue(64); layout->addWidget(progress);
+        components.resize(680,340); components.show(); components.activateWindow(); pump(60);
+        QSettings().setValue("appearance/studio3ReducedMotion",false);
+        int activations=0; QObject::connect(primary,&QPushButton::clicked,[&] { ++activations; });
+        primary->setFocus(Qt::TabFocusReason); key(primary,Qt::Key_Space);
+        check(activations==1,"button: keyboard activation retains native click behavior");
+        primary->setEnabled(false); primary->click(); check(activations==1,"button: disabled actions cannot activate"); primary->setEnabled(true);
+        QEnterEvent enter(QPointF(4,4),QPointF(4,4),primary->mapToGlobal(QPoint(4,4))); QApplication::sendEvent(primary,&enter); pump(30);
+        const auto early=primary->grab().toImage(); const bool animating=primary->isAnimating(); pump(200);
+        check(animating && !primary->isAnimating() && early!=primary->grab().toImage(),"button: hover transitions change frames and settle");
+        tabs->setCurrentIndex(1); pump(30);
+        auto *bar=qobject_cast<SegmentedTabBar *>(tabs->tabBar());
+        const auto tabEarly=bar->grab().toImage(); const bool tabMoving=bar->isAnimating(); pump(220);
+        check(tabs->currentIndex()==1 && tabMoving && !bar->isAnimating() && tabEarly!=bar->grab().toImage(),"tabs: selected pill slides while the native page changes immediately");
+        tabs->setCurrentIndex(0); tabs->setTabEnabled(1,false); bar->setFocus(); key(bar,Qt::Key_Right); pump(220);
+        check(tabs->currentIndex()==2,"tabs: keyboard navigation skips disabled pages"); tabs->setTabEnabled(1,true);
+        progress->setValue(85); pump(30);
+        check(progress->value()==85 && progress->isAnimating(),"progress: presentation animates while the real value stays current");
+        progress->setValue(0); check(progress->value()==0 && !progress->isAnimating(),"progress: a new operation resets immediately");
+        QSettings().setValue("appearance/studio3ReducedMotion",true);
+        QEvent leave(QEvent::Leave); QApplication::sendEvent(primary,&leave); progress->setValue(64); tabs->setCurrentIndex(0);
+        check(!primary->isAnimating() && !progress->isAnimating() && !bar->isAnimating(),"components: reduced motion settles transitions immediately");
+        const auto filledProgress=progress->grab().toImage(); progress->reset();
+        check(progress->value()<progress->minimum() && progress->grab().toImage()!=filledProgress,"progress: native reset clears the rendered fill");
+        progress->setValue(64);
+        input->setFocus(); pump(40);
+        QKeyEvent typing(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,"a"); QApplication::sendEvent(input,&typing);
+        auto *halo=input->findChild<QWidget *>("componentFocusHalo");
+        check(halo && halo->testAttribute(Qt::WA_TransparentForMouseEvents) && input->text()=="a","input: focus halo preserves typing and pointer input"); input->clear();
+        for (bool dark : {true,false}) {
+            Theme::setDark(dark); pump(60); capture(&components,dark?"components-dark":"components-light");
+        }
+        Theme::setDark(true);
+        QMenu menu; menu.addAction("Open run"); auto *unavailable=menu.addAction("Unavailable"); unavailable->setEnabled(false); menu.addSeparator(); auto *rename=menu.addAction("Rename");
+        menu.popup(components.mapToGlobal(QPoint(240,80))); pump(50); key(&menu,Qt::Key_Down); key(&menu,Qt::Key_Down);
+        check(menu.activeAction()==rename,"menu: keyboard navigation skips disabled actions and separators");
+        capture(&menu,"component-menu"); key(&menu,Qt::Key_Escape); check(!menu.isVisible(),"menu: Escape dismisses the menu");
+        QSettings().setValue("appearance/studio3ReducedMotion",false); components.hide();
+    }
     for (bool dark : {true,false}) {
         Theme::setDark(dark);
         for (int width : {848,1104}) {

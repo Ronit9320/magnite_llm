@@ -9,12 +9,13 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QTimer>
 
 TrainingRunPanel::TrainingRunPanel(QWidget *parent) : BasePanel("Training run",parent) {
     setHeaderSubtitle("Review measurements, configuration and the outcome of this run.");
     auto *toolbar=new QHBoxLayout();
-    auto *back=new QPushButton("‹ Back",this); back->setObjectName("secondaryBtn");
+    auto *back=new Button("‹ Back",this); back->setObjectName("secondaryBtn");
     connect(back,&QPushButton::clicked,this,&TrainingRunPanel::backRequested);
     toolbar->addWidget(back); toolbar->addStretch();
     m_visualise=new ToggleSwitch("Visualisation",this); m_visualise->setChecked(true);

@@ -1,4 +1,5 @@
 #include "theme.h"
+#include "widgets/componentfocus.h"
 
 #include <QColor>
 #include <QFile>
@@ -148,6 +149,8 @@ void Theme::loadFonts() {
 }
 
 void Theme::setupApplicationTheme() {
+    static ComponentFocus *focus = new ComponentFocus(qApp);
+    Q_UNUSED(focus);
     loadFonts();
     // Start the refined dark-first design in dark mode once, then remember the switch.
     QSettings appearance;
@@ -229,6 +232,7 @@ int Theme::selfCheck() {
     check("statusWarning", Theme::statusWarning() == "#855C14");
     check("statusError", Theme::statusError() == "#B13D24");
     check("meterTrack valid", QColor(Theme::meterTrack()).isValid() && Theme::meterTrack() == Theme::surfaceBorder());
+    check("motion timings", Theme::motionFastMs()>0 && Theme::motionFastMs()<=Theme::motionStandardMs() && Theme::motionStandardMs()<=200);
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());

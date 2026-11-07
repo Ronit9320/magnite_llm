@@ -1,3 +1,4 @@
+#include "widgets/tabwidget.h"
 #include <QTabWidget>
 #include "panels/settingspanel.h"
 #include "panels/greeting.h"
@@ -16,6 +17,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QSettings>
 #include <QFileInfo>
 #include <QVBoxLayout>
@@ -38,7 +40,7 @@ SettingsPanel::SettingsPanel(QWidget *parent)
 
 void SettingsPanel::setupUi() {
     auto *layout = contentLayout();
-    auto *tabs = new QTabWidget(this);
+    auto *tabs = new TabWidget(this);
     layout->addWidget(tabs,1);
     auto makeCategory = [this,tabs](const QString &name) {
         auto *page = new QWidget(this);
@@ -63,13 +65,13 @@ void SettingsPanel::setupUi() {
     m_updateStatus->setTextFormat(Qt::PlainText);
     m_updateStatus->setWordWrap(true);
     updateCard->addWidget(m_updateStatus);
-    m_updateCheck = new QPushButton("Check for updates", this);
+    m_updateCheck = new Button("Check for updates", this);
     m_updateCheck->setObjectName("secondaryBtn");
-    m_updateDownload = new QPushButton("Download update", this);
+    m_updateDownload = new Button("Download update", this);
     m_updateDownload->setObjectName("secondaryBtn");
-    m_updateInstall = new QPushButton("Restart to install", this);
+    m_updateInstall = new Button("Restart to install", this);
     m_updateInstall->setObjectName("primaryBtn");
-    m_updateCancel = new QPushButton("Cancel download", this);
+    m_updateCancel = new Button("Cancel download", this);
     m_updateCancel->setObjectName("secondaryBtn");
     for (auto *button : {m_updateCheck, m_updateDownload, m_updateInstall, m_updateCancel}) {
         updateCard->addWidget(button);
@@ -100,7 +102,7 @@ void SettingsPanel::setupUi() {
     m_dataDir->setAccessibleName("Data directory");
     m_dataDir->setPlaceholderText(qEnvironmentVariable("MAGNITE_HOME", QDir::homePath()+"/.magnite"));
     m_dataDir->setToolTip("Applied on the next app start. MAGNITE_HOME takes precedence. Existing data is not moved.");
-    auto *dirBtn = new QPushButton("Browse...", this);
+    auto *dirBtn = new Button("Browse...", this);
     dirBtn->setObjectName("secondaryBtn");
     auto *dirRow = new QHBoxLayout();
     dirRow->addWidget(m_dataDir, 1);
@@ -173,7 +175,7 @@ void SettingsPanel::setupUi() {
     storage->addStretch();
 
     auto *btnRow = new QHBoxLayout();
-    m_saveButton = new QPushButton("Save changes", this);
+    m_saveButton = new Button("Save changes", this);
     m_saveButton->setObjectName("primaryBtn");
     btnRow->addWidget(m_saveButton);
     btnRow->addStretch();

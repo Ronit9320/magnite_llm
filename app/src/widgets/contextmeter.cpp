@@ -8,6 +8,7 @@
 #include <QLocale>
 #include <QPainter>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QtGlobal>
 
 namespace ContextMeterLogic {
@@ -151,7 +152,7 @@ ContextMeter::ContextMeter(QObject *parent) : QObject(parent) {
     m_bannerText->setObjectName("contextBannerText");
     m_bannerText->setWordWrap(true);
     bannerLayout->addWidget(m_bannerText, 1);
-    auto *newChat = new QPushButton("Start new chat", banner);
+    auto *newChat = new Button("Start new chat", banner);
     newChat->setObjectName("contextBannerNewChat");
     connect(newChat, &QPushButton::clicked, this, &ContextMeter::newChatRequested);
     bannerLayout->addWidget(newChat);

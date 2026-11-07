@@ -1,3 +1,4 @@
+#include "widgets/spinbox.h"
 #include "widgets/confirmation.h"
 #include <QTimer>
 #include <memory>
@@ -18,6 +19,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -49,12 +51,12 @@ void RagPanel::setupUi() {
     auto *layout = contentLayout();
 
     auto *btnRow = new QHBoxLayout();
-    m_addButton = new QPushButton("Add Documents...", this);
+    m_addButton = new Button("Add Documents...", this);
     m_addButton->setObjectName("primaryBtn");
-    m_removeButton = new QPushButton("Remove Selected", this);
+    m_removeButton = new Button("Remove Selected", this);
     m_removeButton->setObjectName("secondaryBtn");
     m_removeButton->setEnabled(false);
-    m_clearButton = new QPushButton("Clear All", this);
+    m_clearButton = new Button("Clear All", this);
     m_clearButton->setObjectName("destructiveBtn");
     btnRow->addWidget(m_addButton);
     btnRow->addWidget(m_removeButton);
@@ -115,19 +117,19 @@ void RagPanel::setupUi() {
     form->setSpacing(8);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
-    m_chunkSizeSpin = new QSpinBox(this);
+    m_chunkSizeSpin = new SpinBox(this);
     m_chunkSizeSpin->setRange(64, 4096);
     m_chunkSizeSpin->setSingleStep(64);
     m_chunkSizeSpin->setValue(512);
     form->addRow("Chunk size (words):", m_chunkSizeSpin);
 
-    m_chunkOverlapSpin = new QSpinBox(this);
+    m_chunkOverlapSpin = new SpinBox(this);
     m_chunkOverlapSpin->setRange(0, 1024);
     m_chunkOverlapSpin->setSingleStep(16);
     m_chunkOverlapSpin->setValue(64);
     form->addRow("Chunk overlap:", m_chunkOverlapSpin);
 
-    m_topKSpin = new QSpinBox(this);
+    m_topKSpin = new SpinBox(this);
     m_topKSpin->setRange(1, 20);
     m_topKSpin->setValue(4);
     form->addRow("Top-K retrieved chunks:", m_topKSpin);
@@ -145,7 +147,7 @@ void RagPanel::setupUi() {
     m_queryEdit->setClearButtonEnabled(true);
     m_queryEdit->setObjectName("documentQuery");
     m_queryEdit->setAccessibleName("Search document contents");
-    auto *searchButton = m_queryButton = new QPushButton("Search", this);
+    auto *searchButton = m_queryButton = new Button("Search", this);
     searchButton->setObjectName("secondaryBtn");
     queryRow->addWidget(m_queryEdit, 1);
     queryRow->addWidget(searchButton);

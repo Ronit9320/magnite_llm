@@ -17,6 +17,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QScrollArea>
 #include <QTimer>
 #include <QUrl>
@@ -113,9 +114,9 @@ void ModelsPanel::setupUi() {
     m_searchEdit->setPlaceholderText("Search Hugging Face models…");
     m_searchEdit->setClearButtonEnabled(true);
     m_searchEdit->setAccessibleName("Search models");
-    m_searchButton = new QPushButton("Search", this);
+    m_searchButton = new Button("Search", this);
     m_searchButton->setObjectName("primaryBtn");
-    m_refreshButton = new QPushButton("Refresh", this);
+    m_refreshButton = new Button("Refresh", this);
     m_refreshButton->setObjectName("secondaryBtn");
     searchRow->addWidget(m_searchEdit, 1);
     searchRow->addWidget(m_searchButton);
@@ -127,7 +128,7 @@ void ModelsPanel::setupUi() {
     discoverLabel->setObjectName("heroKicker");
     discovery->addWidget(discoverLabel);
     for (const auto &term : {QString("Qwen"),QString("Llama"),QString("Gemma"),QString("SmolLM")}) {
-        auto *chip = new QPushButton(term,this);
+        auto *chip = new Button(term,this);
         chip->setCursor(Qt::PointingHandCursor);
         connect(chip,&QPushButton::clicked,this,[this,term]() {
             m_searchEdit->setText(term);
@@ -141,11 +142,11 @@ void ModelsPanel::setupUi() {
     auto *viewRow = new QHBoxLayout();
     m_viewCombo = new ComboBox(this);
     m_viewCombo->addItems({"Local Models", "Hub Search Results"});
-    m_downloadButton = new QPushButton("Download", this);
+    m_downloadButton = new Button("Download", this);
     m_downloadButton->setObjectName("primaryBtn");
-    m_deleteButton = new QPushButton("Delete", this);
+    m_deleteButton = new Button("Delete", this);
     m_deleteButton->setObjectName("destructiveBtn");
-    m_cancelButton = new QPushButton("Cancel download", this);
+    m_cancelButton = new Button("Cancel download", this);
     m_cancelButton->setObjectName("cancelDownload");
     m_cancelButton->setAccessibleName("Cancel download");
     m_cancelButton->hide();
@@ -169,7 +170,7 @@ void ModelsPanel::setupUi() {
     m_scrollArea->setWidget(makeCardHost());
     layout->addWidget(m_scrollArea, 1);
     m_scrollArea->hide();
-    m_loadMoreButton = new QPushButton("Load more results", this);
+    m_loadMoreButton = new Button("Load more results", this);
     m_loadMoreButton->setObjectName("secondaryBtn");
     m_loadMoreButton->setAccessibleName("Load more results");
     m_loadMoreButton->hide();

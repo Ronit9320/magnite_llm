@@ -1,3 +1,5 @@
+#include "widgets/spinbox.h"
+#include "widgets/tabwidget.h"
 #include <QSplitter>
 #include <QGridLayout>
 #include <QListWidget>
@@ -14,6 +16,7 @@
 #include "widgets/studiocanvas.h"
 #include "theme.h"
 #include <QProgressBar>
+#include "widgets/progressbar.h"
 #include <QSettings>
 #include <QScrollArea>
 
@@ -30,6 +33,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -110,9 +114,9 @@ void TrainingPanel::setupUi() {
     m_modelCombo->setAccessibleName("Base model");
     model->addWidget(m_modelCombo);
     auto *modelRow = new QHBoxLayout();
-    auto *refreshBtn = new QPushButton("Refresh", this);
+    auto *refreshBtn = new Button("Refresh", this);
     refreshBtn->setObjectName("secondaryBtn");
-    auto *folderBtn = new QPushButton("Folder...", this);
+    auto *folderBtn = new Button("Folder...", this);
     folderBtn->setObjectName("secondaryBtn");
     modelRow->addWidget(refreshBtn);
     modelRow->addWidget(folderBtn);
@@ -135,14 +139,14 @@ void TrainingPanel::setupUi() {
     m_datasetCombo->lineEdit()->setPlaceholderText("Choose an imported dataset");
     m_datasetCombo->setAccessibleName("Dataset");
     dataset->addWidget(m_datasetCombo);
-    auto *ingestBtn = new QPushButton("Import file...", this);
+    auto *ingestBtn = new Button("Import file...", this);
     ingestBtn->setObjectName("secondaryBtn");
     dataset->addWidget(ingestBtn);
     connect(ingestBtn, &QPushButton::clicked, this, &TrainingPanel::onBrowseDataset);
     m_datasetSummary = new QLabel("No dataset selected.",this);
     m_datasetSummary->setObjectName("cardMeta"); m_datasetSummary->setWordWrap(true);
     dataset->addWidget(m_datasetSummary);
-    m_validationSpin = new QDoubleSpinBox(this);
+    m_validationSpin = new DoubleSpinBox(this);
     m_validationSpin->setRange(0,50); m_validationSpin->setDecimals(0);
     m_validationSpin->setSingleStep(5); m_validationSpin->setSuffix("%");
     m_validationSpin->setToolTip("Hold out this fraction of rows and measure validation loss after each epoch. 0% disables validation.");
@@ -150,7 +154,7 @@ void TrainingPanel::setupUi() {
 
     setupHyperparameters(setup);
     left->addWidget(m_hyperBox);
-    auto *outputOptions = new QPushButton("Output options ▾",this);
+    auto *outputOptions = new Button("Output options ▾",this);
     outputOptions->setCheckable(true); outputOptions->setObjectName("secondaryBtn");
     auto *output = new QWidget(this);
     auto *outputLayout = new QVBoxLayout(output);
@@ -172,18 +176,18 @@ void TrainingPanel::setupUi() {
     m_estimateLabel=new QLabel("Select a model and dataset to estimate resources.",this);
     m_estimateLabel->setObjectName("cardMeta"); m_estimateLabel->setWordWrap(true);
     m_estimateLabel->setTextFormat(Qt::PlainText); resources->addWidget(m_estimateLabel);
-    m_memoryBar=new QProgressBar(this); m_memoryBar->setRange(0,100);
+    m_memoryBar=new ProgressBar(this); m_memoryBar->setRange(0,100);
     m_memoryBar->setFixedHeight(6); m_memoryBar->setTextVisible(false);
     resources->addWidget(m_memoryBar); m_memoryBar->hide();
     m_estimateTimer=new QTimer(this); m_estimateTimer->setSingleShot(true); m_estimateTimer->setInterval(300);
     connect(m_estimateTimer,&QTimer::timeout,this,&TrainingPanel::requestEstimate);
-    m_startButton = new QPushButton("Start Training", this);
+    m_startButton = new Button("Start Training", this);
     m_startButton->setObjectName("primaryBtn");
     m_startButton->setIcon(Theme::coloredIcon("play", QColor(Theme::accentText())));
 
     auto *presets = new QHBoxLayout();
-    auto *savePreset = new QPushButton("Save preset…",this);
-    auto *loadPreset = m_loadPreset = new QPushButton("Load preset…",this);
+    auto *savePreset = new Button("Save preset…",this);
+    auto *loadPreset = m_loadPreset = new Button("Load preset…",this);
     presets->addWidget(m_startButton,1); presets->addWidget(savePreset);
     outputLayout->addWidget(loadPreset);
     resources->addLayout(presets);
@@ -235,7 +239,7 @@ void TrainingPanel::setupUi() {
     m_visualise->setToolTip("Switch off to inspect the raw job data.");
     auto *viewRow=new QHBoxLayout();
     viewRow->addWidget(m_progressLabel,1); viewRow->addWidget(m_visualise); run->addLayout(viewRow);
-    auto *charts = new QTabWidget(this);
+    auto *charts = new TabWidget(this);
     m_chartTabs=charts;
     charts->setObjectName("trainingCharts");
     m_lossChart = new TrainingChart("loss",this);
@@ -260,7 +264,7 @@ void TrainingPanel::setupUi() {
     m_metrics->setObjectName("cardMeta"); m_metrics->setWordWrap(true);
     m_metrics->setTextFormat(Qt::PlainText);
     run->addWidget(m_metrics);
-    m_progress = new QProgressBar(this);
+    m_progress = new ProgressBar(this);
     m_progress->setRange(0,100); m_progress->setValue(0);
     m_progress->setTextVisible(false); m_progress->setFixedHeight(8);
     run->addWidget(m_progress);
@@ -268,7 +272,7 @@ void TrainingPanel::setupUi() {
     m_runHint->setObjectName("cardMeta"); m_runHint->setWordWrap(true);
     m_runHint->setTextFormat(Qt::PlainText);
     m_runHint->hide(); // Full status is below the workspace; keep the chart visible.
-    m_stopButton = new QPushButton("Stop", this);
+    m_stopButton = new Button("Stop", this);
     m_stopButton->setObjectName("destructiveBtn");
     m_stopButton->setEnabled(false);
     run->addWidget(m_stopButton,0,Qt::AlignLeft);
@@ -290,7 +294,7 @@ void TrainingPanel::setupUi() {
         m_runHint->setText(job["message"].toString());
         m_log->setPlainText(job["message"].toString());
     });
-    auto *events = new QPushButton("Event log ▾",this);
+    auto *events = new Button("Event log ▾",this);
     events->setCheckable(true);
     right->addWidget(events);
     m_log = new QPlainTextEdit(this);
@@ -334,22 +338,22 @@ void TrainingPanel::setupHyperparameters(QWidget *parent) {
         editor->setMinimumWidth(0);
         editor->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     };
-    m_rankSpin=new QSpinBox(m_hyperBox); m_rankSpin->setRange(1,512); m_rankSpin->setValue(8);
-    m_alphaSpin=new QSpinBox(m_hyperBox); m_alphaSpin->setRange(1,1024); m_alphaSpin->setValue(16);
-    m_dropoutSpin=new QDoubleSpinBox(m_hyperBox); m_dropoutSpin->setRange(0,0.99);
+    m_rankSpin=new SpinBox(m_hyperBox); m_rankSpin->setRange(1,512); m_rankSpin->setValue(8);
+    m_alphaSpin=new SpinBox(m_hyperBox); m_alphaSpin->setRange(1,1024); m_alphaSpin->setValue(16);
+    m_dropoutSpin=new DoubleSpinBox(m_hyperBox); m_dropoutSpin->setRange(0,0.99);
     m_dropoutSpin->setDecimals(2); m_dropoutSpin->setSingleStep(0.01); m_dropoutSpin->setValue(0.05);
     field(0,0,"Rank",m_rankSpin); field(0,1,"Alpha",m_alphaSpin); field(0,2,"Dropout",m_dropoutSpin);
-    m_epochsSpin=new QSpinBox(m_hyperBox); m_epochsSpin->setRange(1,100); m_epochsSpin->setValue(3);
-    m_lrSpin=new QDoubleSpinBox(m_hyperBox); m_lrSpin->setRange(0.000001,1);
+    m_epochsSpin=new SpinBox(m_hyperBox); m_epochsSpin->setRange(1,100); m_epochsSpin->setValue(3);
+    m_lrSpin=new DoubleSpinBox(m_hyperBox); m_lrSpin->setRange(0.000001,1);
     m_lrSpin->setDecimals(6); m_lrSpin->setSingleStep(0.00001); m_lrSpin->setValue(0.0002);
-    m_batchSpin=new QSpinBox(m_hyperBox); m_batchSpin->setRange(1,128); m_batchSpin->setValue(1);
+    m_batchSpin=new SpinBox(m_hyperBox); m_batchSpin->setRange(1,128); m_batchSpin->setValue(1);
     field(1,0,"Epochs",m_epochsSpin); field(1,1,"Learning rate",m_lrSpin); field(1,2,"Batch size",m_batchSpin);
     m_targetModules=new ComboBox(m_hyperBox);
     m_targetModules->setMinimumContentsLength(5);
     m_targetModules->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_targetModules->addItems({"q_proj,v_proj","q_proj,k_proj,v_proj,o_proj","all-linear"});
-    m_maxLengthSpin=new QSpinBox(m_hyperBox); m_maxLengthSpin->setRange(8,8192); m_maxLengthSpin->setValue(512);
-    m_warmupSpin=new QDoubleSpinBox(m_hyperBox); m_warmupSpin->setRange(0,1);
+    m_maxLengthSpin=new SpinBox(m_hyperBox); m_maxLengthSpin->setRange(8,8192); m_maxLengthSpin->setValue(512);
+    m_warmupSpin=new DoubleSpinBox(m_hyperBox); m_warmupSpin->setRange(0,1);
     m_warmupSpin->setDecimals(2); m_warmupSpin->setSingleStep(0.01); m_warmupSpin->setValue(0.03);
     field(2,0,"Target modules",m_targetModules); field(2,1,"Max length",m_maxLengthSpin); field(2,2,"Warmup ratio",m_warmupSpin);
     m_quantCombo=new ComboBox(m_hyperBox);

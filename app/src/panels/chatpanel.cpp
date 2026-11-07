@@ -1,3 +1,4 @@
+#include "widgets/spinbox.h"
 #include <QPlainTextEdit>
 #include <QTime>
 #include <QRandomGenerator>
@@ -27,6 +28,7 @@
 #include <QNetworkReply>
 #include <QLineEdit>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -78,9 +80,9 @@ void ChatPanel::setupUi() {
     m_modelCombo->setAccessibleName("Model");
     m_modelCombo->lineEdit()->setPlaceholderText("Choose a model or enter its ID");
     toolbar->addWidget(m_modelCombo, 1);
-    auto *loadBtn = m_loadButton = new QPushButton("Load model", this);
+    auto *loadBtn = m_loadButton = new Button("Load model", this);
     toolbar->addWidget(loadBtn);
-    auto *optionsBtn = new QPushButton("Model settings", this);
+    auto *optionsBtn = new Button("Model settings", this);
     optionsBtn->setObjectName("chatSettingsToggle");
     optionsBtn->setCheckable(true);
     toolbar->addWidget(optionsBtn);
@@ -94,13 +96,13 @@ void ChatPanel::setupUi() {
     m_engineCombo->addItems({"Auto (global setting)", "Local (vLLM)", "Local (llama.cpp)", "Local (torch)", "Local (Ollama)"});
     Surface::field(engineField, "Engine", m_engineCombo);
     fields->addLayout(engineField, 2);
-    m_maxTokensSpin = new QSpinBox(this);
+    m_maxTokensSpin = new SpinBox(this);
     m_maxTokensSpin->setRange(1, 8192);
     m_maxTokensSpin->setValue(256);
     auto *tokens = new QVBoxLayout();
     Surface::field(tokens, "Response tokens", m_maxTokensSpin);
     fields->addLayout(tokens, 1);
-    m_tempSpin = new QDoubleSpinBox(this);
+    m_tempSpin = new DoubleSpinBox(this);
     m_tempSpin->setRange(0.0, 2.0);
     m_tempSpin->setValue(0.7);
     m_tempSpin->setSingleStep(0.05);
@@ -121,7 +123,7 @@ void ChatPanel::setupUi() {
         pills->addWidget(pill);
     }
     m_adapterPill->hide();
-    auto *refreshBtn = new QPushButton("Refresh", this);
+    auto *refreshBtn = new Button("Refresh", this);
     pills->addWidget(refreshBtn);
     controls->addLayout(pills);
     layout->addWidget(controls->parentWidget());
@@ -187,7 +189,7 @@ void ChatPanel::setupUi() {
         {"03 / YOUR CONTROL\nShape the response", "Open engine, response length and temperature settings."}
     };
     for (int i = 0; i < 3; ++i) {
-        auto *button = new QPushButton(workspaceActions[i].label, m_welcome);
+        auto *button = new Button(workspaceActions[i].label, m_welcome);
         button->setObjectName("promptSuggestion");
         button->setToolTip(workspaceActions[i].description);
         suggestions->addWidget(button);
@@ -238,10 +240,10 @@ void ChatPanel::setupUi() {
     actions->addStretch();
     m_meter = new ContextMeter(this);
     actions->addWidget(m_meter->ring());
-    m_stopButton = new QPushButton("Stop", this);
+    m_stopButton = new Button("Stop", this);
     m_stopButton->setEnabled(false);
     actions->addWidget(m_stopButton);
-    m_sendButton = new QPushButton("Send  ↑", this);
+    m_sendButton = new Button("Send  ↑", this);
     m_sendButton->setObjectName("primaryBtn");
     actions->addWidget(m_sendButton);
     composer->addLayout(actions);
