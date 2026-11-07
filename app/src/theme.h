@@ -16,8 +16,8 @@ bool isDark();
 void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
 
 // ---- Paper, graphite and orange palette ----
-inline QString canvasBackground()    { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
-inline QString insetBackground()     { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
+inline QString canvasBackground()    { return isDark() ? QStringLiteral("#09090B") : QStringLiteral("#F1EFE7"); }
+inline QString insetBackground()     { return isDark() ? QStringLiteral("#050506") : QStringLiteral("#E9E6DC"); }
 // Supplied brand colors.
 inline QString brandOrange() { return QStringLiteral("#FF4A0E"); }
 inline QString brandInk() { return QStringLiteral("#201411"); }
@@ -32,10 +32,10 @@ inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
 
-inline QString surfaceFill()         { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
-inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
-inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
-inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
+inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113") : QStringLiteral("#FFFEF8"); }
+inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#2B2B30") : QStringLiteral("#CFD2C5"); }
 inline QString surfaceBorderHover()  { return QStringLiteral("#FF784E"); }
 
 // Unfilled part of the context meter ring and bar.

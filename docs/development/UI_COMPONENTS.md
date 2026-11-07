@@ -71,3 +71,21 @@ failures**, full UI checks at normal and 2× scaling reported **0 failures**, an
 the desktop startup/navigation selftest reported **0 failures**. The normal-scale
 run also generated the component gallery, select/menu and populated panel
 previews. Native Windows/macOS appearance requires checking on those platforms.
+
+## Dark palette and text containment
+
+Dark mode now uses near-black canvas and inset layers, with separate darker card,
+hover and pressed surfaces. Light-mode colors are unchanged. The theme audit
+checks dark elevation order and text contrast in both appearances.
+
+Shared buttons lay text out inside the native padded content box. Single-line
+labels elide when constrained while retaining their complete accessible name;
+truncated labels without an existing tooltip expose the full text on hover.
+Multiline action labels wrap and provide height-for-width sizing. Icons and
+labels are laid out together inside the same clipped content area.
+
+Tab labels are centered and clipped within their own padded tab bounds, rather
+than delegating label positioning with a mismatched stylesheet rectangle. UI
+regressions compare rendered text against its content bounds and cover narrow
+multiline actions, accessible labels and tab ink containment at normal/2× scale.
+Updated captures are under `build/darker-layout-ui/`.

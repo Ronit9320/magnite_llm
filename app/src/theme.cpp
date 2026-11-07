@@ -356,10 +356,11 @@ int Theme::selfCheck() {
 
     const bool originalDark = isDark();
     setDark(true);
-    check("refined dark canvas", canvasBackground() == "#161719");
-    check("refined dark surface", surfaceFill() == "#202225");
-    check("refined dark border", surfaceBorder() == "#383C42");
-    check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() < 40);
+    check("refined dark canvas", canvasBackground() == "#09090B");
+    check("refined dark surface", surfaceFill() == "#111113");
+    check("refined dark border", surfaceBorder() == "#2B2B30");
+    check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() <= 12);
+    check("dark surfaces retain elevation", QColor(insetBackground()).lightness()<QColor(canvasBackground()).lightness() && QColor(canvasBackground()).lightness()<QColor(surfaceFill()).lightness() && QColor(surfaceFill()).lightness()<QColor(surfaceFillHover()).lightness());
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);
     check("dark stylesheet tokens substituted", !qss().contains('@'));
     bool validDark = true;

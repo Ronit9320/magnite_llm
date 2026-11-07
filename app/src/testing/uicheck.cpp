@@ -420,7 +420,45 @@ int runUiCheck(const QString &captures) {
         QKeyEvent typing(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,"a"); QApplication::sendEvent(input,&typing);
         auto *halo=input->findChild<QWidget *>("componentFocusHalo");
         check(halo && halo->testAttribute(Qt::WA_TransparentForMouseEvents) && input->text()=="a","input: focus halo preserves typing and pointer input"); input->clear();
-        for (bool dark : {true,false}) {
+        {
+        // Compare with an empty render: all changed pixels must stay inside
+        // the button's padded content area, even for a constrained long label.
+        QSettings().setValue("appearance/studio3ReducedMotion",true);
+        Button narrow("A long action label that must stay inside its control");
+        narrow.setFixedSize(150,36); narrow.show(); pump(30);
+        const auto label=narrow.text();
+        const auto content=narrow.labelRect();
+        const auto withLabel=narrow.grab().toImage(); narrow.setText(QString());
+        const auto empty=narrow.grab().toImage();
+        bool contained=true,hasInk=false;
+        const qreal scale=withLabel.devicePixelRatio();
+        for (int y=0;y<withLabel.height();++y) for (int x=0;x<withLabel.width();++x)
+            if (withLabel.pixel(x,y)!=empty.pixel(x,y)) {
+                hasInk=true; contained &= content.contains(QPoint(int(x/scale),int(y/scale)));
+            }
+        check(hasInk && contained && content.left()>=6 && content.right()<narrow.width()-5,"button: long text is contained within its padded content box");
+        narrow.setText(label); narrow.grab();
+        auto *accessible=QAccessible::queryAccessibleInterface(&narrow);
+        check(accessible && accessible->text(QAccessible::Name)==label,"button: shortened visual text retains the complete accessible label");
+        narrow.hide();
+        Button multiline("A descriptive action\nthat wraps on a narrow card"); multiline.setObjectName("promptSuggestion");
+        check(multiline.heightForWidth(160)>multiline.heightForWidth(400),"button: multiline actions request enough height when constrained");
+        TabWidget tabs; tabs.addTab(new QWidget(),"Runtime"); tabs.addTab(new QWidget(),"Storage & privacy"); tabs.addTab(new QWidget(),"Appearance");
+        tabs.resize(520,120); tabs.show(); tabs.setCurrentIndex(2); tabs.clearFocus(); pump(40);
+        auto *bar=tabs.tabBar(); const auto image=bar->grab().toImage();
+        QRegion allowed; for (int index=0;index<bar->count();++index) allowed+=bar->tabRect(index).adjusted(10,2,-10,-2);
+        bool tabInkContained=true;
+        const qreal tabScale=image.devicePixelRatio();
+        for (int y=0;y<image.height();++y) for (int x=0;x<image.width();++x) {
+            const auto pixel=image.pixelColor(x,y);
+            if (pixel==QColor(Theme::textPrimary()) || pixel==QColor(Theme::textSecondary()))
+                tabInkContained &= allowed.contains(QPoint(int(x/tabScale),int(y/tabScale)));
+        }
+        check(tabInkContained,"tabs: label ink stays inside each padded tab");
+        capture(&tabs,"text-bounds-tabs"); tabs.hide();
+        QSettings().setValue("appearance/studio3ReducedMotion",false);
+    }
+    for (bool dark : {true,false}) {
             Theme::setDark(dark); pump(60); capture(&components,dark?"components-dark":"components-light");
         }
         Theme::setDark(true);
