@@ -106,6 +106,17 @@ Training example body after dataset ingestion:
 {"base_model":"REGISTERED_MODEL_ID","dataset_id":"DATASET_ID","name":"demo","rank":2,"alpha":4,"target_modules":"all-linear","quantization":"none","max_steps":3,"max_length":64}
 ```
 
+Training settings also accept `dropout` (default `0.05`, `0 <= x < 1`) and
+`validation_split` (default `0`, range `0..0.5`). A nonzero validation split
+requires at least two rows. Held-out rows are excluded from training and
+`eval_loss` is logged at each epoch boundary. `TrainingJob.history` retains the
+latest 1,000 metric entries with actual `step`, monotonic `elapsed_seconds`,
+optional `epoch`, and the finite values present in each log: `loss`, `eval_loss`,
+`learning_rate`, `grad_norm`. Missing metrics are omitted, not set to zero.
+Existing jobs without these optional fields remain readable. See
+[training visualisation](development/TRAINING_VISUALISATION.md) for UI behavior,
+timing estimates and verification.
+
 These APIs accept server-local paths, not multipart browser uploads. Use paths
 accessible to the backend process. Check HTTP status and returned details rather
 than treating a completed request as successful work.

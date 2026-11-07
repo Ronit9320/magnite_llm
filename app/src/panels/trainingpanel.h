@@ -1,8 +1,12 @@
 #pragma once
 
 #include "panels/basepanel.h"
+#include <QJsonArray>
+#include <QJsonObject>
 
 class StudioCanvas;
+class TrainingChart;
+class QListWidget;
 class QComboBox;
 class QGroupBox;
 class QLineEdit;
@@ -46,6 +50,9 @@ private slots:
 
 private:
     void setupUi();
+    void refreshJobs();
+    void displayJob(const QJsonObject &job);
+    void updateInputSummary();
     void setupHyperparameters(QWidget *parent);
     void refreshModels();
     void refreshDatasets(const QString &selectId = QString());
@@ -61,7 +68,6 @@ private:
     QTimer *m_pollTimer;
     QString m_jobId;
     QString m_lastMessage;
-    int m_lastLoggedStep;
 
     QComboBox *m_modelCombo;
     QComboBox *m_datasetCombo;
@@ -79,6 +85,7 @@ private:
     QCheckBox *m_qloraCheck;
     QPushButton *m_startButton;
     QPushButton *m_stopButton;
+    QPushButton *m_loadPreset = nullptr;
     QPlainTextEdit *m_log;
     QLabel *m_statusLabel;
     QLabel *m_progressLabel = nullptr;
@@ -87,6 +94,20 @@ private:
     StudioCanvas *m_activity = nullptr;
     QWidget *m_setup = nullptr;
     QLabel *m_runHint = nullptr;
+    TrainingChart *m_lossChart = nullptr;
+    TrainingChart *m_lrChart = nullptr;
+    TrainingChart *m_gradChart = nullptr;
+    QListWidget *m_runs = nullptr;
+    QLabel *m_inputSummary = nullptr;
+    QLabel *m_datasetSummary = nullptr;
+    QLabel *m_runName = nullptr;
+    QDoubleSpinBox *m_dropoutSpin = nullptr;
+    QDoubleSpinBox *m_validationSpin = nullptr;
+    QJsonArray m_jobs;
+    QJsonArray m_models;
+    QJsonArray m_datasets;
+    bool m_pollPending = false;
+    int m_jobsRequest = 0;
     bool m_quantizationAvailable = true;
     QString m_quantizationDetail;
 };

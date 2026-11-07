@@ -67,6 +67,8 @@ set(MAGNITE_SOURCES
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
     src/widgets/confirmation.h
+    src/widgets/trainingchart.cpp
+    src/widgets/trainingchart.h
     src/widgets/surface.h
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp

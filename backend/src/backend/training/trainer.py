@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 import shutil
 import sys
@@ -175,6 +176,35 @@ def _tokenize_jsonl(path: str, tokenizer, cfg: TrainingConfig, Dataset):
     return raw.map(_tok, remove_columns=raw.column_names, batched=False)
 
 
+def record_metrics(job: TrainingJob, step: int, logs: dict, elapsed: float,
+                   epoch: float | None = None) -> None:
+    """Keep measured, finite scalar telemetry; never invent missing metrics."""
+    entry = {"step": step, "elapsed_seconds": max(0.0, elapsed)}
+    for key in ("loss", "eval_loss", "learning_rate", "grad_norm"):
+        value = logs.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            entry[key] = float(value)
+    if epoch is not None and math.isfinite(epoch):
+        entry["epoch"] = float(epoch)
+    if not any(key in entry for key in ("loss", "eval_loss", "learning_rate", "grad_norm")):
+        return
+    if "loss" in entry:
+        job.loss = entry["loss"]
+    # Replace the list so an HTTP response/persistence snapshot cannot observe
+    # an append followed by truncation. The history is bounded for polling.
+    job.history = (job.history + [entry])[-1000:]
+
+
+def split_dataset(dataset, cfg: TrainingConfig):
+    if cfg.validation_split == 0:
+        return dataset, None
+    if len(dataset) < 2:
+        raise ValueError("Validation requires at least two dataset rows")
+    count = max(1, min(len(dataset) - 1, math.ceil(len(dataset) * cfg.validation_split)))
+    parts = dataset.train_test_split(test_size=count, seed=cfg.seed)
+    return parts["train"], parts["test"]
+
+
 def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
                  adapter_dir_root: str, adapter_store: AdapterStore,
                  cancel_event: threading.Event) -> None:
@@ -195,39 +225,32 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         def __init__(self, job: TrainingJob, cancel_event: threading.Event):
             self._job = job
             self._cancel = cancel_event
+            self._began = time.monotonic()
 
-        def on_train_begin(self, args, state, control, **kwargs):  # noqa: N802
+        def on_train_begin(self, args, state, control, **kwargs):
             self._job.status = "running"
+            self._job.total_steps = state.max_steps
             self._job.progress = 5.0
-            self._job.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             self._job.message = "Training..."
+            self._began = time.monotonic()
+            if self._cancel.is_set():
+                control.should_training_stop = True
 
-        def on_log(self, args, state, control, **kwargs):  # noqa: N802
+        def on_log(self, args, state, control, logs=None, **kwargs):
             self._job.current_step = state.global_step
-            if state.log_history:
-                last = state.log_history[-1]
-                if "loss" in last:
-                    self._job.loss = float(last["loss"])
-                    entry = {
-                        "step": state.global_step,
-                        "loss": self._job.loss,
-                        "learning_rate": float(last.get("learning_rate", 0.0)),
-                    }
-                    if "grad_norm" in last:
-                        entry["grad_norm"] = float(last["grad_norm"])
-                    self._job.history.append(entry)
-                    if len(self._job.history) > 1000:
-                        self._job.history = self._job.history[-1000:]
-                    if self._job.total_steps > 0:
-                        self._job.progress = 5.0 + 85.0 * min(
-                            1.0, state.global_step / self._job.total_steps
-                        )
-                    self._job.message = (
-                        f"Training (step {state.global_step}/{self._job.total_steps}): "
-                        f"loss={self._job.loss:.4f}"
-                    )
+            record_metrics(self._job, state.global_step, logs or {},
+                           time.monotonic() - self._began, state.epoch)
+            if logs and "loss" in logs and self._job.loss is not None:
+                self._job.message = (
+                    f"Training (step {state.global_step}/{self._job.total_steps}): "
+                    f"loss={self._job.loss:.4f}"
+                )
 
-        def on_step_end(self, args, state, control, **kwargs):  # noqa: N802
+        def on_step_end(self, args, state, control, **kwargs):
+            self._job.current_step = state.global_step
+            if self._job.total_steps > 0:
+                self._job.progress = 5.0 + 85.0 * min(
+                    1.0, state.global_step / self._job.total_steps)
             if self._cancel.is_set():
                 control.should_training_stop = True
 
@@ -282,13 +305,14 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
             r=cfg.rank,
             lora_alpha=cfg.alpha,
             target_modules=resolved_targets,
-            lora_dropout=0.05,
+            lora_dropout=cfg.dropout,
             bias="none",
             task_type="CAUSAL_LM",
         )
         model = get_peft_model(model, lora)
 
         train_ds = _tokenize_jsonl(dataset_path, tokenizer, cfg, Dataset)
+        train_ds, eval_ds = split_dataset(train_ds, cfg)
         steps_per_epoch = max(1, (len(train_ds) + cfg.batch_size - 1) // cfg.batch_size)
         total_steps = cfg.max_steps if cfg.max_steps > 0 else steps_per_epoch * cfg.epochs
         job.total_steps = total_steps
@@ -302,6 +326,7 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
             learning_rate=cfg.learning_rate,
             warmup_steps=warmup_steps,
             logging_steps=1,
+            eval_strategy="epoch" if eval_ds is not None else "no",
             report_to=[],
             save_strategy="no",
             remove_unused_columns=False,
@@ -321,6 +346,7 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
             model=model,
             args=args,
             train_dataset=train_ds,
+            eval_dataset=eval_ds,
             data_collator=collator,
             callbacks=[progress],
         )

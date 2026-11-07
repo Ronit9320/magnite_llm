@@ -12,6 +12,8 @@
 #include "panels/chatbubble.h"
 #include "panels/settingspanel.h"
 #include "widgets/studiocanvas.h"
+#include "widgets/trainingchart.h"
+#include <QListWidget>
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
 #include <QApplication>
@@ -101,6 +103,23 @@ struct Fixture : QTcpServer {
             {"message","Downloading from HuggingFace Hub"},{"error",pullError.isEmpty()?QJsonValue():QJsonValue(pullError)}}).toJson(QJsonDocument::Compact);
     }
     QString trainingState = "running";
+    int trainingStatusCode = 200;
+    bool omitTrainingHistory = false;
+    bool serveActiveTraining = false;
+    QJsonObject trainingRequest;
+    QJsonObject trainingJob() const {
+        QJsonArray history;
+        for (int step : {1, 4, 12, 24, 42}) {
+            history.append(QJsonObject{{"step",step},{"loss",2.1-step*0.02},
+                {"learning_rate",0.0002*(1.0-step/100.0)}, {"grad_norm",0.9-step*0.01},
+                {"epoch",step/40.0},{"elapsed_seconds",step*1.5}});
+        }
+        history.append(QJsonObject{{"step",42},{"eval_loss",1.36},{"epoch",1.05},{"elapsed_seconds",64.0}});
+        return QJsonObject{{"id","fixture-job"},{"name","support-tone-v2"},{"status",trainingState},
+            {"current_step",42},{"total_steps",100},{"progress",42},{"loss",1.28},
+            {"history",omitTrainingHistory ? QJsonArray() : history},
+            {"message","Training fixture · learning from example conversations"}};
+    }
     QPointer<QTcpSocket> chatSocket;
     int starts = 0, clears = 0;
     Fixture() {
@@ -164,11 +183,16 @@ struct Fixture : QTcpServer {
                     }
                     else if (path == "/models/pull/job1") { ++pollCount; body=pullJson(); }
                     else if (path == "/models/pull/job1/cancel") { ++cancelCalls; status=cancelStatus; body=cancelStatus==202?pullJson():QByteArray(R"({"detail":"fixture cancel failure"})"); }
-                    else if (path == "/datasets") body = R"([{"id":"fixture-data","name":"Example conversations.jsonl"}])";
-                    else if (path == "/training/jobs") body = "[]";
-                    else if (path == "/training/start") { ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
+                    else if (path == "/datasets") body = R"([{"id":"fixture-data","name":"Example conversations.jsonl","format":"jsonl","rows":4812}])";
+                    else if (path == "/training/jobs") {
+                        auto past=trainingJob(); past["id"]="past-job"; past["name"]="support-tone-v1"; past["status"]="done";
+                        QJsonArray jobs{past};
+                        if (serveActiveTraining) jobs.append(trainingJob());
+                        body=QJsonDocument(jobs).toJson();
+                    }
+                    else if (path == "/training/start") { trainingRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
                     else if (path.startsWith("/training/cancel/")) { trainingState="cancelled"; }
-                    else if (path.startsWith("/training/status/")) body=QJsonDocument(QJsonObject{{"status",trainingState},{"current_step",42},{"total_steps",100},{"progress",42},{"loss",1.28},{"message","Training fixture · learning from example conversations"}}).toJson();
+                    else if (path.startsWith("/training/status/")) { status=trainingStatusCode; body=QJsonDocument(trainingJob()).toJson(); }
                     else if (path == "/inference/status" || path == "/inference/load") body=R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})";
                     else if (path == "/inference/chat") {
                         type="text/event-stream";
@@ -332,7 +356,8 @@ int runUiCheck(const QString &captures) {
             QString loaded; auto conn=QObject::connect(&models,&ModelsPanel::loadRequested,[&loaded](const QString &id){ loaded=id; });
             QMetaObject::invokeMethod(&models,"onDownload"); pump(); // run a real download attempt (fixture rejects it)
             QPushButton *act=nullptr; for (auto *b : done->findChildren<QPushButton *>()) if (b->objectName()=="primaryBtn") act=b;
-            if (act) act->click(); pump();
+            if (act) act->click();
+            pump();
             check(loaded=="huggingface:studio--hub-model-001","Load model on a downloaded result loads the library model");
             QObject::disconnect(conn);
             const int before=fixture.searchRequests.size();
@@ -715,16 +740,52 @@ int runUiCheck(const QString &captures) {
     QObject::connect(&training,&TrainingPanel::trainingCompleted,[&completed](){ ++completed; });
     training.show(); pump();
     auto *start=button(&training,"Start Training");
+    auto *lossChart=training.findChild<TrainingChart *>("trainingLossChart");
+    auto *runs=training.findChild<QListWidget *>("trainingRuns");
+    runs->setCurrentRow(0); pump();
+    check(lossChart->sampleCount()==6,"past runs restore raw training and validation samples");
+    const auto preset=QJsonDocument::fromJson(training.settingsJson().toUtf8()).object();
+    auto changed=preset; changed["dropout"]=0.12; changed["validationSplit"]=10;
+    training.applySettingsJson(QString::fromUtf8(QJsonDocument(changed).toJson()));
     QMetaObject::invokeMethod(&training,"onStart"); QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(fixture.starts==1 && !start->isEnabled(),"training ignores duplicate starts");
+    check(lossChart->sampleCount()==6 && lossChart->accessibleDescription().contains("measured samples"),"live loss chart uses raw history including validation");
+    check(fixture.trainingRequest["dropout"].toDouble()==0.12 && fixture.trainingRequest["validation_split"].toDouble()==0.1,"training sends configured dropout and validation fraction");
+    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    check(lossChart->sampleCount()==6,"repeated status polls do not duplicate chart samples");
     capture(&training,"training-running");
+    training.resize(1104,1020); pump();
+    capture(&training,"training-running-full");
+    Theme::setDark(false); pump(); capture(&training,"training-running-full-light");
+    Theme::setDark(true); training.resize(1104,628); pump();
+    auto *trainingTabs=training.findChild<QTabWidget *>("trainingCharts");
+    for (int tab=1;tab<trainingTabs->count();++tab) {
+        trainingTabs->setCurrentIndex(tab); pump();
+        capture(&training,tab==1?"training-learning-rate":"training-gradient-norm");
+    }
+    trainingTabs->setCurrentIndex(0);
+    fixture.trainingStatusCode=503;
+    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    check(!start->isEnabled() && lossChart->sampleCount()==6,"status outage keeps run tracked and preserves measurements");
+    fixture.trainingStatusCode=200;
+    fixture.omitTrainingHistory=true;
+    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    check(lossChart->sampleCount()==0,"absent telemetry stays empty without fabricated samples");
+    fixture.omitTrainingHistory=false;
+    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     QMetaObject::invokeMethod(&training,"onStop"); pump(); QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(start->isEnabled() && completed==0 && training.findChild<QLabel *>("metricValue")->text()=="Training stopped","cancelled training resets controls without reporting completion");
     fixture.failTraining=true; QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(start->isEnabled() && training.findChild<QLabel *>("statusLabel")->property("state")=="error","training submission failure is recoverable");
     fixture.failTraining=false; fixture.trainingState="done"; QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(start->isEnabled() && completed==1,"training completion resets controls");
-    if (auto *advanced=button(&training,"Hyperparameters ▾")) advanced->click();
+    fixture.trainingState="running"; fixture.serveActiveTraining=true;
+    training.refreshOptions(); pump();
+    check(!start->isEnabled() && lossChart->sampleCount()==6,"training page reconnects to an existing active backend job");
+    fixture.serveActiveTraining=false;
+    QMetaObject::invokeMethod(&training,"onStop"); pump();
+    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    check(start->isEnabled() && completed==1,"reattached run supports cancellation");
     training.resize(848,628); pump();
     bool trainingFits=true; for(auto *scroll:training.findChildren<QScrollArea *>()) trainingFits &= scroll->horizontalScrollBar()->maximum()==0;
     if (!trainingFits) for(auto *scroll:training.findChildren<QScrollArea *>()) {
