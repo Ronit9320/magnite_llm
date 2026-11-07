@@ -11,32 +11,50 @@
 #include "panels/adaptercard.h"
 #include "panels/chatpanel.h"
 #include "panels/chatbubble.h"
+#include "panels/chattree.h"
+#include "panels/chatstore.h"
+#include "panels/greeting.h"
+#include "widgets/namedialog.h"
+#include "widgets/chathistorylist.h"
+#include "widgets/sidebarstate.h"
+#include "widgets/sidebar.h"
+#include "panels/chathistorycontroller.h"
+#include "panels/messagerow.h"
 #include "panels/settingspanel.h"
 #include "widgets/studiocanvas.h"
 #include "widgets/trainingchart.h"
 #include <QListWidget>
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
+#include "widgets/contextmeter.h"
+#include "widgets/versionswitcher.h"
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QEnterEvent>
+#include <QFocusEvent>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QHBoxLayout>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSvgGenerator>
@@ -45,6 +63,8 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QVBoxLayout>
+#include <QVariant>
 #include <QUrlQuery>
 #include <QSet>
 #include <cstdio>
@@ -103,6 +123,40 @@ struct Fixture : QTcpServer {
             {"status",pullStatus},{"progress",pullProgress},{"bytes_done",double(pullDone)},{"bytes_total",double(pullTotal)},
             {"message","Downloading from HuggingFace Hub"},{"error",pullError.isEmpty()?QJsonValue():QJsonValue(pullError)}}).toJson(QJsonDocument::Compact);
     }
+    // Context usage (/inference/context-usage): the reply echoes the request's max_tokens as the reserve.
+    int usageUsed = 1000, usageLimit = 4096, usageStatus = 200;
+    bool holdUsageOnce = false;
+    QStringList usageRequests;
+    QPointer<QTcpSocket> heldUsageSocket;
+    QByteArray heldUsageBody;
+    void releaseHeldUsage() {
+        if (!heldUsageSocket) return;
+        heldUsageSocket->write("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: "+QByteArray::number(heldUsageBody.size())+"\r\nConnection: close\r\n\r\n"+heldUsageBody);
+        heldUsageSocket->disconnectFromHost();
+        heldUsageSocket.clear();
+    }
+    // Compaction (/inference/compact) and the chat requests the panel makes.
+    int compactStatus = 200, compactCovered = 4;
+    QString compactMethod = "summary";
+    bool holdCompact = false;
+    QStringList compactRequests, chatRequests;
+    // What /inference/chat streams back; tests change it to tell a fresh reply from an old one.
+    // chatEmpty: the reply streams no text (just "done", or nothing at all while held); chatStatus: an HTTP error instead of a stream.
+    bool chatEmpty = false;
+    int chatStatus = 200;
+    QString chatReply = QStringLiteral("A local model can use your documents to give more useful answers.\n\nTry a specific question about your project.");
+    QPointer<QTcpSocket> heldCompactSocket;
+    // An unrelated request that stays in flight (/held-other), to prove cancelling a compaction leaves it alone.
+    bool holdOther = false;
+    QPointer<QTcpSocket> heldOtherSocket;
+    static void finishHeld(QPointer<QTcpSocket> &socket, const QByteArray &body) {
+        if (!socket) return;
+        socket->write("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: "+QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);
+        socket->disconnectFromHost();
+        socket.clear();
+    }
+    void releaseHeldOther() { finishHeld(heldOtherSocket, "{}"); }
+    void releaseHeldCompact() { finishHeld(heldCompactSocket, R"({"summary":"late summary","covered":4,"method":"summary"})"); }
     QString trainingState = "running";
     int trainingStatusCode = 200;
     bool omitTrainingHistory = false;
@@ -198,16 +252,50 @@ struct Fixture : QTcpServer {
                     else if (path == "/training/start") { trainingRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
                     else if (path.startsWith("/training/cancel/")) { trainingState="cancelled"; }
                     else if (path.startsWith("/training/status/")) { status=trainingStatusCode; body=QJsonDocument(trainingJob()).toJson(); }
+                    else if (path == "/held-other") {
+                        if (holdOther) { heldOtherSocket = socket; return; }
+                    }
+                    else if (path == "/inference/compact") {
+                        const QByteArray requestBody = bytes->mid(headerEnd+4);
+                        compactRequests << QString::fromUtf8(requestBody);
+                        if (holdCompact) { heldCompactSocket = socket; return; }
+                        status = compactStatus;
+                        if (compactStatus != 200) body = R"({"detail":"fixture compact failure"})";
+                        else {
+                            const QString previous = QJsonDocument::fromJson(requestBody).object().value("previous_summary").toString();
+                            body = QJsonDocument(QJsonObject{{"summary",compactMethod=="summary"?QString("The user asked about X."):previous},
+                                {"covered",compactCovered},{"method",compactMethod}}).toJson(QJsonDocument::Compact);
+                        }
+                    }
+                    else if (path == "/inference/context-usage") {
+                        const QByteArray requestBody = bytes->mid(headerEnd+4);
+                        usageRequests << QString::fromUtf8(requestBody);
+                        status = usageStatus;
+                        if (usageStatus != 200) body = R"({"detail":"No inference engine loaded. Load a model first."})";
+                        else {
+                            const int reserved = QJsonDocument::fromJson(requestBody).object().value("max_tokens").toInt(256);
+                            body = QJsonDocument(QJsonObject{{"used",usageUsed},{"reserved",reserved},{"limit",usageLimit},
+                                {"fill",double(usageUsed+reserved)/usageLimit},{"exact",true}}).toJson(QJsonDocument::Compact);
+                            if (holdUsageOnce) {
+                                holdUsageOnce = false; heldUsageSocket = socket; heldUsageBody = body;
+                                return;
+                            }
+                        }
+                    }
                     else if (path == "/inference/status" || path == "/inference/load") body=R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})";
                     else if (path == "/inference/chat") {
-                        type="text/event-stream";
-                        body="data: {\"delta\":\"A local model can use your documents to give more useful answers.\\n\\nTry a specific question about your project.\"}\n\n";
-                        if (holdChat) {
-                            chatSocket=socket;
-                            socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body);
-                            return;
+                        chatRequests << QString::fromUtf8(bytes->mid(headerEnd+4));
+                        if (chatStatus != 200) { status=chatStatus; body=R"({"detail":"fixture chat failure"})"; }
+                        else {
+                            type="text/event-stream";
+                            body=chatEmpty?QByteArray():"data: "+QJsonDocument(QJsonObject{{"delta",chatReply}}).toJson(QJsonDocument::Compact)+"\n\n";
+                            if (holdChat) {
+                                chatSocket=socket;
+                                socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body);
+                                return;
+                            }
+                            body+="data: {\"done\":true}\n\n";
                         }
-                        body+="data: {\"done\":true}\n\n";
                     }
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
@@ -855,9 +943,880 @@ int runUiCheck(const QString &captures) {
     check(token.width()<=350 && token.height()>150,"long unbroken responses wrap without clipping height");
     host.hide(); chat.hide();
 
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.reloadContextSettings(); chat.show(); pump();
+        auto *ring=chat.findChild<QWidget *>("contextRing"); auto *bar=chat.findChild<QWidget *>("contextBar"); auto *banner=chat.findChild<QWidget *>("contextBanner");
+        auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *statusLine=chat.findChild<QLabel *>("statusLabel");
+        auto *tokensSpin=chat.findChild<QSpinBox *>(); auto *sendButton=button(&chat,"Send  ↑");
+        check(ring && bar && banner && input && statusLine && tokensSpin && sendButton,"chat panel hosts the context meter pieces");
+        if (ring && bar && banner && input && statusLine && tokensSpin && sendButton) {
+            auto lastUsage=[&fixture]() { return QJsonDocument::fromJson(fixture.usageRequests.value(fixture.usageRequests.size()-1).toUtf8()).object(); };
+            auto requests=[&fixture]() { return int(fixture.usageRequests.size()); };
+            auto status=[statusLine]() { return statusLine->text(); };
+            fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.usageStatus=200;
+            int before=requests();
+            chat.refreshEngineStatus();
+            check(waitUntil([&]{ return requests()>before && ring->isVisible(); }),"meter appears once a model is known to be loaded");
+            check(ring->toolTip().contains("1,000 of 4,096") && ring->toolTip().contains("256 reserved") && !bar->isVisible() && !banner->isVisible(),"default Ring shows the numbers on hover; bar and banner stay hidden");
+            check(lastUsage().value("max_tokens").toInt()==256,"usage request carries the Response tokens reserve");
+
+            fixture.usageUsed=3000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return status().contains("getting full"); }) && statusLine->property("state")=="warn","70-90% shows the warning in the status line");
+            fixture.usageUsed=3900; chat.refreshContextUsage();
+            check(waitUntil([&]{ return status().contains("almost full"); }),"above 90% the warning says it is almost full");
+
+            fixture.usageUsed=1000; before=requests();
+            input->setPlainText("a"); input->setPlainText("ab"); input->setPlainText("abc"); pump(100);
+            check(requests()==before,"typing waits for a pause before asking for usage");
+            check(waitUntil([&]{ return requests()==before+1; }),"typing asks for usage once after the pause");
+            pump(700);
+            check(requests()==before+1,"quick typing sends exactly one usage request");
+            const QJsonArray typed=lastUsage().value("messages").toArray();
+            check(!typed.isEmpty() && typed.last().toObject().value("content").toString()=="abc" && typed.last().toObject().value("role").toString()=="user","the typed draft is counted as a pending user message");
+            input->clear();
+
+            fixture.usageUsed=1000; fixture.holdUsageOnce=true; before=requests();
+            chat.refreshContextUsage(); waitUntil([&]{ return requests()==before+1; });
+            fixture.usageUsed=2000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return ring->toolTip().contains("2,000 of"); }),"the newer usage reply is shown");
+            fixture.releaseHeldUsage(); pump(300);
+            check(ring->toolTip().contains("2,000 of"),"a late, older usage reply is ignored");
+
+            fixture.usageStatus=409; chat.refreshContextUsage();
+            check(waitUntil([&]{ return !ring->isVisible(); }),"a backend that reports no model hides the meter");
+            input->setPlainText("still sendable"); pump(50);
+            check(sendButton->isEnabled() && statusLine->property("state")!="error","no usage never blocks sending or reports an error");
+            input->clear(); fixture.usageStatus=200;
+
+            QSettings().setValue("chat/meterStyle","bar"); chat.reloadContextSettings(); fixture.usageUsed=1000;
+            check(waitUntil([&]{ return bar->isVisible() && !ring->isVisible(); }),"switching the setting to Bar swaps the meter without restarting");
+            QSettings().setValue("chat/meterStyle","off"); chat.reloadContextSettings(); pump(100);
+            check(!bar->isVisible() && !ring->isVisible() && !banner->isVisible(),"Off hides every meter piece");
+            QSettings().setValue("chat/meterStyle","ringBanner"); chat.reloadContextSettings(); fixture.usageUsed=3900; chat.refreshContextUsage();
+            check(waitUntil([&]{ return banner->isVisible(); }),"Ring + banner shows the banner when nearly full");
+            pump(100); check(!status().contains("almost full"),"with the banner showing, the status line does not repeat the warning");
+            QSettings().remove("chat/meterStyle"); chat.reloadContextSettings(); fixture.usageUsed=1000; chat.refreshContextUsage();
+            check(waitUntil([&]{ return ring->isVisible() && !banner->isVisible(); }),"removing the setting returns to Ring");
+
+            fixture.usageLimit=2048; tokensSpin->setValue(8192);
+            check(waitUntil([&]{ return status().contains("Reduce Response tokens"); }),"Response tokens larger than the window asks to reduce them");
+            fixture.usageLimit=4096; tokensSpin->setValue(256); pump(700);
+
+            before=requests();
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+            check(waitUntil([&]{ return requests()>before; }) && lastUsage().value("messages").toArray().isEmpty(),"clearing the chat measures an empty conversation");
+            if (!captures.isEmpty()) {
+                const bool wasDark=Theme::isDark();
+                chat.resize(1104,628);
+                struct Shot { const char *style; int used; const char *name; };
+                for (bool dark : {true,false}) {
+                    Theme::setDark(dark);
+                    for (const Shot &shot : {Shot{"ring",1000,"ring-ok"},Shot{"ring",3000,"ring-warn"},Shot{"ringBanner",3900,"banner-critical"},Shot{"bar",3000,"bar-warn"}}) {
+                        QSettings().setValue("chat/meterStyle",shot.style); chat.reloadContextSettings();
+                        fixture.usageUsed=shot.used; const int n=requests(); chat.refreshContextUsage();
+                        waitUntil([&]{ return requests()>n; }); pump(150);
+                        capture(&chat,QString("chat-meter-%1-%2").arg(shot.name,dark?"dark":"light"));
+                    }
+                }
+                Theme::setDark(wasDark);
+                QSettings().remove("chat/meterStyle"); chat.reloadContextSettings();
+            }
+        }
+        chat.hide();
+    }
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        chat.reloadContextSettings();
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.show(); pump();
+        auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *statusLine=chat.findChild<QLabel *>("statusLabel");
+        auto *sendButton=button(&chat,"Send  ↑"); auto *stopButton=button(&chat,"Stop"); auto *ring=chat.findChild<QWidget *>("contextRing");
+        auto *tokensSpin=chat.findChild<QSpinBox *>();
+        check(input && statusLine && sendButton && stopButton && ring && tokensSpin,"compaction checks can find the chat controls");
+        if (input && statusLine && sendButton && stopButton && ring && tokensSpin) {
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            fixture.usageStatus=200; fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.compactStatus=200;
+            fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.holdCompact=false;
+            fixture.compactRequests.clear(); fixture.chatRequests.clear();
+            auto sendAndWait=[&](const QString &text) {
+                const int n=fixture.chatRequests.size();
+                input->setPlainText(text); pump(20); sendButton->click();
+                const bool sent=waitUntil([&]{ return fixture.chatRequests.size()>n && sendButton->text()=="Send  ↑"; });
+                pump(150); return sent;
+            };
+            auto json=[](const QStringList &list) { return QJsonDocument::fromJson(list.value(list.size()-1).toUtf8()).object(); };
+            auto dividers=[&chat]() { return chat.findChildren<QLabel *>("contextDivider"); };
+            auto status=[statusLine]() { return statusLine->text(); };
+
+            bool seeded=true; for (int i=0;i<4;++i) seeded&=sendAndWait(QString("turn %1").arg(i));
+            check(seeded && fixture.chatRequests.size()==4,"four ordinary turns are sent");
+            check(fixture.compactRequests.isEmpty() && dividers().isEmpty(),"below the threshold nothing is compacted");
+
+            fixture.usageUsed=3600; // (3600+256)/4096 = 94%, above the 85% default
+            check(sendAndWait("turn 4"),"a send at the threshold still goes through");
+            check(fixture.compactRequests.size()==1,"a send at or above the threshold compacts exactly once");
+            {
+                const QJsonObject request=json(fixture.compactRequests); const QJsonArray posted=request.value("messages").toArray();
+                check(request.value("keep_recent").toInt()==4 && qAbs(request.value("target_fill").toDouble()-0.85)<1e-9 && request.value("previous_summary").toString().isEmpty() && request.value("max_tokens").toInt()==256,
+                      "compact request carries keep_recent 4, the 85% target, no earlier summary and the reserve");
+                check(posted.size()==9 && posted.last().toObject().value("content").toString()=="turn 4","the new message is part of what is compacted, as the last message");
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==6 && sent.at(0).toObject().value("role").toString()=="system" &&
+                      sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X." &&
+                      sent.at(1).toObject().value("content").toString()=="turn 2" && sent.last().toObject().value("content").toString()=="turn 4",
+                      "the model receives the summary plus only the messages after the compacted ones");
+            }
+            check(dividers().size()==1 && dividers().first()->text().contains("summarized"),"a divider says the earlier messages were summarized");
+            check(chat.findChildren<ChatBubble *>().size()==10,"every earlier message stays on screen");
+
+            fixture.compactCovered=3;
+            check(sendAndWait("turn 5"),"a second compaction goes through");
+            {
+                const QJsonObject request=json(fixture.compactRequests); const QJsonArray posted=request.value("messages").toArray();
+                check(fixture.compactRequests.size()==2 && request.value("previous_summary").toString()=="The user asked about X." && posted.size()==7 && posted.at(0).toObject().value("content").toString()=="turn 2",
+                      "a repeat compaction posts only the uncompacted tail and the earlier summary");
+                check(json(fixture.chatRequests).value("messages").toArray().size()==5,"covered messages accumulate across compactions");
+            }
+
+            fixture.compactMethod="dropped"; fixture.compactCovered=2;
+            check(sendAndWait("turn 6"),"a fallback that drops old messages still sends");
+            check(dividers().size()==3 && dividers().last()->text().contains("dropped"),"the divider says messages were dropped when the fallback ran");
+            {
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==5 && sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X.","dropping keeps the earlier summary and advances the covered count");
+            }
+
+            fixture.compactMethod="summary"; fixture.compactCovered=0;
+            const int dividersBefore=dividers().size();
+            check(sendAndWait("turn 7") && dividers().size()==dividersBefore,"a compaction that covers nothing adds no divider");
+
+            fixture.compactCovered=4; fixture.compactStatus=500;
+            check(sendAndWait("turn 8") && dividers().size()==dividersBefore+1 && dividers().last()->text().contains("Could not compact"),"a failed compaction says so in the transcript and sends anyway");
+            check(json(fixture.chatRequests).value("messages").toArray().at(0).toObject().value("role").toString()=="system","after a failed compaction the earlier summary is still sent");
+            fixture.compactStatus=200;
+
+            const int compactsBeforeUnknown=fixture.compactRequests.size();
+            fixture.usageStatus=409;
+            check(sendAndWait("turn 9") && fixture.compactRequests.size()==compactsBeforeUnknown,"when usage is unknown the message is sent without compacting");
+            check(json(fixture.chatRequests).value("messages").toArray().at(0).toObject().value("role").toString()=="system","the existing summary survives a model/usage hiccup");
+            fixture.usageStatus=200;
+
+            QSettings().setValue("chat/autoCompactPercent",0); chat.reloadContextSettings(); fixture.usageUsed=3900;
+            const int compactsBeforeOff=fixture.compactRequests.size();
+            check(sendAndWait("turn 10") && fixture.compactRequests.size()==compactsBeforeOff,"auto-compact Off never compacts, even when nearly full");
+            QSettings().setValue("chat/autoCompactPercent",90); chat.reloadContextSettings(); fixture.usageUsed=3600; // (3600+256)/4096 = 94% still >= 90
+            const int compactsAt90=fixture.compactRequests.size();
+            check(sendAndWait("turn 11") && fixture.compactRequests.size()==compactsAt90+1 && qAbs(json(fixture.compactRequests).value("target_fill").toDouble()-0.90)<1e-9,"the chosen percentage is used as the target");
+            QSettings().remove("chat/autoCompactPercent"); chat.reloadContextSettings();
+
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(dividers().isEmpty(),"clearing the chat removes the dividers");
+            check(sendAndWait("fresh start"),"a new chat sends");
+            {
+                const QJsonArray sent=json(fixture.chatRequests).value("messages").toArray();
+                check(sent.size()==1 && sent.at(0).toObject().value("role").toString()=="user","clearing the chat also forgets the summary");
+            }
+
+            fixture.usageUsed=3900;
+            const int compactsShort=fixture.compactRequests.size();
+            check(sendAndWait("short one") && fixture.compactRequests.size()==compactsShort,"a short history is never compacted, even when nearly full");
+
+            bool grown=true; fixture.usageUsed=1000; for (int i=0;i<3;++i) grown&=sendAndWait(QString("more %1").arg(i));
+            fixture.usageLimit=2048; tokensSpin->setValue(8192); pump(700); fixture.usageUsed=3900;
+            const int compactsReserve=fixture.compactRequests.size();
+            check(grown && sendAndWait("reserve too big") && fixture.compactRequests.size()==compactsReserve,"Response tokens at or above the window never start a compaction");
+            fixture.usageLimit=4096; tokensSpin->setValue(256); pump(700);
+
+            fixture.usageUsed=3600; fixture.holdCompact=true;
+            const int chatsBeforeStop=fixture.chatRequests.size(), compactsBeforeStop=fixture.compactRequests.size();
+            input->setPlainText("stop me"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeStop+1 && fixture.heldCompactSocket; }) && status().contains("Compacting") && stopButton->isEnabled() && !sendButton->isEnabled(),
+                  "while compacting, status says so, Stop is available and Send is not");
+            stopButton->click(); pump(300);
+            check(input->toPlainText()=="stop me" && sendButton->isEnabled() && status().contains("Compaction stopped") && fixture.chatRequests.size()==chatsBeforeStop,
+                  "Stop during compaction keeps the typed text, re-enables Send and sends nothing");
+            fixture.holdCompact=false; fixture.heldCompactSocket.clear();
+            check(sendAndWait("stop me") && fixture.compactRequests.size()==compactsBeforeStop+2 && json(fixture.chatRequests).value("messages").toArray().last().toObject().value("content").toString()=="stop me",
+                  "after stopping a compaction the same message can be sent");
+
+            QSettings().setValue("chat/meterStyle","off"); chat.reloadContextSettings(); fixture.usageUsed=3600; fixture.holdCompact=true;
+            const int compactsOff=fixture.compactRequests.size();
+            input->setPlainText("quiet compaction"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsOff+1; }) && status().contains("Compacting") && !ring->isVisible(),
+                  "with the meter Off, compaction still says Compacting… and shows no meter");
+            stopButton->click(); pump(300); fixture.holdCompact=false; fixture.heldCompactSocket.clear();
+            QSettings().remove("chat/meterStyle"); chat.reloadContextSettings();
+
+            // Cancelling a compaction aborts only that request.
+            fixture.usageUsed=3600; fixture.holdCompact=true; fixture.holdOther=true; fixture.heldCompactSocket.clear();
+            int otherStatus=-1; client.get("/held-other",[&otherStatus](int code,const QJsonDocument &){ otherStatus=code; });
+            const int compactsNarrow=fixture.compactRequests.size();
+            input->setPlainText("cancel narrowly"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.heldOtherSocket && fixture.compactRequests.size()==compactsNarrow+1 && fixture.heldCompactSocket; }),"a compaction and an unrelated request are in flight together");
+            stopButton->click(); pump(300);
+            check(otherStatus==-1,"stopping a compaction leaves other in-flight requests alone");
+            fixture.releaseHeldOther(); pump(200);
+            check(otherStatus==200,"the unrelated request still completes normally");
+            fixture.holdOther=false; fixture.holdCompact=false; input->clear();
+
+            // Starting a new chat while compacting cancels the compaction; the late reply changes nothing.
+            fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+            const int chatsBeforeClear=fixture.chatRequests.size(), compactsBeforeClear=fixture.compactRequests.size();
+            input->setPlainText("clear while compacting"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeClear+1 && fixture.heldCompactSocket; }),"a compaction is in flight before the chat is cleared");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.releaseHeldCompact(); pump(300);
+            check(fixture.chatRequests.size()==chatsBeforeClear && dividers().isEmpty() && sendButton->isEnabled(),"clearing the chat during compaction cancels it and a late reply changes nothing");
+            fixture.holdCompact=false; input->clear();
+
+            // Transcript rows: the screen is a drawing of the conversation tree's active path.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            fixture.chatRequests.clear(); fixture.compactRequests.clear();
+            auto rows=[&chat]() { return chat.findChildren<MessageRow *>(); };
+            check(sendAndWait("row one") && sendAndWait("row two"),"two turns are sent for the row checks");
+            check(rows().size()==4 && rows().at(0)->bubble()->text()=="row one" && rows().at(2)->bubble()->text()=="row two" &&
+                  rows().at(1)->bubble()->text().startsWith("A local model") && rows().at(0)->bubble()->role()==ChatBubble::User && rows().at(1)->bubble()->role()==ChatBubble::Assistant,
+                  "messages render as rows, one per path message, bubble text matches");
+            {
+                QSet<int> ids; bool all=true; for (auto *row : rows()) { all&=row->node()!=0; ids.insert(row->node()); }
+                check(all && ids.size()==4,"every row knows its own conversation node, replies included once committed");
+            }
+            fixture.usageUsed=3600;
+            check(sendAndWait("row three") && fixture.compactRequests.size()==1 && dividers().size()==1,"a compaction draws its divider");
+            const QString dividerText=dividers().isEmpty()?QString():dividers().first()->text();
+            check(rows().size()==6 && chat.findChildren<ChatBubble *>().size()==6,"six rows and six bubbles after three turns");
+            QMetaObject::invokeMethod(&chat,"redrawForTest",Qt::DirectConnection); pump(100);
+            check(dividers().size()==1 && dividers().first()->text()==dividerText && dividerText.contains("summarized"),"a divider is shown again when the transcript is redrawn");
+            check(rows().size()==6 && chat.findChildren<ChatBubble *>().size()==6 && rows().at(4)->bubble()->text()=="row three","redrawing leaves no stale rows or bubbles");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(rows().isEmpty() && dividers().isEmpty(),"clearing the chat leaves no rows");
+
+            // Editing a message you already sent.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.holdCompact=false;
+            fixture.chatReply="reply A"; fixture.chatRequests.clear(); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            auto pencilOf=[](MessageRow *row) { return row->findChild<QPushButton *>("editButton"); };
+            auto boxOf=[](MessageRow *row) { return row->findChild<QPlainTextEdit *>("messageEditBox"); };
+            auto sendKey=[](QWidget *target,int key,Qt::KeyboardModifiers modifiers=Qt::NoModifier) { QKeyEvent press(QEvent::KeyPress,key,modifiers); QApplication::sendEvent(target,&press); };
+            auto openEditor=[&](int index) { const auto all=rows(); if (index>=all.size() || !pencilOf(all.at(index))) return false; pencilOf(all.at(index))->click(); pump(40); return all.at(index)->isEditing(); };
+            auto saveEdit=[&](int index,const QString &text) { auto *row=rows().at(index); boxOf(row)->setPlainText(text); row->findChild<QPushButton *>("editSave")->click(); };
+            auto waitDone=[&](int requestsBefore) { return waitUntil([&]{ return fixture.chatRequests.size()>requestsBefore && sendButton->text()=="Send  ↑"; }) && (pump(150),true); };
+            auto messagesOf=[](const QString &body) { return QJsonDocument::fromJson(body.toUtf8()).object().value("messages").toArray(); };
+            auto mentions=[](const QJsonArray &messages,const QString &text) { for (const auto &m : messages) if (m.toObject().value("content").toString().contains(text)) return true; return false; };
+
+            check(sendAndWait("turn one") && sendAndWait("turn two") && sendAndWait("turn three") && rows().size()==6,"three turns are on screen before editing");
+            {
+                int pencils=0, onReplies=0;
+                for (auto *row : rows()) if (pencilOf(row)) { ++pencils; if (row->bubble()->role()==ChatBubble::Assistant) ++onReplies; }
+                check(pencils==3 && onReplies==0,"every message you sent has an edit pencil, replies have none");
+            }
+            {
+                auto *row=rows().at(2); auto *pencil=pencilOf(row);
+                QEnterEvent enter(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(row,&enter); pump(20);
+                const bool shown=pencil->isVisibleTo(row);
+                QEvent leave(QEvent::Leave); QApplication::sendEvent(row,&leave); pump(20);
+                check(shown && !pencil->isVisibleTo(row),"hovering a row shows its pencil, leaving hides it");
+            }
+            check(openEditor(2) && boxOf(rows().at(2)) && boxOf(rows().at(2))->toPlainText()=="turn two" && !rows().at(2)->bubble()->isVisibleTo(rows().at(2)),"clicking the pencil opens the editor pre-filled and hides the bubble");
+            pump(80); capture(&chat,"chat-editing");
+            check(openEditor(0) && !rows().at(2)->isEditing() && rows().at(0)->isEditing(),"opening a second editor closes the first");
+            sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+            check(!rows().at(0)->isEditing() && rows().at(0)->bubble()->isVisibleTo(rows().at(0)) && rows().size()==6 && fixture.chatRequests.size()==3,"Esc cancels and changes nothing");
+            {
+                openEditor(2); saveEdit(2,"   \n "); pump(200);
+                const bool blankCancelled=!rows().at(2)->isEditing() && fixture.chatRequests.size()==3;
+                openEditor(2); rows().at(2)->findChild<QPushButton *>("editSave")->click(); pump(200);
+                check(blankCancelled && !rows().at(2)->isEditing() && fixture.chatRequests.size()==3 && rows().size()==6,"empty or unchanged text counts as cancel");
+            }
+            input->setPlainText("my draft"); pump(20);
+            check(openEditor(2) && !sendButton->isEnabled(),"while an editor is open the composer's Send is off, so a typed edit cannot be lost");
+            fixture.chatReply="reply to edit";
+            const int beforeEdit=fixture.chatRequests.size();
+            saveEdit(2,"  turn two edited\nsecond line é ✓  ");
+            check(waitDone(beforeEdit),"saving an edit sends it");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("content").toString()=="turn one" && sent.at(1).toObject().value("role").toString()=="assistant" &&
+                      sent.at(2).toObject().value("role").toString()=="user" && sent.at(2).toObject().value("content").toString()==QString("turn two edited\nsecond line é ✓"),
+                      "an edit sends the messages before it plus the edited text, with only outer whitespace trimmed");
+            }
+            check(rows().size()==4 && rows().at(2)->bubble()->text()==QString("turn two edited\nsecond line é ✓") && rows().at(3)->bubble()->text()=="reply to edit","the screen shows the edited message and a fresh reply");
+            {
+                bool gone=true; for (auto *row : rows()) gone&=!row->bubble()->text().contains("turn three");
+                check(gone,"the old continuation is gone from the screen");
+            }
+            check(input->toPlainText()=="my draft" && sendButton->isEnabled(),"the draft in the main composer is untouched by editing");
+            input->clear();
+            const int beforeFirst=fixture.chatRequests.size();
+            check(openEditor(0),"the first message can be edited too");
+            saveEdit(0,"turn one edited");
+            check(waitDone(beforeFirst),"editing the first message sends it");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==1 && sent.at(0).toObject().value("content").toString()=="turn one edited" && rows().size()==2 && rows().at(0)->bubble()->text()=="turn one edited",
+                      "editing the first message branches from the start: just it and its reply remain");
+            }
+
+            // A long chat, edited at the compaction threshold.
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.usageUsed=1000; fixture.chatReply="reply A";
+            bool grownLong=true; for (int i=1;i<=5;++i) grownLong&=sendAndWait(QString("long %1").arg(i));
+            check(grownLong && rows().size()==10,"a five-turn chat is built for the threshold checks");
+            pump(700); fixture.usageUsed=3600; fixture.usageRequests.clear(); fixture.compactRequests.clear();
+            const int beforeLong=fixture.chatRequests.size();
+            check(openEditor(6),"turn four can be edited");
+            saveEdit(6,"long 4 edited");
+            check(waitDone(beforeLong) && fixture.compactRequests.size()==1,"an edit at the threshold compacts first");
+            {
+                QJsonArray measured; for (const QString &body : fixture.usageRequests) if (measured.isEmpty() && mentions(messagesOf(body),"long 4 edited")) measured=messagesOf(body);   // the first one is the measurement made when the edit was saved
+                check(measured.size()==7 && !mentions(measured,"long 5") && measured.last().toObject().value("content").toString()=="long 4 edited","the usage request for an edit excludes the old continuation");
+                const QJsonObject compact=json(fixture.compactRequests); const QJsonArray posted=compact.value("messages").toArray();
+                check(posted.size()==7 && !mentions(posted,"long 5") && posted.last().toObject().value("content").toString()=="long 4 edited" && compact.value("previous_summary").toString().isEmpty(),
+                      "compaction for an edit uses only the messages before the edit point");
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==4 && sent.at(0).toObject().value("role").toString()=="system" && !mentions(sent,"long 5") && sent.last().toObject().value("content").toString()=="long 4 edited","the model gets the summary, the messages kept before the edit and the edited text");
+            }
+            check(dividers().size()==1 && rows().size()==8,"the compaction divider and the shortened conversation are on screen");
+
+            // Stop during a compaction started by an edit.
+            fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+            const int chatsBeforeEditStop=fixture.chatRequests.size(), compactsBeforeEditStop=fixture.compactRequests.size(), rowsBeforeEditStop=rows().size();
+            openEditor(6); saveEdit(6,"another try");
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeEditStop+1 && fixture.heldCompactSocket; }) && status().contains("Compacting"),"saving an edit at the threshold starts a compaction");
+            stopButton->click(); pump(300);
+            check(rows().size()==rowsBeforeEditStop && rows().at(6)->isEditing() && boxOf(rows().at(6))->toPlainText()=="another try" && rows().at(6)->bubble()->text()=="long 4 edited" && fixture.chatRequests.size()==chatsBeforeEditStop,
+                  "Stop during that compaction reopens the editor with the typed text and leaves the conversation unchanged");
+            // Clearing the chat while an edit is being compacted.
+            fixture.heldCompactSocket.clear();
+            rows().at(6)->findChild<QPushButton *>("editSave")->click();
+            check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeEditStop+2 && fixture.heldCompactSocket; }),"the edit is compacting again");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            fixture.releaseHeldCompact(); pump(300);
+            check(fixture.chatRequests.size()==chatsBeforeEditStop && rows().isEmpty() && dividers().isEmpty() && sendButton->isEnabled()==false,"clearing the chat while an edit is being compacted cancels it and a late reply changes nothing");
+            fixture.holdCompact=false; input->clear();
+
+            // Backend not ready.
+            fixture.usageUsed=1000;
+            check(sendAndWait("ready check") && rows().size()==2,"a chat exists for the offline check");
+            openEditor(0); client.setBaseUrl(QString());
+            saveEdit(0,"edited offline"); pump(100);
+            check(rows().at(0)->isEditing() && boxOf(rows().at(0))->toPlainText()=="edited offline" && status().contains("Backend not connected") && rows().at(0)->bubble()->text()=="ready check",
+                  "with the backend not ready the editor stays open with its text");
+            client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+            sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+
+            // Pencils follow the streaming state.
+            fixture.holdChat=true; input->setPlainText("stream me"); pump(20); sendButton->click();
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a held reply is streaming");
+            {
+                bool off=true; for (auto *row : rows()) if (auto *p=pencilOf(row)) off&=!p->isEnabled();
+                check(off,"pencils are disabled while a reply is streaming");
+            }
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+            {
+                bool on=true; for (auto *row : rows()) if (auto *p=pencilOf(row)) on&=p->isEnabled();
+                check(on,"pencils are enabled again once the reply ends");
+            }
+
+            // Clearing the chat while an editor is open.
+            openEditor(0);
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->setPlainText("after clear"); pump(20);
+            check(rows().isEmpty() && sendButton->isEnabled(),"clearing the chat while an editor is open leaves no rows and Send works");
+            input->clear();
+
+            // Switching between versions.
+            fixture.usageUsed=1000; fixture.chatReply="orig reply"; fixture.usageRequests.clear(); fixture.chatRequests.clear();
+            auto versionOf=[](MessageRow *row) { auto *sw=row->findChild<VersionSwitcher *>("versionSwitcher"); auto *l=sw?sw->findChild<QLabel *>("versionLabel"):nullptr; return (!sw || sw->isHidden() || !l)?QString():l->text(); };
+            auto arrow=[](MessageRow *row,const char *name) { return row->findChild<QPushButton *>(name); };
+            auto texts=[&]() { QStringList out; for (auto *row : rows()) out << row->bubble()->text(); return out; };
+            check(sendAndWait("s1") && sendAndWait("s2") && sendAndWait("s3") && rows().size()==6,"a three-turn chat exists for the version checks");
+            bool noneYet=true; for (auto *row : rows()) noneYet&=versionOf(row).isEmpty();
+            check(noneYet,"a message with one version shows no switcher");
+            input->setPlainText("draft stays"); pump(20);
+            fixture.chatReply="edit reply";
+            const int beforeV=fixture.chatRequests.size();
+            input->clear(); openEditor(2); saveEdit(2,"s2 edited"); input->setPlainText("draft stays"); // the composer's Send is off while editing, so the draft is typed after saving
+            check(waitDone(beforeV) && rows().size()==4,"editing turn two leaves its new version on screen");
+            check(versionOf(rows().at(2))=="2 / 2" && versionOf(rows().at(0)).isEmpty() && versionOf(rows().at(1)).isEmpty() && versionOf(rows().at(3)).isEmpty(),"an edited message shows 2 / 2 below its bubble, nothing else shows a switcher");
+            fixture.usageRequests.clear();
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(texts()==QStringList({"s1","orig reply","s2","orig reply","s3","orig reply"}) && versionOf(rows().at(2))=="1 / 2","previous shows the original message and its whole conversation");
+            check(waitUntil([&]{ return !fixture.usageRequests.isEmpty(); }) && messagesOf(fixture.usageRequests.last()).size()==7 && messagesOf(fixture.usageRequests.last()).last().toObject().value("content").toString()=="draft stays",
+                  "after a switch the usage request matches the conversation on screen (plus the draft)");
+            arrow(rows().at(2),"versionNext")->click(); pump(200);
+            check(texts()==QStringList({"s1","orig reply","s2 edited","edit reply"}) && versionOf(rows().at(2))=="2 / 2","next returns to the edit and its continuation");
+            { QEnterEvent hover(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(rows().at(2),&hover); pump(60); capture(&chat,"chat-versions"); QEvent unhover(QEvent::Leave); QApplication::sendEvent(rows().at(2),&unhover); }
+            check(input->toPlainText()=="draft stays","switching leaves the draft in the main composer alone");
+            input->clear();
+            const int beforeCont=fixture.chatRequests.size();
+            fixture.chatReply="edit branch reply";
+            check(sendAndWait("s4"),"a message is sent on the edited version");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==5 && sent.at(2).toObject().value("content").toString()=="s2 edited" && !mentions(sent,"s3") && sent.last().toObject().value("content").toString()=="s4" && fixture.chatRequests.size()==beforeCont+1,
+                      "the next send continues from the version on screen");
+            }
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            fixture.chatReply="orig branch reply";
+            check(sendAndWait("s5"),"a message is sent on the original version");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==7 && sent.at(2).toObject().value("content").toString()=="s2" && mentions(sent,"s3") && !mentions(sent,"s4") && !mentions(sent,"s2 edited"),"after switching back, the next send continues the original conversation");
+            }
+            fixture.chatReply="third reply";
+            openEditor(2); saveEdit(2,"s2 again");
+            check(waitDone(fixture.chatRequests.size()-1) && versionOf(rows().at(2))=="3 / 3" && rows().size()==4,"a second edit of the same message shows 3 / 3");
+            check(!arrow(rows().at(2),"versionNext")->isEnabled() && arrow(rows().at(2),"versionPrev")->isEnabled(),"next is off at the last version");
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(versionOf(rows().at(2))=="2 / 3" && texts()==QStringList({"s1","orig reply","s2 edited","edit reply","s4","edit branch reply"}),"stepping back goes through the middle version with its own continuation");
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(versionOf(rows().at(2))=="1 / 3" && !arrow(rows().at(2),"versionPrev")->isEnabled() && rows().size()==8,"previous is off at the first version and the original conversation is whole");
+
+            // Arrows follow what the panel is doing.
+            {
+                auto switchers=[&chat]() { QList<VersionSwitcher *> shown; for (auto *sw : chat.findChildren<VersionSwitcher *>()) if (!sw->isHidden()) shown << sw; return shown; };
+                auto allOff=[&]() { auto all=switchers(); if (all.isEmpty()) return false; for (auto *sw : all) if (sw->findChild<QPushButton *>("versionPrev")->isEnabled() || sw->findChild<QPushButton *>("versionNext")->isEnabled()) return false; return true; };
+                fixture.holdChat=true; input->setPlainText("hold me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }) && allOff(),"arrows are disabled while a reply is streaming");
+                fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+                waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+                check(!allOff() && !switchers().isEmpty(),"arrows work again once the reply ends");
+
+                fixture.usageUsed=3600; fixture.holdCompact=true; fixture.heldCompactSocket.clear();
+                const int compactsV=fixture.compactRequests.size();
+                input->setPlainText("compact me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.compactRequests.size()==compactsV+1 && fixture.heldCompactSocket; }) && allOff(),"arrows are disabled while a send is being prepared");
+                stopButton->click(); pump(300); fixture.holdCompact=false; fixture.heldCompactSocket.clear(); fixture.usageUsed=1000; input->clear();
+                check(!allOff(),"arrows work again after the compaction is stopped");
+
+                check(openEditor(0) && allOff(),"arrows are disabled while an editor is open, so the edit cannot be lost");
+                sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(40);
+                check(!allOff(),"arrows work again once the editor closes");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            check(chat.findChildren<VersionSwitcher *>().isEmpty(),"clearing the chat removes the switchers");
+
+            // A version switch brings back that version's compaction.
+            fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4; fixture.chatReply="c reply";
+            bool grownC=true; for (int i=1;i<=5;++i) grownC&=sendAndWait(QString("c%1").arg(i));
+            fixture.usageUsed=3600;
+            check(grownC && sendAndWait("c6") && dividers().size()==1 && rows().size()==12,"a six-turn chat is compacted once");
+            fixture.usageUsed=1000;
+            const int beforeC=fixture.chatRequests.size();
+            openEditor(2); saveEdit(2,"c2 edited");
+            check(waitDone(beforeC) && rows().size()==4 && dividers().isEmpty(),"editing before the compaction leaves the divider behind");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("role").toString()=="user" && sent.last().toObject().value("content").toString()=="c2 edited","the edited version is sent without the other version's summary");
+            }
+            arrow(rows().at(2),"versionPrev")->click(); pump(200);
+            check(rows().size()==12 && dividers().size()==1 && dividers().first()->text().contains("summarized"),"switching back shows the compaction divider again");
+            check(sendAndWait("c7"),"a message is sent after switching back");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="system" && sent.at(0).toObject().value("content").toString()=="Summary of the earlier conversation: The user asked about X." && sent.last().toObject().value("content").toString()=="c7",
+                      "switching back restores that version's summary for the next send");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Retrying the latest reply.
+            fixture.usageUsed=1000; fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
+            fixture.chatRequests.clear(); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            auto retryOf=[](MessageRow *row) { return row->findChild<QPushButton *>("retryButton"); };
+            auto clickRetry=[&](MessageRow *row) { if (auto *b=retryOf(row)) b->click(); };
+            auto retryOn=[&]() { QList<MessageRow *> on; for (auto *row : rows()) if (auto *b=retryOf(row)) if (b->isEnabled()) on << row; return on; };
+            fixture.chatReply="old reply";
+            check(sendAndWait("t1") && sendAndWait("t2") && rows().size()==4,"a two-turn chat exists for the retry checks");
+            check(retryOn().size()==1 && retryOn().first()==rows().last() && !retryOf(rows().at(0)),"only the latest reply has a retry button");
+            {
+                auto *row=rows().last(); auto *b=retryOf(row);
+                QEnterEvent enter(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(row,&enter); pump(20);
+                const bool shown=b && b->isVisibleTo(row);
+                QEvent leave(QEvent::Leave); QApplication::sendEvent(row,&leave); pump(20);
+                check(shown && b && !b->isVisibleTo(row),"hovering the latest reply shows its retry button, leaving hides it");
+            }
+            input->setPlainText("retry draft"); pump(20);
+            fixture.chatReply="new reply"; const int beforeRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeRetry),"retry sends a request");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(0).toObject().value("content").toString()=="t1" && sent.at(1).toObject().value("role").toString()=="assistant" && sent.at(2).toObject().value("role").toString()=="user" && sent.at(2).toObject().value("content").toString()=="t2",
+                      "retry sends the conversation up to the user message, with no extra user message");
+            }
+            check(rows().size()==4 && rows().last()->bubble()->text()=="new reply" && versionOf(rows().last())=="2 / 2" && versionOf(rows().at(2)).isEmpty(),"retry shows the new reply as version 2 / 2 and the message above keeps one version");
+            check(input->toPlainText()=="retry draft","retry leaves the draft in the main composer alone");
+            input->clear();
+            arrow(rows().last(),"versionPrev")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="old reply" && versionOf(rows().last())=="1 / 2","previous returns to the old reply");
+            arrow(rows().last(),"versionNext")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="new reply" && retryOn().size()==1,"next returns to the new reply, which can be retried again");
+
+            // While a retry streams.
+            fixture.chatReply="streaming retry"; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && rows().size()==4 && rows().last()->bubble()->text().contains("streaming retry"); }),"the retry streams into the place of the old reply");
+            check(!texts().contains("new reply") && retryOn().isEmpty(),"the old reply is not shown while the retry streams, and retry is off");
+            pump(500); fixture.usageRequests.clear();   // from here on every usage request is made while the retry streams
+            chat.refreshContextUsage();
+            check(waitUntil([&]{ return !fixture.usageRequests.isEmpty(); }) && messagesOf(fixture.usageRequests.last()).size()==3,"the usage request during a retry excludes the old reply");
+            { bool off=true; for (auto *sw : chat.findChildren<VersionSwitcher *>()) if (!sw->isHidden()) off&=!sw->findChild<QPushButton *>("versionNext")->isEnabled() && !sw->findChild<QPushButton *>("versionPrev")->isEnabled(); check(off,"version arrows are off while a retry streams"); }
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->write("data: {\"done\":true}\n\n"); fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); }
+            waitUntil([&]{ return sendButton->text()=="Send  ↑"; }); pump(200);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry"),"the finished retry is the third version of the reply");
+
+            // A retry that gives nothing back keeps the previous reply.
+            fixture.chatEmpty=true;
+            clickRetry(rows().last());
+            waitUntil([&]{ return sendButton->text()=="Send  ↑" && fixture.chatRequests.size()>beforeRetry+1 && status().contains("Retry failed"); }); pump(150);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry") && status().contains("Retry failed"),"a retry that returns no text keeps the previous reply and its count");
+            fixture.chatEmpty=false;
+            fixture.chatStatus=500; fixture.usageStatus=409; const int errorsBefore=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            waitUntil([&]{ return fixture.chatRequests.size()>errorsBefore && sendButton->text()=="Send  ↑"; }); pump(150);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry"),"a failed retry request (no model loaded) keeps the previous reply");
+            fixture.chatStatus=200; fixture.usageStatus=200;
+
+            // Stop before any text, then after some text.
+            fixture.chatEmpty=true; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a silent retry is held open");
+            stopButton->click(); pump(300);
+            check(rows().size()==4 && versionOf(rows().last())=="3 / 3" && rows().last()->bubble()->text().contains("streaming retry") && retryOn().size()==1,"Stop before any text keeps the previous reply");
+            fixture.chatSocket.clear(); fixture.chatEmpty=false; fixture.chatReply="partial retry";
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && rows().last()->bubble()->text().contains("partial retry"); }),"a retry streams some text");
+            stopButton->click(); pump(300);
+            fixture.holdChat=false; fixture.chatSocket.clear();
+            check(rows().size()==4 && versionOf(rows().last())=="4 / 4" && rows().last()->bubble()->text().contains("partial retry"),"Stop after some text keeps the partial reply as a new version");
+
+            // Retry is not offered without a backend.
+            {
+                const int requestsBefore=fixture.chatRequests.size();
+                client.setBaseUrl(QString());
+                clickRetry(rows().last()); pump(100);
+                check(status().contains("Backend not connected") && fixture.chatRequests.size()==requestsBefore && rows().size()==4 && versionOf(rows().last())=="4 / 4","retry with the backend not connected changes nothing");
+                client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+            }
+
+            // Clearing the chat while a retry streams.
+            fixture.chatReply="held again"; fixture.holdChat=true; fixture.chatSocket.clear();
+            clickRetry(rows().last());
+            check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"a retry is streaming before the chat is cleared");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(150);
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(150);
+            input->setPlainText("after retry clear"); pump(20);
+            check(rows().isEmpty() && dividers().isEmpty() && sendButton->isEnabled(),"clearing the chat while a retry streams leaves nothing behind");
+            input->clear();
+
+            // Retry at the compaction threshold.
+            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            bool grownR=true; for (int i=1;i<=4;++i) grownR&=sendAndWait(QString("r%1").arg(i));
+            fixture.chatReply="last old"; grownR&=sendAndWait("r5");
+            pump(700); fixture.compactRequests.clear(); fixture.usageRequests.clear();
+            check(grownR && rows().size()==10,"a five-turn chat exists for the retry-at-threshold check");
+            fixture.usageUsed=3600; fixture.chatReply="retry result";
+            const int beforeRC=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeRC) && fixture.compactRequests.size()==1,"retry at the threshold compacts first");
+            {
+                const QJsonObject compact=json(fixture.compactRequests); const QJsonArray posted=compact.value("messages").toArray();
+                check(posted.size()==9 && posted.last().toObject().value("content").toString()=="r5" && !mentions(posted,"last old"),"compaction for a retry posts only the messages up to the user message");
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==6 && sent.at(0).toObject().value("role").toString()=="system" && sent.last().toObject().value("content").toString()=="r5" && !mentions(sent,"last old"),"the retry request carries the summary and the kept messages");
+            }
+            check(dividers().size()==1 && rows().size()==10 && versionOf(rows().last())=="2 / 2","the compaction divider is shown and the reply is a new version");
+            fixture.usageUsed=1000; fixture.chatReply="follow up reply";
+            check(sendAndWait("r6"),"a message is sent after the retry");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="system" && mentions(sent,"retry result") && !mentions(sent,"last old") && sent.last().toObject().value("content").toString()=="r6",
+                      "the next send uses the new reply and the summary made during the retry");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Review fix 1: a retry that fails after compacting must leave the conversation exactly as it was,
+            // and a successful one must keep its summary with its own reply.
+            fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
+            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            bool grownF=true; for (int i=1;i<=5;++i) grownF&=sendAndWait(QString("f%1").arg(i));
+            pump(700); fixture.compactRequests.clear();
+            check(grownF && rows().size()==10,"a five-turn chat exists for the failed-retry checks");
+            fixture.usageUsed=3600; fixture.chatEmpty=true;
+            const int beforeFailedRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            waitUntil([&]{ return fixture.compactRequests.size()==1 && fixture.chatRequests.size()>beforeFailedRetry && sendButton->text()=="Send  ↑"; }); pump(250);
+            check(fixture.compactRequests.size()==1 && rows().size()==10 && dividers().isEmpty() && versionOf(rows().last()).isEmpty(),"a retry that compacts and then returns nothing leaves the conversation as it was");
+            fixture.chatEmpty=false; fixture.usageUsed=1000; fixture.chatReply="after failed retry";
+            check(sendAndWait("f6"),"a message is sent after the failed retry");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==11 && sent.at(0).toObject().value("role").toString()=="user" && !mentions(sent,"Summary of the earlier"),"a failed retry leaves no summary behind for the next send");
+            }
+            fixture.usageUsed=3600; fixture.chatReply="retry won"; fixture.compactRequests.clear();
+            const int beforeGoodRetry=fixture.chatRequests.size();
+            clickRetry(rows().last());
+            check(waitDone(beforeGoodRetry) && fixture.compactRequests.size()==1 && versionOf(rows().last())=="2 / 2" && dividers().size()==1,"a retry that compacts and succeeds is a new version with its divider");
+            arrow(rows().last(),"versionPrev")->click(); pump(200);
+            check(rows().last()->bubble()->text()=="after failed retry" && dividers().isEmpty(),"the old reply comes back without the new reply's divider");
+            fixture.usageUsed=1000; fixture.chatReply="on the old reply";
+            check(sendAndWait("f7"),"a message is sent on the old reply");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.at(0).toObject().value("role").toString()=="user" && !mentions(sent,"Summary of the earlier") && mentions(sent,"after failed retry"),"the old reply is not sent with the summary made for the other reply");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Review fix 2: a message that got no reply can be sent again from its editor, without a second copy.
+            fixture.chatStatus=500; fixture.usageStatus=409; fixture.usageUsed=1000;
+            const int beforeNoReply=fixture.chatRequests.size();
+            input->setPlainText("no reply yet"); pump(20); sendButton->click();
+            waitUntil([&]{ return fixture.chatRequests.size()>beforeNoReply && sendButton->text()=="Send  ↑"; }); pump(250);
+            fixture.chatStatus=200; fixture.usageStatus=200; fixture.chatReply="finally";
+            check(openEditor(0),"the unanswered message can be opened for editing");
+            rows().at(0)->findChild<QPushButton *>("editSave")->click();
+            check(waitDone(beforeNoReply+1),"saving it unchanged sends it again");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==1 && sent.at(0).toObject().value("content").toString()=="no reply yet","it is sent once, not as a second copy of the message");
+            }
+            check(rows().size()==2 && rows().at(1)->bubble()->text()=="finally" && versionOf(rows().at(0)).isEmpty(),"the reply arrives under the same message and it gets no new version");
+            openEditor(0); rows().at(0)->findChild<QPushButton *>("editSave")->click(); pump(200);
+            check(!rows().at(0)->isEditing() && fixture.chatRequests.size()==beforeNoReply+2,"once it has a reply, saving it unchanged is a cancel again");
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
+            // Chat history: the panel saves every change and can open, rename and delete saved chats.
+            {
+                QTemporaryDir historyDir; const QString chatsPath=historyDir.path()+"/chats"; ChatStore history(chatsPath);
+                chat.setChatStore(&history);
+                fixture.chatReply="reply A"; fixture.usageUsed=1000; fixture.usageLimit=4096; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+                fixture.holdChat=false; fixture.holdCompact=false;
+                QStringList announced; const auto announcedLink=QObject::connect(&chat,&ChatPanel::currentChatChanged,[&announced](const QString &id) { announced << id; });
+                int busyFlips=0; const auto busyLink=QObject::connect(&chat,&ChatPanel::busyChanged,[&busyFlips](bool) { ++busyFlips; });
+                auto chatFiles=[&]() { return QDir(chatsPath).entryList({"*.json"},QDir::Files); };
+                auto savedTexts=[&](const QString &id) { QStringList out; if (const auto t=history.load(id)) for (const auto &m : t->messages()) out << m.value("content").toString(); return out; };
+                auto releaseChat=[&]() { fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(100); };
+                auto usageMessages=[&]() {
+                    const int n=fixture.usageRequests.size(); chat.refreshContextUsage(); waitUntil([&]{ return fixture.usageRequests.size()>n; });
+                    return QJsonDocument::fromJson(fixture.usageRequests.last().toUtf8()).object().value("messages").toArray();
+                };
+                auto newChat=[&]() { QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(60); };
+                auto versions=[&]() { QStringList out; for (auto *row : rows()) out << versionOf(row); return out; };
+                auto dividerTexts=[&]() { QStringList out; for (auto *label : dividers()) out << label->text(); return out; };
+
+                newChat();
+                check(chat.currentChatId().isEmpty() && chatFiles().isEmpty() && history.list().isEmpty() && button(&chat,"+  New chat")==nullptr,"history: a blank chat writes nothing, and the toolbar has no New chat button any more");
+
+                // The first message creates the file at once; a half-streamed reply is not saved.
+                fixture.holdChat=true; input->setPlainText("history one"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }),"history: the first reply is streaming");
+                const QString id1=chat.currentChatId();
+                check(!id1.isEmpty() && chatFiles()==QStringList({id1+".json"}) && savedTexts(id1)==QStringList({"history one"}) && announced.size()==2 && announced.last()==id1,"history: the first message creates the chat file at once, ending at the user's message");
+                pump(400);
+                check(savedTexts(id1)==QStringList({"history one"}) && history.list().at(0).title=="history one","history: a reply still streaming is not saved");
+                stopButton->click(); pump(400);
+                check(savedTexts(id1)==QStringList({"history one","reply A"}),"history: Stop keeps the partial reply and saves it");
+                releaseChat();
+
+                // Every kind of change is saved.
+                check(sendAndWait("history two") && savedTexts(id1).size()==4 && savedTexts(id1).at(2)=="history two","history: a finished reply is saved");
+                fixture.chatReply="reply B"; int before=fixture.chatRequests.size();
+                check(openEditor(2),"history: the second message can be edited"); saveEdit(2,"history two edited"); check(waitDone(before),"history: the edit is sent"); pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && savedTexts(id1)==QStringList({"history one","reply A","history two edited","reply B"}) && t->versionCount(t->activePath().at(2))==2,"history: an edit is saved with both versions");
+                }
+                fixture.chatReply="reply C"; before=fixture.chatRequests.size();
+                clickRetry(rows().last()); check(waitDone(before),"history: the reply is retried"); pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && savedTexts(id1).last()=="reply C" && t->versionCount(t->activePath().last())==2,"history: a retry is saved with both versions");
+                }
+                arrow(rows().last(),"versionPrev")->click(); pump(400);
+                check(savedTexts(id1).last()=="reply B","history: switching to an older version is saved");
+                arrow(rows().last(),"versionNext")->click(); pump(400);
+                check(savedTexts(id1).last()=="reply C","history: switching back is saved");
+                fixture.usageUsed=3600; fixture.chatReply="reply D";
+                check(sendAndWait("history three") && dividers().size()==1,"history: a compaction happens in the chat to be saved");
+                fixture.usageUsed=1000; pump(300);
+                {
+                    const auto t=history.load(id1);
+                    check(t && t->compaction().covered>0 && !t->compaction().summary.isEmpty(),"history: the compaction snapshot is saved");
+                    int noteCount=0; if (t) for (auto id : t->activePath()) noteCount+=t->notes(id).size();
+                    check(noteCount==1,"history: the compaction divider note is saved");
+                }
+
+                // Reopening restores the chat exactly.
+                const QStringList beforeTexts=texts(), beforeVersions=versions(), beforeDividers=dividerTexts();
+                const QJsonArray beforeRequest=usageMessages();
+                newChat();
+                check(rows().isEmpty() && chat.currentChatId().isEmpty() && history.list().size()==1 && announced.last().isEmpty(),"history: starting a new chat keeps the old one saved");
+                input->setPlainText("my draft"); pump(20);
+                check(chat.openChat(id1) && chat.currentChatId()==id1 && announced.last()==id1,"history: a saved chat can be opened");
+                check(texts()==beforeTexts && versions()==beforeVersions && dividerTexts()==beforeDividers && input->toPlainText()=="my draft","history: the reopened chat shows the same messages, versions and dividers, and the draft is untouched");
+                input->clear(); pump(20);
+                check(usageMessages()==beforeRequest && beforeRequest.size()>0 && beforeRequest.at(0).toObject().value("role").toString()=="system","history: the reopened chat would send exactly what it sent before, summary included");
+                arrow(rows().at(2),"versionPrev")->click(); pump(300);
+                check(texts().at(2)=="history two","history: older versions are still reachable after reopening");
+                arrow(rows().at(2),"versionNext")->click(); pump(300);
+                check(chat.openChat(id1),"history: opening the chat that is already open is fine");
+
+                // A second chat, then the busy guards.
+                newChat(); fixture.chatReply="reply A";
+                check(sendAndWait("second chat") && history.list().size()==2,"history: a second chat is saved next to the first");
+                const QString id2=chat.currentChatId();
+                check(!id2.isEmpty() && id2!=id1 && history.list().at(0).id==id2,"history: the newest chat is listed first");
+                fixture.holdChat=true; input->setPlainText("busy one"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.chatSocket && sendButton->text()=="Responding…"; }) && chat.isBusy(),"history: a reply is streaming and the chat is busy");
+                const QStringList rowsBusy=texts();
+                check(!chat.openChat(id1) && chat.currentChatId()==id2 && texts()==rowsBusy,"history: a chat cannot be opened while a reply streams");
+                check(!chat.deleteChat(id2) && history.list().size()==2 && !chat.renameChat(id2,"nope"),"history: the busy chat can neither be deleted nor renamed");
+                auto titleOf=[&](const QString &id) { for (const auto &row : history.list()) if (row.id==id) return row.title; return QString("<missing>"); };
+                check(chat.renameChat(id1,"First chat") && titleOf(id1)=="First chat","history: another, idle chat can be renamed meanwhile");
+                stopButton->click(); pump(300); releaseChat();
+                check(!chat.isBusy() && busyFlips>=2,"history: busy turns on and off");
+                check(openEditor(0) && !chat.openChat(id1) && chat.isBusy(),"history: a chat cannot be opened while a message editor is open");
+                sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(60);
+                check(!rows().at(0)->isEditing() && !chat.isBusy(),"history: closing the editor ends the busy state");
+                QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(60);
+                check(chat.openChat(id1),"history: the first chat is opened again");
+                check(sendAndWait("pad 1") && sendAndWait("pad 2") && sendAndWait("pad 3"),"history: the chat is long enough to be compacted");
+                fixture.holdCompact=true; fixture.heldCompactSocket.clear(); fixture.usageUsed=3600;
+                input->setPlainText("prepare me"); pump(20); sendButton->click();
+                check(waitUntil([&]{ return fixture.heldCompactSocket; }) && chat.isBusy() && !chat.openChat(id2) && chat.currentChatId()==id1,"history: a chat cannot be opened while a send is being prepared");
+                newChat(); fixture.releaseHeldCompact(); pump(200); fixture.holdCompact=false; fixture.usageUsed=1000; input->clear();
+
+                // Rename and delete.
+                check(chat.openChat(id1) && chat.renameChat(id1,"  Renamed chat ") && titleOf(id1)=="Renamed chat" && !chat.renameChat(id1,"   ") && !chat.renameChat("not-an-id","x"),"history: a chat can be renamed; an empty title or unknown id cannot");
+                fixture.chatReply="reply E";
+                check(sendAndWait("history four"),"history: the renamed chat continues");
+                pump(300);
+                bool renamedKept=false; for (const auto &row : history.list()) if (row.id==id1) renamedKept=row.title=="Renamed chat" && row.customTitle;
+                check(renamedKept,"history: a renamed chat keeps its name as it grows");
+                arrow(rows().last(),"versionPrev")->click();   // a change that is still waiting to be saved ...
+                check(chat.deleteChat(id1) && !history.load(id1) && chat.currentChatId().isEmpty() && rows().isEmpty() && announced.last().isEmpty(),"history: deleting the open chat leaves a blank chat");
+                pump(500);
+                check(!chatFiles().contains(id1+".json") && history.list().size()==1 && history.list().at(0).id==id2,"history: a deleted chat is not brought back by a late save");
+                check(sendAndWait("after delete") && chat.currentChatId()!=id1 && !chat.currentChatId().isEmpty() && history.list().size()==2,"history: the next message starts a new chat, not the deleted one");
+                const QString id3=chat.currentChatId();
+                check(chat.deleteChat(id2) && chat.currentChatId()==id3 && rows().size()==2 && history.list().size()==1,"history: deleting another chat leaves the open one alone");
+                check(!chat.deleteChat(id2) && !chat.deleteChat("../x"),"history: deleting an unknown chat does nothing");
+
+                // Bad files and failures.
+                newChat(); input->setPlainText("keep this draft"); pump(20);
+                { QFile f(chatsPath+"/"+id3+".json"); check(f.open(QIODevice::WriteOnly|QIODevice::Truncate),"open corrupt-chat fixture"); f.write("junk"); }
+                const QStringList rowsBefore=texts();
+                check(!chat.openChat(id3) && chat.currentChatId().isEmpty() && texts()==rowsBefore && status().contains("could not be opened") && !chat.openChat("0b6c3a52-9d0e-4f1c-8a77-0123456789ab"),"history: an unreadable chat does not open and nothing changes");
+                check(input->toPlainText()=="keep this draft","history: the draft survives a failed open"); input->clear();
+                history.remove(id3);
+                ChatTree victimTree; victimTree.addChild(victimTree.addChild(ChatTree::kRoot,"user","victim chat"),"assistant","ok");
+                const QString victim=history.create(); history.save(victim,victimTree);
+                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+                check(sendAndWait("cannot be saved") && rows().size()==2 && !history.lastError().isEmpty(),"history: a chat that cannot be saved still works");
+                const QString id4=chat.currentChatId();
+                {   // a failure to rename or delete is reported, not silent
+                    const bool renamedOk=chat.renameChat(victim,"cannot rename"); const QString renameStatus=status();
+                    const bool deletedOk=chat.deleteChat(victim); const QString deleteStatus=status();
+                    check(!renamedOk && renameStatus.contains("Could not rename") && statusLine->property("state")=="warn","history: a rename that fails says so");
+                    check(!deletedOk && deleteStatus.contains("Could not delete") && statusLine->property("state")=="warn" && history.list().size()>=1,"history: a delete that fails says so and keeps the chat");
+                }
+                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
+                chat.flushSave(); pump(100);
+                check(savedTexts(id4).size()==2,"history: a save that failed is tried again when the chat is flushed (switching chats or closing)");
+                check(sendAndWait("now it can"),"history: the next message after the folder is fixed is sent"); pump(300);
+                check(chat.currentChatId()==id4 && savedTexts(id4).size()==4,"history: the chat is saved in full once the folder is writable again");
+
+                // The meter's prompt starts a new chat and keeps the old one.
+                if (auto *meter=chat.findChild<ContextMeter *>()) {
+                    emit meter->newChatRequested(); pump(60);
+                    check(rows().isEmpty() && chat.currentChatId().isEmpty() && !savedTexts(id4).isEmpty(),"history: the meter's new-chat prompt starts a new chat and keeps the old one");
+                }
+
+                // Without a store nothing is written and nothing breaks.
+                chat.setChatStore(nullptr); newChat();
+                const int filesBefore=chatFiles().size();
+                check(sendAndWait("no store") && chat.currentChatId().isEmpty() && rows().size()==2,"history: without a store a chat still works");
+                fixture.chatReply="reply F"; before=fixture.chatRequests.size();
+                clickRetry(rows().last()); check(waitDone(before) && rows().last()->bubble()->text()=="reply F","history: retry works without a store");
+                check(openEditor(0),"history: editing works without a store"); sendKey(boxOf(rows().at(0)),Qt::Key_Escape); pump(60);
+                check(chatFiles().size()==filesBefore && !chat.openChat(id4) && !chat.renameChat(id4,"x") && !chat.deleteChat(id4),"history: without a store nothing is written and nothing can be opened, renamed or deleted");
+                newChat();
+                QObject::disconnect(announcedLink); QObject::disconnect(busyLink);
+            }
+
+            // The greeting on every blank chat.
+            {
+                QSettings().remove("profile/name"); Greeting::setUserName("Archit");
+                int hour=9; chat.setHourProviderForTest([&hour]() { return hour; });
+                auto greeting=[&chat]() { auto *label=chat.findChild<QLabel *>("emptyConversation"); return label?label->text():QString(); };
+                auto blank=[&]() { QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(40); };
+                blank();
+                check(Greeting::variants(9,"Archit").contains(greeting()) && !greeting().contains("Your model. Your way.") && chat.findChild<QLabel *>("emptyConversation")->isVisible(),"greeting: a blank chat greets by name for the time of day");
+                bool repeated=false; QString previous=greeting();
+                for (int i=0;i<12;++i) { blank(); repeated|=greeting()==previous; previous=greeting(); }
+                check(!repeated,"greeting: a new blank chat never repeats the previous wording");
+                blank(); const QString fixedText=greeting();
+                QMetaObject::invokeMethod(&chat,"redrawForTest",Qt::DirectConnection); chat.resize(900,640); Theme::setDark(!Theme::isDark()); pump(60); Theme::setDark(!Theme::isDark()); pump(60);
+                check(greeting()==fixedText,"greeting: the wording stays put while the blank chat is on screen (redraw, resize, theme change)");
+                hour=23; blank();
+                check(Greeting::variants(23,"Archit").contains(greeting()),"greeting: a late-night chat says so");
+                hour=14; fixture.chatReply="hello there";
+                check(sendAndWait("greeting test") && !chat.findChild<QLabel *>("emptyConversation")->isVisible(),"greeting: a chat with messages shows no greeting");
+                blank();
+                check(chat.findChild<QLabel *>("emptyConversation")->isVisible() && Greeting::variants(14,"Archit").contains(greeting()),"greeting: going back to a blank chat greets again");
+                // Changing the name in Settings re-greets the blank chat.
+                SettingsPanel nameSettings;
+                auto *nameEdit=nameSettings.findChild<QLineEdit *>("profileName");
+                check(nameEdit && nameEdit->text()=="Archit" && nameEdit->accessibleName()=="Your name","greeting: Settings shows the stored name in a 'Your name' box");
+                if (nameEdit) {
+                    const auto link=QObject::connect(&nameSettings,&SettingsPanel::settingsChanged,&chat,&ChatPanel::reloadContextSettings);
+                    nameEdit->setText("  Ada  "); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName()=="Ada" && Greeting::variants(14,"Ada").contains(greeting()),"greeting: renaming yourself in Settings changes the greeting at once");
+                    nameEdit->setText(""); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName().isEmpty() && Greeting::variants(14,"").contains(greeting()),"greeting: clearing the name drops it from the greeting");
+                    nameEdit->setText(QString(60,'n')); emit nameEdit->editingFinished(); pump(40);
+                    check(Greeting::userName().size()==40,"greeting: a very long name is capped at 40 characters");
+                    QObject::disconnect(link);
+                }
+                // A name saved after the panel was built (the first-launch question) shows up in Settings.
+                {
+                    QSettings().remove("profile/name"); SettingsPanel late; Greeting::setUserName("Zed");
+                    auto *edit=late.findChild<QLineEdit *>("profileName");
+                    late.show(); pump(40);
+                    check(edit && edit->text()=="Zed","settings: the name box shows a name saved after the panel was built");
+                    if (edit) { edit->setFocus(); emit edit->editingFinished(); pump(20); check(Greeting::userName()=="Zed","settings: pressing Return in the name box keeps the name"); }
+                    late.hide(); Greeting::setUserName("Archit");
+                }
+                // Opening a saved chat does not use up a greeting: New chat afterwards never repeats the one last shown.
+                {
+                    QTemporaryDir greetDir; ChatStore greetStore(greetDir.path()+"/chats"); chat.setChatStore(&greetStore);
+                    blank(); fixture.chatReply="hi";
+                    check(sendAndWait("greet me"),"greeting: a chat to reopen is sent");
+                    const QString greetId=chat.currentChatId();
+                    bool repeated2=false;
+                    for (int i=0;i<30;++i) { blank(); const QString shown=greeting(); chat.openChat(greetId); blank(); repeated2|=greeting()==shown; }
+                    check(!repeated2,"greeting: opening a saved chat between two blank chats does not make the greeting repeat");
+                    chat.setChatStore(nullptr); blank();
+                }
+                chat.setHourProviderForTest({}); QSettings().remove("profile/name");
+                blank();
+            }
+            input->clear();
+        }
+        QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
+        chat.hide();
+    }
     settings.show(); pump();
     bool hosted=false; for(auto *edit:settings.findChildren<QLineEdit *>()) hosted|=edit->echoMode()==QLineEdit::Password;
-    check(!hosted && settings.findChild<QComboBox *>()->count()==3,"Settings exposes only supported local engines");
+    QComboBox *engineCombo=nullptr; for(auto *combo:settings.findChildren<QComboBox *>()) if(combo->accessibleName()=="Default inference engine") engineCombo=combo;
+    check(!hosted && engineCombo && engineCombo->count()==3,"Settings exposes only supported local engines");
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
     settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
@@ -899,6 +1858,779 @@ int runUiCheck(const QString &captures) {
         QSvgGenerator svg; svg.setFileName(captures+"/konark-wheel.svg"); svg.setSize(QSize(216,216)); svg.setViewBox(QRect(0,0,216,216));
         svg.setTitle("Magnite · Konark-inspired wheel"); QPainter painter(&svg);
         BrandMark::paint(painter,QRectF(0,0,216,216),QColor(Theme::accentPrimary()));
+    }
+    {
+        using Ids=QList<ChatTree::NodeId>;
+        ChatTree tree;
+        check(tree.isEmpty() && tree.activePath().isEmpty() && tree.messages().isEmpty() && tree.lastOnPath()==ChatTree::kRoot,"chat tree: an empty tree has an empty path and no messages");
+        const auto q1=tree.addChild(ChatTree::kRoot,"user","q1"); const auto a1=tree.addChild(q1,"assistant","a1");
+        const auto q2=tree.addChild(a1,"user","q2"); const auto a2=tree.addChild(q2,"assistant","a2");
+        {
+            const auto msgs=tree.messages();
+            check(!tree.isEmpty() && tree.activePath()==Ids({q1,a1,q2,a2}) && msgs.size()==4 && msgs.at(0).value("role").toString()=="user" && msgs.at(0).value("content").toString()=="q1" &&
+                  msgs.at(3).value("role").toString()=="assistant" && msgs.at(3).value("content").toString()=="a2" && tree.lastOnPath()==a2 && tree.pathIndexOf(q2)==2 &&
+                  tree.parentOf(a1)==q1 && tree.parentOf(q1)==ChatTree::kRoot && tree.role(a1)=="assistant" && tree.content(q2)=="q2",
+                  "chat tree: messages added in turn form the path in order");
+            check(tree.messages(2).size()==2 && tree.messages(2).at(1).value("content").toString()=="a1" && tree.messages(0).isEmpty() && tree.messages(99).size()==4,
+                  "chat tree: messages(pathCount) returns only the leading messages");
+        }
+        const auto q2b=tree.addChild(a1,"user","q2 edited");
+        check(tree.activePath()==Ids({q1,a1,q2b}) && tree.versionCount(q2b)==2 && tree.versionIndex(q2b)==1 && tree.versionIndex(q2)==0 &&
+              tree.versionsOf(q2)==Ids({q2,q2b}) && tree.pathIndexOf(q2)==-1 && tree.messages().size()==3 && tree.versionCount(q1)==1 && tree.versionIndex(q1)==0,
+              "chat tree: a sibling becomes the newest, active version and counts n of n");
+        const auto q2c=tree.addChild(a1,"user","q2 again");
+        check(tree.versionCount(q2c)==3 && tree.versionIndex(q2c)==2 && tree.versionIndex(q2)==0,"chat tree: a second edit of the same message counts 3 of 3");
+        tree.activate(q2);
+        check(tree.activePath()==Ids({q1,a1,q2,a2}) && tree.versionIndex(q2)==0,"chat tree: activating an older version restores its whole continuation");
+        const auto q1b=tree.addChild(ChatTree::kRoot,"user","q1 edited");
+        check(tree.activePath()==Ids({q1b}) && tree.parentOf(q1b)==ChatTree::kRoot && tree.versionCount(q1)==2 && tree.versionIndex(q1b)==1,"chat tree: editing the first message branches from the root");
+        tree.activate(q1);
+        check(tree.activePath()==Ids({q1,a1,q2,a2}),"chat tree: switching the first message back restores the whole earlier conversation");
+        const auto a2c=tree.addChild(q2,"assistant","a2 retried");
+        const auto a2b=tree.addChild(q2b,"assistant","a2 for edit");
+        tree.activate(q2b);
+        check(tree.activePath()==Ids({q1,a1,q2b,a2b}) && tree.versionCount(a2c)==2 && tree.versionsOf(a2b)==Ids({a2b}) && tree.versionCount(a2b)==1,
+              "chat tree: an edit inside an older version branches again");
+        tree.activate(q2);
+        check(tree.activePath()==Ids({q1,a1,q2,a2c}) && tree.versionsOf(a2c)==Ids({a2,a2c}),"chat tree: each version remembers its own latest reply");
+
+        ChatTree t2;
+        const auto u1=t2.addChild(ChatTree::kRoot,"user","u1"); const auto r1=t2.addChild(u1,"assistant","r1");
+        const auto u2=t2.addChild(r1,"user","u2"); const auto r2=t2.addChild(u2,"assistant","r2"); const auto u3=t2.addChild(r2,"user","u3");
+        check(t2.compaction().covered==0 && t2.compaction().summary.isEmpty(),"chat tree: no snapshot means no compaction");
+        t2.setCompaction(u2,{"S0",1}); t2.setCompaction(u3,{"S",2});
+        check(t2.compaction().summary=="S" && t2.compaction().covered==2,"chat tree: compaction is the last snapshot on the path");
+        check(t2.compaction(4).summary=="S0" && t2.compaction(4).covered==1 && t2.compaction(3).summary=="S0" && t2.compaction(2).covered==0,
+              "chat tree: compaction(pathCount) ignores nodes at or after pathCount");
+        t2.addNote(u3,"Context compacted");
+        check(t2.notes(u3)==QStringList({"Context compacted"}) && t2.notes(u2).isEmpty(),"chat tree: notes stay with their node");
+        const auto u3b=t2.addChild(r2,"user","u3 edited");
+        check(t2.compaction().summary=="S0" && t2.compaction().covered==1 && t2.notes(u3b).isEmpty(),"chat tree: a snapshot on a node that left the path no longer applies");
+        t2.activate(u3);
+        check(t2.compaction().summary=="S" && t2.compaction().covered==2 && t2.notes(u3)==QStringList({"Context compacted"}),"chat tree: switching back restores the snapshot and the notes");
+
+        t2.clear();
+        check(t2.isEmpty() && t2.activePath().isEmpty() && t2.compaction().covered==0 && t2.addChild(ChatTree::kRoot,"user","fresh")==1,"chat tree: clear resets everything");
+
+        // JSON round-trip: the whole tree, including versions that are not on screen, comes back unchanged.
+        {
+            ChatTree c; // compacted conversation with an edited first message, an edited reply branch and a retried reply
+            const auto c1=c.addChild(ChatTree::kRoot,"user","c1 é世 \"quoted\"\nline2"); const auto d1=c.addChild(c1,"assistant","d1");
+            const auto c2=c.addChild(d1,"user","c2"); const auto d2=c.addChild(c2,"assistant","d2"); const auto c3=c.addChild(d2,"user","c3");
+            c.setCompaction(c3,{"summary of c1..d1",2}); c.addNote(c3,"Context compacted"); c.addNote(c3,"second note");
+            c.addChild(c2,"assistant","d2 retried"); c.addChild(d1,"user","c2 edited"); c.addChild(ChatTree::kRoot,"user","c1 edited");
+            c.activate(c1); c.activate(c2); // a non-trivial active choice: older versions active, newer ones parked
+            const QJsonObject json=c.toJson();
+            const auto back=ChatTree::fromJson(json);
+            check(back.has_value() && back->toJson()==json,"chat tree json: a reloaded tree writes exactly the same json");
+            if (back) {
+                bool same=back->activePath()==c.activePath() && back->lastOnPath()==c.lastOnPath() && back->messages()==c.messages() &&
+                          back->compaction().summary==c.compaction().summary && back->compaction().covered==c.compaction().covered;
+                for (ChatTree::NodeId id=1; id<=12; ++id)
+                    same &= back->role(id)==c.role(id) && back->content(id)==c.content(id) && back->parentOf(id)==c.parentOf(id) &&
+                            back->versionsOf(id)==c.versionsOf(id) && back->versionIndex(id)==c.versionIndex(id) && back->notes(id)==c.notes(id);
+                check(same,"chat tree json: path, messages, versions, notes and compaction match after a reload");
+                ChatTree reloaded=*back;
+                c.activate(d2); reloaded.activate(d2);
+                check(reloaded.activePath()==c.activePath() && reloaded.messages()==c.messages() && reloaded.compaction().covered==c.compaction().covered && reloaded.compaction().covered==2,
+                      "chat tree json: the request a reloaded conversation would send equals the original's, after switching versions too");
+                reloaded.activate(ChatTree::NodeId(8)); c.activate(ChatTree::NodeId(8)); // the edited first message: another branch
+                check(reloaded.messages()==c.messages() && reloaded.compaction().covered==0,"chat tree json: a parked first-message version comes back with its own continuation");
+                check(reloaded.addChild(reloaded.lastOnPath(),"assistant","after reload")==9,"chat tree json: new messages continue the ids after a reload");
+            }
+            ChatTree empty;
+            const auto emptyBack=ChatTree::fromJson(empty.toJson());
+            check(emptyBack.has_value() && emptyBack->isEmpty() && emptyBack->activePath().isEmpty(),"chat tree json: an empty tree round-trips");
+
+            ChatTree g; const auto gq=g.addChild(ChatTree::kRoot,"user","hi"); const auto gr=g.addChild(gq,"assistant","yo");
+            g.addNote(gq,"n"); g.setCompaction(gr,{"S",1});
+            const QJsonObject good=g.toJson();
+            check(ChatTree::fromJson(good).has_value(),"chat tree json: the small good tree is accepted");
+            auto withNode=[&good](int index,const QString &name,const QJsonValue &value) {
+                QJsonObject o=good; QJsonArray nodes=o.value("nodes").toArray(); QJsonObject n=nodes.at(index).toObject();
+                n.insert(name,value); nodes.replace(index,n); o.insert("nodes",nodes); return o;
+            };
+            auto withTop=[&good](const QString &name,const QJsonValue &value) { QJsonObject o=good; o.insert(name,value); return o; };
+            auto rejects=[&check](const QJsonObject &o,const QString &why) { check(!ChatTree::fromJson(o).has_value(),"chat tree json: rejects "+why); };
+            rejects(withNode(1,"parent",99),"a parent id out of range");
+            rejects(withNode(1,"parent",0),"a child whose parent field disagrees with its parent's child list");
+            rejects(withNode(0,"children",QJsonArray{2,2}),"a child listed twice");
+            rejects(withNode(0,"children",QJsonArray{1}),"a node that is its own child");
+            rejects(withNode(0,"activeChild",5),"an active child that is not one of the children");
+            rejects(withNode(0,"activeChild",0),"a node with children but no active child");
+            rejects(withTop("rootActive",7),"a root active child that is not a root child");
+            rejects(withTop("rootChildren",QJsonArray()),"nodes that cannot be reached from the root");
+            rejects(withTop("rootChildren",QJsonArray{1,2}),"a root child that is not parented by the root");
+            rejects(withNode(0,"role","robot"),"an unknown role");
+            rejects(withNode(0,"content",5),"a content that is not text");
+            rejects(withNode(0,"notes",QJsonArray{1}),"a note that is not text");
+            rejects(withNode(1,"compaction",QJsonObject{{"summary","x"},{"covered",-1}}),"a negative covered count");
+            rejects(withNode(1,"compaction",QJsonObject{{"summary","x"},{"covered",5}}),"a covered count larger than the conversation up to that message");
+            rejects(withNode(0,"id",9),"a node whose id is not its position");
+            rejects(withTop("nodes","nope"),"nodes of the wrong type");
+            rejects(QJsonObject(),"an object with nothing in it");
+            QJsonObject missing=good; missing.remove("nodes"); rejects(missing,"a missing nodes list");
+            QJsonObject missingRoot=good; missingRoot.remove("rootChildren"); rejects(missingRoot,"missing rootChildren");
+        }
+    }
+    {
+        // ChatStore: one json file per chat, atomic writes, bad files skipped and never touched.
+        const bool hadHome=qEnvironmentVariableIsSet("MAGNITE_HOME");
+        const QByteArray savedHome=qgetenv("MAGNITE_HOME");
+        QSettings storageSettings;
+        const QVariant savedDir=storageSettings.value("storage/dataDir");
+        qunsetenv("MAGNITE_HOME"); storageSettings.remove("storage/dataDir");
+#ifdef Q_OS_WIN
+        QString expectedHome=qEnvironmentVariable("APPDATA");
+        if (expectedHome.isEmpty()) expectedHome=QDir::homePath()+"/.magnite";
+        expectedHome+="/Magnite";
+#else
+        const QString expectedHome=QDir::homePath()+"/.magnite";
+#endif
+        check(ChatStore::defaultDir()==QFileInfo(expectedHome).absoluteFilePath()+"/chats","saved chats use the platform backend data home");
+        storageSettings.setValue("storage/dataDir","settings-chats-home");
+        check(ChatStore::defaultDir()==QFileInfo("settings-chats-home").absoluteFilePath()+"/chats","saved chats respect the configured data directory");
+        qputenv("MAGNITE_HOME","env-chats-home");
+        check(ChatStore::defaultDir()==QFileInfo("env-chats-home").absoluteFilePath()+"/chats","saved chats prefer MAGNITE_HOME over saved settings");
+        if (hadHome) qputenv("MAGNITE_HOME",savedHome); else qunsetenv("MAGNITE_HOME");
+        if (savedDir.isValid()) storageSettings.setValue("storage/dataDir",savedDir); else storageSettings.remove("storage/dataDir");
+        QTemporaryDir tmp; const QString dir=tmp.path()+"/chats";
+        auto makeTree=[](const QString &question,const QString &answer) { ChatTree t; const auto q=t.addChild(ChatTree::kRoot,"user",question); if(!answer.isEmpty()) t.addChild(q,"assistant",answer); return t; };
+        auto files=[&dir]() { return QDir(dir).entryList(QDir::Files|QDir::NoDotAndDotDot,QDir::Name); };
+        auto ids=[](const QList<ChatSummary> &rows) { QStringList out; for(const auto &r:rows) out<<r.id; return out; };
+        auto loneSurrogate=[](const QString &text) {
+            for(int i=0;i<text.size();++i) { if(text.at(i).isHighSurrogate()) { if(i+1>=text.size()||!text.at(i+1).isLowSurrogate()) return true; ++i; } else if(text.at(i).isLowSurrogate()) return true; }
+            return false;
+        };
+        int changes=0;
+        ChatStore store(dir);
+        QObject::connect(&store,&ChatStore::changed,[&changes]() { ++changes; });
+        check(store.list().isEmpty() && !QDir(dir).exists(),"chat store: a new store on a fresh folder is empty and creates nothing yet");
+        check(ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789ab") && !ChatStore::validId("") && !ChatStore::validId("../x") && !ChatStore::validId("a/b") &&
+              !ChatStore::validId("0B6C3A52-9D0E-4F1C-8A77-0123456789AB") && !ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789a") && !ChatStore::validId("0b6c3a52-9d0e-4f1c-8a77-0123456789ab.json"),
+              "chat store: only real lowercase uuids are valid ids");
+        const QString idA=store.create();
+        check(ChatStore::validId(idA) && idA!=store.create() && store.list().isEmpty() && !QDir(dir).exists() && changes==0,"chat store: create gives a fresh valid id and writes nothing");
+        const ChatTree treeA=makeTree("How do I join two tables?","Use JOIN.");
+        check(store.save(idA,treeA) && files()==QStringList({idA+".json"}) && changes==1,"chat store: saving writes exactly one file and announces the change");
+        check(store.list().size()==1 && store.list().at(0).id==idA && store.list().at(0).title=="How do I join two tables?" && !store.list().at(0).customTitle && store.list().at(0).created.isValid() && store.list().at(0).updated.isValid(),
+              "chat store: the saved chat is listed with a title from its first message");
+        const auto loadedA=store.load(idA);
+        check(loadedA.has_value() && loadedA->toJson()==treeA.toJson(),"chat store: a saved chat loads back identical");
+        const QString idB=store.create(); store.save(idB,makeTree("Second chat",""));
+        check(ids(store.list())==QStringList({idB,idA}),"chat store: the chat saved most recently is listed first");
+        ChatTree longer=treeA; longer.addChild(longer.lastOnPath(),"user","and left joins?");
+        const QDateTime createdA=store.list().at(1).created;
+        store.save(idA,longer);
+        check(ids(store.list())==QStringList({idA,idB}) && store.list().at(0).created==createdA && store.list().at(0).updated>store.list().at(1).updated,"chat store: saving again moves the chat to the top and keeps its creation time");
+        changes=0;
+        check(store.rename(idB,"  My renamed chat  ") && changes==1 && ids(store.list())==QStringList({idA,idB}),"chat store: renaming changes the title but not the order");
+        {
+            const auto row=store.list().at(1);
+            check(row.title=="My renamed chat" && row.customTitle,"chat store: a renamed chat is trimmed and marked custom");
+        }
+        ChatTree moreB=makeTree("Second chat","reply"); store.save(idB,moreB);
+        check(store.list().at(0).id==idB && store.list().at(0).title=="My renamed chat","chat store: a renamed chat keeps its name when saved again");
+        check(!store.rename(idB,"   ") && !store.rename(idB,"") && !store.rename("not-an-id","x") && !store.rename("0b6c3a52-9d0e-4f1c-8a77-0123456789ab","x") && store.list().at(0).title=="My renamed chat",
+              "chat store: an empty title, a bad id or an unknown chat cannot rename");
+        check(!store.remove("0b6c3a52-9d0e-4f1c-8a77-0123456789ab") && !store.remove("../x"),"chat store: removing an unknown or invalid id does nothing");
+        {
+            ChatStore again(dir);
+            check(ids(again.list())==ids(store.list()) && again.list().at(0).title==store.list().at(0).title && again.list().at(0).updated==store.list().at(0).updated && again.list().at(1).created==store.list().at(1).created,
+                  "chat store: a new store on the same folder lists the same chats in the same order");
+        }
+        check(files().size()==2 && files().filter(QRegularExpression("\\.json$")).size()==2,"chat store: no temporary files are left behind");
+
+        // titles
+        check(ChatStore::titleFor(ChatTree())=="New chat" && ChatStore::titleFor(makeTree("   \n\t ",""))=="New chat","chat store: an empty chat or a blank first message is titled New chat");
+        check(ChatStore::titleFor(makeTree("a\n\nb\t\tc   d",""))=="a b c d","chat store: line breaks and runs of spaces collapse in a title");
+        check(ChatStore::titleFor(makeTree(QString(40,'x'),""))==QString(40,'x') && ChatStore::titleFor(makeTree(QString(100,'y'),""))==QString(40,'y')+QString::fromUtf8("\u2026"),"chat store: a title is cut to 40 characters plus an ellipsis only when longer");
+        {
+            QString emoji; for(int i=0;i<100;++i) emoji+=QString::fromUtf8("\U0001F600");
+            const QString cut=ChatStore::titleFor(makeTree(emoji,""));
+            check(!loneSurrogate(cut) && cut.endsWith(QString::fromUtf8("\u2026")) && cut.size()<=41,"chat store: a long title of non-ASCII characters is never cut inside a character");
+            check(ChatStore::titleFor(makeTree("Caf\u00e9 \u4e16\u754c \"quoted\"",""))=="Caf\u00e9 \u4e16\u754c \"quoted\"","chat store: accents, CJK and quotes survive in a title");
+        }
+        {
+            ChatTree edited=makeTree("original first message","r"); edited.addChild(ChatTree::kRoot,"user","edited first message");
+            check(ChatStore::titleFor(edited)=="original first message","chat store: the title comes from the first version of the first message");
+        }
+
+        // removal
+        check(store.remove(idA) && !files().contains(idA+".json") && ids(store.list())==QStringList({idB}) && !store.load(idA).has_value(),"chat store: removing a chat deletes its file and its row");
+
+        // bad files
+        {
+            const QString good=store.create(); store.save(good,makeTree("good chat","ok"));
+            auto write=[&dir,&check](const QString &name,const QByteArray &bytes) { QFile f(dir+"/"+name); check(f.open(QIODevice::WriteOnly),"open chat-store fixture"); f.write(bytes); };
+            const QString idJunk="11111111-1111-4111-8111-111111111111", idEmpty="22222222-2222-4222-8222-222222222222", idNewer="33333333-3333-4333-8333-333333333333",
+                          idMismatch="44444444-4444-4444-8444-444444444444", idBroken="55555555-5555-4555-8555-555555555555";
+            write("garbage.json","not json at all"); write(idJunk+".json","{ truncated"); write(idEmpty+".json","");
+            QJsonObject newer; { QFile f(dir+"/"+good+".json"); check(f.open(QIODevice::ReadOnly),"read chat-store fixture"); newer=QJsonDocument::fromJson(f.readAll()).object(); }
+            QJsonObject n2=newer; n2["version"]=99; n2["id"]=idNewer; write(idNewer+".json",QJsonDocument(n2).toJson());
+            QJsonObject n3=newer; n3["id"]="66666666-6666-4666-8666-666666666666"; write(idMismatch+".json",QJsonDocument(n3).toJson());
+            QJsonObject n4=newer; n4["id"]=idBroken; QJsonObject tree=n4["tree"].toObject(); tree["rootActive"]=42; n4["tree"]=tree; write(idBroken+".json",QJsonDocument(n4).toJson());
+            const int before=files().size();
+            ChatStore withBad(dir);
+            const QStringList listed=ids(withBad.list());
+            check(listed.contains(good) && listed.contains(idB) && listed.size()==2,"chat store: unreadable, empty, newer-version, mismatched and broken files are left out of the list");
+            check(!withBad.load(idJunk) && !withBad.load(idEmpty) && !withBad.load(idNewer) && !withBad.load(idMismatch) && !withBad.load(idBroken) && withBad.load(good).has_value(),"chat store: loading a bad file gives nothing, loading a good one still works");
+            check(files().size()==before && files().contains("garbage.json") && files().contains(idJunk+".json") && files().contains(idEmpty+".json") && files().contains(idNewer+".json"),"chat store: bad files stay on disk untouched");
+            check(withBad.save(good,makeTree("good chat","ok again")) && withBad.rename(good,"still works"),"chat store: saving and renaming still work next to bad files");
+            for(const auto &name:{"garbage.json"}) QFile::remove(dir+"/"+name);
+            for(const auto &id:{idJunk,idEmpty,idNewer,idMismatch,idBroken}) QFile::remove(dir+"/"+id+".json");
+        }
+
+        // failures
+        {
+            QFile blocker(tmp.path()+"/blocker"); check(blocker.open(QIODevice::WriteOnly),"open blocked-store fixture"); blocker.write("x"); blocker.close();
+            ChatStore blocked(tmp.path()+"/blocker/chats");
+            check(!blocked.save(blocked.create(),makeTree("x","y")) && !blocked.lastError().isEmpty() && blocked.list().isEmpty(),"chat store: a folder that cannot be created fails the save with a message");
+            const QString keep=ids(store.list()).first();
+            const auto before=store.load(keep);
+            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+            const bool saved=store.save(keep,makeTree("changed","changed"));
+            const QString error=store.lastError();
+            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
+            const auto after=store.load(keep);
+            check(!saved && !error.isEmpty() && before.has_value() && after.has_value() && before->toJson()==after->toJson(),"chat store: a failed save reports an error and leaves the previous file intact");
+        }
+    }
+    {
+        // Greeting: time-of-day wording and the stored name.
+        QSettings().remove("profile/name"); QSettings().remove("profile/nameAsked");
+        const QStringList morning=Greeting::variants(5,"Archit");
+        check(morning.size()==3 && morning.at(0)=="Good morning, Archit" && morning.at(1)=="Morning, Archit" && morning.at(2)=="Rise and shine, Archit","greeting: the morning wordings use the name");
+        check(Greeting::variants(14,"Archit")==QStringList({"Good afternoon, Archit","Afternoon, Archit","Hope your day is going well, Archit"}),"greeting: the afternoon wordings");
+        check(Greeting::variants(19,"Archit")==QStringList({"Good evening, Archit","Evening, Archit","Winding down, Archit?"}),"greeting: the evening wordings");
+        check(Greeting::variants(23,"Archit")==QStringList({"Up late, Archit?","Burning the midnight oil, Archit?","Still up, Archit?"}),"greeting: the late-night wordings, ending in a question");
+        const QMap<int,QString> bands={{0,"Up late"},{3,"Up late"},{4,"Up late"},{5,"Good morning"},{11,"Good morning"},{12,"Good afternoon"},{16,"Good afternoon"},{17,"Good evening"},{21,"Good evening"},{22,"Up late"},{23,"Up late"}};
+        bool edges=true; for(auto it=bands.begin();it!=bands.end();++it) edges&=Greeting::variants(it.key(),"A").at(0).startsWith(it.value());
+        check(edges,"greeting: every hour lands in the right band, including 4/5, 11/12, 16/17, 21/22 and midnight");
+        check(Greeting::variants(-3,"A").at(0).startsWith("Up late") && Greeting::variants(27,"A").at(0).startsWith("Up late"),"greeting: an hour outside 0-23 does not crash");
+        check(Greeting::variants(5,"").at(0)=="Good morning" && Greeting::variants(5,"   ").at(1)=="Morning" && Greeting::variants(5,"").at(2)=="Rise and shine","greeting: without a name the wording drops it");
+        check(Greeting::variants(23,"").at(0)=="Up late?" && Greeting::variants(23,"").at(1)=="Burning the midnight oil?" && Greeting::variants(19,"").at(2)=="Winding down?","greeting: without a name the question marks stay");
+        {
+            const QStringList options=Greeting::variants(5,"A");
+            bool never=true; for(int r=0;r<=20;++r) for(const QString &previous:options) never&=Greeting::pick(options,previous,r)!=previous;
+            check(never,"greeting: pick never repeats the previous wording");
+            check(Greeting::pick({"only"},"only",7)=="only" && Greeting::pick(options,QString(),1)==options.at(1) && Greeting::pick(options,QString(),4)==options.at(1),"greeting: pick uses the random number, and a single option is returned even if repeated");
+            check(!Greeting::pick(options,"x",-5).isEmpty() && !Greeting::pick(options,"x",2000000000).isEmpty() && Greeting::pick({}, "x", 3).isEmpty(),"greeting: pick copes with negative, huge and empty input");
+        }
+        check(Greeting::cleanName("  Ada  ")=="Ada" && Greeting::cleanName("   ").isEmpty() && Greeting::cleanName(QString(60,'n')).size()==40 && Greeting::cleanName("Zo\u00eb \u4e16\u754c")=="Zo\u00eb \u4e16\u754c","greeting: names are trimmed, capped at 40 characters and keep non-ASCII");
+        {
+            QString emoji; for(int i=0;i<30;++i) emoji+=QString::fromUtf8("\U0001F600");
+            const QString cut=Greeting::cleanName(emoji);
+            bool lone=false; for(int i=0;i<cut.size();++i) { if(cut.at(i).isHighSurrogate()) { if(i+1>=cut.size()||!cut.at(i+1).isLowSurrogate()) lone=true; ++i; } else if(cut.at(i).isLowSurrogate()) lone=true; }
+            check(!lone && cut.size()<=40,"greeting: a long name is never cut inside a character");
+        }
+        check(Greeting::userName().isEmpty() && !Greeting::nameAsked(),"greeting: no name and not asked before anything is stored");
+        Greeting::setUserName("  Archit "); Greeting::setNameAsked(true);
+        check(Greeting::userName()=="Archit" && Greeting::nameAsked() && QSettings().value("profile/name").toString()=="Archit","greeting: the name and the asked flag are stored in Settings");
+        Greeting::setUserName("   ");
+        check(Greeting::userName().isEmpty(),"greeting: a blank name clears it");
+        QSettings().remove("profile/name"); QSettings().remove("profile/nameAsked");
+        const QString suggestion=Greeting::accountNameSuggestion();
+        check(suggestion.isEmpty() || suggestion.at(0).isUpper() || !suggestion.at(0).isLetter(),"greeting: the account name suggestion starts with a capital letter");
+    }
+    {
+        // Sidebar state: the decisions behind the collapsible left menu.
+        const QString key=SidebarState::kSettingsKey;
+        QSettings().remove(key);
+        SidebarState s;
+        check(!s.collapsed() && s.width()==176 && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
+        s.setCollapsed(true);
+        check(s.width()==52 && !s.showLabels() && !s.showHistory(true) && s.showNewChatButton(true) && !s.showNewChatButton(false),"sidebar state: collapsed hides labels and list, offers + only on Playground");
+        check(s.toggleTooltip()=="Expand sidebar \u00b7 Ctrl+B","sidebar state: the collapsed toggle offers to expand");
+        check(s.toggle()==false && !s.collapsed() && s.toggleTooltip()=="Collapse sidebar \u00b7 Ctrl+B" && s.toggle()==true && s.collapsed(),"sidebar state: toggle returns the new state and flips back and forth");
+        check(!SidebarState::load().collapsed(),"sidebar state: nothing stored means expanded");
+        SidebarState(true).save();
+        check(SidebarState::load().collapsed() && QSettings().value(key).toBool(),"sidebar state: a collapsed choice is stored and loaded");
+        SidebarState(false).save();
+        check(!SidebarState::load().collapsed(),"sidebar state: an expanded choice is stored and loaded");
+        QSettings().setValue(key,"true");
+        check(SidebarState::load().collapsed(),"sidebar state: a stored text \"true\" counts as collapsed");
+        QSettings().setValue(key,"banana");
+        check(!SidebarState::load().collapsed(),"sidebar state: a garbage value counts as expanded");
+        QSettings().remove(key);
+    }
+    {
+        // The sidebar widget, expanded: the left menu as the main window used to build it inline.
+        const bool wasDark=Theme::isDark();
+        QSettings().remove(SidebarState::kSettingsKey);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        Sidebar sidebar(items,{"Settings","settings",5},4);
+        QList<int> requested; QObject::connect(&sidebar,&Sidebar::panelRequested,[&](int panel){ requested<<panel; });
+        QList<ChatSummary> saved; for (int i=0;i<7;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        sidebar.history()->setChats(saved,QString());
+        sidebar.resize(176,680); sidebar.show(); pump();
+        auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto nav=navButtons();
+        const QStringList tips={"Library \u00b7 Ctrl+1","Training \u00b7 Ctrl+2","Knowledge \u00b7 Ctrl+3","Adapters \u00b7 Ctrl+4","Playground \u00b7 Ctrl+5","Settings \u00b7 Ctrl+6"};
+        bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
+        check(tipsOk&&sidebar.width()==176,"sidebar: six nav buttons with today's tooltips in a 176px column");
+        nav[1]->click();
+        check(requested==QList<int>({1}),"sidebar: clicking a button asks for its panel");
+        requested.clear(); bool shortcutsOk=true;
+        for (int n=1;n<=6;++n) {
+            QShortcut *found=nullptr; for (auto *sc : sidebar.findChildren<QShortcut *>()) if (sc->key().toString()==QString("Ctrl+%1").arg(n)) found=sc;
+            shortcutsOk&=found!=nullptr; if (found) emit found->activated();
+        }
+        check(shortcutsOk&&requested==QList<int>({0,1,2,3,4,5}),"sidebar: Ctrl+1..6 ask for their panels");
+        sidebar.setCurrentPanel(4);
+        bool onlyChat=true; for (auto it=nav.begin();it!=nav.end();++it) onlyChat&=it.value()->isChecked()==(it.key()==4);
+        check(onlyChat&&sidebar.history()->isVisibleTo(&sidebar),"sidebar: the open workspace is checked and Playground shows the chat list");
+        sidebar.setCurrentPanel(1);
+        bool onlyTraining=true; for (auto it=nav.begin();it!=nav.end();++it) onlyTraining&=it.value()->isChecked()==(it.key()==1);
+        check(onlyTraining&&!sidebar.history()->isVisibleTo(&sidebar),"sidebar: other workspaces hide the chat list");
+        bool iconsOk=true;
+        for (bool dark : {true,false}) {
+            Theme::setDark(dark); sidebar.refreshIcons();
+            iconsOk&=nav[1]->icon().pixmap(18,18).toImage()!=nav[0]->icon().pixmap(18,18).toImage();
+        }
+        check(iconsOk,"sidebar: the open workspace's icon is tinted differently in both themes");
+        sidebar.setCurrentPanel(4); pump();
+        bool fits=true; QList<QWidget *> column; for (int i=0;i<5;++i) column<<nav[i]; column<<sidebar.history();
+        for (int i=0;i<column.size();++i) {
+            fits&=sidebar.rect().contains(column[i]->geometry());
+            if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
+        }
+        fits&=sidebar.rect().contains(nav[5]->geometry())&&sidebar.history()->geometry().bottom()<nav[5]->geometry().top();
+        check(fits,"sidebar: everything fits 176x680 with a populated chat list, nothing overlapping");
+        check(sidebar.brandSeal()&&sidebar.brandSeal()->property("brandMark").toBool(),"sidebar: the brand seal is the animated brand mark");
+        Theme::setDark(wasDark);
+    }
+    {
+        // The sidebar widget, collapsed into a slim icon strip.
+        const bool wasDark=Theme::isDark();
+        const QString key=SidebarState::kSettingsKey;
+        QSettings().remove(key);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        const QStringList labels={"Library","Training","Knowledge","Adapters","Playground","Settings"};
+        Sidebar strip(items,{"Settings","settings",5},4);
+        QList<ChatSummary> saved; for (int i=0;i<3;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        strip.history()->setChats(saved,QString());
+        strip.show(); strip.setCurrentPanel(4); pump();
+        int collapsedSignals=0; bool lastCollapsed=false;
+        QObject::connect(&strip,&Sidebar::collapsedChanged,[&](bool c){ ++collapsedSignals; lastCollapsed=c; });
+        auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : strip.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto *toggle=strip.findChild<QPushButton *>("sidebarToggle");
+        check(toggle&&!strip.isCollapsed()&&strip.width()==176&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
+        strip.setCollapsed(true); pump();
+        auto buttons=nav();
+        bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
+        for (int i=0;i<6&&strippedOk;++i) strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&buttons[i]->toolTip().startsWith(labels[i]+" \u00b7 Ctrl+");
+        check(strippedOk,"sidebar: collapsing makes a 52px icon strip; the labels stay as tooltips and accessible names");
+        bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
+        for (auto *tag : strip.findChildren<QLabel *>("studioTag")) hidden&=!tag->isVisibleTo(&strip);
+        check(hidden&&strip.brandSeal()->width()<=32&&strip.brandSeal()->isVisibleTo(&strip),"sidebar: the strip hides the wordmark and tags and shrinks the logo to a small mark");
+        strip.setCurrentPanel(4);
+        check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
+        check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
+        strip.setCollapsed(false); pump();
+        buttons=nav(); bool backOk=strip.width()==176&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==76;
+        for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];
+        check(backOk,"sidebar: expanding brings back the text, the logo, the wordmark and the chat list");
+        strip.setCollapsed(true); pump();
+        for (bool dark : {true,false}) {
+            Theme::setDark(dark); strip.refreshIcons(); pump();
+            buttons=nav(); strip.setCurrentPanel(4);
+            strip.resize(52,680); pump();
+            QList<QWidget *> column={strip.brandSeal(),toggle}; for (int i=0;i<5;++i) column<<buttons[i];
+            bool fits=true; for (int i=0;i<column.size();++i) {
+                fits&=strip.rect().contains(column[i]->geometry());
+                if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
+            }
+            fits&=strip.rect().contains(buttons[5]->geometry())&&buttons[4]->geometry().bottom()<buttons[5]->geometry().top();
+            check(fits,QString("sidebar: the strip fits 52x680 in %1 mode").arg(dark?"dark":"light"));
+            const QImage shot=strip.grab().toImage();
+            auto hasAccent=[&](QPushButton *b) {
+                const QColor accent(Theme::accentPrimary()); const qreal dpr=shot.devicePixelRatio(); const QRect r=b->geometry();
+                for (int x=qRound(r.left()*dpr);x<qRound((r.left()+5)*dpr);++x) for (int y=qRound(r.top()*dpr);y<=qRound(r.bottom()*dpr);++y) {
+                    const QColor c=shot.pixelColor(x,y);
+                    if (qAbs(c.red()-accent.red())<=12&&qAbs(c.green()-accent.green())<=12&&qAbs(c.blue()-accent.blue())<=12) return true;
+                }
+                return false;
+            };
+            check(hasAccent(buttons[4])&&!hasAccent(buttons[0]),QString("sidebar: the open workspace keeps the orange marker in the strip (%1)").arg(dark?"dark":"light"));
+            {
+                // Icon centring: the ink of an idle button's icon sits in the middle of the button.
+                const qreal dpr=shot.devicePixelRatio(); const QRect r=buttons[0]->geometry();
+                const QColor back=shot.pixelColor(qRound((r.left()+2)*dpr),qRound((r.top()-4)*dpr));
+                int minX=100000,maxX=-1;
+                for (int x=qRound((r.left()+4)*dpr);x<qRound((r.right()-2)*dpr);++x) for (int y=qRound((r.top()+4)*dpr);y<qRound((r.bottom()-4)*dpr);++y) {
+                    const QColor c=shot.pixelColor(x,y);
+                    if (qAbs(c.red()-back.red())+qAbs(c.green()-back.green())+qAbs(c.blue()-back.blue())>90) { minX=qMin(minX,x); maxX=qMax(maxX,x); }
+                }
+                const qreal inkCentre=(minX+maxX)/2.0/dpr, buttonCentre=r.left()+r.width()/2.0;
+                check(maxX>minX&&qAbs(inkCentre-buttonCentre)<=2.5,QString("sidebar: the strip's icons sit in the middle of their buttons (%1)").arg(dark?"dark":"light"));
+            }
+            check(buttons[4]->icon().pixmap(18,18).toImage()!=buttons[0]->icon().pixmap(18,18).toImage(),QString("sidebar: the strip's icons are re-tinted after a theme switch (%1)").arg(dark?"dark":"light"));
+        }
+        Theme::setDark(wasDark);
+        strip.setCollapsed(false); collapsedSignals=0; QSettings().remove(key);
+        const QImage openChevron=toggle->icon().pixmap(14,14).toImage();
+        toggle->click(); pump();
+        check(strip.isCollapsed()&&collapsedSignals==1&&QSettings().value(key).toBool()&&strip.width()==52,"sidebar: clicking the toggle collapses, announces it and stores the choice");
+        check(toggle->icon().pixmap(14,14).toImage()!=openChevron,"sidebar: the toggle's arrow flips with the state");
+        toggle->click(); pump();
+        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==176,"sidebar: clicking again expands and stores the choice");
+        QShortcut *ctrlB=nullptr; for (auto *sc : strip.findChildren<QShortcut *>()) if (sc->key().toString()=="Ctrl+B") ctrlB=sc;
+        bool ctrlBOk=ctrlB&&ctrlB->context()==Qt::WindowShortcut;
+        if (ctrlB) { emit ctrlB->activated(); pump(); ctrlBOk&=strip.isCollapsed(); emit ctrlB->activated(); pump(); ctrlBOk&=!strip.isCollapsed(); }
+        check(ctrlBOk,"sidebar: Ctrl+B toggles the sidebar from anywhere in the window");
+        QPlainTextEdit box; QKeyEvent override(QEvent::ShortcutOverride,Qt::Key_B,Qt::ControlModifier); override.ignore();
+        QApplication::sendEvent(&box,&override);
+        check(!override.isAccepted(),"sidebar: the chat box does not swallow Ctrl+B");
+        QSettings().setValue(key,true);
+        Sidebar saved1(items,{"Settings","settings",5},4); saved1.show();
+        bool startOk=saved1.width()==52&&saved1.isCollapsed();
+        for (auto *b : saved1.findChildren<QPushButton *>("navBtn")) startOk&=b->text().isEmpty();
+        check(startOk,"sidebar: a stored collapsed choice shows at once, before anything is processed");
+        QSettings().setValue(key,"banana");
+        Sidebar garbage(items,{"Settings","settings",5},4); garbage.show();
+        check(!garbage.isCollapsed()&&garbage.width()==176,"sidebar: a garbage stored value starts expanded");
+        QSettings().remove(key);
+    }
+    {
+        // The + under Playground, the busy state, focus and the slide.
+        const QString key=SidebarState::kSettingsKey, reducedKey="appearance/studio3ReducedMotion";
+        QSettings().remove(key); QSettings().remove(reducedKey);
+        const QList<Sidebar::NavItem> items={{"Library","box",0},{"Training","graduation-cap",1},{"Knowledge","database",2},{"Adapters","layers",3},{"Playground","message-circle",4}};
+        Sidebar bar(items,{"Settings","settings",5},4);
+        bar.setAnimationsEnabled(false);
+        QList<ChatSummary> saved; for (int i=0;i<3;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
+        bar.history()->setChats(saved,QString());
+        bar.show(); pump();
+        auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
+        auto *plus=bar.findChild<QPushButton *>("sidebarNewChat");
+        bool matrix=plus!=nullptr;
+        for (bool collapsed : {false,true}) for (int panel : {1,4}) {
+            bar.setCollapsed(collapsed); bar.setCurrentPanel(panel);
+            matrix&=plus&&plus->isVisibleTo(&bar)==(collapsed&&panel==4);
+        }
+        check(matrix,"sidebar: the + shows only while collapsed and Playground is open");
+        bar.setCollapsed(true); bar.setCurrentPanel(4); pump();
+        auto buttons=nav();
+        const QRect pr=plus->geometry(), play=buttons[4]->geometry(), settings=buttons[5]->geometry();
+        check(plus->toolTip()=="New chat"&&plus->accessibleName()=="New chat"&&pr.top()>play.bottom()&&pr.bottom()<settings.top()&&qAbs(pr.center().x()-bar.width()/2)<=2,"sidebar: the + sits just under Playground, centred, named New chat");
+        int asked=0; QObject::connect(&bar,&Sidebar::newChatRequested,[&]{ ++asked; });
+        plus->click();
+        check(asked==1,"sidebar: the + asks for a new chat");
+        auto *listNew=bar.history()->findChild<QPushButton *>("historyNew");
+        bar.setBusy(true);
+        check(listNew&&!plus->isEnabled()&&!listNew->isEnabled(),"sidebar: busy turns off the + and the list's New chat row together");
+        bar.setBusy(false);
+        check(plus->isEnabled()&&listNew->isEnabled(),"sidebar: not busy turns both back on");
+        bar.setCollapsed(false); bar.setCurrentPanel(4); pump();
+        bar.history()->findChild<QListWidget *>("historyList")->setFocus(); pump();
+        check(bar.focusWidget()==bar.history()->findChild<QListWidget *>("historyList"),"sidebar: the chat list can hold focus (setup for the next check)");
+        bar.setCollapsed(true); pump();
+        check(bar.focusWidget()==nav()[4],"sidebar: collapsing moves focus off the hidden chat list to Playground");
+        bar.setCollapsed(false); bar.setCurrentPanel(4); nav()[0]->setFocus(); bar.setCollapsed(true); pump();
+        check(bar.focusWidget()==nav()[0],"sidebar: collapsing leaves focus alone when it was not in the chat list");
+        {
+            // Focus that moved out of the sidebar after the chat list had it must stay where it is (e.g. the chat box).
+            QWidget host; auto *row=new QHBoxLayout(&host); row->setContentsMargins(0,0,0,0);
+            Sidebar inner(items,{"Settings","settings",5},4); inner.setAnimationsEnabled(false); inner.history()->setChats(saved,QString());
+            auto *box=new QLineEdit; row->addWidget(&inner); row->addWidget(box);
+            host.resize(600,680); host.show(); inner.setCurrentPanel(4); pump();
+            inner.history()->findChild<QListWidget *>("historyList")->setFocus(); box->setFocus(); pump();
+            inner.setCollapsed(true); pump();
+            check(host.focusWidget()==box,"sidebar: collapsing does not steal focus that already moved to the chat box");
+        }
+        // The slide.
+        bar.setCollapsed(false); pump();
+        bar.setAnimationsEnabled(true);
+        bar.toggle();
+        check(bar.isCollapsed()&&bar.width()==176,"sidebar: a slide starts from the current width (state flips at once)");
+        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=176; }
+        check(waitUntil([&]{ return bar.width()==52; },1000)&&inRange&&bar.minimumWidth()==52&&bar.maximumWidth()==52,"sidebar: collapsing slides down to exactly 52px");
+        bar.toggle();
+        check(!bar.isCollapsed()&&bar.width()==52,"sidebar: expanding starts from the strip width");
+        check(waitUntil([&]{ return bar.width()==176&&bar.maximumWidth()==176; },1000),"sidebar: expanding slides up to exactly 176px");
+        bool textBack=true; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) textBack&=!b->text().isEmpty();
+        check(textBack&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar),"sidebar: the text and wordmark are back once the slide ends");
+        bar.toggle(); bar.toggle(); pump(300);
+        bool looksExpanded=bar.width()==176&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==76&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
+        for (auto *b : bar.findChildren<QPushButton *>("navBtn")) looksExpanded&=!b->text().isEmpty();
+        check(looksExpanded,"sidebar: two quick toggles end expanded, 176px, drawn expanded (text, wordmark, full logo), stored as expanded");
+        bar.toggle(); bar.toggle(); bar.toggle();
+        check(waitUntil([&]{ return bar.width()==52; },1000)&&bar.isCollapsed()&&QSettings().value(key).toBool(),"sidebar: three quick toggles end collapsed, 52px, stored as collapsed");
+        QSettings().setValue(reducedKey,true);
+        bar.toggle();
+        check(!bar.isCollapsed()&&bar.width()==176,"sidebar: with reduced motion the change is instant");
+        QSettings().remove(reducedKey); QSettings().remove(key);
+    }
+    {
+        // The first-launch question.
+        NameDialog asked("Archit");
+        auto *edit=asked.findChild<QLineEdit *>("nameInput"); auto *save=button(&asked,"Save"); auto *skip=button(&asked,"Skip");
+        bool heading=false; for (auto *label : asked.findChildren<QLabel *>()) heading|=label->text()=="What should I call you?";
+        check(edit && save && skip && heading && edit->text()=="Archit" && edit->accessibleName()=="Your name","name dialog: asks 'What should I call you?' with the suggestion filled in, plus Save and Skip");
+        asked.show(); pump(40);
+        if (edit && save && skip) {
+            edit->setText("  Ada  "); save->click(); pump(20);
+            check(asked.result()==QDialog::Accepted && asked.name()=="Ada","name dialog: Save accepts the trimmed name");
+            NameDialog skipped("Archit"); skipped.show(); button(&skipped,"Skip")->click(); pump(20);
+            check(skipped.result()==QDialog::Rejected,"name dialog: Skip rejects");
+            NameDialog escaped("Archit"); escaped.show(); key(&escaped,Qt::Key_Escape); pump(20);
+            check(escaped.result()==QDialog::Rejected,"name dialog: Esc counts as Skip");
+            NameDialog longName(QString(60,'z')); check(longName.name().size()==40 && NameDialog("").name().isEmpty(),"name dialog: a long suggestion is capped and an empty one stays empty");
+            NameDialog blank(""); blank.show(); button(&blank,"Save")->click(); pump(20);
+            check(blank.name().isEmpty(),"name dialog: saving an empty name gives no name");
+        }
+    }
+    {
+        // The saved-chats list under Playground.
+        ChatHistoryList list; list.resize(220,420);
+        auto *newButton=list.findChild<QPushButton *>("historyNew"); auto *view=list.findChild<QListWidget *>("historyList");
+        check(newButton && view && view->accessibleName()=="Saved chats" && newButton->accessibleName()=="New chat" && !newButton->icon().isNull(),"history list: has a New chat button and a Saved chats list");
+        if (newButton && view) {
+            auto makeChats=[](int n) { QList<ChatSummary> out; for (int i=0;i<n;++i) { ChatSummary c; c.id=QString("id%1").arg(i); c.title=QString("Chat number %1").arg(i); out << c; } return out; };
+            QStringList opened, renamed, deleted; int newRequests=0;
+            QObject::connect(&list,&ChatHistoryList::openRequested,[&opened](const QString &id) { opened << id; });
+            QObject::connect(&list,&ChatHistoryList::renameRequested,[&renamed](const QString &id) { renamed << id; });
+            QObject::connect(&list,&ChatHistoryList::deleteRequested,[&deleted](const QString &id) { deleted << id; });
+            QObject::connect(&list,&ChatHistoryList::newChatRequested,[&newRequests]() { ++newRequests; });
+            auto clickRow=[&](int row) {
+                const QPoint pos=view->visualItemRect(view->item(row)).center(); const QPoint global=view->viewport()->mapToGlobal(pos);
+                QMouseEvent press(QEvent::MouseButtonPress,QPointF(pos),QPointF(global),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+                QMouseEvent release(QEvent::MouseButtonRelease,QPointF(pos),QPointF(global),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(view->viewport(),&press); QApplication::sendEvent(view->viewport(),&release); pump(20);
+            };
+            auto currentId=[&]() { return view->currentItem()?view->currentItem()->data(Qt::UserRole).toString():QString(); };
+            list.setChats({},QString()); list.show(); pump(40);
+            check(view->count()==0 && !view->isVisibleTo(&list) && newButton->isVisibleTo(&list),"history list: with no chats only the New chat button shows");
+            list.setChats(makeChats(12),"id2"); pump(60);
+            check(view->count()==12 && view->item(0)->text()=="Chat number 0" && view->item(11)->data(Qt::UserRole).toString()=="id11" && currentId()=="id2","history list: rows appear in the order given and the open chat is the current one");
+            check(view->height()==ChatHistoryList::kVisibleRows*ChatHistoryList::kRowHeight && view->verticalScrollBar()->maximum()>0,"history list: with many chats it shows five rows and scrolls");
+            {
+                int fullyVisible=0; for (int i=0;i<view->count();++i) if (view->viewport()->rect().contains(view->visualItemRect(view->item(i)))) ++fullyVisible;
+                check(fullyVisible==5,"history list: exactly five rows are visible at once");
+            }
+            view->verticalScrollBar()->setValue(60); list.setChats(makeChats(12),"id2"); pump(30);
+            check(view->verticalScrollBar()->value()==60,"history list: refreshing the same chats keeps the scroll position");
+            list.setChats(makeChats(3),"id1"); pump(60);
+            check(view->height()==3*ChatHistoryList::kRowHeight && view->verticalScrollBar()->maximum()==0 && currentId()=="id1","history list: with three chats the list is three rows tall and does not scroll");
+            list.setChats(makeChats(12),"id2"); pump(60);
+
+            clickRow(3);
+            check(opened==QStringList({"id3"}),"history list: clicking a row asks to open that chat, once");
+            newButton->click(); check(newRequests==1,"history list: New chat asks for a new chat");
+            view->setCurrentRow(5); key(view,Qt::Key_Return); key(view,Qt::Key_Delete);
+            check(opened==QStringList({"id3","id5"}) && deleted==QStringList({"id5"}),"history list: Enter opens the current row and Delete asks to delete it");
+            {
+                QMenu *menu=list.contextMenuFor("id4"); QStringList names; for (auto *a : menu->actions()) names << a->text();
+                check(names==QStringList({"Rename","Delete"}),"history list: the row menu offers Rename and Delete");
+                menu->actions().at(0)->trigger(); menu->actions().at(1)->trigger();
+                check(renamed==QStringList({"id4"}) && deleted==QStringList({"id5","id4"}),"history list: the menu actions ask to rename and delete that chat");
+                delete menu;
+            }
+
+            opened.clear(); deleted.clear(); renamed.clear(); list.setBusy(true);
+            clickRow(3); view->setCurrentRow(5); key(view,Qt::Key_Return); view->setCurrentRow(2); key(view,Qt::Key_Delete);
+            check(!newButton->isEnabled() && opened.isEmpty() && deleted.isEmpty(),"history list: while busy nothing can be opened or deleted from the keyboard, and New chat is off");
+            list.setChats(makeChats(12),"id2"); clickRow(4);
+            check(opened.isEmpty() && currentId()=="id2","history list: a refused click does not move the highlight off the open chat");
+            {
+                QMenu *openMenu=list.contextMenuFor("id2"); QMenu *otherMenu=list.contextMenuFor("id4");
+                check(!openMenu->actions().at(0)->isEnabled() && !openMenu->actions().at(1)->isEnabled() && otherMenu->actions().at(0)->isEnabled() && otherMenu->actions().at(1)->isEnabled(),"history list: while busy the open chat's menu is off, other chats' menus still work");
+                delete openMenu; delete otherMenu;
+            }
+            view->setCurrentRow(7); key(view,Qt::Key_Delete);
+            check(deleted==QStringList({"id7"}),"history list: another chat can still be deleted while busy");
+            list.setBusy(false); clickRow(6);
+            check(newButton->isEnabled() && opened==QStringList({"id6"}),"history list: busy off restores opening and New chat");
+
+            {
+                QList<ChatSummary> long1=makeChats(2); long1[0].title=QString(200,'w'); list.setChats(long1,"id1"); pump(40);
+                check(view->item(0)->toolTip()==QString(200,'w') && view->textElideMode()==Qt::ElideRight && view->horizontalScrollBarPolicy()==Qt::ScrollBarAlwaysOff,"history list: a very long title is elided on the row and complete in its tooltip");
+            }
+            for (bool dark : {true,false}) { Theme::setDark(dark); list.setChats(makeChats(9),"id3"); list.refreshIcons(); pump(80); capture(&list,dark?"history-list-dark":"history-list-light"); }
+            Theme::setDark(true); list.hide();
+        }
+    }
+    {
+        // The controller joins store, panel and list; dialogs are replaceable so no window pops up.
+        QTemporaryDir dir; ChatStore store(dir.path()+"/chats");
+        auto sample=[](const QString &question) { ChatTree t; const auto q=t.addChild(ChatTree::kRoot,"user",question); t.addChild(q,"assistant","answer to "+question); return t; };
+        QStringList savedIds; for (const QString question : {"alpha chat","beta chat","gamma chat"}) { const QString id=store.create(); store.save(id,sample(question)); savedIds << id; }
+        ChatPanel hostedChat; hostedChat.setBackendClient(&client); hostedChat.setChatStore(&store);
+        ChatHistoryList historyList; QWidget dialogParent;
+        ChatHistoryController controller(&store,&hostedChat,&historyList,&dialogParent);
+        auto *view=historyList.findChild<QListWidget *>("historyList"); auto *newButton=historyList.findChild<QPushButton *>("historyNew");
+        historyList.resize(220,400); historyList.show(); pump(40);
+        auto titles=[&]() { QStringList out; for (int i=0;i<view->count();++i) out << view->item(i)->text(); return out; };
+        auto titleOf=[&](const QString &id) { for (const auto &row : store.list()) if (row.id==id) return row.title; return QString("<missing>"); };
+        check(view && newButton && view->count()==3 && titles()==QStringList({"gamma chat","beta chat","alpha chat"}) && view->selectedItems().isEmpty(),"history controller: the list shows exactly what the store holds, newest first, with nothing open");
+        const QString idNew=store.create(); store.save(idNew,sample("delta chat")); pump(20);
+        check(view->count()==4 && view->item(0)->text()=="delta chat","history controller: a chat saved later appears in the list");
+        emit historyList.openRequested(savedIds.at(0)); pump(40);
+        check(hostedChat.currentChatId()==savedIds.at(0) && view->currentItem() && view->currentItem()->data(Qt::UserRole).toString()==savedIds.at(0) && hostedChat.findChildren<MessageRow *>().size()==2,"history controller: opening from the list opens the chat and highlights its row");
+        emit historyList.newChatRequested(); pump(40);
+        check(hostedChat.currentChatId().isEmpty() && view->selectedItems().isEmpty() && view->count()==4 && hostedChat.findChildren<MessageRow *>().isEmpty(),"history controller: New chat shows a blank chat and keeps every saved chat listed");
+        QString askedWith; QString answer="Renamed by check";
+        controller.askTitle=[&](const QString &current) { askedWith=current; return answer; };
+        emit historyList.renameRequested(savedIds.at(1)); pump(40);
+        check(askedWith=="beta chat" && titleOf(savedIds.at(1))=="Renamed by check" && titles().contains("Renamed by check"),"history controller: rename asks with the current title and applies the answer");
+        answer="  "; emit historyList.renameRequested(savedIds.at(1)); pump(40);
+        check(titleOf(savedIds.at(1))=="Renamed by check","history controller: an empty answer changes nothing");
+        QString confirmedFor; bool agree=false;
+        controller.confirmDelete=[&](const QString &title) { confirmedFor=title; return agree; };
+        emit historyList.deleteRequested(savedIds.at(2)); pump(40);
+        check(confirmedFor=="gamma chat" && titleOf(savedIds.at(2))=="gamma chat" && view->count()==4,"history controller: a refused delete changes nothing");
+        agree=true; emit historyList.deleteRequested(savedIds.at(2)); pump(40);
+        check(titleOf(savedIds.at(2))=="<missing>" && view->count()==3,"history controller: a confirmed delete removes the chat and its row");
+        emit historyList.openRequested(savedIds.at(0)); pump(40); emit historyList.deleteRequested(savedIds.at(0)); pump(40);
+        check(hostedChat.currentChatId().isEmpty() && titleOf(savedIds.at(0))=="<missing>" && view->count()==2 && hostedChat.findChildren<MessageRow *>().isEmpty(),"history controller: deleting the open chat leaves a blank chat");
+        // Busy state reaches the list.
+        {
+            fixture.holdChat=true; fixture.chatReply="held";
+            auto *typed=hostedChat.findChild<QPlainTextEdit *>("chatInput"); typed->setPlainText("a held question"); pump(20);
+            QMetaObject::invokeMethod(&hostedChat,"onSend",Qt::DirectConnection);
+            check(waitUntil([&]{ return fixture.chatSocket && !newButton->isEnabled(); }),"history controller: while a reply streams the list's New chat is off");
+            const QString streaming=hostedChat.currentChatId(); emit historyList.openRequested(savedIds.at(1)); pump(40);
+            check(hostedChat.currentChatId()==streaming,"history controller: opening another chat while a reply streams is refused");
+            QMetaObject::invokeMethod(&hostedChat,"onClearChat",Qt::DirectConnection); pump(60);
+            fixture.holdChat=false; if (fixture.chatSocket) { fixture.chatSocket->disconnectFromHost(); fixture.chatSocket.clear(); } pump(100);
+            check(newButton->isEnabled() && hostedChat.currentChatId().isEmpty(),"history controller: when the reply ends the list is usable again");
+        }
+        QMetaObject::invokeMethod(&hostedChat,"onClearChat",Qt::DirectConnection);
+        historyList.hide();
+        hostedChat.setBackendClient(nullptr); pump(500); client.abortAll(); pump(100);   // no request may outlive the panel it reports to
+    }
+    {
+        QWidget host; auto *hostLayout=new QVBoxLayout(&host);
+        auto *switcher=new VersionSwitcher(&host); hostLayout->addWidget(switcher);
+        auto *messageRow=new MessageRow(ChatBubble::User,5,"hello",&host); hostLayout->addWidget(messageRow);
+        host.resize(400,200); host.show(); pump();
+        auto *prev=switcher->findChild<QPushButton *>("versionPrev"); auto *next=switcher->findChild<QPushButton *>("versionNext"); auto *label=switcher->findChild<QLabel *>("versionLabel");
+        check(prev && next && label && switcher->objectName()=="versionSwitcher","switcher: has its previous, next and label parts");
+        if (prev && next && label) {
+            switcher->setVersion(0,1); pump();
+            check(switcher->isHidden(),"switcher: hidden for one version");
+            switcher->setVersion(1,3); pump();
+            check(!switcher->isHidden() && label->text()=="2 / 3" && prev->isEnabled() && next->isEnabled(),"switcher: shows '2 / 3' for index 1 of 3 with both arrows on");
+            switcher->setVersion(0,3); check(!prev->isEnabled() && next->isEnabled() && label->text()=="1 / 3","switcher: previous is disabled at the first version");
+            switcher->setVersion(2,3); check(prev->isEnabled() && !next->isEnabled() && label->text()=="3 / 3","switcher: next is disabled at the last version");
+            QList<int> steps; QObject::connect(switcher,&VersionSwitcher::step,[&steps](int delta) { steps << delta; });
+            switcher->setVersion(1,3); prev->click(); next->click();
+            check(steps==QList<int>({-1,1}),"switcher: step emits -1 and +1");
+            switcher->setEnabledForUse(false);
+            check(!prev->isEnabled() && !next->isEnabled(),"switcher: disabled for use disables both arrows");
+            switcher->setEnabledForUse(true); check(prev->isEnabled() && next->isEnabled(),"switcher: enabling for use restores the arrows by position");
+            check(prev->accessibleName()=="Previous version" && next->accessibleName()=="Next version","switcher: arrows have accessible names");
+        }
+        auto *replyRow=new MessageRow(ChatBubble::Assistant,6,"hi there",&host); hostLayout->addWidget(replyRow); host.resize(400,300); pump(40);
+        {
+            auto *pencil=messageRow->findChild<QPushButton *>("editButton"); auto *retry=replyRow->findChild<QPushButton *>("retryButton"); auto *box=messageRow->findChild<QPlainTextEdit *>("messageEditBox");
+            check(pencil && retry && box && pencil->accessibleName()=="Edit message" && retry->accessibleName()=="Retry reply" && box->accessibleName()=="Edit your message","row: pencil, retry and editor have accessible names");
+            check(pencil && retry && pencil->focusPolicy()!=Qt::NoFocus && retry->focusPolicy()!=Qt::NoFocus,"row: pencil and retry accept keyboard focus");
+            check(messageRow->focusPolicy()==Qt::TabFocus && replyRow->focusPolicy()==Qt::NoFocus,"row: a row with an action is a tab stop, one without is not");
+            replyRow->setRetryAvailable(true);
+            check(replyRow->focusPolicy()==Qt::TabFocus,"row: a reply that can be retried becomes a tab stop");
+            auto *outside=new QPushButton("Outside message rows",&host); hostLayout->addWidget(outside);
+            host.activateWindow(); pump(40);
+            // Move Qt's real focus, rather than sending synthetic focus events
+            // that leave QApplication::focusWidget() pointing at the old row.
+            QEvent leave(QEvent::Leave); QApplication::sendEvent(messageRow,&leave); QApplication::sendEvent(replyRow,&leave);
+            messageRow->setFocus(Qt::TabFocusReason); pump(20);
+            const bool editRevealed=messageRow->hasFocus() && pencil->isVisibleTo(messageRow);
+            pencil->setFocus(Qt::TabFocusReason); pump(20);
+            check(pencil->hasFocus() && pencil->isVisibleTo(messageRow),"row: moving focus to its action keeps the pencil visible");
+            replyRow->setFocus(Qt::TabFocusReason); pump(20);
+            check(editRevealed && replyRow->hasFocus() && retry->isVisibleTo(replyRow),"row: tabbing to a row reveals its pencil or retry button");
+            outside->setFocus(Qt::TabFocusReason); pump(40);
+            check(outside->hasFocus() && !pencil->isVisibleTo(messageRow) && !retry->isVisibleTo(replyRow),"row: leaving a row with the keyboard hides them again");
+            replyRow->setRetryAvailable(false);
+        }
+        auto *rowSwitcher=messageRow->findChild<VersionSwitcher *>("versionSwitcher");
+        check(rowSwitcher && rowSwitcher->isHidden(),"row: no switcher is shown while a message has one version");
+        if (rowSwitcher) {
+            messageRow->setVersion(1,2); pump();
+            auto *rowLabel=rowSwitcher->findChild<QLabel *>("versionLabel");
+            check(!rowSwitcher->isHidden() && rowLabel && rowLabel->text()=="2 / 2" && rowSwitcher->y()>=messageRow->bubble()->geometry().bottom(),"row: shows '2 / 2' below its bubble");
+            QList<QPair<int,int>> stepped; QObject::connect(messageRow,&MessageRow::versionStep,[&stepped](ChatTree::NodeId node,int delta) { stepped << qMakePair(int(node),delta); });
+            rowSwitcher->findChild<QPushButton *>("versionPrev")->click();
+            check(stepped.size()==1 && stepped.first().first==5 && stepped.first().second==-1,"row: a version step reports the row's node and direction");
+            messageRow->setActionsEnabled(false);
+            check(!rowSwitcher->findChild<QPushButton *>("versionPrev")->isEnabled() && !rowSwitcher->findChild<QPushButton *>("versionNext")->isEnabled(),"row: disabling actions disables the arrows");
+        }
+    }
+    {
+        using namespace ContextMeterLogic;
+        check(levelFor(0.69)==Level::Ok && levelFor(0.70)==Level::Warn && levelFor(0.90)==Level::Warn &&
+              levelFor(0.91)==Level::Critical && levelFor(1.5)==Level::Critical,"meter levels switch at 70% and above 90%");
+        check(!shouldCompact(0.84,85) && shouldCompact(0.85,85) && !shouldCompact(0.99,0) &&
+              !shouldCompact(0.99,86) && shouldCompact(0.70,70),"auto-compact fires at or above the chosen percentage only");
+        check(parseAutoCompact(QVariant())==85 && parseAutoCompact(QVariant("abc"))==85 && parseAutoCompact(60)==85 &&
+              parseAutoCompact(95)==85 && parseAutoCompact(0)==0 && parseAutoCompact(75)==75 && parseAutoCompact(QVariant("90"))==90,
+              "stored auto-compact values outside Off/70-90 step 5 fall back to 85");
+        check(parseStyle("bar")==Style::Bar && parseStyle("")==Style::Ring && parseStyle("garbage")==Style::Ring &&
+              parseStyle(styleKey(Style::RingBanner))==Style::RingBanner && parseStyle("off")==Style::Off,"meter style keys round-trip; unknown keys mean Ring");
+        check(usageText(1390,256,4096,true)=="1,390 / 4,096 tokens" && usageText(1390,256,4096,false)=="~1,390 / 4,096 tokens","usage text groups digits and marks estimates with ~");
+
+        ContextMeter meter; QWidget host; auto *hostLayout=new QVBoxLayout(&host);
+        hostLayout->addWidget(meter.ring()); hostLayout->addWidget(meter.bar()); hostLayout->addWidget(meter.banner());
+        host.show(); pump();
+        check(meter.ring()->objectName()=="contextRing" && meter.bar()->objectName()=="contextBar" && meter.banner()->objectName()=="contextBanner","meter widgets have stable object names");
+        check(!meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"meter shows nothing before the first usage");
+        meter.setUsage(1400,256,4096,true);
+        check(meter.level()==Level::Ok && meter.warningText().isEmpty(),"under 70% is quiet");
+        meter.setUsage(3000,256,4096,true);
+        check(meter.level()==Level::Warn && !meter.warningText().isEmpty(),"70-90% warns");
+        meter.setUsage(3900,256,4096,true);
+        check(meter.level()==Level::Critical,"over 90% is critical");
+        meter.setAutoCompact(85); check(meter.warningText().contains("compact",Qt::CaseInsensitive),"critical warning mentions auto-compact when on");
+        meter.setAutoCompact(0); check(!meter.warningText().contains("will compact",Qt::CaseInsensitive) && meter.warningText().contains("fail",Qt::CaseInsensitive),"critical warning says the next message may fail when auto-compact is off");
+        meter.setUsage(0,5000,2048,true);
+        check(meter.warningText()=="Reduce Response tokens","reserve larger than the window asks to reduce Response tokens");
+        meter.setStyle(Style::Ring); meter.setUsage(1400,256,4096,true); pump();
+        check(meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"Ring style shows only the ring");
+        check(meter.ring()->toolTip().contains("1,400 of 4,096") && meter.ring()->toolTip().contains("256 reserved"),"ring tooltip gives the exact numbers");
+        meter.setStyle(Style::Bar); pump();
+        check(!meter.ring()->isVisible() && meter.bar()->isVisible(),"Bar style shows only the bar");
+        auto *barLabel=meter.bar()->findChild<QLabel *>("contextBarText");
+        check(barLabel && barLabel->text().contains("1,400 / 4,096 tokens") && barLabel->text().contains("256 reserved"),"bar shows the numbers without hovering");
+        meter.setStyle(Style::RingBanner); meter.setUsage(3900,256,4096,true); pump();
+        check(meter.ring()->isVisible() && meter.banner()->isVisible(),"Ring + banner shows the banner when critical");
+        meter.setUsage(1400,256,4096,true); pump();
+        check(meter.ring()->isVisible() && !meter.banner()->isVisible(),"Ring + banner hides the banner below critical");
+        meter.setStyle(Style::Ring); meter.setUsage(3900,256,4096,true); pump();
+        check(!meter.banner()->isVisible(),"Ring style never shows the banner");
+        meter.setStyle(Style::Off); pump();
+        check(!meter.ring()->isVisible() && !meter.bar()->isVisible() && !meter.banner()->isVisible(),"Off hides every meter widget");
+        meter.setStyle(Style::Ring); meter.clearUsage(); pump();
+        check(!meter.ring()->isVisible() && meter.warningText().isEmpty() && !meter.hasUsage(),"clearing usage hides the meter and its warning");
+        bool asked=false; QObject::connect(&meter,&ContextMeter::newChatRequested,[&asked](){ asked=true; });
+        meter.setStyle(Style::RingBanner); meter.setUsage(3900,256,4096,true); pump();
+        if (auto *button=meter.banner()->findChild<QPushButton *>("contextBannerNewChat")) button->click();
+        check(asked,"banner offers Start new chat");
+        host.hide();
+    }
+    {
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
+        SettingsPanel chatSettings;
+        auto *styleCombo=chatSettings.findChild<QComboBox *>("meterStyleCombo");
+        auto *compactCombo=chatSettings.findChild<QComboBox *>("autoCompactCombo");
+        check(styleCombo && compactCombo,"Settings has a Chat card with meter style and auto-compact");
+        if (styleCombo && compactCombo) {
+            check(styleCombo->currentData().toString()=="ring" && compactCombo->currentText()=="85%","chat settings default to Ring and 85%");
+            check(styleCombo->count()==4 && compactCombo->count()==6 && compactCombo->itemText(0)=="Off","meter styles and auto-compact choices are offered");
+            int changes=0; QObject::connect(&chatSettings,&SettingsPanel::settingsChanged,[&changes](){ ++changes; });
+            styleCombo->setCurrentIndex(styleCombo->findData("bar"));
+            check(QSettings().value("chat/meterStyle").toString()=="bar" && changes==1,"changing the meter style saves immediately and notifies once");
+            compactCombo->setCurrentIndex(compactCombo->findData(0));
+            check(QSettings().value("chat/autoCompactPercent").toInt()==0 && changes==2,"turning auto-compact Off saves 0 and notifies once");
+            compactCombo->setCurrentIndex(compactCombo->findData(70));
+            check(QSettings().value("chat/autoCompactPercent").toInt()==70,"auto-compact accepts 70%");
+            QSettings().setValue("chat/autoCompactPercent",61); QSettings().setValue("chat/meterStyle","nonsense");
+            SettingsPanel reopened;
+            auto *reopenedStyle=reopened.findChild<QComboBox *>("meterStyleCombo"); auto *reopenedCompact=reopened.findChild<QComboBox *>("autoCompactCombo");
+            check(reopenedStyle && reopenedCompact && reopenedStyle->currentData().toString()=="ring" && reopenedCompact->currentText()=="85%","invalid stored chat settings load as the defaults");
+        }
+        QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
     }
     ClickFeedback feedback(qApp);
     QPushButton click("Run"); click.resize(120,44); click.show(); click.activateWindow(); pump();

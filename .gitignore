@@ -65,3 +65,6 @@ build-macos/
 # Windows source development virtualenv
 .venv312/
 build-windows/
+
+# Brainstorming mockups and local executor scratch (superpowers workflow)
+.superpowers/

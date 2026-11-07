@@ -38,6 +38,9 @@ inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#34383D
 inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
 inline QString surfaceBorderHover()  { return QStringLiteral("#FF784E"); }
 
+// Unfilled part of the context meter ring and bar.
+inline QString meterTrack()          { return surfaceBorder(); }
+
 inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
 inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }
 inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : QStringLiteral("#62685F"); }

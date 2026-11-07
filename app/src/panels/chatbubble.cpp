@@ -57,7 +57,8 @@ QSize ChatBubble::measure(const QString &text) const {
         return QSize(kPadX * 2 + kFrame * 2 + kMinInner,
                      fm.height() + kPadY * 2 + kFrame * 2);
 
-    const int available = parentWidget() ? parentWidget()->width() - 48 : 680;
+    const QWidget *reference = m_reference ? m_reference.data() : parentWidget();
+    const int available = reference ? reference->width() - 48 : 680;
     const int innerWidth = qBound(kMinInner, available - 2 * kPadX - 2 * kFrame, kMaxInner);
     int naturalWidth = kMinInner;
     for (const QString &line : text.split('\n')) naturalWidth = qMax(naturalWidth,fm.horizontalAdvance(line));
@@ -86,6 +87,12 @@ void ChatBubble::remeasure() {
     updateGeometry();
 }
 
+void ChatBubble::setWidthReference(QWidget *reference) {
+    m_reference = reference;
+    if (reference) reference->installEventFilter(this);
+    remeasure();
+}
+
 void ChatBubble::setText(const QString &text) {
     m_text = text;
     m_content->setText(m_text);
@@ -97,6 +104,6 @@ void ChatBubble::setCursorVisible(bool show) {
     remeasure();
 }
 bool ChatBubble::eventFilter(QObject *watched, QEvent *event) {
-    if (watched == parentWidget() && event->type() == QEvent::Resize) remeasure();
+    if ((watched == parentWidget() || (m_reference && watched == m_reference.data())) && event->type() == QEvent::Resize) remeasure();
     return QFrame::eventFilter(watched, event);
 }

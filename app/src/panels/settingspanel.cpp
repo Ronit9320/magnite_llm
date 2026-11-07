@@ -1,5 +1,6 @@
 #include <QTabWidget>
 #include "panels/settingspanel.h"
+#include "panels/greeting.h"
 #include "update_manager.h"
 #include <QCoreApplication>
 
@@ -11,6 +12,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include "widgets/surface.h"
+#include "widgets/contextmeter.h"
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -49,6 +51,7 @@ void SettingsPanel::setupUi() {
     auto *runtime = makeCategory("Runtime");
     auto *storage = makeCategory("Storage && privacy");
     auto *visual = makeCategory("Appearance");
+    auto *chatColumn = makeCategory("Chat");
     auto *updates = makeCategory("Updates");
     auto *updateCard = Surface::card(this, "Magnite " + QCoreApplication::applicationVersion());
     auto *updateHint = new QLabel("Preview channel. Updates replace the app and bundled runtime; models and application data stay in place. Restart when your work is finished.", this);
@@ -129,6 +132,39 @@ void SettingsPanel::setupUi() {
     visual->addWidget(appearance->parentWidget());
     visual->addStretch();
 
+    auto *contextCard = Surface::card(this,"Context window");
+    m_meterStyle = new ComboBox(this);
+    m_meterStyle->setObjectName("meterStyleCombo");
+    m_meterStyle->addItem("Ring", "ring");
+    m_meterStyle->addItem("Bar", "bar");
+    m_meterStyle->addItem("Ring + banner", "ringBanner");
+    m_meterStyle->addItem("Off", "off");
+    Surface::field(contextCard,"Context meter",m_meterStyle);
+    m_autoCompact = new ComboBox(this);
+    m_autoCompact->setObjectName("autoCompactCombo");
+    m_autoCompact->addItem("Off", 0);
+    for (int percent = 70; percent <= 90; percent += 5) m_autoCompact->addItem(QString("%1%").arg(percent), percent);
+    Surface::field(contextCard,"Auto-compact when the context reaches",m_autoCompact);
+    auto *contextHint = new QLabel("The meter shows how much of the model's memory this chat uses and warns from 70%. Auto-compact summarizes older messages when you send at or above the chosen level; your messages stay on screen. Changes apply immediately.",this);
+    contextHint->setWordWrap(true);
+    contextHint->setObjectName("cardMeta");
+    contextCard->addWidget(contextHint);
+    chatColumn->addWidget(contextCard->parentWidget());
+
+    auto *youCard = Surface::card(this,"You");
+    m_profileName = new QLineEdit(this);
+    m_profileName->setObjectName("profileName");
+    m_profileName->setAccessibleName("Your name");
+    m_profileName->setPlaceholderText("Your name (optional)");
+    m_profileName->setMaxLength(80);
+    Surface::field(youCard,"Your name",m_profileName);
+    auto *youHint = new QLabel("Shown only in the greeting on a new chat. It stays on this computer. Leave it empty for no name.",this);
+    youHint->setWordWrap(true);
+    youHint->setObjectName("cardMeta");
+    youCard->addWidget(youHint);
+    chatColumn->addWidget(youCard->parentWidget());
+    chatColumn->addStretch();
+
     auto *local = Surface::card(this,"Local by default");
     auto *copy = new QLabel("Models, adapters and documents stay in your local data directory.\n\nUse the Light / Dark switch in the top bar to change appearance.",this);
     copy->setWordWrap(true);
@@ -165,6 +201,19 @@ void SettingsPanel::setupUi() {
         emit settingsChanged();
     };
     connect(m_grid,&QCheckBox::toggled,this,appearanceChanged);
+    auto chatChanged = [this]() {
+        QSettings s;
+        s.setValue("chat/meterStyle",m_meterStyle->currentData().toString());
+        s.setValue("chat/autoCompactPercent",m_autoCompact->currentData().toInt());
+        emit settingsChanged();
+    };
+    connect(m_profileName,&QLineEdit::editingFinished,this,[this]() {
+        Greeting::setUserName(m_profileName->text());
+        m_profileName->setText(Greeting::userName());
+        emit settingsChanged();
+    });
+    connect(m_meterStyle,qOverload<int>(&QComboBox::currentIndexChanged),this,chatChanged);
+    connect(m_autoCompact,qOverload<int>(&QComboBox::currentIndexChanged),this,chatChanged);
     connect(m_reducedMotion,&QCheckBox::toggled,this,appearanceChanged);
 }
 
@@ -173,9 +222,17 @@ void SettingsPanel::loadFromSettings() {
     s.remove("hosted/apiKey");
     m_engineOverride->setCurrentIndex(qBound(0, s.value("engine/override", 0).toInt(), 2));
     m_dataDir->setText(s.value("storage/dataDir").toString());
+    m_profileName->setText(Greeting::userName());
     s.remove("hosted/endpoint");
     m_grid->setChecked(s.value("appearance/studio3Ambient",true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion",false).toBool());
+    m_meterStyle->setCurrentIndex(qMax(0, m_meterStyle->findData(ContextMeterLogic::styleKey(ContextMeterLogic::parseStyle(s.value("chat/meterStyle").toString())))));
+    m_autoCompact->setCurrentIndex(qMax(0, m_autoCompact->findData(ContextMeterLogic::parseAutoCompact(s.value("chat/autoCompactPercent")))));
+}
+
+void SettingsPanel::showEvent(QShowEvent *event) {
+    BasePanel::showEvent(event);
+    if (m_profileName && !m_profileName->hasFocus()) m_profileName->setText(Greeting::userName());
 }
 
 void SettingsPanel::onBrowseDataDir() {

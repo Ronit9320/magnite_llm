@@ -209,3 +209,28 @@ Verified on Linux for this implementation:
 
 Native Windows, macOS, CUDA QLoRA, long-run memory behavior and training quality
 require further manual testing on the corresponding hardware before promotion.
+
+## Integration with the remote feature branch
+
+The local training branch incorporates `origin/feature` at
+`76e44dd5549a52d1ee6dc1733e010984877eee18`. This adds the context-window meter and
+auto-compaction, editable/retryable chat versions, saved chat history and
+personalized greetings, and the collapsible sidebar. Training visualisation,
+resource estimates and contextual run review remain in place.
+
+Conflict resolution retains both the training and chat styles/test fixtures,
+both sidebar and run-review navigation checks, and the current `dev`/`master`
+branch/path filters for automatic verification. Saved chat defaults now follow
+the backend's Windows `%APPDATA%/Magnite` convention; environment and Settings
+data-directory overrides retain precedence. Incoming chat-focus tests use actual
+Qt focus transfers so they can verify both entering an action and leaving a row.
+
+The integration is local to `feature/training-visualisation`; neither `dev` nor
+`master` is modified and the branch is not pushed.
+
+Integration verification: CMake build passed; backend suite **248 tests**
+(**247 passed**, **1 platform skip**); UI suites at normal and 2× scaling both
+reported **0 failures**; theme audit and desktop selftest reported **0 failures**;
+`actionlint` passed for the retained verification workflow. Combined UI captures
+and logs are under ignored `build/feature-integration-*`. Native Windows/macOS
+execution and GPU paths were not exercised by these local Linux checks.

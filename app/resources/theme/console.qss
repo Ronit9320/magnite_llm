@@ -25,6 +25,14 @@ QPushButton:disabled { color: @textMuted; background: @insetBackground; border-c
 QPushButton#navBtn { padding: 8px 10px; border: 1px solid transparent; background: transparent; font-family: @bodyFont; text-align: left; border-radius: 8px; color: @textSecondary; border-left: 3px solid transparent; font-size: 12px; }
 QPushButton#navBtn:hover { border-color: @surfaceBorder; background: @surfaceFillHover; }
 QPushButton#navBtn:checked { border: 1px solid @surfaceBorder; background: @surfaceFill; color: @textPrimary; border-color: @surfaceBorder; border-left: 3px solid @accentPrimary; }
+QWidget#sidebar[collapsed="true"] QPushButton#navBtn { padding: 0; text-align: center; }
+QPushButton#sidebarToggle { padding: 0; border: 1px solid @surfaceBorder; border-radius: 6px; background: @surfaceFill; }
+QPushButton#sidebarToggle:hover { background: @surfaceFillHover; }
+QPushButton#sidebarToggle:focus { border-color: @accentPrimary; }
+QPushButton#sidebarNewChat { padding: 0; border: 1px solid @surfaceBorder; border-radius: 13px; background: @surfaceFill; }
+QPushButton#sidebarNewChat:hover { background: @surfaceFillHover; }
+QPushButton#sidebarNewChat:focus { border-color: @accentPrimary; }
+QPushButton#sidebarNewChat:disabled { background: transparent; }
 QPushButton#primaryBtn { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#cardPrimary { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#primaryBtn:hover { background: @accentHover; border-color: @textPrimary; }
@@ -42,6 +50,7 @@ QLabel#panelSubtitle { color: @textSecondary; font-size: 12px; }
 QLabel#subtitle { color: @textSecondary; font-size: 12px; }
 QLabel#statusLabel { color: @textSecondary; font-size: 12px; }
 QLabel#cardMeta { color: @textSecondary; font-size: 12px; }
+QLabel#contextDivider { color: @textMuted; font-size: 12px; padding: 6px 0; }
 QLabel#cardDownloaded { color: @statusSuccess; font-size: 12px; font-weight: 600; }
 QLabel#headingLabel { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#cardTitle { font-family: @headingFont; font-size: 14px; font-weight: 600; }
@@ -104,6 +113,12 @@ QProgressBar::chunk { background: @accentPrimary; border-radius: 4px; }
 QFrame#chatBubbleUser { background: @surfaceFillHover; border: 1px solid @surfaceBorder; border-radius: 14px; }
 QFrame#chatBubbleAssistant { border-radius: 6px; background: transparent; border: none; }
 QLabel#chatBubbleText { color: @textPrimary; font-size: 14px; }
+QWidget#versionSwitcher QPushButton, QPushButton#editButton, QPushButton#retryButton { background: transparent; border: none; border-radius: 6px; padding: 0; min-height: 0; }
+QWidget#versionSwitcher QPushButton:hover:enabled, QPushButton#editButton:hover:enabled, QPushButton#retryButton:hover:enabled { background: @surfaceFillHover; }
+QPlainTextEdit#messageEditBox { background: @insetBackground; border: 1px solid @accentPrimary; border-radius: 10px; padding: 8px; font-size: 14px; }
+QPushButton#editSave { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
+QPushButton#editSave:hover { background: @accentHover; border-color: @textPrimary; }
+QLabel#versionLabel { color: @textMuted; font-size: 12px; }
 QStatusBar { background: @insetBackground; color: @textSecondary; font-size: 12px; border-top: 1px solid @surfaceBorder; }
 QToolTip { background: @textPrimary; color: @surfaceFill; padding: 6px 8px; border: none; border-radius: 6px; }
 QFrame#workspaceBar { border-bottom: 1px solid @surfaceBorder; background: @canvasBackground; }
@@ -185,3 +200,14 @@ QListWidget#trainingRuns::item:hover, QListWidget#trainingRuns::item:selected { 
 QLabel#runState[state="ok"] { color: @statusSuccess; }
 QLabel#runState[state="error"] { color: @statusError; }
 QLabel#runState[state="warn"] { color: @statusWarning; }
+
+/* Saved chats under Playground */
+QPushButton#historyNew { padding: 5px 10px; border: 1px solid transparent; background: transparent; font-family: @bodyFont; text-align: left; border-radius: 8px; color: @accentLabel; font-size: 12px; }
+QPushButton#historyNew:hover { border-color: @surfaceBorder; background: @surfaceFillHover; }
+QPushButton#historyNew:focus { border-color: @accentPrimary; }
+QPushButton#historyNew:disabled { color: @textMuted; }
+QListWidget#historyList { background: transparent; border: none; outline: none; font-family: @bodyFont; font-size: 12px; }
+QListWidget#historyList::item { padding: 4px 10px; border-radius: 8px; color: @textSecondary; border: 1px solid transparent; }
+QListWidget#historyList::item:hover { background: @surfaceFillHover; }
+QListWidget#historyList::item:selected { background: @surfaceFill; color: @textPrimary; border: 1px solid @surfaceBorder; }
+QListWidget#historyList:focus { border: none; }

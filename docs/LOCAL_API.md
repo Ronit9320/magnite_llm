@@ -87,6 +87,8 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Ingest/list documents | `POST /rag/documents` with `path` or `name`/`content`; `GET /rag/documents` |
 | Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score` |
 | Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
+| Context usage | `POST /inference/context-usage` with `messages`, `max_tokens`; returns `used`, `reserved`, `limit`, `fill`, `exact` (409 when no model is loaded; works during generation) |
+| Compact a long chat | `POST /inference/compact` with `messages`, optional `previous_summary`, `max_tokens`, `target_fill`, `keep_recent`; returns `summary`, `covered`, `method` (409 while busy) |
 | Runtime engine preference | `POST /inference/settings` with `engine_override`: 0 Auto, 1 vLLM, 2 llama.cpp |
 | Prepare application update | `POST /updates/quiesce` with `{}`; 200 when idle, 409 while work is active |
 | Desktop graceful shutdown | `POST /_desktop/shutdown`; requires a configured launch token; absent in tokenless developer mode |

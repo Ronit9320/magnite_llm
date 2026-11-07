@@ -31,7 +31,8 @@ public:
     bool isReady() const { return !m_baseUrl.isEmpty(); }
 
     void get(const QString &path, Callback onDone);
-    void post(const QString &path, const QJsonObject &body, Callback onDone);
+    // Returns the in-flight reply so a caller can cancel just this request (null if not sent).
+    QNetworkReply *post(const QString &path, const QJsonObject &body, Callback onDone);
     void remove(const QString &path, Callback onDone);
 
     // Streaming POST that parses Server-Sent Events ("data: {...}" blocks).
@@ -47,8 +48,8 @@ public:
 
 private:
     QNetworkRequest request(const QString &path) const;
-    void send(const QString &method, const QString &path,
-              const QJsonObject &body, Callback onDone);
+    QNetworkReply *send(const QString &method, const QString &path,
+                        const QJsonObject &body, Callback onDone);
 
     QNetworkAccessManager *m_nam;
     QString m_baseUrl;

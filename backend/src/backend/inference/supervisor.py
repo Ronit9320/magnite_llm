@@ -233,6 +233,13 @@ class InferenceSupervisor:
         """Clear the active adapter and unload the adapter engine."""
         self.unload()
 
+    def current_engine(self) -> BaseEngine:
+        """The loaded engine, without taking the operation lock (read-only uses)."""
+        engine = self._engine
+        if engine is None:
+            raise RuntimeError("No inference engine loaded. Load a model first.")
+        return engine
+
     def chat_stream(self, messages, **kwargs):
         return self._stream("chat_stream", messages, **kwargs)
 
