@@ -103,6 +103,12 @@ authentication themselves; the CLI access wrapper protects them when a token is
 configured. Direct `uvicorn backend.server:app` bypasses that wrapper and the
 data-directory lock. See [update architecture](development/RELEASE_PIPELINE.md).
 
+Dataset ingestion accepts JSONL, CSV and plain text and stores normalized JSONL.
+JSONL supports `messages`, `text`, `instruction`/`output` (with optional `input`),
+`prompt`/`completion`, and `prompt`/`response` rows. A `prompt`/`response` pair
+becomes user/assistant chat messages; both fields must be nonempty strings.
+CSV files with `prompt,response` headers use the same chat normalization.
+
 Training example body after dataset ingestion:
 
 ```json
