@@ -9,7 +9,9 @@
 #include <QKeyEvent>
 #include <QLocale>
 #include <QProgressBar>
+#include "widgets/progressbar.h"
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -117,7 +119,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     auto *state = new QLabel(stateText, this);
     state->setObjectName(m_downloaded ? "cardDownloaded" : "cardMeta");
     const bool loads = !isHub || m_downloaded;
-    auto *action = new QPushButton(loads ? "Load model" : "Download",this);
+    auto *action = new Button(loads ? "Load model" : "Download",this);
     action->setObjectName("primaryBtn");
     m_actionButton = action;
     if (isHub) {
@@ -127,7 +129,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
         // narrow card never has to squeeze three things into one row.
         layout->addWidget(state);
         actions->addStretch(1);
-        m_deleteButton = new QPushButton("Delete",this);
+        m_deleteButton = new Button("Delete",this);
         m_deleteButton->setObjectName("cardDanger");
         m_deleteButton->setCursor(Qt::PointingHandCursor);
         m_deleteButton->setAccessibleName("Delete model "+m_id);
@@ -158,7 +160,7 @@ void ModelCard::appendProgressRow() {
     column->setContentsMargins(0, 0, 0, 0);
     column->setSpacing(6);
 
-    m_progressBar = new QProgressBar(this);
+    m_progressBar = new ProgressBar(this);
     m_progressBar->setObjectName(QStringLiteral("cardProgress"));
     m_progressBar->setRange(0, 100);
     m_progressBar->setValue(0);
@@ -172,7 +174,7 @@ void ModelCard::appendProgressRow() {
     m_progressLabel->setObjectName(QStringLiteral("monoLabel"));
     detailRow->addWidget(m_progressLabel, 1);
 
-    m_cancelButton = new QPushButton("Cancel", this);
+    m_cancelButton = new Button("Cancel", this);
     m_cancelButton->setObjectName(QStringLiteral("secondaryBtn"));
     m_cancelButton->setAccessibleName("Cancel download " + m_id);
     m_cancelButton->setCursor(Qt::PointingHandCursor);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFrame>
+#include <QPointer>
 
 #include <QSize>
 #include <QString>
@@ -22,6 +23,9 @@ public:
     QString text() const { return m_text; }
 
     void setText(const QString &text);
+    // Size the bubble against `reference`'s width instead of its parent's (a row that wraps
+    // the bubble would otherwise make it narrower than the chat area it belongs to).
+    void setWidthReference(QWidget *reference);
     void setCursorVisible(bool show);
 
 protected:
@@ -37,4 +41,5 @@ private:
     Role m_role;
     QString m_text;
     QLabel *m_content;
+    QPointer<QWidget> m_reference;
 };

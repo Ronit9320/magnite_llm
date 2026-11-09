@@ -8,7 +8,7 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
-BasePanel::BasePanel(const QString &title, QWidget *parent)
+BasePanel::BasePanel(const QString &title, QWidget *parent, bool customHeader)
     : QWidget(parent)
     , m_title(title)
     , m_contentLayout(new QVBoxLayout())
@@ -30,9 +30,14 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
     m_subtitleLabel->setWordWrap(true);
     m_subtitleLabel->setVisible(false);
 
-    root->addWidget(titleLabel);
-    root->addWidget(m_subtitleLabel);
-    root->addSpacing(Theme::spacingBase());
+    if (!customHeader) {
+        root->addWidget(titleLabel);
+        root->addWidget(m_subtitleLabel);
+        root->addSpacing(Theme::spacingBase());
+    } else {
+        titleLabel->hide();
+        root->setContentsMargins(32,18,32,20);
+    }
 
     auto *content = new QWidget(this);
     content->setLayout(m_contentLayout);
@@ -42,6 +47,9 @@ BasePanel::BasePanel(const QString &title, QWidget *parent)
         root->addWidget(content,1);
         return;
     }
+    // Keep the page track at the outer edge; content keeps its own breathing room.
+    auto margins=root->contentsMargins(); margins.setRight(4); root->setContentsMargins(margins);
+    m_contentLayout->setContentsMargins(0,0,28,0);
     auto *scroll = new QScrollArea(this);
     scroll->setObjectName("cardScroll");
     scroll->setFrameShape(QFrame::NoFrame);

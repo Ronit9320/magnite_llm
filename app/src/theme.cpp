@@ -77,6 +77,9 @@ std::vector<Token> tokens() {
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
         {"@statusSuccess",      Theme::statusSuccess()},
+        {"@comparisonSeries",   Theme::comparisonSeries()},
+        {"@chartHoverFill",     Theme::chartHoverFill()},
+        {"@chartHoverText",     Theme::chartHoverText()},
         {"@statusWarning",      Theme::statusWarning()},
         {"@statusError",        Theme::statusError()},
         {"@headingFont",        Theme::headingFont()},
@@ -161,6 +164,14 @@ void Theme::setupApplicationTheme() {
 bool Theme::isDark() { return darkMode; }
 
 void Theme::setDark(bool dark) {
+    static bool applied=false;
+    if (applied && darkMode==dark) return;
+    applied=true;
+    // Apply palette and stylesheet as one visual change, including open dialogs.
+    QList<QWidget *> updatingWindows;
+    for (auto *window : QApplication::topLevelWidgets()) if (window->updatesEnabled()) {
+        window->setUpdatesEnabled(false); updatingWindows.append(window);
+    }
     darkMode = dark;
     QPalette palette = qApp->palette();
     palette.setColor(QPalette::Window, QColor(canvasBackground()));
@@ -183,8 +194,8 @@ void Theme::setDark(bool dark) {
             button && button->property("themeIcon").isValid())
             button->setIcon(coloredIcon(button->property("themeIcon").toString(),
                 QColor(button->property("themeIconTone")=="error" ? statusError() : textSecondary())));
-        widget->update();
     }
+    for (auto *window : updatingWindows) { window->setUpdatesEnabled(true); window->update(); }
 }
 
 QString Theme::qss() {
@@ -228,6 +239,8 @@ int Theme::selfCheck() {
     check("statusSuccess", Theme::statusSuccess() == "#276749");
     check("statusWarning", Theme::statusWarning() == "#855C14");
     check("statusError", Theme::statusError() == "#B13D24");
+    check("meterTrack valid", QColor(Theme::meterTrack()).isValid() && Theme::meterTrack() == Theme::surfaceBorder());
+    check("motion timings", Theme::motionFastMs()>0 && Theme::motionFastMs()<=Theme::motionStandardMs() && Theme::motionStandardMs()<=200);
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());
@@ -263,7 +276,8 @@ int Theme::selfCheck() {
     const std::vector<const char *> kIcons = {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
-        "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down"};
+        "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
+        "pencil", "chevron-left", "chevron-right"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
@@ -350,10 +364,11 @@ int Theme::selfCheck() {
 
     const bool originalDark = isDark();
     setDark(true);
-    check("refined dark canvas", canvasBackground() == "#161719");
-    check("refined dark surface", surfaceFill() == "#202225");
-    check("refined dark border", surfaceBorder() == "#383C42");
-    check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() < 40);
+    check("refined dark canvas", canvasBackground() == "#09090B");
+    check("refined dark surface", surfaceFill() == "#111113");
+    check("refined dark border", surfaceBorder() == "#2B2B30");
+    check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() <= 12);
+    check("dark surfaces retain elevation", QColor(insetBackground()).lightness()<QColor(canvasBackground()).lightness() && QColor(canvasBackground()).lightness()<QColor(surfaceFill()).lightness() && QColor(surfaceFill()).lightness()<QColor(surfaceFillHover()).lightness());
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);
     check("dark stylesheet tokens substituted", !qss().contains('@'));
     bool validDark = true;
@@ -373,10 +388,12 @@ int Theme::selfCheck() {
     for (bool dark : {false,true}) {
         setDark(dark);
         bool readable=true;
-        for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel()})
+        for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel(),comparisonSeries()})
             for(const auto &surface:{canvasBackground(),surfaceFill()}) readable &= contrast(ink,surface)>=4.5;
         check(dark ? "dark text contrast >= 4.5" : "light text contrast >= 4.5",readable);
         check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
+        check("chart hover colours valid",QColor(chartHoverFill()).isValid() && QColor(chartHoverText()).isValid());
+        check("chart hover text contrast >= 4.5",contrast(chartHoverText(),chartHoverFill())>=4.5);
     }
     setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);

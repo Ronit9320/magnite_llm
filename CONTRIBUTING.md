@@ -37,7 +37,12 @@ hardcode hex colors in widgets/stylesheets. Icons use `stroke="currentColor"`
 and Theme::coloredIcon. Preserve keyboard focus, both themes, and reduced motion.
 The implementation in `app/src/theme.h`, `app/resources/theme/console.qss`, and
 `app/resources/brand/` defines the current design. Keep new feature styling
-consistent with it. Local planning files and retired design experiments are
+consistent with it. Boolean settings use the shared `ToggleSwitch` in
+`app/src/widgets/toggleswitch.h`; it preserves native checked-state and keyboard
+behavior while drawing the themed track and thumb. Use shared `Button`,
+`ComboBox`, `TabWidget`, `SpinBox`/`DoubleSpinBox` and `ProgressBar` components for
+ordinary controls; see [native UI components](docs/development/UI_COMPONENTS.md)
+for variants, motion and verification. Local planning files and retired design experiments are
 not contribution references.
 
 ## Verification

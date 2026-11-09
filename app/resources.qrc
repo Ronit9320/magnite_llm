@@ -35,6 +35,9 @@
         <file alias="icons/search.svg">resources/icons/search.svg</file>
         <file alias="icons/chevron-up.svg">resources/icons/chevron-up.svg</file>
         <file alias="icons/chevron-down.svg">resources/icons/chevron-down.svg</file>
+        <file alias="icons/chevron-left.svg">resources/icons/chevron-left.svg</file>
+        <file alias="icons/chevron-right.svg">resources/icons/chevron-right.svg</file>
+        <file alias="icons/pencil.svg">resources/icons/pencil.svg</file>
         <file alias="icons/send.svg">resources/icons/send.svg</file>
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>

@@ -54,8 +54,20 @@ set(MAGNITE_SOURCES
     src/panels/modelcard.cpp
     src/panels/adaptercard.cpp
     src/widgets/flowlayout.cpp
+    src/widgets/componentfocus.cpp
+    src/widgets/componentfocus.h
+    src/widgets/progressbar.cpp
+    src/widgets/progressbar.h
+    src/widgets/spinbox.h
+    src/widgets/motion.h
+    src/widgets/button.cpp
+    src/widgets/button.h
+    src/widgets/tabwidget.cpp
+    src/widgets/tabwidget.h
     src/widgets/combobox.cpp
     src/widgets/combobox.h
+    src/widgets/toggleswitch.cpp
+    src/widgets/toggleswitch.h
     src/widgets/clickfeedback.cpp
     src/widgets/clickfeedback.h
     src/widgets/brandmark.cpp
@@ -66,14 +78,40 @@ set(MAGNITE_SOURCES
     src/widgets/logoanimation.h
     src/widgets/overviewtile.cpp
     src/widgets/overviewtile.h
+    src/widgets/contextmeter.cpp
+    src/widgets/contextmeter.h
+    src/widgets/versionswitcher.cpp
+    src/widgets/versionswitcher.h
+    src/widgets/namedialog.cpp
+    src/widgets/namedialog.h
+    src/widgets/chathistorylist.cpp
+    src/widgets/chathistorylist.h
+    src/widgets/sidebar.cpp
+    src/widgets/sidebar.h
+    src/widgets/sidebarstate.cpp
+    src/widgets/sidebarstate.h
     src/widgets/confirmation.h
+    src/widgets/trainingchart.cpp
+    src/widgets/trainingchart.h
     src/widgets/surface.h
+    src/panels/trainingrunpanel.cpp
+    src/panels/trainingrunpanel.h
     src/panels/trainingpanel.cpp
     src/panels/ragpanel.cpp
     src/panels/ragdoccard.cpp
     src/panels/adapterspanel.cpp
     src/panels/chatpanel.cpp
     src/panels/chatbubble.cpp
+    src/panels/chattree.cpp
+    src/panels/chattree.h
+    src/panels/chatstore.cpp
+    src/panels/chatstore.h
+    src/panels/greeting.cpp
+    src/panels/greeting.h
+    src/panels/chathistorycontroller.cpp
+    src/panels/chathistorycontroller.h
+    src/panels/messagerow.cpp
+    src/panels/messagerow.h
     src/panels/settingspanel.cpp
     resources.qrc
 )

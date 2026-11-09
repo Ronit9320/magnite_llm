@@ -12,7 +12,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 
-from backend.inference.schemas import ChatMessage, ChatRequest, ChatRole, CompletionRequest, InferenceStatus
+from backend.inference.context import (drop_to_fit, fill_of, split_for_compaction,
+                                       summarize_prompt, summary_message)
+from backend.inference.schemas import (ChatMessage, ChatRequest, ChatRole, CompactRequest, CompactResult,
+                                       CompletionRequest, ContextUsage, ContextUsageRequest,
+                                       InferenceStatus)
 from backend.inference.supervisor import get_supervisor
 from backend.rag.context import injectable_context
 from backend.request_work import request_work, watch_disconnect, ClientDisconnected
@@ -55,6 +59,73 @@ def _with_rag_context(req: ChatRequest, engine) -> list[ChatMessage]:
 @router.get("/status", response_model=InferenceStatus)
 def status():
     return get_supervisor().status()
+
+
+@router.post("/context-usage", response_model=ContextUsage)
+def context_usage(req: ContextUsageRequest):
+    """How full the loaded model's context is. Read-only: never takes the operation lock."""
+    try:
+        engine = get_supervisor().current_engine()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    used = engine.count_messages(req.messages)
+    limit = engine.context_size()
+    return ContextUsage(used=used, reserved=req.max_tokens, limit=limit,
+                        fill=fill_of(used, req.max_tokens, limit),
+                        exact=engine.name == "torch")
+
+
+async def _summarize(engine, prompt: list[ChatMessage]) -> str:
+    parts: list[str] = []
+    async with aclosing(engine.chat_stream(prompt, max_tokens=256, temperature=0.2, top_p=0.95)) as stream:
+        async for delta in stream:
+            parts.append(delta)
+    return "".join(parts).strip()
+
+
+@router.post("/compact", response_model=CompactResult)
+async def compact(req: CompactRequest, request: Request):
+    """Summarize the older part of a chat so it fits again; fall back to dropping old messages."""
+    sup = get_supervisor()
+    try:
+        with sup.operation():
+            engine = sup.current_engine()
+            split = split_for_compaction(req.messages, req.keep_recent)
+            if split == 0:
+                return CompactResult(summary=req.previous_summary, covered=0, method="summary")
+            limit = engine.context_size()
+            # Compaction cannot help when the reply reserve alone fills the window, or the
+            # recent messages we must keep already exceed the target: skip the slow summary.
+            if req.max_tokens >= limit or fill_of(engine.count_messages(req.messages[split:]),
+                                                 req.max_tokens, limit) >= req.target_fill:
+                return CompactResult(summary=req.previous_summary, covered=0, method="summary")
+            work = asyncio.create_task(_summarize(engine, summarize_prompt(req.messages[:split], req.previous_summary)))
+            stop_watching = asyncio.Event()
+            watcher = asyncio.create_task(watch_disconnect(request, stop_watching))
+            try:
+                done, _ = await asyncio.wait((work, watcher), return_when=asyncio.FIRST_COMPLETED)
+                if work not in done:
+                    work.cancel()
+                    with anyio.CancelScope(shield=True), suppress(asyncio.CancelledError, Exception):
+                        await work
+                    return Response(status_code=499)
+                try:
+                    summary = work.result()
+                except Exception:  # noqa: BLE001 - any engine failure falls back to dropping
+                    summary = ""
+            finally:
+                stop_watching.set()
+                with anyio.CancelScope(shield=True), suppress(asyncio.CancelledError):
+                    await watcher
+            if summary:
+                remaining = [summary_message(summary)] + req.messages[split:]
+                if fill_of(engine.count_messages(remaining), req.max_tokens, limit) < req.target_fill:
+                    return CompactResult(summary=summary, covered=split, method="summary")
+            covered = drop_to_fit(engine.count_messages, req.messages, req.previous_summary,
+                                  req.max_tokens, limit, req.target_fill)
+            return CompactResult(summary=req.previous_summary, covered=covered, method="dropped")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/adapter", response_model=InferenceStatus)

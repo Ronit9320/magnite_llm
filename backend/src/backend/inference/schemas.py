@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +58,30 @@ class InferenceStatus(BaseModel):
     backend_available: bool
     active_adapter: Optional[str] = None
     active_adapter_id: Optional[str] = None
+
+
+class ContextUsageRequest(BaseModel):
+    messages: list[ChatMessage]
+    max_tokens: int = Field(default=256, ge=1, le=8192)
+
+
+class ContextUsage(BaseModel):
+    used: int = Field(description="Tokens taken by the messages")
+    reserved: int = Field(description="Tokens reserved for the reply (max_tokens)")
+    limit: int = Field(description="The loaded model's context size")
+    fill: float = Field(description="(used + reserved) / limit")
+    exact: bool = Field(description="False when the engine can only estimate token counts")
+
+
+class CompactRequest(BaseModel):
+    messages: list[ChatMessage] = Field(description="The not-yet-compacted tail of the chat")
+    previous_summary: str = ""
+    max_tokens: int = Field(default=256, ge=1, le=8192)
+    target_fill: float = Field(default=0.85, gt=0.0, le=1.0)
+    keep_recent: int = Field(default=4, ge=0, le=64)
+
+
+class CompactResult(BaseModel):
+    summary: str
+    covered: int = Field(description="Leading posted messages the summary stands in for")
+    method: Literal["summary", "dropped"]

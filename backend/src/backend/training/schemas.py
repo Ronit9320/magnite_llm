@@ -28,6 +28,9 @@ class TrainingConfig(BaseModel):
     target_modules: str = Field("q_proj,v_proj", description="Comma-separated or 'all-linear'")
     quantization: str = Field("none", description="none|4bit|8bit")
 
+    dropout: float = Field(0.05, ge=0.0, lt=1.0)
+    validation_split: float = Field(0.0, ge=0.0, le=0.5)
+
     epochs: int = Field(3, ge=1, le=100)
     max_steps: int = Field(0, ge=0, description="0 = derive from epochs")
     learning_rate: float = Field(2e-4, gt=0.0, le=1.0)

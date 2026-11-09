@@ -95,6 +95,8 @@ class TrainingJobManager:
         dataset = self._datasets.get(cfg.dataset_id)
         if dataset is None:
             raise ValueError(f"Unknown dataset '{cfg.dataset_id}' — ingest a dataset first")
+        if cfg.validation_split > 0 and dataset.rows < 2:
+            raise ValueError("Validation requires at least two dataset rows")
         if not cfg.base_model.strip():
             raise ValueError("base_model is required")
         if cfg.quantization not in ("none", "4bit", "8bit"):

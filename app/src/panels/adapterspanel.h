@@ -23,6 +23,7 @@ public:
 signals:
     // Emitted when the active adapter changes (activate/clear/delete).
     void adapterActivated();
+    void runDetailsRequested(const QString &jobId);
 
 public slots:
     void refresh();

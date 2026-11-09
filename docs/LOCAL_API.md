@@ -76,6 +76,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Ingest dataset | `POST /datasets/ingest` with absolute `path`, or `name`, `format`, `content` |
 | List/read/delete datasets | `GET /datasets`, `GET /datasets/{id}`, `DELETE /datasets/{id}` |
 | Start training | `POST /training/start` with `base_model`, `dataset_id`, training settings |
+| Training resource estimate | `POST /training/estimate` with training settings; advisory local model/memory budget and measured-history duration calibration |
 | Training capability probe | `GET /training/capabilities`; reports quantization availability and platform reason |
 | Training history/status/cancel | `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` |
 | List adapters | `GET /adapters` |
@@ -86,6 +87,8 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Ingest/list documents | `POST /rag/documents` with `path` or `name`/`content`; `GET /rag/documents` |
 | Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score` |
 | Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
+| Context usage | `POST /inference/context-usage` with `messages`, `max_tokens`; returns `used`, `reserved`, `limit`, `fill`, `exact` (409 when no model is loaded; works during generation) |
+| Compact a long chat | `POST /inference/compact` with `messages`, optional `previous_summary`, `max_tokens`, `target_fill`, `keep_recent`; returns `summary`, `covered`, `method` (409 while busy) |
 | Runtime engine preference | `POST /inference/settings` with `engine_override`: 0 Auto, 1 vLLM, 2 llama.cpp |
 | Prepare application update | `POST /updates/quiesce` with `{}`; 200 when idle, 409 while work is active |
 | Desktop graceful shutdown | `POST /_desktop/shutdown`; requires a configured launch token; absent in tokenless developer mode |
@@ -105,6 +108,17 @@ Training example body after dataset ingestion:
 ```json
 {"base_model":"REGISTERED_MODEL_ID","dataset_id":"DATASET_ID","name":"demo","rank":2,"alpha":4,"target_modules":"all-linear","quantization":"none","max_steps":3,"max_length":64}
 ```
+
+Training settings also accept `dropout` (default `0.05`, `0 <= x < 1`) and
+`validation_split` (default `0`, range `0..0.5`). A nonzero validation split
+requires at least two rows. Held-out rows are excluded from training and
+`eval_loss` is logged at each epoch boundary. `TrainingJob.history` retains the
+latest 1,000 metric entries with actual `step`, monotonic `elapsed_seconds`,
+optional `epoch`, and the finite values present in each log: `loss`, `eval_loss`,
+`learning_rate`, `grad_norm`. Missing metrics are omitted, not set to zero.
+Existing jobs without these optional fields remain readable. See
+[training visualisation](development/TRAINING_VISUALISATION.md) for UI behavior,
+timing estimates and verification.
 
 These APIs accept server-local paths, not multipart browser uploads. Use paths
 accessible to the backend process. Check HTTP status and returned details rather
@@ -126,3 +140,14 @@ than treating a completed request as successful work.
 - Training cancellation remains available during saving. Cancellation accepted
   before adapter publication discards the saved output; after publication the
   job is terminal and cancellation is rejected.
+
+### `GET /training/telemetry`
+
+Lightweight device-wide compute readings, with no ML runtime imports. Returns
+`device`, `accelerator`, `kind`, `used_bytes`, `total_bytes`,
+`utilization_percent`, `temperature_c`, `power_w` and `detail`.
+An available NVIDIA probe describes one GPU; memory is never summed across GPUs.
+If GPU telemetry is unavailable, the response labels system/unified memory and
+leaves unsupported scalars `null`. These are device-wide readings, not an
+assertion that the selected training job uses that GPU. The desktop refreshes
+this card while its training page is visible, with one request in flight.

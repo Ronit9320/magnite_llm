@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 
@@ -48,8 +49,8 @@ void AdaptersPanel::setupUi() {
     rackLabel->setObjectName("heroKicker");
     toolbar->addWidget(rackLabel);
     toolbar->addStretch();
-    auto *refreshButton = new QPushButton("Refresh registry",this);
-    auto *importButton = new QPushButton("Import archive…",this);
+    auto *refreshButton = new Button("Refresh registry",this);
+    auto *importButton = new Button("Import archive…",this);
     importButton->setObjectName("primaryBtn");
     toolbar->addWidget(refreshButton);
     toolbar->addWidget(importButton);
@@ -124,6 +125,7 @@ void AdaptersPanel::refresh() {
             if (!value.isObject()) continue;
             const QJsonObject adapter = value.toObject();
             auto *card = new AdapterCard(adapter, m_cardHost);
+            connect(card, &AdapterCard::runDetailsRequested, this, &AdaptersPanel::runDetailsRequested);
             connect(card, &AdapterCard::activateRequested, this, &AdaptersPanel::onActivate);
             connect(card, &AdapterCard::exportRequested, this, &AdaptersPanel::onExportAdapter);
             connect(card, &AdapterCard::deleteRequested, this, &AdaptersPanel::onDeleteAdapter);

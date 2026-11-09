@@ -20,7 +20,7 @@ public:
         setGeometry(button->rect());
         auto *animation = new QVariantAnimation(this);
         const bool sidebar = button->objectName() == "navBtn";
-        animation->setDuration(sidebar ? 600 : 320);
+        animation->setDuration(sidebar ? Theme::motionStandardMs() : 240);
         animation->setStartValue(0.0);
         animation->setEndValue(1.0);
         animation->setEasingCurve(sidebar ? QEasingCurve::InOutSine : QEasingCurve::OutCubic);
@@ -53,7 +53,7 @@ ClickFeedback::ClickFeedback(QObject *parent) : QObject(parent) { qApp->installE
 
 bool ClickFeedback::eventFilter(QObject *watched, QEvent *event) {
     auto *button = qobject_cast<QPushButton *>(watched);
-    if (button && button->isEnabled() && button->isVisible()
+    if (button && !button->property("animatedComponent").toBool() && button->isEnabled() && button->isVisible()
         && !QSettings().value("appearance/studio3ReducedMotion", false).toBool()) {
         if (event->type() == QEvent::MouseButtonPress) {
             auto *mouse = static_cast<QMouseEvent *>(event);

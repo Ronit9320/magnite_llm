@@ -332,8 +332,8 @@ removes indexed content and vectors, never the original source file.
 
 Default application home is `~/.magnite`; Windows has an APPDATA branch in
 `paths.app_home()`. `DATA_SCHEMA` gates updater compatibility; no automatic migration framework exists. Model weights and
-embedding caches are separate Hub storage. Qt settings and in-memory desktop
-chat history are outside backend ownership.
+embedding caches are separate Hub storage. Qt settings and the desktop's saved chats
+(`<home>/chats`, written by the client; see architecture.md, Chat history) are outside backend ownership.
 
 Other environment inputs: `MAGNITE_ENGINE_OVERRIDE`, `MAGNITE_OLLAMA_URL`
 (default `http://127.0.0.1:11434`), Hub authentication/offline/cache variables,

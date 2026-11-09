@@ -16,8 +16,8 @@ bool isDark();
 void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
 
 // ---- Paper, graphite and orange palette ----
-inline QString canvasBackground()    { return isDark() ? QStringLiteral("#161719") : QStringLiteral("#F1EFE7"); }
-inline QString insetBackground()     { return isDark() ? QStringLiteral("#111214") : QStringLiteral("#E9E6DC"); }
+inline QString canvasBackground()    { return isDark() ? QStringLiteral("#09090B") : QStringLiteral("#F1EFE7"); }
+inline QString insetBackground()     { return isDark() ? QStringLiteral("#050506") : QStringLiteral("#E9E6DC"); }
 // Supplied brand colors.
 inline QString brandOrange() { return QStringLiteral("#FF4A0E"); }
 inline QString brandInk() { return QStringLiteral("#201411"); }
@@ -32,11 +32,14 @@ inline QString accentText()    { return QStringLiteral("#201D18"); }
 // Destructive-button hover + text-on-danger fills (status-error family).
 inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : QStringLiteral("#FFD0BD"); }
 
-inline QString surfaceFill()         { return isDark() ? QStringLiteral("#202225") : QStringLiteral("#FFFEF8"); }
-inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#2A2D31") : QStringLiteral("#E5E8D5"); }
-inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#34383D") : QStringLiteral("#E5E8D5"); }
-inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#383C42") : QStringLiteral("#CFD2C5"); }
+inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113") : QStringLiteral("#FFFEF8"); }
+inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
+inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#2B2B30") : QStringLiteral("#CFD2C5"); }
 inline QString surfaceBorderHover()  { return QStringLiteral("#FF784E"); }
+
+// Unfilled part of the context meter ring and bar.
+inline QString meterTrack()          { return surfaceBorder(); }
 
 inline QString textPrimary()   { return isDark() ? QStringLiteral("#F1EFE7") : QStringLiteral("#20221F"); }
 inline QString textSecondary() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#555D54"); }
@@ -45,6 +48,11 @@ inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : Q
 inline QString statusSuccess() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
 inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
+inline QString comparisonSeries() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+
+// Graph readouts stay dark and compact in both appearances.
+inline QString chartHoverFill() { return brandInk(); }
+inline QString chartHoverText() { return isDark() ? textPrimary() : canvasBackground(); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
@@ -57,6 +65,8 @@ inline int spacingBase()           { return 6; }
 inline int panelPadding()          { return 16; }
 inline int minWindowWidth()        { return 1024; }
 inline int minWindowHeight()       { return 680; }
+inline int motionFastMs() { return 140; }
+inline int motionStandardMs() { return 180; }
 inline int cornerRadiusSmall()     { return 8; }
 
 // ---- Runtime helpers ----

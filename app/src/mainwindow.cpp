@@ -9,9 +9,17 @@
 #include "panels/basepanel.h"
 #include "panels/modelspanel.h"
 #include "panels/trainingpanel.h"
+#include "panels/trainingrunpanel.h"
 #include "panels/ragpanel.h"
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
+#include "panels/chathistorycontroller.h"
+#include "panels/chatstore.h"
+#include "panels/greeting.h"
+#include "widgets/chathistorylist.h"
+#include "widgets/sidebar.h"
+#include "widgets/sidebarstate.h"
+#include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
 #include "widgets/studiocanvas.h"
@@ -37,6 +45,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
@@ -47,6 +56,14 @@
 #include <QSaveFile>
 
 #include <memory>
+
+namespace {
+// Runs that must never touch the user's real chats or ask questions.
+bool verificationRun() {
+    const auto args = QCoreApplication::arguments();
+    return args.contains("--selftest") || args.contains("--screenshot") || args.contains("--ui-check");
+}
+}  // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -124,9 +141,11 @@ MainWindow::MainWindow(QWidget *parent)
     const bool verification = m_selfTest || args.contains("--ui-check") || args.contains("--screenshot");
     if (!verification && QSettings().value("updates/checkOnStartup", true).toBool())
         QTimer::singleShot(5000, m_updater, &UpdateManager::check);
+    if (!verificationRun()) QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
 }
 
 MainWindow::~MainWindow() {
+    m_chatPanel->flushSave();   // before anything is torn down: the last change must reach disk
     // Settle replies while the panels referenced by their callbacks still exist.
     m_backendClient->abortAll();
     savePanelSettings();
@@ -140,30 +159,18 @@ void MainWindow::setupUi() {
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // ---- Horizontal masthead (design doc §12) ----
-    auto *sidebar = new QWidget();
-    sidebar->setObjectName("sidebar");
-    sidebar->setFixedWidth(176);
-    auto *sidebarLayout = new QVBoxLayout(sidebar);
-    sidebarLayout->setContentsMargins(14, 20, 14, 16);
-    sidebarLayout->setSpacing(6);
-    auto *brandRow = new QVBoxLayout();
-    sidebarLayout->addLayout(brandRow);
+    // ---- Left menu ----
+    m_sidebar = new Sidebar({{"Library", "box", PanelModels},
+                             {"Training", "graduation-cap", PanelTraining},
+                             {"Knowledge", "database", PanelRag},
+                             {"Adapters", "layers", PanelAdapters},
+                             {"Playground", "message-circle", PanelChat}},
+                            {"Settings", "settings", PanelSettings}, PanelChat);
+    m_history = m_sidebar->history();
+    connect(m_sidebar, &Sidebar::panelRequested, this, &MainWindow::switchPanel);
+    auto *brandSeal = m_sidebar->brandSeal();
 
-    auto *brandSeal = new StudioCanvas(sidebar);
-    brandSeal->setProperty("brandMark", true);
-    brandSeal->setFixedSize(76, 76);
-    brandSeal->setAccessibleName("Magnite logo");
-    brandSeal->setToolTip("Magnite · Intelligence on your own terms");
-    brandRow->addWidget(brandSeal);
-    auto *logoLabel = new BrandWordmark(sidebar);
-    logoLabel->setObjectName("logoLabel");
-    brandRow->addWidget(logoLabel);
-    auto *edition = new QLabel("LOCAL STUDIO", sidebar);
-    edition->setObjectName("studioTag");
-    brandRow->addWidget(edition);
-
-    auto *mode = new QPushButton("Dark mode", sidebar);
+    auto *mode = new QPushButton("Dark mode", central);
     mode->setObjectName("themeToggle");
     mode->setCheckable(true);
     mode->setChecked(Theme::isDark());
@@ -174,56 +181,11 @@ void MainWindow::setupUi() {
         Theme::setDark(dark);
         QSettings().setValue("appearance/studio3Dark", dark);
         mode->setText(dark ? "Light mode" : "Dark mode");
-        refreshNavIcons();
+        m_sidebar->refreshIcons();
     });
 
-    sidebarLayout->addSpacing(24);
-    auto *workspaceLabel = new QLabel("WORKSPACES", sidebar);
-    workspaceLabel->setObjectName("studioTag");
-    sidebarLayout->addWidget(workspaceLabel);
-    auto *navigation = new QVBoxLayout();
-    navigation->setSpacing(8);
-    sidebarLayout->addLayout(navigation,1);
-
-    struct NavInfo {
-        QString label;
-        QString icon;
-        int panel;
-    };
-
-    auto makeNavButton = [this](const NavInfo &info) {
-        auto *btn = new QPushButton(info.label);
-        btn->setObjectName("navBtn");
-        btn->setCheckable(true);
-        btn->setCursor(Qt::PointingHandCursor);
-        btn->setProperty("navicon", info.icon);
-        btn->setProperty("panel", info.panel);
-        connect(btn, &QPushButton::clicked, this, [this, info]() {
-            switchPanel(info.panel);
-        });
-        btn->setToolTip(info.label + " · Ctrl+" + QString::number(info.panel + 1));
-        btn->setMinimumHeight(48);
-        auto *shortcut = new QShortcut(QKeySequence(QString("Ctrl+%1").arg(info.panel + 1)), this);
-        connect(shortcut, &QShortcut::activated, btn, &QPushButton::click);
-        m_sideButtons.append(btn);
-        return btn;
-    };
-
-    // Five numbered workspaces; Settings anchors the right edge.
-    const QList<NavInfo> navs = {
-        {"Library",   "box",       PanelModels},
-        {"Training", "graduation-cap", PanelTraining},
-        {"Knowledge",      "database",         PanelRag},
-        {"Adapters", "layers",         PanelAdapters},
-        {"Playground",     "message-circle", PanelChat},
-    };
-    for (const auto &info : navs)
-        navigation->addWidget(makeNavButton(info));
-
-    navigation->addStretch();
-
     // Quiet, non-interactive service status; details are available on hover.
-    auto *connection = new QFrame(sidebar);
+    auto *connection = new QFrame(central);
     connection->setObjectName("connectionStatus");
     connection->setFixedHeight(28);
     connection->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -247,10 +209,7 @@ void MainWindow::setupUi() {
         setPillState("err", "Unavailable");
     });
 
-    navigation->addWidget(makeNavButton({"Settings", "settings", PanelSettings}));
-
-
-    mainLayout->addWidget(sidebar);
+    mainLayout->addWidget(m_sidebar);
 
     // ---- Panels ----
     m_modelsPanel = new ModelsPanel();
@@ -258,6 +217,16 @@ void MainWindow::setupUi() {
     m_ragPanel = new RagPanel();
     m_adaptersPanel = new AdaptersPanel();
     m_chatPanel = new ChatPanel();
+    // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
+    m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
+    m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
+    m_chatPanel->setChatStore(m_chatStore);
+    m_historyController = new ChatHistoryController(m_chatStore, m_chatPanel, m_history, this, this);
+    // The strip's + asks exactly like the list's New chat row, and is busy exactly when the row is.
+    connect(m_sidebar, &Sidebar::newChatRequested, m_history, &ChatHistoryList::newChatRequested);
+    connect(m_chatPanel, &ChatPanel::busyChanged, m_sidebar, &Sidebar::setBusy);
+    m_sidebar->setBusy(m_chatPanel->isBusy());
+    m_sidebar->setAnimationsEnabled(!verificationRun());
     m_settingsPanel = new SettingsPanel();
 
     connect(m_modelsPanel,&ModelsPanel::workspaceRequested,this,&MainWindow::switchPanel);
@@ -274,6 +243,7 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_settingsPanel);
 
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
+    connect(m_settingsPanel, &SettingsPanel::settingsChanged, m_chatPanel, &ChatPanel::reloadContextSettings);
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, [this]() {
         if (m_backendClient->isReady()) {
             m_backendClient->post("/inference/settings",
@@ -308,7 +278,17 @@ void MainWindow::setupUi() {
     m_background = new StudioCanvas(workspace);
     auto *canvasLayout = new QVBoxLayout(m_background);
     canvasLayout->setContentsMargins(0,0,0,0);
-    canvasLayout->addWidget(m_stack);
+    m_workspacePages=new QStackedWidget(this);
+    m_runPanel=new TrainingRunPanel();
+    m_workspacePages->addWidget(m_stack); m_workspacePages->addWidget(m_runPanel);
+    auto openRun=[this](const QString &id) {
+        m_runReturnPanel=m_stack->currentIndex();
+        m_workspacePages->setCurrentWidget(m_runPanel); m_runPanel->openRun(id);
+    };
+    connect(m_trainingPanel,&TrainingPanel::runDetailsRequested,this,openRun);
+    connect(m_adaptersPanel,&AdaptersPanel::runDetailsRequested,this,openRun);
+    connect(m_runPanel,&TrainingRunPanel::backRequested,this,[this] { switchPanel(m_runReturnPanel); });
+    canvasLayout->addWidget(m_workspacePages);
     workspaceLayout->addWidget(m_background,1);
     mainLayout->addWidget(workspace, 1);
     auto applyAppearance = [this, brandSeal]() {
@@ -327,35 +307,30 @@ void MainWindow::setupUi() {
     setCentralWidget(central);
     new ClickFeedback(this);
 
-    refreshNavIcons();
+    m_sidebar->setCurrentPanel(m_stack->currentIndex());
 }
 
 void MainWindow::switchPanel(int index) {
     // Persist whichever panel we're leaving, then show the new one. The nav
     // buttons mirror the active panel (also on programmatic switches, e.g.
     // selftest), then the incoming panel crossfades in.
+    m_workspacePages->setCurrentWidget(m_stack);
     m_stack->setCurrentIndex(index);
-    for (auto *btn : m_sideButtons)
-        btn->setChecked(btn->property("panel").toInt() == index);
-    refreshNavIcons();
+    m_sidebar->setCurrentPanel(index);
     startPanelFade();
     savePanelSettings();
 }
 
-void MainWindow::refreshNavIcons() {
-    // Stroke-tinted icons: blue on the active item, secondary when idle.
-    for (auto *btn : m_sideButtons) {
-        const QString name = btn->property("navicon").toString();
-        const QColor color = btn->isChecked()
-            ? QColor(Theme::accentPrimary())
-            : QColor(Theme::textSecondary());
-        btn->setIcon(Theme::coloredIcon(name, color, 18));
-        btn->setIconSize(QSize(18, 18));
-    }
+void MainWindow::askForNameIfNeeded() {
+    if (Greeting::nameAsked()) return;
+    NameDialog dialog(Greeting::accountNameSuggestion(), this);
+    if (dialog.exec() == QDialog::Accepted) Greeting::setUserName(dialog.name());
+    Greeting::setNameAsked(true);   // Save and Skip both end the question for good
+    m_chatPanel->reloadContextSettings();   // a blank chat picks up the name at once
 }
 
 void MainWindow::startPanelFade() {
-    // Gentle 600ms fade-in of the destination panel. Skipped in
+    // Brief fade-in of the destination panel. Skipped in
     // selftest mode so the panel navigation stays deterministic, and the
     // effect is removed on completion so Qt doesn't keep an offscreen buffer.
     if (m_selfTest || m_skipFade || QSettings().value("appearance/studio3ReducedMotion", false).toBool())
@@ -373,10 +348,10 @@ void MainWindow::startPanelFade() {
     effect->setOpacity(0.0);
 
     m_crossfade = new QPropertyAnimation(effect, "opacity", this);
-    m_crossfade->setDuration(600);
+    m_crossfade->setDuration(Theme::motionStandardMs());
     m_crossfade->setStartValue(0.0);
     m_crossfade->setEndValue(1.0);
-    m_crossfade->setEasingCurve(QEasingCurve::InOutSine);
+    m_crossfade->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_crossfade, &QPropertyAnimation::finished, this, [this]() {
         if (m_crossfade) {
             m_crossfade->deleteLater();
@@ -411,6 +386,13 @@ void MainWindow::captureScreenshots(const QString &dir) {
     // on Wayland where the X root grab comes back black.
     QDir().mkpath(dir);
     m_shotDir = dir;
+    // MAGNITE_SCREENSHOT_SIDEBAR=collapsed shows the strip (not stored in Settings).
+    if (qEnvironmentVariable("MAGNITE_SCREENSHOT_SIDEBAR") == "collapsed") m_sidebar->setCollapsed(true);
+    // MAGNITE_SCREENSHOT_THEME=dark shows the dark theme without storing it.
+    if (qEnvironmentVariable("MAGNITE_SCREENSHOT_THEME") == "dark") {
+        Theme::setDark(true);
+        m_sidebar->refreshIcons();
+    }
     m_skipFade = true;
     m_background->setMotionEnabled(false);
     captureNextPanel(0);
@@ -467,6 +449,7 @@ void MainWindow::onBackendStarted() {
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
+    m_runPanel->setBackendClient(m_backendClient);
     m_ragPanel->setBackendClient(m_backendClient);
     m_adaptersPanel->setBackendClient(m_backendClient);
     m_chatPanel->setBackendClient(m_backendClient);
@@ -584,6 +567,48 @@ void MainWindow::runSelfTest() {
 
         checkC(m_stack->currentIndex() == PanelSettings, "navigated through all panels");
         checkC(m_stack->count() == PanelCount, "panel count");
+
+        switchPanel(PanelTraining);
+        m_trainingPanel->runDetailsRequested("selftest-missing-run");
+        checkC(m_workspacePages->currentWidget()==m_runPanel,"training opens contextual run page");
+        m_runPanel->backRequested();
+        checkC(m_workspacePages->currentWidget()==m_stack && m_stack->currentIndex()==PanelTraining,"run review returns to training");
+        switchPanel(PanelAdapters);
+        m_adaptersPanel->runDetailsRequested("selftest-missing-run");
+        checkC(m_workspacePages->currentWidget()==m_runPanel,"adapters opens contextual run page");
+        switchPanel(PanelSettings);
+        checkC(m_workspacePages->currentWidget()==m_stack,"sidebar exits run review");
+
+        // Left menu: collapse button, the + under Playground and the busy state.
+        {
+            const SidebarState storedSidebar = SidebarState::load();
+            m_sidebar->setAnimationsEnabled(false);
+            m_sidebar->setCollapsed(false);   // start from expanded whatever was stored
+            auto *toggle = m_sidebar->findChild<QPushButton *>("sidebarToggle");
+            auto *plus = m_sidebar->findChild<QPushButton *>("sidebarNewChat");
+            auto *listNew = m_history->findChild<QPushButton *>("historyNew");
+            checkC(toggle && plus && listNew && m_sidebar->width() == SidebarState::kExpandedWidth, "sidebar: the real window has the toggle, the + and the New chat row");
+            if (toggle && plus && listNew) {
+                toggle->click();
+                checkC(m_sidebar->isCollapsed() && m_sidebar->width() == 52, "sidebar: the toggle collapses the real menu to 52px");
+                switchPanel(PanelChat);
+                checkC(plus->isVisibleTo(m_sidebar) && !m_history->isVisibleTo(m_sidebar), "sidebar: collapsed on Playground shows the + and hides the chat list");
+                emit m_chatPanel->busyChanged(true);
+                checkC(!plus->isEnabled() && !listNew->isEnabled(), "sidebar: a busy chat turns off the + and the New chat row");
+                emit m_chatPanel->busyChanged(false);
+                checkC(plus->isEnabled() && listNew->isEnabled(), "sidebar: an idle chat turns them back on");
+                int asked = 0;
+                const auto spy = connect(m_history, &ChatHistoryList::newChatRequested, this, [&asked]() { ++asked; });
+                plus->click();
+                disconnect(spy);
+                checkC(asked == 1, "sidebar: the + sends the same new-chat request as the list's New chat row");
+                checkC(m_chatPanel->currentChatId().isEmpty(), "sidebar: the + leaves a blank new chat");
+                toggle->click();
+                checkC(!m_sidebar->isCollapsed() && m_sidebar->width() == SidebarState::kExpandedWidth && m_history->isVisibleTo(m_sidebar), "sidebar: the toggle brings the real menu back");
+            }
+            storedSidebar.save();   // leave the user's stored choice as it was
+            switchPanel(PanelSettings);
+        }
 
         // Settings round-trips.
         const QList<BasePanel*> panels = {

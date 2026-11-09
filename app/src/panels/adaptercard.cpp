@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include "widgets/button.h"
 #include <QStyle>
 #include <QVBoxLayout>
 #include <QDateTime>
@@ -85,16 +86,24 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     metaRow->addStretch(1);
     layout->addLayout(metaRow);
 
+    const auto trainingJob=data.value("training_job_id").toString();
+    if (!trainingJob.isEmpty()) {
+        auto *run=new Button("View run data",this); run->setObjectName("cardBtn");
+        run->setAccessibleName("View training run for "+m_id);
+        layout->addWidget(run,0,Qt::AlignLeft);
+        connect(run,&QPushButton::clicked,this,[this,trainingJob] { emit runDetailsRequested(trainingJob); });
+    }
+
     // Row 3: activation, export and deletion actions.
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(6);
-    m_activateButton = new QPushButton(QStringLiteral("Activate"), this);
+    m_activateButton = new Button(QStringLiteral("Activate"), this);
     m_activateButton->setObjectName(QStringLiteral("cardPrimary"));
     m_activateButton->setCursor(Qt::PointingHandCursor);
-    auto *exportButton = new QPushButton(QStringLiteral("Export"), this);
+    auto *exportButton = new Button(QStringLiteral("Export"), this);
     exportButton->setObjectName(QStringLiteral("cardBtn"));
     exportButton->setCursor(Qt::PointingHandCursor);
-    auto *deleteButton = new QPushButton(QStringLiteral("Delete"), this);
+    auto *deleteButton = new Button(QStringLiteral("Delete"), this);
     deleteButton->setObjectName(QStringLiteral("cardDanger"));
     deleteButton->setCursor(Qt::PointingHandCursor);
     btnRow->addWidget(m_activateButton);
