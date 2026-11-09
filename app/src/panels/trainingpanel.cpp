@@ -1288,7 +1288,9 @@ void TrainingPanel::updateComparison() {
     auto latest=[](const QJsonArray &history,const QString &key) {
         QJsonValue result;
         for (const auto &value : history) {
-            const auto v=value.toObject()[key];
+            // operator[] can return a reference into the temporary object on
+            // older Qt builds. Keep an owned value beyond this statement.
+            const QJsonValue v=value.toObject().value(key);
             if (v.isDouble() && std::isfinite(v.toDouble())) result=v;
         }
         return result;

@@ -2135,16 +2135,25 @@ int runUiCheck(const QString &captures) {
                 history.remove(id3);
                 ChatTree victimTree; victimTree.addChild(victimTree.addChild(ChatTree::kRoot,"user","victim chat"),"assistant","ok");
                 const QString victim=history.create(); history.save(victim,victimTree);
-                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+                // A directory's read-only flag does not prevent writes on Windows.
+                // Preserve the files and put a regular file in the directory's place.
+                const QString savedChatsPath=chatsPath+".saved";
+                check(QDir().rename(chatsPath,savedChatsPath),"preserve chats before blocking storage");
+                QFile storageBlocker(chatsPath);
+                check(storageBlocker.open(QIODevice::WriteOnly),"block the chats directory with a file");
+                storageBlocker.close();
                 check(sendAndWait("cannot be saved") && rows().size()==2 && !history.lastError().isEmpty(),"history: a chat that cannot be saved still works");
                 const QString id4=chat.currentChatId();
+                check(storageBlocker.remove() && QDir().rename(savedChatsPath,chatsPath),"restore chats after the failed save");
                 {   // a failure to rename or delete is reported, not silent
+                    const QString victimPath=chatsPath+"/"+victim+".json";
+                    check(QFile::rename(victimPath,victimPath+".saved") && QDir().mkdir(victimPath),"block a chat file with a directory");
                     const bool renamedOk=chat.renameChat(victim,"cannot rename"); const QString renameStatus=status();
                     const bool deletedOk=chat.deleteChat(victim); const QString deleteStatus=status();
                     check(!renamedOk && renameStatus.contains("Could not rename") && statusLine->property("state")=="warn","history: a rename that fails says so");
                     check(!deletedOk && deleteStatus.contains("Could not delete") && statusLine->property("state")=="warn" && history.list().size()>=1,"history: a delete that fails says so and keeps the chat");
+                    check(QDir().rmdir(victimPath) && QFile::rename(victimPath+".saved",victimPath),"restore the blocked chat file");
                 }
-                QFile::setPermissions(chatsPath,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
                 chat.flushSave(); pump(100);
                 check(savedTexts(id4).size()==2,"history: a save that failed is tried again when the chat is flushed (switching chats or closing)");
                 check(sendAndWait("now it can"),"history: the next message after the folder is fixed is sent"); pump(300);
@@ -2505,10 +2514,13 @@ int runUiCheck(const QString &captures) {
             check(!blocked.save(blocked.create(),makeTree("x","y")) && !blocked.lastError().isEmpty() && blocked.list().isEmpty(),"chat store: a folder that cannot be created fails the save with a message");
             const QString keep=ids(store.list()).first();
             const auto before=store.load(keep);
-            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::ExeOwner);
+            check(QDir().rename(dir,dir+".saved"),"preserve the store before blocking writes");
+            QFile storageBlocker(dir);
+            check(storageBlocker.open(QIODevice::WriteOnly),"block the store directory with a file");
+            storageBlocker.close();
             const bool saved=store.save(keep,makeTree("changed","changed"));
             const QString error=store.lastError();
-            QFile::setPermissions(dir,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner);
+            check(storageBlocker.remove() && QDir().rename(dir+".saved",dir),"restore the store after the failed save");
             const auto after=store.load(keep);
             check(!saved && !error.isEmpty() && before.has_value() && after.has_value() && before->toJson()==after->toJson(),"chat store: a failed save reports an error and leaves the previous file intact");
         }
