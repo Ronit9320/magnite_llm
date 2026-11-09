@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 QT_TAG = "v6.8.3"
 REPOS = ("qtbase", "qtsvg")
@@ -68,7 +70,22 @@ EXCLUDED = {  # Id -> why it is not in this bundle
 
 def fetch(url: str) -> bytes:
     # curl uses the macOS trust store; python.org builds of Python often ship without CA certificates.
-    return subprocess.run(["curl", "-fsSL", "--retry", "3", url], check=True, capture_output=True).stdout
+    command = ["curl", "-fsSL", "--retry", "3", "--connect-timeout", "20", "--max-time", "120"]
+    token = os.environ.get("GH_TOKEN", "")
+    parsed = urlsplit(url)
+    headers = b""
+    if token and parsed.scheme == "https" and parsed.netloc == "api.github.com":
+        # Shared hosted-runner IPs can exhaust GitHub's anonymous API quota.
+        # Keep credentials off the command line and away from raw-file hosts.
+        command += ["--header", "@-"]
+        headers = f"Authorization: Bearer {token}\n".encode()
+    result = subprocess.run(command + [url], input=headers, capture_output=True)
+    if result.returncode:
+        detail = result.stderr.decode(errors="replace")
+        if token:
+            detail = detail.replace(token, "[redacted]")
+        raise RuntimeError(f"Qt notice download failed for {url} (curl exit {result.returncode}): {detail[-2000:]}")
+    return result.stdout
 
 
 def attributions(cache: Path):

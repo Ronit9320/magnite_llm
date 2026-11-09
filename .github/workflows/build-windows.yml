@@ -65,6 +65,8 @@ jobs:
           cmake --version >> build/packaging/windows/hosted/environment.txt
           Get-PSDrive -PSProvider FileSystem > build/packaging/windows/hosted/disk-before.txt
       - name: Stage native application, isolated runtime and installer
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           & packaging/windows/build_package.ps1 -QtRoot $env:MAGNITE_QT_ROOT -VcpkgRoot $env:MAGNITE_VCPKG_ROOT -InnoCompiler $env:MAGNITE_INNO_COMPILER *> build/packaging/windows/hosted/build.log
       - name: Backend regressions and signed manifest checks
