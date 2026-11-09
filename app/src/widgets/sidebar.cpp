@@ -8,6 +8,7 @@
 
 #include <QBoxLayout>
 #include <QLabel>
+#include <QFrame>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSpacerItem>
@@ -35,12 +36,12 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     brand->addLayout(m_top);
     m_seal = new StudioCanvas(this);
     m_seal->setProperty("brandMark", true);
-    m_seal->setFixedSize(76, 76);
+    m_seal->setFixedSize(35, 35);
     m_seal->setAccessibleName("Magnite logo");
     m_seal->setToolTip("Magnite · Intelligence on your own terms");
     m_toggle = new QPushButton(this);
     m_toggle->setObjectName("sidebarToggle");
-    m_toggle->setFixedSize(26, 26);
+    m_toggle->setFixedSize(18, 24);
     m_toggle->setCursor(Qt::PointingHandCursor);
     connect(m_toggle, &QPushButton::clicked, this, &Sidebar::toggle);
     m_top->addWidget(m_seal);
@@ -48,19 +49,20 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_top->addWidget(m_toggle, 0, Qt::AlignTop);
     m_wordmark = new BrandWordmark(this);
     m_wordmark->setObjectName("logoLabel");
-    brand->addWidget(m_wordmark);
+    m_wordmark->setFixedSize(86,24);
+    m_top->insertWidget(1,m_wordmark);
     auto *edition = new QLabel("LOCAL STUDIO", this);
     edition->setObjectName("studioTag");
-    brand->addWidget(edition);
+    edition->hide();
 
     m_gap = new QSpacerItem(0, 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
     layout->addSpacerItem(m_gap);
-    auto *workspaceLabel = new QLabel("WORKSPACES", this);
+    auto *workspaceLabel = new QLabel("WORKSPACE", this);
     workspaceLabel->setObjectName("studioTag");
     layout->addWidget(workspaceLabel);
-    m_tags = {edition, workspaceLabel};
+    m_tags = {workspaceLabel};
     auto *navigation = new QVBoxLayout();
-    navigation->setSpacing(8);
+    navigation->setSpacing(5);
     layout->addLayout(navigation, 1);
 
     for (const NavItem &item : workspaces) {
@@ -86,6 +88,11 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
         }
     }
     navigation->addStretch();
+    auto *local=new QFrame(this); local->setObjectName("sidebarLocalCard");
+    auto *localBody=new QVBoxLayout(local); localBody->setContentsMargins(12,12,12,12); localBody->setSpacing(6);
+    auto *localName=new QLabel("● Local workspace",local); localName->setObjectName("sidebarLocalName"); localBody->addWidget(localName);
+    auto *localDetail=new QLabel("Your machine. Your models.",local); localDetail->setObjectName("sidebarLocalDetail"); localDetail->setWordWrap(true); localBody->addWidget(localDetail);
+    navigation->addWidget(local);
     navigation->addWidget(makeNavButton(settings));
 
     auto *collapseKey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_B), this);
@@ -114,7 +121,7 @@ QPushButton *Sidebar::makeNavButton(const NavItem &item) {
     button->setProperty("label", item.label);
     connect(button, &QPushButton::clicked, this, [this, item]() { emit panelRequested(item.panel); });
     button->setToolTip(item.label + " · Ctrl+" + QString::number(item.panel + 1));
-    button->setMinimumHeight(48);
+    button->setMinimumHeight(40);
     auto *shortcut = new QShortcut(QKeySequence(QString("Ctrl+%1").arg(item.panel + 1)), this);
     connect(shortcut, &QShortcut::activated, button, &QPushButton::click);
     m_buttons.append(button);
@@ -195,15 +202,16 @@ void Sidebar::applyPresentation() {
     m_top->setDirection(collapsed ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
     m_top->setAlignment(m_seal, collapsed ? Qt::AlignHCenter : Qt::Alignment());
     m_top->setAlignment(m_toggle, collapsed ? Qt::AlignHCenter : Qt::AlignTop);
-    const int side = collapsed ? 30 : 76;
+    const int side = collapsed ? 30 : 35;
     m_seal->setFixedSize(side, side);
     m_wordmark->setVisible(m_state.showLabels());
+    findChild<QWidget *>("sidebarLocalCard")->setVisible(m_state.showLabels());
     for (auto *tag : m_tags) tag->setVisible(m_state.showLabels());
     for (auto *button : m_buttons) {
         const QString label = button->property("label").toString();
         button->setText(m_state.showLabels() ? label : QString());
         button->setAccessibleName(label);
-        button->setMinimumHeight(collapsed ? 40 : 48);
+        button->setMinimumHeight(40);
     }
     updateExtras();
     // Dynamic-property rules (QWidget#sidebar[collapsed="true"] ...) apply to the children too.

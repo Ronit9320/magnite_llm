@@ -14,8 +14,9 @@ SegmentedTabBar::SegmentedTabBar(QWidget *parent) : QTabBar(parent) {
     connect(this,&QTabBar::currentChanged,this,[this] { selectIndicator(isVisible()); });
 }
 QSize SegmentedTabBar::tabSizeHint(int index) const {
+    if (property("underline").toBool()) return {qMax(42,fontMetrics().horizontalAdvance(tabText(index))+22),36};
     const int icon=tabIcon(index).isNull()?0:iconSize().width()+6;
-    return {qMax(76,fontMetrics().size(Qt::TextShowMnemonic,tabText(index)).width()+32+icon),qMax(36,fontMetrics().height()+12)};
+    return {qMax(76,fontMetrics().size(Qt::TextShowMnemonic,tabText(index)).width()+32+icon),property("compact").toBool()?28:qMax(36,fontMetrics().height()+12)};
 }
 bool SegmentedTabBar::isAnimating() const { return m_motion->running(); }
 void SegmentedTabBar::selectIndicator(bool animate) {
@@ -30,14 +31,20 @@ void SegmentedTabBar::hideEvent(QHideEvent *event) { m_motion->snap(1); QTabBar:
 void SegmentedTabBar::paintEvent(QPaintEvent *) {
     QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(QColor(Theme::insetBackground())); painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
-    painter.drawRoundedRect(QRectF(rect()).adjusted(0.5,0.5,-0.5,-0.5),10,10);
+    const bool underline=property("underline").toBool();
+    if (underline) {
+        painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
+        painter.drawLine(0,height()-1,width(),height()-1);
+    } else painter.drawRoundedRect(QRectF(rect()).adjusted(0.5,0.5,-0.5,-0.5),10,10);
     if (m_indicator.isValid()) {
         painter.setBrush(QColor(Theme::surfaceFill())); painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
-        painter.drawRoundedRect(m_indicator,7,7);
-        if (hasFocus()) { painter.setBrush(Qt::NoBrush); painter.setPen(QPen(QColor(Theme::accentLabel()),1.5)); painter.drawRoundedRect(m_indicator,7,7); }
+        if (underline) {
+            painter.setPen(QPen(QColor(Theme::accentPrimary()),2));
+            painter.drawLine(QPointF(m_indicator.left(),height()-1),QPointF(m_indicator.right(),height()-1));
+        } else painter.drawRoundedRect(m_indicator,7,7);
     }
     for (int index=0;index<count();++index) {
-        const QRect area=tabRect(index).adjusted(12,3,-12,-3);
+        const QRect area=tabRect(index).adjusted(underline?6:12,3,underline?-6:-12,-3);
         const QColor ink(!isTabEnabled(index)?Theme::textMuted():index==currentIndex()?Theme::textPrimary():Theme::textSecondary());
         painter.save(); painter.setClipRect(area); painter.setPen(ink); painter.setFont(font());
         QRect label=area;

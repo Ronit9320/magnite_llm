@@ -41,6 +41,7 @@ ToggleSwitch::ToggleSwitch(const QString &text, QWidget *parent)
 }
 
 QSize ToggleSwitch::sizeHint() const {
+    if (property("compact").toBool()) return {30+(text().isEmpty()?0:6+fontMetrics().horizontalAdvance(text())),28};
     const auto label=fontMetrics().size(Qt::TextShowMnemonic,text());
     return {qCeil(kTrackWidth)+2*kPadding+(text().isEmpty()?0:kGap+label.width()),
             qMax(qCeil(kTrackHeight),label.height())+2*kPadding};
@@ -66,8 +67,10 @@ void ToggleSwitch::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     const bool rtl=layoutDirection()==Qt::RightToLeft;
-    const qreal x=rtl ? width()-kPadding-kTrackWidth : kPadding;
-    const QRectF track(x,(height()-kTrackHeight)/2.0,kTrackWidth,kTrackHeight);
+    const bool compact=property("compact").toBool();
+    const qreal trackWidth=compact?24:kTrackWidth,trackHeight=compact?14:kTrackHeight,thumbDiameter=compact?10:kThumbDiameter;
+    const qreal x=rtl ? width()-kPadding-trackWidth : kPadding;
+    const QRectF track(x,(height()-trackHeight)/2.0,trackWidth,trackHeight);
     const bool hover=isEnabled() && underMouse();
     auto blend=[this](const QColor &off,const QColor &on) {
         return QColor::fromRgbF(off.redF()+(on.redF()-off.redF())*m_position,
@@ -77,16 +80,12 @@ void ToggleSwitch::paintEvent(QPaintEvent *) {
     QColor fill=blend(QColor(Theme::surfaceBorder()),QColor(hover?Theme::accentHover():Theme::accentPrimary()));
     QColor edge=blend(QColor(Theme::textMuted()),QColor(Theme::accentPrimary()));
     if (!isEnabled()) { fill=QColor(Theme::insetBackground()); edge=QColor(Theme::surfaceBorder()); }
-    if (hasFocus() && isEnabled()) {
-        painter.setPen(QPen(QColor(Theme::accentLabel()),1.5)); painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(track.adjusted(-3,-3,3,3),15,15);
-    }
     painter.setPen(QPen(edge,1)); painter.setBrush(fill);
-    painter.drawRoundedRect(track,kTrackHeight/2,kTrackHeight/2);
-    const qreal inset=(kTrackHeight-kThumbDiameter)/2;
+    painter.drawRoundedRect(track,trackHeight/2,trackHeight/2);
+    const qreal inset=(trackHeight-thumbDiameter)/2;
     const qreal progress=rtl?1-m_position:m_position;
-    const qreal travel=kTrackWidth-kThumbDiameter-2*inset;
-    const QRectF thumb(track.left()+inset+travel*progress,track.top()+inset,kThumbDiameter,kThumbDiameter);
+    const qreal travel=trackWidth-thumbDiameter-2*inset;
+    const QRectF thumb(track.left()+inset+travel*progress,track.top()+inset,thumbDiameter,thumbDiameter);
     QColor thumbColor(Theme::isDark()?Theme::textPrimary():Theme::surfaceFill());
     if (!isEnabled()) thumbColor=QColor(Theme::textMuted());
     painter.setPen(QPen(QColor(Theme::textSecondary()),0.6)); painter.setBrush(thumbColor);

@@ -48,6 +48,11 @@ inline QString textMuted()     { return isDark() ? QStringLiteral("#888F9A") : Q
 inline QString statusSuccess() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
 inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
+inline QString comparisonSeries() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+
+// Graph readouts stay dark and compact in both appearances.
+inline QString chartHoverFill() { return brandInk(); }
+inline QString chartHoverText() { return isDark() ? textPrimary() : canvasBackground(); }
 
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }

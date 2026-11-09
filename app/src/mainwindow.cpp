@@ -587,7 +587,7 @@ void MainWindow::runSelfTest() {
             auto *toggle = m_sidebar->findChild<QPushButton *>("sidebarToggle");
             auto *plus = m_sidebar->findChild<QPushButton *>("sidebarNewChat");
             auto *listNew = m_history->findChild<QPushButton *>("historyNew");
-            checkC(toggle && plus && listNew && m_sidebar->width() == 176, "sidebar: the real window has the toggle, the + and the New chat row");
+            checkC(toggle && plus && listNew && m_sidebar->width() == SidebarState::kExpandedWidth, "sidebar: the real window has the toggle, the + and the New chat row");
             if (toggle && plus && listNew) {
                 toggle->click();
                 checkC(m_sidebar->isCollapsed() && m_sidebar->width() == 52, "sidebar: the toggle collapses the real menu to 52px");
@@ -604,7 +604,7 @@ void MainWindow::runSelfTest() {
                 checkC(asked == 1, "sidebar: the + sends the same new-chat request as the list's New chat row");
                 checkC(m_chatPanel->currentChatId().isEmpty(), "sidebar: the + leaves a blank new chat");
                 toggle->click();
-                checkC(!m_sidebar->isCollapsed() && m_sidebar->width() == 176 && m_history->isVisibleTo(m_sidebar), "sidebar: the toggle brings the real menu back");
+                checkC(!m_sidebar->isCollapsed() && m_sidebar->width() == SidebarState::kExpandedWidth && m_history->isVisibleTo(m_sidebar), "sidebar: the toggle brings the real menu back");
             }
             storedSidebar.save();   // leave the user's stored choice as it was
             switchPanel(PanelSettings);

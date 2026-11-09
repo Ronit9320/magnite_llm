@@ -12,7 +12,7 @@ class BasePanel : public QWidget {
     Q_OBJECT
 
 public:
-    explicit BasePanel(const QString &title, QWidget *parent = nullptr);
+    explicit BasePanel(const QString &title, QWidget *parent = nullptr, bool customHeader = false);
 
     QString title() const { return m_title; }
 

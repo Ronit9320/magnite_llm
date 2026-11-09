@@ -140,3 +140,14 @@ than treating a completed request as successful work.
 - Training cancellation remains available during saving. Cancellation accepted
   before adapter publication discards the saved output; after publication the
   job is terminal and cancellation is rejected.
+
+### `GET /training/telemetry`
+
+Lightweight device-wide compute readings, with no ML runtime imports. Returns
+`device`, `accelerator`, `kind`, `used_bytes`, `total_bytes`,
+`utilization_percent`, `temperature_c`, `power_w` and `detail`.
+An available NVIDIA probe describes one GPU; memory is never summed across GPUs.
+If GPU telemetry is unavailable, the response labels system/unified memory and
+leaves unsupported scalars `null`. These are device-wide readings, not an
+assertion that the selected training job uses that GPU. The desktop refreshes
+this card while its training page is visible, with one request in flight.

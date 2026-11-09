@@ -68,17 +68,12 @@ void Button::paintEvent(QPaintEvent *) {
     if (ghost) { base.setAlpha(0); border.setAlpha(0); }
     QColor fill=mix(base,hover,m_hover->value());
     if (isDown()) fill=QColor(primary?Theme::accentActive():danger?Theme::dangerHover():Theme::surfaceFillActive());
-    if (isCheckable() && isChecked()) { fill=QColor(primary?Theme::accentActive():Theme::surfaceFillActive()); border=QColor(Theme::accentLabel()); }
+    if (isCheckable() && isChecked()) { fill=QColor(primary?Theme::accentActive():Theme::surfaceFillActive()); }
     if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Theme::surfaceBorder()); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
+    if (hasFocus() && isEnabled() && !isDown() && !isChecked()) fill=hover;
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
     painter.setBrush(fill); painter.setPen(QPen(border,1));
     painter.drawRoundedRect(bounds,Theme::cornerRadiusSmall(),Theme::cornerRadiusSmall());
-    if (hasFocus() && isEnabled()) {
-        QColor ring(Theme::accentLabel()); ring.setAlphaF(0.25);
-        painter.setBrush(Qt::NoBrush); painter.setPen(QPen(ring,3));
-        painter.drawRoundedRect(bounds.adjusted(1,1,-1,-1),7,7);
-        painter.setPen(QPen(QColor(Theme::accentLabel()),1)); painter.drawRoundedRect(bounds,8,8);
-    }
     // Apply the native stylesheet content box before laying out the label.
     // Calling CE_PushButtonLabel with the full widget rect bypasses QSS padding.
     const QRect content=labelRect();
@@ -87,7 +82,7 @@ void Button::paintEvent(QPaintEvent *) {
     painter.setFont(font()); painter.setPen(ink);
     const bool rtl=layoutDirection()==Qt::RightToLeft;
     const bool multiline=text().contains('\n');
-    const bool leftAligned=name=="promptSuggestion" || name=="historyNew";
+    const bool leftAligned=name=="promptSuggestion" || name=="historyNew" || property("leftAligned").toBool();
     const int gap=icon().isNull() || text().isEmpty()?0:6;
     const int iconWidth=icon().isNull()?0:qMin(option.iconSize.width(),content.width());
     const int available=qMax(0,content.width()-iconWidth-gap);

@@ -1,5 +1,4 @@
 #include "theme.h"
-#include "widgets/componentfocus.h"
 
 #include <QColor>
 #include <QFile>
@@ -78,6 +77,9 @@ std::vector<Token> tokens() {
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
         {"@statusSuccess",      Theme::statusSuccess()},
+        {"@comparisonSeries",   Theme::comparisonSeries()},
+        {"@chartHoverFill",     Theme::chartHoverFill()},
+        {"@chartHoverText",     Theme::chartHoverText()},
         {"@statusWarning",      Theme::statusWarning()},
         {"@statusError",        Theme::statusError()},
         {"@headingFont",        Theme::headingFont()},
@@ -149,8 +151,6 @@ void Theme::loadFonts() {
 }
 
 void Theme::setupApplicationTheme() {
-    static ComponentFocus *focus = new ComponentFocus(qApp);
-    Q_UNUSED(focus);
     loadFonts();
     // Start the refined dark-first design in dark mode once, then remember the switch.
     QSettings appearance;
@@ -164,6 +164,14 @@ void Theme::setupApplicationTheme() {
 bool Theme::isDark() { return darkMode; }
 
 void Theme::setDark(bool dark) {
+    static bool applied=false;
+    if (applied && darkMode==dark) return;
+    applied=true;
+    // Apply palette and stylesheet as one visual change, including open dialogs.
+    QList<QWidget *> updatingWindows;
+    for (auto *window : QApplication::topLevelWidgets()) if (window->updatesEnabled()) {
+        window->setUpdatesEnabled(false); updatingWindows.append(window);
+    }
     darkMode = dark;
     QPalette palette = qApp->palette();
     palette.setColor(QPalette::Window, QColor(canvasBackground()));
@@ -186,8 +194,8 @@ void Theme::setDark(bool dark) {
             button && button->property("themeIcon").isValid())
             button->setIcon(coloredIcon(button->property("themeIcon").toString(),
                 QColor(button->property("themeIconTone")=="error" ? statusError() : textSecondary())));
-        widget->update();
     }
+    for (auto *window : updatingWindows) { window->setUpdatesEnabled(true); window->update(); }
 }
 
 QString Theme::qss() {
@@ -380,10 +388,12 @@ int Theme::selfCheck() {
     for (bool dark : {false,true}) {
         setDark(dark);
         bool readable=true;
-        for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel()})
+        for(const auto &ink:{textPrimary(),textSecondary(),textMuted(),statusSuccess(),statusError(),statusWarning(),accentLabel(),comparisonSeries()})
             for(const auto &surface:{canvasBackground(),surfaceFill()}) readable &= contrast(ink,surface)>=4.5;
         check(dark ? "dark text contrast >= 4.5" : "light text contrast >= 4.5",readable);
         check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
+        check("chart hover colours valid",QColor(chartHoverFill()).isValid() && QColor(chartHoverText()).isValid());
+        check("chart hover text contrast >= 4.5",contrast(chartHoverText(),chartHoverFill())>=4.5);
     }
     setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);

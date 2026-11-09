@@ -23,12 +23,15 @@
 #include "panels/settingspanel.h"
 #include "widgets/studiocanvas.h"
 #include "widgets/trainingchart.h"
+#include <QTableWidget>
 #include <QListWidget>
 #include "widgets/brandmark.h"
 #include "widgets/clickfeedback.h"
 #include "widgets/contextmeter.h"
 #include "widgets/versionswitcher.h"
 #include <QApplication>
+#include <QClipboard>
+#include <QWheelEvent>
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QAccessible>
@@ -43,6 +46,7 @@
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QEventLoop>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -75,6 +79,12 @@
 #include <QUrlQuery>
 #include <QSet>
 #include <cstdio>
+#include <cmath>
+#include <QDialog>
+#include <QStackedWidget>
+#include <QTextCursor>
+#include <QScreen>
+#include <QDateTime>
 #include <functional>
 #include <memory>
 
@@ -168,8 +178,30 @@ struct Fixture : QTcpServer {
     int trainingStatusCode = 200;
     bool omitTrainingHistory = false;
     bool serveActiveTraining = false;
+    bool designPreview = false;
+    bool emptyTrainingJobs = false;
+    bool includeSubmittedTraining = false;
+    bool deferTrainingCancellation = false;
+    int trainingCancels = 0;
+    QJsonObject trainingEstimateRequest;
     QJsonObject trainingRequest;
     QJsonObject trainingJob() const {
+        if (designPreview) {
+            QJsonArray history;
+            for (int i=0;i<56;++i) {
+                const double t=i/55.0;
+                history.append(QJsonObject{{"step",int(10+t*548)},{"loss",0.482+2.318*(std::exp(-t*5)-std::exp(-5))/(1-std::exp(-5))+std::sin(t*38)*0.035*(1-t)},
+                    {"learning_rate",0.0002*(t<0.08?t/0.08:0.5*(1+std::cos((t-0.08)/0.92*3.14159265)))},
+                    {"grad_norm",0.342+0.65*(std::exp(-t*4)-std::exp(-4))},
+                    {"epoch",t*1.86},{"elapsed_seconds",t*835+21}});
+                if (i%8==0 || i==55) history.append(QJsonObject{{"step",int(10+t*548)},{"eval_loss",0.536+1.964*(std::exp(-t*4.5)-std::exp(-4.5))/(1-std::exp(-4.5))},{"epoch",t*1.86},{"elapsed_seconds",t*835+21}});
+            }
+            return QJsonObject{{"id","fixture-job"},{"name","support-assistant-v3"},{"status",trainingState},{"base_model","Qwen2.5-3B"},
+                {"dataset_id","fixture-data"},{"config",QJsonObject{{"rank",16},{"alpha",32},{"epochs",3},{"batch_size",4},{"max_length",1024},{"learning_rate",0.0002},{"quantization","4bit"},{"validation_split",0.1}}},
+                {"current_step",558},{"total_steps",900},{"progress",62},{"loss",0.482},{"history",history},
+                {"created_at","Today, 10:42"},{"started_at",QDateTime::currentDateTimeUtc().addSecs(-856).toString(Qt::ISODate)},
+                {"message","Step 558 completed · recorded signals saved locally"}};
+        }
         QJsonArray history;
         for (int step : {1, 4, 12, 24, 42}) {
             history.append(QJsonObject{{"step",step},{"loss",2.1-step*0.02},
@@ -248,16 +280,25 @@ struct Fixture : QTcpServer {
                     }
                     else if (path == "/models/pull/job1") { ++pollCount; body=pullJson(); }
                     else if (path == "/models/pull/job1/cancel") { ++cancelCalls; status=cancelStatus; body=cancelStatus==202?pullJson():QByteArray(R"({"detail":"fixture cancel failure"})"); }
-                    else if (path == "/datasets") body = R"([{"id":"fixture-data","name":"Example conversations.jsonl","format":"jsonl","rows":4812}])";
-                    else if (path == "/training/estimate") body=R"({"memory":{"kind":"VRAM","available_bytes":25769803776},"memory_low_bytes":17179869184,"memory_high_bytes":22548578304,"adapter_bytes":167772160,"steps":1800,"duration_low_seconds":7200,"duration_high_seconds":8400,"assumptions":"Fixture advisory budget"})";
+                    else if (path == "/datasets") body = designPreview ? R"([{"id":"fixture-data","name":"support-conversations.jsonl","format":"jsonl","rows":2400}])" : R"([{"id":"fixture-data","name":"Example conversations.jsonl","format":"jsonl","rows":4812}])";
+                    else if (path == "/training/telemetry") body=R"({"device":"NVIDIA RTX 3060","kind":"VRAM","accelerator":"CUDA","used_bytes":7838315315,"total_bytes":12884901888,"utilization_percent":94,"temperature_c":68,"power_w":142,"detail":"Synthetic UI fixture only; device-wide readings in production."})";
+                    else if (path == "/training/estimate") { trainingEstimateRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); body=R"({"memory":{"kind":"VRAM","available_bytes":25769803776},"memory_low_bytes":17179869184,"memory_high_bytes":22548578304,"adapter_bytes":167772160,"steps":1800,"duration_low_seconds":7200,"duration_high_seconds":8400,"assumptions":"Fixture advisory budget"})"; if (designPreview) body=R"({"memory":{"kind":"VRAM","available_bytes":12884901888},"memory_low_bytes":7838315315,"memory_high_bytes":7838315315,"steps":900,"assumptions":"Synthetic screenshot fixture only"})"; }
                     else if (path == "/training/jobs") {
                         auto past=trainingJob(); past["id"]="past-job"; past["name"]="support-tone-v1"; past["status"]="done";
-                        QJsonArray jobs{past};
-                        if (serveActiveTraining) jobs.append(trainingJob());
+                        auto older=past; older["id"]="older-job"; older["name"]="support-tone-baseline";
+                        auto config=older["config"].toObject(); config["rank"]=16; older["config"]=config;
+                        older["history"]=QJsonArray{QJsonObject{{"step",4},{"loss",2.4},{"learning_rate",0.0001},{"grad_norm",1.1}}};
+                        QJsonArray jobs{past,older};
+                        if (designPreview) {
+                            past["name"]="support-assistant-v2"; past["loss"]=0.612; older["name"]="support-assistant-v1"; older["loss"]=0.784;
+                            auto writing=past; writing["id"]="writing-job"; writing["name"]="writing-style-v1"; writing["base_model"]="SmolLM2-1.7B"; writing["loss"]=0.559;
+                            jobs=QJsonArray{trainingJob(),past,older,writing};
+                        } else if (serveActiveTraining || includeSubmittedTraining) jobs.append(trainingJob());
+                        if (emptyTrainingJobs) jobs={};
                         body=QJsonDocument(jobs).toJson();
                     }
-                    else if (path == "/training/start") { trainingRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); ++starts; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
-                    else if (path.startsWith("/training/cancel/")) { trainingState="cancelled"; }
+                    else if (path == "/training/start") { trainingRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); ++starts; if (!failTraining) includeSubmittedTraining=true; status=failTraining?400:202; body=failTraining?R"({"detail":"Fixture training failure"})":R"({"id":"fixture-job"})"; }
+                    else if (path.startsWith("/training/cancel/")) { ++trainingCancels; if (!deferTrainingCancellation) trainingState="cancelled"; }
                     else if (path.startsWith("/training/status/")) { status=trainingStatusCode; body=QJsonDocument(trainingJob()).toJson(); }
                     else if (path == "/held-other") {
                         if (holdOther) { heldOtherSocket = socket; return; }
@@ -331,6 +372,180 @@ int runUiCheck(const QString &captures) {
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+    if (qEnvironmentVariableIsSet("MAGNITE_TRAINING_DESIGN_CHECK")) {
+        fixture.designPreview=true; fixture.serveActiveTraining=true;
+        TrainingPanel training; training.resize(1245,1350); training.setBackendClient(&client); training.show(); pump(900);
+        training.applySettingsJson(R"json({"baseModel":"Qwen2.5-3B","dataset":"support-conversations.jsonl","rank":16,"batchSize":4,"validationSplit":10,"qlora":true,"quantization":"4-bit (NF4)"})json"); pump(350);
+        QDir().mkpath(captures);
+        auto *workspace=training.findChild<SegmentedTabBar *>("trainingWorkspaceTabs");
+        auto *metrics=training.findChild<SegmentedTabBar *>("trainingMetricTabs");
+        auto *scroll=training.findChild<QScrollArea *>("cardScroll");
+        auto *index=training.findChild<QListWidget *>("trainingRuns");
+        auto *loss=training.findChild<TrainingChart *>("trainingLossChart");
+        for (const bool dark : {false,true}) {
+            Theme::setDark(dark);
+            for (int view=0;view<2;++view) {
+                workspace->setCurrentIndex(view); training.resize(1245,view==0?1600:1450); scroll->verticalScrollBar()->setValue(0); pump(700);
+                if (view==1) check(index->parentWidget()->width()>=240,"Observatory experiment column has room for names and tags");
+                auto *badge=training.findChild<QLabel *>("trainingBadge");
+                auto *actions=training.findChild<Button *>("trainingRunActions");
+                check(qAbs(badge->mapTo(&training,badge->rect().center()).y()-actions->mapTo(&training,actions->rect().center()).y())<=1,"status and run actions share a vertical center");
+                check(actions->labelRect().width()>=actions->fontMetrics().horizontalAdvance(actions->text()),"run action glyph fits without elision");
+                const QPointF hoverPoint(loss->width()-26,50);
+                QMouseEvent move(QEvent::MouseMove,hoverPoint,loss->mapToGlobal(hoverPoint.toPoint()),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(loss,&move);
+                auto *readout=loss->findChild<QLabel *>("trainingChartHover");
+                check(readout->isVisible() && readout->text().contains("Train") && readout->text().contains("Val.") && readout->text().contains("0.482"),"chart hover immediately displays measured train and validation values");
+                check(loss->rect().contains(readout->geometry()),"chart hover stays inside chart at its right edge");
+                check(loss->toolTip().isEmpty(),"chart does not use a native tooltip");
+                check(loss->grab().save(captures+QString("/hover-%1-%2.png").arg(view).arg(dark?"dark":"light")),"capture instant chart readout");
+                QEvent leave(QEvent::Leave); QApplication::sendEvent(loss,&leave);
+                check(!readout->isVisible(),"chart hover clears when pointer leaves");
+                const auto name=QString("%1-%2.png").arg(view==0?"studio":"observatory",dark?"dark":"light");
+                check(training.grab().save(captures+"/"+name),"capture "+name);
+                check(scroll->horizontalScrollBar()->maximum()==0,"reference workspace has no horizontal overflow");
+            }
+        }
+        auto *logToggle=training.findChild<QPushButton *>("trainingLogToggle"); logToggle->click(); pump(100);
+        auto *log=training.findChild<QPlainTextEdit *>("trainingEventLog");
+        auto *logSearch=training.findChild<QLineEdit *>("trainingLogSearch");
+        check(log->isVisible() && log->toPlainText().contains("[INFO]") && log->toPlainText().contains("Loss"),"event log includes severity and recorded measurements");
+        check(!log->verticalScrollBar()->property("scrollActive").toBool(),"inner scrollbar is quiet before a scroll gesture");
+        auto *innerBar=log->verticalScrollBar();
+        QMouseEvent barHover(QEvent::MouseMove,QPointF(2,20),innerBar->mapToGlobal(QPoint(2,20)),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(innerBar,&barHover);
+        check(!innerBar->property("scrollActive").toBool(),"hovering an idle inner track does not reveal its handle");
+        const auto originalLog=log->toPlainText();
+        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(150);
+        check(log->toPlainText()==originalLog,"unchanged polling does not duplicate events");
+        logSearch->setText("validation");
+        check(!log->toPlainText().isEmpty() && log->toPlainText().split('\n').size()<originalLog.split('\n').size(),"log filter narrows recorded events");
+        training.findChild<QPushButton *>("trainingLogCopy")->click();
+        check(QApplication::clipboard()->text()==log->toPlainText(),"copy uses visible filtered events");
+        logSearch->clear();
+        log->verticalScrollBar()->setValue(0);
+        auto *follow=training.findChild<QPushButton *>("trainingLogFollow");
+        check(!follow->isChecked(),"reading older events pauses following"); follow->click();
+        check(log->verticalScrollBar()->value()==log->verticalScrollBar()->maximum(),"follow latest returns to newest event");
+        workspace->setCurrentIndex(0); training.resize(829,628); pump(500);
+        scroll->ensureWidgetVisible(log); pump(100);
+        log->verticalScrollBar()->setValue(log->verticalScrollBar()->maximum());
+        const int outerBefore=scroll->verticalScrollBar()->value();
+        QWheelEvent wheel(QPointF(20,20),log->viewport()->mapToGlobal(QPoint(20,20)),QPoint(),QPoint(0,-120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(log->viewport(),&wheel);
+        check(scroll->verticalScrollBar()->value()==outerBefore,"wheel at nested log boundary leaves the page still");
+        check(log->verticalScrollBar()->property("scrollActive").toBool(),"inner scrollbar appears during scrolling");
+        check(scroll->verticalScrollBar()->width()==3,"page scrollbar uses the finer 3px track");
+        auto *pageBar=scroll->verticalScrollBar();
+        check(training.width()-pageBar->mapTo(&training,pageBar->rect().topRight()).x()<=8,"page scrollbar sits at the outer edge");
+        check(scroll->widget()->layout()->contentsMargins().right()>=24,"content is separated from the page scrollbar");
+        check(training.findChild<QWidget *>("trainingLogCard")->grab().save(captures+"/event-log-compact.png"),"capture readable event log and thin scrollbars");
+        pump(1000);
+        check(!log->verticalScrollBar()->property("scrollActive").toBool(),"inner scrollbar disappears after scrolling stops");
+        check(training.findChild<QWidget *>("trainingLogCard")->grab().save(captures+"/event-log-idle.png"),"capture event log with hidden scrollbar");
+        log->verticalScrollBar()->setValue(0); const int beforeTop=scroll->verticalScrollBar()->value();
+        QWheelEvent wheelUp(QPointF(20,20),log->viewport()->mapToGlobal(QPoint(20,20)),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(log->viewport(),&wheelUp);
+        check(scroll->verticalScrollBar()->value()==beforeTop,"wheel at the top of an inner box stays contained");
+        logToggle->click();
+        check(!training.findChild<QPushButton *>("trainingArchiveToggle")->isVisible() && !training.findChild<QPushButton *>("trainingCompareAction")->isVisible(),"Studio has no compare actions");
+        workspace->setCurrentIndex(1); pump(100);
+        auto *compareAction=training.findChild<QPushButton *>("trainingCompareAction");
+        check(compareAction->isVisible(),"Compare run lives in Observatory"); compareAction->click(); pump(150);
+        check(training.findChild<QComboBox *>("compareRunA")->isVisible(),"Observatory opens the comparison controls");
+        workspace->setCurrentIndex(0); pump(100);
+        check(!training.findChild<QComboBox *>("compareRunA")->isVisible() && !training.findChild<QPushButton *>("trainingArchiveToggle")->isChecked(),"returning to Studio closes the comparison");
+        QElapsedTimer themeTime; themeTime.start();
+        for (const bool dark : {false,true,false,true}) Theme::setDark(dark);
+        fprintf(stderr,"[ui-check] four theme switches: %lld ms\n",themeTime.elapsed()); pump(100);
+        check(Theme::isDark() && training.updatesEnabled() && log->updatesEnabled(),"rapid appearance switches settle with updates enabled");
+        check(scroll->horizontalScrollBar()->maximum()==0,"compact Studio fits");
+        workspace->setCurrentIndex(1); pump(500); check(scroll->horizontalScrollBar()->maximum()==0,"compact Observatory fits");
+        workspace->setCurrentIndex(0); metrics->setCurrentIndex(3); pump(650);
+        check(training.findChild<QStackedWidget *>("trainingChartStack")->currentIndex()==3,"throughput tab selects measured step rates");
+        metrics->setCurrentIndex(0);
+        auto *toggle=training.findChild<QCheckBox *>("trainingSmoothing"); toggle->setChecked(false);
+        check(loss->sampleCount()>50,"smoothing preserves raw sample count"); toggle->setChecked(true);
+        QListWidgetItem *past=nullptr;
+        for(int i=0;i<index->count();++i) if(index->item(i)->data(Qt::UserRole)=="past-job") past=index->item(i);
+        QMetaObject::invokeMethod(index,"itemClicked",Q_ARG(QListWidgetItem *,past)); pump(150);
+        check(training.findChild<QLabel *>("trainingBadge")->text().contains("Completed"),"selecting history displays that run's status");
+        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(150);
+        check(training.findChild<QLabel *>("trainingBadge")->text().contains("Completed"),"live polling does not replace a selected historical run");
+        const auto savedRecipe=training.settingsJson();
+        QCheckBox *rawToggle=nullptr;
+        for (auto *box : training.findChildren<QCheckBox *>()) if (box->text()=="Visualisation") rawToggle=box;
+        training.findChild<QPushButton *>("trainingFollowActive")->click(); pump(100);
+        rawToggle->setChecked(false); pump(100);
+        auto *raw=training.findChild<QPlainTextEdit *>("trainingRawData"); auto cursor=raw->textCursor();
+        cursor.setPosition(10); cursor.setPosition(30,QTextCursor::KeepAnchor); raw->setTextCursor(cursor); raw->verticalScrollBar()->setValue(30);
+        const auto selection=raw->textCursor().selectedText(); const int rawScroll=raw->verticalScrollBar()->value();
+        pump(1100); QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        check(raw->textCursor().selectedText()==selection && raw->verticalScrollBar()->value()==rawScroll,"raw job updates preserve text selection and scroll position");
+        rawToggle->setChecked(true);
+        for (int i=0;i<index->count();++i) if (index->item(i)->data(Qt::UserRole)=="past-job") {
+            QMetaObject::invokeMethod(index,"itemClicked",Q_ARG(QListWidgetItem *,index->item(i))); break;
+        }
+        auto *next=training.findChild<QPushButton *>("trainingReuseRun"); next->click(); pump(450);
+        auto *configure=training.findChild<QPushButton *>("trainingConfigureRun");
+        auto *dialog=training.findChild<QDialog *>("trainingRunDialog");
+        check(dialog->isVisible() && dialog->findChildren<QComboBox *>().size()==5,"new-run dialog keeps all native dropdowns, including advanced precision and modules");
+        check(training.settingsJson()==savedRecipe,"duplicating a run leaves the saved next recipe unchanged");
+        auto *dialogScroll=dialog->findChild<QScrollArea *>("trainingDialogScroll");
+        auto *advanced=dialog->findChild<QPushButton *>("trainingDraftAdvanced"); advanced->setChecked(true); pump(100);
+        check(dialogScroll->horizontalScrollBar()->maximum()==0,"advanced dialog fields fit without horizontal scrolling");
+        check(dialog->height()<=dialog->screen()->availableGeometry().height() && dialog->width()<=dialog->screen()->availableGeometry().width(),"run editor fits the available screen, including high DPI");
+        check(dialog->findChild<QPushButton *>("trainingDraftSave")->isVisible(),"save action stays visible when advanced content scrolls");
+        advanced->setChecked(false); Theme::setDark(false); pump(350);
+        check(dialog->grab().save(captures+"/new-run-light.png"),"capture polished new run dialog");
+        auto *draftRank=dialog->findChild<QSpinBox *>("trainingDraft_rank"); draftRank->setValue(32);
+        auto *precision=dialog->findChild<QComboBox *>("trainingDraft_quantization"); precision->setCurrentIndex(2); pump(450);
+        check(fixture.trainingEstimateRequest["rank"].toInt()==32 && fixture.trainingEstimateRequest["quantization"]=="8bit", "dialog estimates follow the current draft, including precision");
+        check(training.settingsJson()==savedRecipe,"live draft estimates do not mutate the saved recipe");
+        auto *dataset=dialog->findChild<QComboBox *>("trainingDraft_dataset"); dataset->setCurrentText("missing-dataset");
+        dialog->findChild<QPushButton *>("trainingDraftSave")->click(); pump(100);
+        auto *dialogStatus=dialog->findChild<QLabel *>("trainingDialogStatus");
+        check(dialog->isVisible() && dialogStatus->property("state")=="error" && dataset->property("invalid").toBool(),"invalid dataset is explained and highlighted in the modal");
+        const auto validationMessage=dialogStatus->text(); QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        check(dialogStatus->text()==validationMessage,"live job polling does not replace modal validation feedback");
+        dialog->reject(); pump(100); check(training.settingsJson()==savedRecipe,"cancelled modal draft leaves the next recipe unchanged");
+        configure->click(); pump(350);
+        dataset=dialog->findChild<QComboBox *>("trainingDraft_dataset"); dataset->setCurrentText("support-conversations.jsonl");
+        draftRank=dialog->findChild<QSpinBox *>("trainingDraft_rank"); draftRank->setValue(32);
+        dialog->findChild<QComboBox *>("trainingDraft_quantization")->setCurrentIndex(2);
+        dialog->findChild<QPushButton *>("trainingDraftSave")->click(); pump(100);
+        const auto committed=QJsonDocument::fromJson(training.settingsJson().toUtf8()).object();
+        check(committed["rank"].toInt()==32 && committed["quantization"]=="8-bit (bitsandbytes)","saving the modal commits its explicit advanced precision");
+        auto *indexSearch=training.findChild<QLineEdit *>("trainingIndexSearch"); indexSearch->setText("no-such-run"); pump(80);
+        check(!index->isVisible() && !training.findChild<QTableWidget *>("trainingExperimentTable")->isVisible(),"no-match search replaces empty rows with an explanation");
+        indexSearch->clear(); workspace->setCurrentIndex(1); pump(80);
+        index->setFocus(); index->setCurrentRow(0); key(index,Qt::Key_Down); pump(100);
+        check(training.findChild<QLabel *>("trainingRunTitle")->text()=="support-assistant-v2","arrow keys select and display experiments");
+        check(training.findChild<QPushButton *>("trainingFollowActive")->isVisible(),"historical selection offers a direct return to the active run");
+        training.findChild<QPushButton *>("trainingFollowActive")->click(); pump(100);
+        fixture.deferTrainingCancellation=true; QMetaObject::invokeMethod(&training,"onStop"); pump(100);
+        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100); QMetaObject::invokeMethod(&training,"onStop"); pump(80);
+        check(fixture.trainingCancels==1 && !training.findChild<QPushButton *>("trainingStopRun")->isEnabled(),"pending cancellation stays disabled across status polls and duplicate stops");
+        fixture.trainingState="cancelled"; QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        check(training.findChild<QLabel *>("trainingBadge")->text()=="Stopped","terminal cancellation replaces the stopping state");
+        fixture.serveActiveTraining=false; workspace->setCurrentIndex(0);
+        configure->click(); pump(350); fixture.failTraining=true;
+        for (auto *button : dialog->findChildren<QPushButton *>()) if (button->property("dialogStart").toBool()) button->click();
+        pump(150);
+        check(dialog->isVisible() && dialog->findChild<QLabel *>("trainingDialogStatus")->text().contains("Could not start"),"failed submission keeps the dialog open with a recoverable error");
+        check(training.findChild<QLabel *>("trainingRunTitle")->text()=="support-assistant-v3","failed submission restores the previous recorded experiment");
+        check(dialog->grab().save(captures+"/new-run-error.png"),"capture submission error"); dialog->reject();
+        auto *feedback=training.findChild<QFrame *>("trainingFeedback");
+        check(feedback->isVisible() && feedback->mapTo(&training,QPoint()).y()<training.findChild<QWidget *>("trainingStudio")->mapTo(&training,QPoint()).y(),"submission feedback remains visible above the monitor");
+        training.findChild<QPushButton *>("trainingDismissStatus")->click();
+        check(!feedback->isVisible(),"notifications can be dismissed without changing run state");
+        fixture.emptyTrainingJobs=true; training.refreshOptions(); pump(450);
+        check(training.findChild<QLabel *>("trainingRunTitle")->text()=="Your next experiment" && loss->sampleCount()==0,"an empty archive clears stale run details");
+        check(training.grab().save(captures+"/empty-studio.png"),"capture empty Studio");
+        auto *recipe=training.findChild<QWidget *>("trainingRecipe"); auto *studio=training.findChild<QWidget *>("trainingStudio");
+        check(studio->mapTo(&training,QPoint()).y()<recipe->mapTo(&training,QPoint()).y(),"monitor remains before next recipe");
+        fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures); return failures?1:0;
+    }
     {
         ToggleSwitch toggle("Enable feature"); toggle.resize(toggle.sizeHint()); toggle.show(); toggle.activateWindow(); pump();
         QSettings().setValue("appearance/studio3ReducedMotion",false);
@@ -419,7 +634,7 @@ int runUiCheck(const QString &captures) {
         input->setFocus(); pump(40);
         QKeyEvent typing(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,"a"); QApplication::sendEvent(input,&typing);
         auto *halo=input->findChild<QWidget *>("componentFocusHalo");
-        check(halo && halo->testAttribute(Qt::WA_TransparentForMouseEvents) && input->text()=="a","input: focus halo preserves typing and pointer input"); input->clear();
+        check(!halo && input->text()=="a","input: typing works without a highlighting focus border"); input->clear();
         {
         // Compare with an empty render: all changed pixels must stay inside
         // the button's padded content area, even for a constrained long label.
@@ -487,6 +702,9 @@ int runUiCheck(const QString &captures) {
                     tabs->setCurrentIndex(0); pump();
                 }
                 if (width == 848 && (name == "settings" || name == "training")) {
+                    if (name=="training") {
+                        training.findChild<QPushButton *>("trainingSettingsToggle")->setChecked(true); pump();
+                    }
                     auto *combo = panel->findChild<QComboBox *>();
                     const int previous = combo->currentIndex();
                     combo->setFocus();
@@ -973,14 +1191,68 @@ int runUiCheck(const QString &captures) {
     for (auto *box : training.findChildren<QCheckBox *>()) if (box->text()=="Visualisation") visualise=box;
     check(visualise->isChecked(),"training defaults to visualisation");
     runs->setCurrentRow(0); pump();
-    check(lossChart->sampleCount()==6,"past runs restore raw training and validation samples");
+    check(lossChart->sampleCount()==6,"Studio restores the most recent saved experiment when idle");
+    auto *settingsToggle=training.findChild<QPushButton *>("trainingSettingsToggle");
+    auto *archiveToggle=training.findChild<QPushButton *>("trainingArchiveToggle");
+    check(settingsToggle && archiveToggle,"training exposes recipe settings and experiment archive");
+    auto *workspace=training.findChild<SegmentedTabBar *>("trainingWorkspaceTabs");
+    auto *metricTabs=training.findChild<SegmentedTabBar *>("trainingMetricTabs");
+    check(workspace && workspace->currentIndex()==0 && workspace->tabText(0)=="Studio",
+          "training opens in Studio with Observatory second");
+    auto *studio=training.findChild<QWidget *>("trainingStudio");
+    auto *recipe=training.findChild<QWidget *>("trainingRecipe");
+    check(studio->mapTo(&training,QPoint()).y()<recipe->mapTo(&training,QPoint()).y(),
+          "live training studio comes before the next run recipe");
+    training.resize(1104,1520);
+    settingsToggle->setChecked(true); pump(250);
+    capture(&training,"training-iteration2-setup");
+    Theme::setDark(false); pump(); capture(&training,"training-iteration2-setup-light");
+    Theme::setDark(true);
+    settingsToggle->setChecked(false); workspace->setCurrentIndex(1); archiveToggle->setChecked(true); pump(250);
+    check(training.findChild<QTableWidget *>("trainingExperimentTable")->isVisible() && lossChart->isVisible(),"experiment table stays alongside the live canvas");
+    auto *compareA=training.findChild<QComboBox *>("compareRunA");
+    auto *compareB=training.findChild<QComboBox *>("compareRunB");
+    compareA->setCurrentIndex(1); compareB->setCurrentIndex(2); pump(650);
+    auto *comparisonLoss=training.findChild<TrainingChart *>("comparisonLossChart");
+    check(comparisonLoss->sampleCount()==7,"comparison overlays both measured histories without interpolation");
+    auto *comparisonTable=training.findChild<QTableWidget *>("trainingComparison");
+    check(comparisonTable->item(8,1)->text()=="8" && comparisonTable->item(8,2)->text()=="16",
+          "comparison shows each run's saved rank rather than current setup");
+    check(comparisonTable->item(6,2)->text()=="—","comparison leaves missing validation unmeasured");
+    auto *method=training.findChild<QComboBox *>("trainingMethod");
+    check(!(method->model()->flags(method->model()->index(2,0)) & Qt::ItemIsEnabled),"full fine-tuning is unavailable in the method chooser");
+    if (auto *scroll=training.findChild<QScrollArea *>("cardScroll"))
+        scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+    capture(&training,"training-iteration2-compare");
+    Theme::setDark(false); pump(); capture(&training,"training-iteration2-compare-light");
+    Theme::setDark(true);
+    compareB->setCurrentIndex(1); pump();
+    check(comparisonLoss->sampleCount()==0,"comparison requires distinct runs");
+    check(lossChart->sampleCount()==6,"invalid comparison removes the stale baseline from the primary chart");
+    compareB->setCurrentIndex(2);
+    training.refreshOptions(); pump();
+    check(compareB->currentData().toString()=="older-job","comparison selection survives history refresh by identity");
+    archiveToggle->setChecked(false);
     const auto preset=QJsonDocument::fromJson(training.settingsJson().toUtf8()).object();
     auto changed=preset; changed["dropout"]=0.12; changed["validationSplit"]=10;
     training.applySettingsJson(QString::fromUtf8(QJsonDocument(changed).toJson()));
     QMetaObject::invokeMethod(&training,"onStart"); QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(fixture.starts==1 && !start->isEnabled(),"training ignores duplicate starts");
     check(runs->isEnabled(),"past run review remains available during active training");
+    check(method->isEnabled() && settingsToggle->isEnabled(),"next recipe remains editable while the active run keeps its saved settings");
     check(lossChart->sampleCount()==6 && lossChart->accessibleDescription().contains("measured samples"),"live loss chart uses raw history including validation");
+    check(training.findChild<QLabel *>("trainingConfiguration")->text().contains("LoRA rank: 8"),
+          "run context uses the saved backend configuration");
+    metricTabs->setCurrentIndex(1); pump(220);
+    check(!lossChart->isVisible(),"metric tabs select a single primary chart");
+    metricTabs->setCurrentIndex(0); workspace->setCurrentIndex(1); pump(650);
+    check(training.findChild<QWidget *>("trainingObservatorySignals")->isVisible() && runs->isVisible(),
+          "Observatory exposes secondary signals and experiment history");
+    capture(&training,"training-observatory-native");
+    Theme::setDark(false); pump(); capture(&training,"training-observatory-native-light"); Theme::setDark(true);
+    workspace->setCurrentIndex(0); pump();
+    check(!training.findChild<QWidget *>("trainingObservatorySignals")->isVisible(),
+          "Studio restores the focused primary signal view");
     check(fixture.trainingRequest["dropout"].toDouble()==0.12 && fixture.trainingRequest["validation_split"].toDouble()==0.1,"training sends configured dropout and validation fraction");
     QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(lossChart->sampleCount()==6,"repeated status polls do not duplicate chart samples");
@@ -990,16 +1262,11 @@ int runUiCheck(const QString &captures) {
     check(training.findChild<QPlainTextEdit *>("trainingRawData")->isVisible() && !lossChart->isVisible(),"raw data toggle replaces visualisation");
     check(QJsonDocument::fromJson(training.findChild<QPlainTextEdit *>("trainingRawData")->toPlainText().toUtf8()).object()["history"].toArray().size()==6,"raw view contains actual run history");
     visualise->setChecked(true); pump(600);
-    training.resize(1104,1020); pump();
+    training.resize(1104,1240); pump();
     capture(&training,"training-running-full");
     Theme::setDark(false); pump(); capture(&training,"training-running-full-light");
     Theme::setDark(true); training.resize(1104,628); pump();
-    auto *trainingTabs=training.findChild<QTabWidget *>("trainingCharts");
-    for (int tab=1;tab<trainingTabs->count();++tab) {
-        trainingTabs->setCurrentIndex(tab); pump();
-        capture(&training,tab==1?"training-learning-rate":"training-gradient-norm");
-    }
-    trainingTabs->setCurrentIndex(0);
+    check(training.findChild<QWidget *>("trainingCharts")->isVisible(),"Studio keeps the selected chart visible in a compact window");
     fixture.trainingStatusCode=503;
     QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(!start->isEnabled() && lossChart->sampleCount()==6,"status outage keeps run tracked and preserves measurements");
@@ -1011,6 +1278,20 @@ int runUiCheck(const QString &captures) {
     QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     QMetaObject::invokeMethod(&training,"onStop"); pump(); QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(start->isEnabled() && completed==0 && training.findChild<QLabel *>("metricValue")->text()=="Training stopped","cancelled training resets controls without reporting completion");
+    auto *reuse=training.findChild<QPushButton *>("trainingReuseRun");
+    check(reuse->isEnabled() && lossChart->sampleCount()==6,"stopped run retains measurements and can seed another recipe");
+    reuse->click(); pump();
+    auto *reuseDialog=training.findChild<QDialog *>("trainingRunDialog");
+    check(reuseDialog->findChild<QSpinBox *>("trainingDraft_rank")->value()==8 &&
+          reuseDialog->findChild<QLineEdit *>("trainingDraft_adapterName")->text()=="support-tone-v2-next",
+          "use as next run creates a draft of the saved settings with a new name");
+    reuseDialog->reject();
+    check(training.findChild<QLabel *>("trainingConfiguration")->text().contains("LoRA rank: 8"),
+          "next recipe editing leaves the previous run context intact");
+    auto *runSearch=training.findChild<QLineEdit *>("trainingRunSearch");
+    runSearch->setText("no-such-experiment"); pump();
+    bool allHidden=true; for(int i=0;i<runs->count();++i) allHidden &= runs->item(i)->isHidden();
+    check(allHidden,"experiment search filters the local run list"); runSearch->clear();
     fixture.failTraining=true; QMetaObject::invokeMethod(&training,"onStart"); pump();
     check(start->isEnabled() && training.findChild<QLabel *>("statusLabel")->property("state")=="error","training submission failure is recoverable");
     fixture.failTraining=false; fixture.trainingState="done"; QMetaObject::invokeMethod(&training,"onStart"); pump();
@@ -1022,6 +1303,7 @@ int runUiCheck(const QString &captures) {
     QMetaObject::invokeMethod(&training,"onStop"); pump();
     QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
     check(start->isEnabled() && completed==1,"reattached run supports cancellation");
+    settingsToggle->setChecked(true);
     training.resize(848,628); pump();
     bool trainingFits=true; for(auto *scroll:training.findChildren<QScrollArea *>()) trainingFits &= scroll->horizontalScrollBar()->maximum()==0;
     if (!trainingFits) for(auto *scroll:training.findChildren<QScrollArea *>()) {
@@ -2273,7 +2555,7 @@ int runUiCheck(const QString &captures) {
         const QString key=SidebarState::kSettingsKey;
         QSettings().remove(key);
         SidebarState s;
-        check(!s.collapsed() && s.width()==176 && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
+        check(!s.collapsed() && s.width()==195 && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
         s.setCollapsed(true);
         check(s.width()==52 && !s.showLabels() && !s.showHistory(true) && s.showNewChatButton(true) && !s.showNewChatButton(false),"sidebar state: collapsed hides labels and list, offers + only on Playground");
         check(s.toggleTooltip()=="Expand sidebar \u00b7 Ctrl+B","sidebar state: the collapsed toggle offers to expand");
@@ -2298,12 +2580,12 @@ int runUiCheck(const QString &captures) {
         QList<int> requested; QObject::connect(&sidebar,&Sidebar::panelRequested,[&](int panel){ requested<<panel; });
         QList<ChatSummary> saved; for (int i=0;i<7;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
         sidebar.history()->setChats(saved,QString());
-        sidebar.resize(176,680); sidebar.show(); pump();
+        sidebar.resize(195,680); sidebar.show(); pump();
         auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto nav=navButtons();
         const QStringList tips={"Library \u00b7 Ctrl+1","Training \u00b7 Ctrl+2","Knowledge \u00b7 Ctrl+3","Adapters \u00b7 Ctrl+4","Playground \u00b7 Ctrl+5","Settings \u00b7 Ctrl+6"};
         bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
-        check(tipsOk&&sidebar.width()==176,"sidebar: six nav buttons with today's tooltips in a 176px column");
+        check(tipsOk&&sidebar.width()==195,"sidebar: six nav buttons with today's tooltips in a 195px column");
         nav[1]->click();
         check(requested==QList<int>({1}),"sidebar: clicking a button asks for its panel");
         requested.clear(); bool shortcutsOk=true;
@@ -2331,7 +2613,7 @@ int runUiCheck(const QString &captures) {
             if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
         }
         fits&=sidebar.rect().contains(nav[5]->geometry())&&sidebar.history()->geometry().bottom()<nav[5]->geometry().top();
-        check(fits,"sidebar: everything fits 176x680 with a populated chat list, nothing overlapping");
+        check(fits,"sidebar: everything fits 195x680 with a populated chat list, nothing overlapping");
         check(sidebar.brandSeal()&&sidebar.brandSeal()->property("brandMark").toBool(),"sidebar: the brand seal is the animated brand mark");
         Theme::setDark(wasDark);
     }
@@ -2350,7 +2632,7 @@ int runUiCheck(const QString &captures) {
         QObject::connect(&strip,&Sidebar::collapsedChanged,[&](bool c){ ++collapsedSignals; lastCollapsed=c; });
         auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : strip.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto *toggle=strip.findChild<QPushButton *>("sidebarToggle");
-        check(toggle&&!strip.isCollapsed()&&strip.width()==176&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
+        check(toggle&&!strip.isCollapsed()&&strip.width()==195&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
         strip.setCollapsed(true); pump();
         auto buttons=nav();
         bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
@@ -2363,7 +2645,7 @@ int runUiCheck(const QString &captures) {
         check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
         check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
         strip.setCollapsed(false); pump();
-        buttons=nav(); bool backOk=strip.width()==176&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==76;
+        buttons=nav(); bool backOk=strip.width()==195&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==35;
         for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];
         check(backOk,"sidebar: expanding brings back the text, the logo, the wordmark and the chat list");
         strip.setCollapsed(true); pump();
@@ -2387,7 +2669,7 @@ int runUiCheck(const QString &captures) {
                 }
                 return false;
             };
-            check(hasAccent(buttons[4])&&!hasAccent(buttons[0]),QString("sidebar: the open workspace keeps the orange marker in the strip (%1)").arg(dark?"dark":"light"));
+            check(!hasAccent(buttons[4])&&!hasAccent(buttons[0]),QString("sidebar: active workspace uses its icon without a highlighting border (%1)").arg(dark?"dark":"light"));
             {
                 // Icon centring: the ink of an idle button's icon sits in the middle of the button.
                 const qreal dpr=shot.devicePixelRatio(); const QRect r=buttons[0]->geometry();
@@ -2409,7 +2691,7 @@ int runUiCheck(const QString &captures) {
         check(strip.isCollapsed()&&collapsedSignals==1&&QSettings().value(key).toBool()&&strip.width()==52,"sidebar: clicking the toggle collapses, announces it and stores the choice");
         check(toggle->icon().pixmap(14,14).toImage()!=openChevron,"sidebar: the toggle's arrow flips with the state");
         toggle->click(); pump();
-        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==176,"sidebar: clicking again expands and stores the choice");
+        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==195,"sidebar: clicking again expands and stores the choice");
         QShortcut *ctrlB=nullptr; for (auto *sc : strip.findChildren<QShortcut *>()) if (sc->key().toString()=="Ctrl+B") ctrlB=sc;
         bool ctrlBOk=ctrlB&&ctrlB->context()==Qt::WindowShortcut;
         if (ctrlB) { emit ctrlB->activated(); pump(); ctrlBOk&=strip.isCollapsed(); emit ctrlB->activated(); pump(); ctrlBOk&=!strip.isCollapsed(); }
@@ -2424,7 +2706,7 @@ int runUiCheck(const QString &captures) {
         check(startOk,"sidebar: a stored collapsed choice shows at once, before anything is processed");
         QSettings().setValue(key,"banana");
         Sidebar garbage(items,{"Settings","settings",5},4); garbage.show();
-        check(!garbage.isCollapsed()&&garbage.width()==176,"sidebar: a garbage stored value starts expanded");
+        check(!garbage.isCollapsed()&&garbage.width()==195,"sidebar: a garbage stored value starts expanded");
         QSettings().remove(key);
     }
     {
@@ -2478,23 +2760,23 @@ int runUiCheck(const QString &captures) {
         bar.setCollapsed(false); pump();
         bar.setAnimationsEnabled(true);
         bar.toggle();
-        check(bar.isCollapsed()&&bar.width()==176,"sidebar: a slide starts from the current width (state flips at once)");
-        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=176; }
+        check(bar.isCollapsed()&&bar.width()==195,"sidebar: a slide starts from the current width (state flips at once)");
+        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=195; }
         check(waitUntil([&]{ return bar.width()==52; },1000)&&inRange&&bar.minimumWidth()==52&&bar.maximumWidth()==52,"sidebar: collapsing slides down to exactly 52px");
         bar.toggle();
         check(!bar.isCollapsed()&&bar.width()==52,"sidebar: expanding starts from the strip width");
-        check(waitUntil([&]{ return bar.width()==176&&bar.maximumWidth()==176; },1000),"sidebar: expanding slides up to exactly 176px");
+        check(waitUntil([&]{ return bar.width()==195&&bar.maximumWidth()==195; },1000),"sidebar: expanding slides up to exactly 195px");
         bool textBack=true; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) textBack&=!b->text().isEmpty();
         check(textBack&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar),"sidebar: the text and wordmark are back once the slide ends");
         bar.toggle(); bar.toggle(); pump(300);
-        bool looksExpanded=bar.width()==176&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==76&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
+        bool looksExpanded=bar.width()==195&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==35&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
         for (auto *b : bar.findChildren<QPushButton *>("navBtn")) looksExpanded&=!b->text().isEmpty();
-        check(looksExpanded,"sidebar: two quick toggles end expanded, 176px, drawn expanded (text, wordmark, full logo), stored as expanded");
+        check(looksExpanded,"sidebar: two quick toggles end expanded, 195px, drawn expanded (text, wordmark, full logo), stored as expanded");
         bar.toggle(); bar.toggle(); bar.toggle();
         check(waitUntil([&]{ return bar.width()==52; },1000)&&bar.isCollapsed()&&QSettings().value(key).toBool(),"sidebar: three quick toggles end collapsed, 52px, stored as collapsed");
         QSettings().setValue(reducedKey,true);
         bar.toggle();
-        check(!bar.isCollapsed()&&bar.width()==176,"sidebar: with reduced motion the change is instant");
+        check(!bar.isCollapsed()&&bar.width()==195,"sidebar: with reduced motion the change is instant");
         QSettings().remove(reducedKey); QSettings().remove(key);
     }
     {

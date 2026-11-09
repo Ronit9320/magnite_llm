@@ -72,6 +72,12 @@ def training_estimate(cfg: TrainingConfig):
     return estimate(cfg, dataset.rows, _get_manager().list())
 
 
+@training_router.get("/telemetry")
+def training_telemetry():
+    from backend.training.telemetry import device_telemetry
+    return device_telemetry()
+
+
 @training_router.get("/capabilities")
 def training_capabilities():
     supported, reason = quantization_support()
