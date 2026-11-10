@@ -122,6 +122,19 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
             }
         }
     }
+    panel.selectCategory(0);
+    QTimer::singleShot(0, qApp, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        check(dialog && dialog->objectName() == "settingsDetailDialog" &&
+                  dialog->windowFlags().testFlag(Qt::FramelessWindowHint),
+              "shortcuts uses the settings frame instead of a system title bar");
+        if (dialog) {
+            if (!captures.isEmpty())
+                dialog->grab().save(captures + "/settings-shortcuts.png");
+            dialog->reject();
+        }
+    });
+    panel.findChild<QPushButton*>("settingsShortcuts")->click();
     panel.selectCategory(1);
     auto* size = panel.findChild<QComboBox*>("settingsInterfaceSize");
     const int defaultSize = panel.findChild<QLabel*>("settingsTitle")->font().pixelSize();

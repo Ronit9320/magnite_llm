@@ -3,6 +3,8 @@
 #include <QJsonObject>
 #include <functional>
 
+class StorageSummary;
+class DiagnosticsSummary;
 class QComboBox;
 class QCheckBox;
 class QLineEdit;
@@ -49,6 +51,7 @@ class SettingsPanel : public BasePanel {
     void deleteChats();
     void reviewReport();
     void viewLogs();
+    void showShortcuts();
     void refreshNavigation();
     void showText(const QString& title, const QString& text, bool exportable = false);
     bool writeJson(const QString& title, const QJsonObject& object);
@@ -78,10 +81,10 @@ class SettingsPanel : public BasePanel {
     QStackedWidget* m_pages = nullptr;
     QLabel* m_title = nullptr;
     QLabel* m_description = nullptr;
-    QLabel* m_storageInfo = nullptr;
+    StorageSummary* m_storageInfo = nullptr;
     QLabel* m_cachePath = nullptr;
     QLabel* m_effectivePath = nullptr;
-    QLabel* m_diagnostics = nullptr;
+    DiagnosticsSummary* m_diagnostics = nullptr;
     QLabel* m_chatCount = nullptr;
     QList<QPushButton*> m_navigation;
     MotionValue* m_pageMotion = nullptr;

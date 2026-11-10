@@ -12,6 +12,7 @@
 #include "widgets/confirmation.h"
 #include "widgets/contextmeter.h"
 #include "widgets/motion.h"
+#include "widgets/settingssummary.h"
 #include "widgets/themechoice.h"
 #include "widgets/toggleswitch.h"
 #include <QApplication>
@@ -30,6 +31,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -100,8 +102,38 @@ void note(QVBoxLayout* layout, const QString& title, const QString& text) {
     body->addWidget(label(text, "settingsHint"));
     layout->addWidget(host);
 }
-QString bytes(qint64 value) {
-    return QLocale().formattedDataSize(value);
+class StaticSettingsLogo : public QWidget {
+  public:
+    explicit StaticSettingsLogo(int size, QWidget* parent = nullptr) : QWidget(parent) {
+        setFixedSize(size, size);
+        setAccessibleName("Magnite static logo");
+        setObjectName("settingsStaticLogo");
+    }
+
+  protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        BrandMark::paint(painter, QRectF(rect()), QColor(Theme::brandOrange()));
+    }
+};
+QWidget* signature(bool large) {
+    auto* host = new QWidget;
+    host->setObjectName(large ? "settingsUpdateBrand" : "settingsSidebarBrand");
+    auto* body = new QHBoxLayout(host);
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(large ? 16 : 10);
+    body->addWidget(new StaticSettingsLogo(large ? 64 : 34));
+    auto* copy = new QVBoxLayout;
+    copy->setContentsMargins(0, 0, 0, 0);
+    copy->setSpacing(3);
+    auto* name = new BrandWordmark;
+    if (!large)
+        name->setFixedSize(110, 30);
+    copy->addWidget(name);
+    copy->addWidget(label(QCoreApplication::applicationVersion(), "settingsHint"));
+    body->addLayout(copy);
+    body->addStretch();
+    return host;
 }
 } // namespace
 
@@ -144,10 +176,7 @@ void SettingsPanel::setupUi() {
         connect(item, &QPushButton::clicked, this, [this, i] { selectCategory(i); });
     }
     navBody->addStretch();
-    auto* brand = new BrandWordmark;
-    brand->setFixedHeight(27);
-    navBody->addWidget(brand);
-    navBody->addWidget(label(QCoreApplication::applicationVersion(), "settingsHint"));
+    navBody->addWidget(signature(false));
     shell->addWidget(nav);
     auto* right = new QWidget;
     right->setObjectName("settingsContent");
@@ -205,15 +234,10 @@ void SettingsPanel::setupUi() {
     note(general, "Just for your workspace",
          "Your name stays on this computer. Leave it empty for a greeting without a name.");
     auto* shortcuts = button("View shortcuts");
+    shortcuts->setObjectName("settingsShortcuts");
     row(general, "Keyboard shortcuts", "Review the shortcuts available throughout Magnite.",
         shortcuts);
-    connect(shortcuts, &QPushButton::clicked, this, [this] {
-        showText(
-            "Keyboard shortcuts",
-            "Ctrl/⌘ + , — Settings\nCtrl/⌘ + N — New chat\nCtrl + 1…5 — Switch workspace\nCtrl + 6 "
-            "— Settings\nCtrl + B — Collapse sidebar\nEscape — Close a dialog\nShift + Enter — New "
-            "line\n\nThe send-message preference controls Enter in the composer.");
-    });
+    connect(shortcuts, &QPushButton::clicked, this, &SettingsPanel::showShortcuts);
     auto* reset = button("Reset…");
     reset->setObjectName("resetPreferencesButton");
     row(general, "Reset preferences",
@@ -303,8 +327,7 @@ void SettingsPanel::setupUi() {
         "Check backend connectivity, installed engines and detected hardware.", details);
     connect(details, &QPushButton::clicked, this, [this] { selectCategory(6); });
     auto* storage = columns[4];
-    m_storageInfo = label("Storage usage is available when the local service is connected.",
-                          "settingsStorageSummary");
+    m_storageInfo = new StorageSummary;
     storage->addWidget(m_storageInfo);
     m_effectivePath = label("", "settingsHint");
     storage->addWidget(label("Active data directory", "settingsRowTitle"));
@@ -388,8 +411,7 @@ void SettingsPanel::setupUi() {
     notifications->addWidget(
         label("Notifications contain no prompts, responses or document content.", "settingsHint"));
     auto* diagnostics = columns[6];
-    m_diagnostics = label("Local backend not connected.", "settingsDiagnosticSummary");
-    m_diagnostics->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_diagnostics = new DiagnosticsSummary;
     diagnostics->addWidget(m_diagnostics);
     auto* refresh = button("Refresh details");
     diagnostics->addWidget(refresh, 0, Qt::AlignLeft);
@@ -406,8 +428,7 @@ void SettingsPanel::setupUi() {
         logs);
     connect(logs, &QPushButton::clicked, this, &SettingsPanel::viewLogs);
     auto* updates = columns[7];
-    updates->addWidget(
-        label("Magnite " + QCoreApplication::applicationVersion(), "settingsVersion"));
+    updates->addWidget(signature(true));
     updates->addWidget(label("Preview channel", "settingsHint"));
     m_updateStatus = label("Check for a new preview release.", "updateStatus");
     updates->addWidget(m_updateStatus);
@@ -606,7 +627,7 @@ void SettingsPanel::setChatContext(ChatStore* store, ChatPanel* chat) {
 void SettingsPanel::refreshDetails() {
     if (!m_client || !m_client->isReady()) {
         m_info = {};
-        m_diagnostics->setText(
+        m_diagnostics->setUnavailable(
             "Local backend not connected. Details will be available once it is ready.");
         return;
     }
@@ -616,36 +637,18 @@ void SettingsPanel::refreshDetails() {
     m_client->get("/system/info", [this](int status, const QJsonDocument& doc) {
         if (status != 200 || !doc.isObject()) {
             m_info = {};
-            m_diagnostics->setText(
+            m_diagnostics->setUnavailable(
                 "Could not read local runtime details. Check the connection and retry.");
             return;
         }
         m_info = doc.object();
-        const auto device = m_info["device"].toObject();
-        QStringList lines;
-        lines << "Local backend connected" << "App: " + QCoreApplication::applicationVersion()
-              << "Backend: " + m_info["version"].toString()
-              << "System: " + m_info["system"].toString() + " · " +
-                     m_info["architecture"].toString()
-              << "Python: " + m_info["python"].toString()
-              << "Device: " + device["device"].toString("Unknown");
-        lines << "Memory: " +
-                     (device["total_bytes"].isDouble()
-                          ? bytes(qint64(device["total_bytes"].toDouble()))
-                          : "Unknown") +
-                     " (" + device["kind"].toString() + ")"
-              << "" << "Installed runtime packages:";
-        const auto engines = m_info["engines"].toObject();
-        for (auto it = engines.begin(); it != engines.end(); ++it)
-            lines << it.key() + ": " +
-                         (it.value().isString() ? it.value().toString() : "Not installed");
-        lines << "" << "Installed packages do not guarantee that every model is compatible.";
-        m_diagnostics->setText(lines.join('\n'));
+        m_diagnostics->setDetails(m_info);
     });
     m_client->get("/system/storage", [this](int status, const QJsonDocument& doc) {
         m_detailsPending = false;
         if (status != 200 || !doc.isObject()) {
-            m_storageInfo->setText("Could not measure storage usage. Refresh details to retry.");
+            m_storageInfo->setUnavailable(
+                "Could not measure storage usage. Refresh details to retry.");
             return;
         }
         const auto o = doc.object();
@@ -654,18 +657,7 @@ void SettingsPanel::refreshDetails() {
                              "\nShared with other apps; may be outside Magnite's data directory.");
         m_activeDataPath = o["data_directory"].toString();
         m_effectivePath->setText(m_activeDataPath);
-        const auto workspace = o["workspace"].toObject(), models = o["models"].toObject();
-        auto size = [](const QJsonObject& part) {
-            return (part["complete"].toBool() ? QString() : QString("At least ")) +
-                   bytes(qint64(part["bytes"].toDouble()));
-        };
-        const auto free = o["free_bytes"];
-        m_storageInfo->setText(
-            "Workspace: " + size(workspace) + "\nShared model cache: " +
-            (o["combined_locations"].toBool() ? QString("included in workspace") : size(models)) +
-            "\nFree on data volume: " +
-            (free.isDouble() ? bytes(qint64(free.toDouble())) : "Unknown") +
-            "\nBounded scan; symbolic links are excluded.");
+        m_storageInfo->setMeasurements(o);
     });
 }
 void SettingsPanel::resetPreferences() {
@@ -750,12 +742,20 @@ void SettingsPanel::deleteChats() {
     setStatus(QString("Deleted %1 saved conversations.").arg(removed));
 }
 void SettingsPanel::showText(const QString& title, const QString& text, bool exportable) {
-    QDialog dialog(this);
+    QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
+    dialog.setObjectName("settingsDetailDialog");
     dialog.setWindowTitle(title);
     dialog.resize(620, 430);
     auto* body = new QVBoxLayout(&dialog);
     body->setContentsMargins(24, 22, 24, 22);
-    body->addWidget(label(title, "settingsTitle"));
+    auto* heading = new QHBoxLayout;
+    heading->addWidget(label(title, "settingsTitle"), 1);
+    auto* dismiss = button("×", "settingsClose");
+    dismiss->setFixedSize(30, 30);
+    dismiss->setAccessibleName("Close " + title);
+    heading->addWidget(dismiss);
+    connect(dismiss, &QPushButton::clicked, &dialog, &QDialog::reject);
+    body->addLayout(heading);
     auto* filter = new QLineEdit;
     filter->setPlaceholderText("Filter lines…");
     filter->setAccessibleName("Filter report or log lines");
@@ -851,4 +851,43 @@ void SettingsPanel::changeEvent(QEvent* event) {
     BasePanel::changeEvent(event);
     if (event->type() == QEvent::ApplicationPaletteChange)
         refreshNavigation();
+}
+
+void SettingsPanel::showShortcuts() {
+    QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
+    dialog.setObjectName("settingsDetailDialog");
+    dialog.setWindowTitle("Keyboard shortcuts");
+    dialog.resize(600, 540);
+    auto* body = new QVBoxLayout(&dialog);
+    body->setContentsMargins(28, 24, 28, 24);
+    body->setSpacing(14);
+    auto* heading = new QHBoxLayout;
+    auto* copy = new QVBoxLayout;
+    copy->addWidget(label("QUICK REFERENCE", "settingsEyebrow"));
+    copy->addWidget(label("Keyboard shortcuts", "settingsTitle"));
+    heading->addLayout(copy, 1);
+    auto* dismiss = button("×", "settingsClose");
+    dismiss->setFixedSize(30, 30);
+    dismiss->setAccessibleName("Close keyboard shortcuts");
+    heading->addWidget(dismiss, 0, Qt::AlignTop);
+    connect(dismiss, &QPushButton::clicked, &dialog, &QDialog::reject);
+    body->addLayout(heading);
+    const QList<QPair<QString, QString>> shortcuts = {
+        {"Open settings", "Ctrl / ⌘ + ,"},         {"New chat", "Ctrl / ⌘ + N"},
+        {"Switch workspace", "Ctrl + 1…5"},        {"Open settings from sidebar", "Ctrl + 6"},
+        {"Collapse sidebar", "Ctrl + B"},          {"Close a dialog", "Esc"},
+        {"New line in a message", "Shift + Enter"}};
+    for (const auto& shortcut : shortcuts) {
+        auto* row = new QHBoxLayout;
+        row->addWidget(label(shortcut.first, "settingsRowTitle"), 1);
+        auto* key = label(shortcut.second, "settingsKeycap");
+        key->setAlignment(Qt::AlignCenter);
+        row->addWidget(key);
+        body->addLayout(row);
+        line(body);
+    }
+    body->addStretch();
+    body->addWidget(
+        label("Your Chat preferences control which shortcut sends a message.", "settingsHint"));
+    dialog.exec();
 }

@@ -85,3 +85,16 @@ The changed settings/window/theme/MainWindow C++ sources also passed syntax chec
 against Qt 6.2.4 headers. A full Qt 6.2 configure was blocked by the pre-existing
 `compress="0"` animated-symbol resource entry; that unrelated resource is unchanged.
 The executable and runtime checks above use the installed current Qt.
+
+### Settings presentation refinement
+
+The sidebar footer and Updates category pair the static supplied symbol with the
+wordmark at its natural proportions. Shortcuts use a frameless settings-style
+utility dialog and a keycap list; report/log dialogs share that frame. Storage is
+shown as a measured total, separate cache/workspace metrics, a file-distribution
+bar and a free-space value. The bar compares measured file sizes across locations,
+not disk capacity; partial scans retain lower-bound labels. Diagnostics use
+version/system/device cards and individual runtime-package status rows.
+
+Focused settings checks at 1× and 2× capture these views and verify that the
+shortcuts dialog requests the frameless window flag. The theme audit also passes.

@@ -386,11 +386,25 @@ QLabel#settingsRowTitle { font-size: 13px; font-weight: 500; }
 QLabel#settingsFooter { color: @textMuted; font-size: 10px; padding: 16px 0; }
 QFrame#settingsRule { background: @surfaceBorder; border: none; }
 QFrame#settingsNote { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
-QLabel#settingsStorageSummary { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 18px; }
-QLabel#settingsVersion { font-family: @headingFont; font-size: 30px; padding: 12px 0; }
-QLabel#settingsDiagnosticSummary { font-size: 13px; padding: 12px 0; }
 QPushButton#settingsClose { padding: 0; min-height: 0; font-size: 22px; }
 QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget, QScrollArea#settingsScroll > QWidget > QWidget { background: transparent; border: none; }
 QPushButton#deleteAllChats { color: @statusError; }
 
 QPushButton[themeChoice="true"] { min-height: 143px; max-height: 143px; min-width: 110px; padding: 0; }
+
+/* Structured settings summaries and matching utility dialogs. */
+QDialog#settingsDetailDialog { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
+QFrame#settingsStorageOverview { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QLabel#settingsStorageTotal { font-family: @headingFont; font-size: 29px; }
+QLabel#settingsStorageFree { font-weight: 500; font-size: 12px; }
+QFrame#settingsMetric { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QFrame#settingsStorageOverview QFrame#settingsMetric { background: @surfaceFill; }
+QLabel#settingsMetricValue { font-family: @headingFont; font-size: 17px; }
+QFrame[metricTone="models"] QLabel#settingsHint { color: @accentLabel; }
+QFrame[metricTone="workspace"] QLabel#settingsHint { color: @comparisonSeries; }
+QLabel#settingsRuntimeStatus { color: @textMuted; background: @canvasBackground; padding: 6px 10px; border-radius: 10px; font-size: 11px; }
+QFrame#settingsEngineRow { background: @canvasBackground; border-radius: 6px; }
+QLabel#settingsEngineStatus { font-size: 11px; color: @textSecondary; }
+QLabel#settingsKeycap { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; font-size: 12px; padding: 7px 12px; min-width: 120px; }
+
+QLabel#settingsRuntimeStatus[connected="true"] { color: @statusSuccess; }

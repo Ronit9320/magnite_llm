@@ -89,6 +89,8 @@ set(MAGNITE_SOURCES
     src/widgets/versionswitcher.h
     src/widgets/themechoice.cpp
     src/widgets/themechoice.h
+    src/widgets/settingssummary.cpp
+    src/widgets/settingssummary.h
     src/widgets/settingswindow.cpp
     src/widgets/settingswindow.h
     src/widgets/namedialog.cpp
