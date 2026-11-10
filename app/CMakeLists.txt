@@ -43,6 +43,14 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/testing/docs_tests.cpp
+    src/testing/docs_tests.h
+    src/panels/docslibrary.cpp
+    src/panels/docslibrary.h
+    src/panels/docspanel.cpp
+    src/panels/docspanel.h
+    src/widgets/docscontentview.cpp
+    src/widgets/docscontentview.h
     src/update_manager.cpp
     src/update_manager.h
     src/testing/windowchrome_tests.cpp

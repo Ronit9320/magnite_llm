@@ -882,8 +882,8 @@ void SettingsPanel::showShortcuts() {
         {"Open settings", Shortcuts::label(Shortcuts::settings())},
         {"New chat", Shortcuts::label(Shortcuts::newChat())},
         {"Switch workspace", Shortcuts::label(Shortcuts::workspace(0)) + " … " +
-                                 Shortcuts::label(Shortcuts::workspace(4))},
-        {"Open settings from sidebar", Shortcuts::label(Shortcuts::workspace(5))},
+                                 Shortcuts::label(Shortcuts::workspace(5))},
+        {"Open settings from sidebar", Shortcuts::label(Shortcuts::workspace(6))},
         {"Collapse sidebar", Shortcuts::label(Shortcuts::collapseSidebar())},
         {"Close a dialog", Shortcuts::label(QKeySequence(Qt::Key_Escape))},
         {"New line in a message", Shortcuts::label(Shortcuts::newLine())}};
