@@ -51,6 +51,7 @@ set(MAGNITE_SOURCES
     src/testing/uicheck.h
     src/main.cpp
     src/mainwindow.cpp
+    src/trainingduration.h
     src/theme.cpp
     src/backend_manager.cpp
     src/backend_client.cpp

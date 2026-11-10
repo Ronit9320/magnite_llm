@@ -35,6 +35,7 @@
 #include "widgets/surface.h"
 #include "widgets/studiocanvas.h"
 #include "theme.h"
+#include "trainingduration.h"
 #include <QProgressBar>
 #include "widgets/progressbar.h"
 #include <QSettings>
@@ -1137,9 +1138,9 @@ void TrainingPanel::renderJob(const QJsonObject &job) {
     if (steps>0 && seconds>0 && job["status"].toString()=="running" && total>step) {
         const double remaining=seconds/steps*(total-step);
         if (std::isfinite(remaining)) {
-            m_remainingReading->setText(QString("%1m %2s").arg(int(remaining)/60,2,10,QChar('0')).arg(int(remaining)%60,2,10,QChar('0')));
-            timing=QString("~%1 min left · %2 steps/s")
-                .arg(qMax(1.0,std::ceil(remaining/60.0)),0,'f',0).arg(steps/seconds,0,'f',2);
+            m_remainingReading->setText(TrainingTime::duration(remaining));
+            timing=QString("~%1 left · %2 steps/s")
+                .arg(TrainingTime::duration(remaining)).arg(steps/seconds,0,'f',2);
         }
     }
     if (steps>0 && seconds>0) m_throughputReading->setText(QString::number(steps/seconds,'f',2));
@@ -1166,16 +1167,16 @@ void TrainingPanel::renderJob(const QJsonObject &job) {
     const auto ended=QDateTime::fromString(job["finished_at"].toString(),Qt::ISODate);
     if (began.isValid() && (ended.isValid() || status=="running" || status=="queued")) elapsed=qMax(qint64(0),began.secsTo(ended.isValid()?ended:QDateTime::currentDateTimeUtc()));
     m_statNotes[1]->setText(validation.isDouble()?"Held-out samples":config["validation_split"].toDouble()>0?"Awaiting validation":"Validation not enabled");
-    m_statNotes[3]->setText(QString("%1 min elapsed").arg(elapsed/60.0,0,'f',1));
+    m_statNotes[3]->setText(TrainingTime::duration(elapsed)+" elapsed");
     if (status=="done" || status=="cancelled" || status=="error")
-        m_remainingReading->setText(QString("%1m %2s").arg(int(elapsed)/60,2,10,QChar('0')).arg(int(elapsed)%60,2,10,QChar('0')));
+        m_remainingReading->setText(TrainingTime::duration(elapsed));
     QStringList activity{QString("● %1\n   %2").arg(status=="done"?"Training completed":status=="cancelled"?"Run stopped":"Latest update",job["message"].toString("Waiting for an update"))};
     if (validation.isDouble()) activity << QString("● Validation measured\n   Loss %1 · Epoch %2").arg(number(validation),number(epoch));
     activity << (began.isValid()?"● Training started\n   "+began.toLocalTime().toString("dd MMM, HH:mm"):"● Waiting for training to start");
     m_activityText->setText(activity.join("\n\n"));
-    m_metrics->setText(QString("Step %1 / %2  ·  Epoch %3  ·  %4 min elapsed\nLR %5  ·  Gradient %6  ·  %7")
+    m_metrics->setText(QString("Step %1 / %2  ·  Epoch %3  ·  %4 elapsed\nLR %5  ·  Gradient %6  ·  %7")
         .arg(step).arg(total>0?QString::number(total):"—").arg(number(epoch))
-        .arg(elapsed/60.0,0,'f',1).arg(number(rate),number(gradient),timing));
+        .arg(TrainingTime::duration(elapsed)).arg(number(rate),number(gradient),timing));
 }
 
 void TrainingPanel::refreshJobs() {
@@ -1362,7 +1363,8 @@ void TrainingPanel::requestEstimate() {
         lines << (available>0 ? memory["kind"].toString()+" available: "+gb(available) : memory["kind"].toString()+": available memory unknown");
         if (e["adapter_bytes"].toDouble()>0) lines << QString("Adapter: ~%1 MB").arg(e["adapter_bytes"].toDouble()/(1024*1024),0,'f',1);
         if (e["duration_high_seconds"].toDouble()>0)
-            lines << QString("Estimated time: ~%1–%2 min").arg(qMax(1.0,std::ceil(e["duration_low_seconds"].toDouble()/60.0)),0,'f',0).arg(qMax(1.0,std::ceil(e["duration_high_seconds"].toDouble()/60.0)),0,'f',0);
+            lines << QString("Estimated time: ~%1–%2").arg(TrainingTime::duration(e["duration_low_seconds"].toDouble()),
+                                                         TrainingTime::duration(e["duration_high_seconds"].toDouble()));
         else lines << "Estimated time: calibrates after a matching run";
         if (e["steps"].isDouble()) lines << QString("%1 optimiser steps").arg(e["steps"].toInt());
         m_estimateLabel->setText(lines.join("    ·    "));
