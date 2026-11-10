@@ -6,6 +6,10 @@ from typing import AsyncIterator
 from backend.inference.schemas import ChatMessage
 
 
+class EngineUnloaded(RuntimeError):
+    """The engine was unloaded while a read-only call (token counting) was using it."""
+
+
 class BaseEngine(ABC):
     """Interface every inference engine implements."""
 

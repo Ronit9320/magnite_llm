@@ -17,11 +17,16 @@ from backend.inference.context import (drop_to_fit, fill_of, split_for_compactio
 from backend.inference.schemas import (ChatMessage, ChatRequest, ChatRole, CompactRequest, CompactResult,
                                        CompletionRequest, ContextUsage, ContextUsageRequest,
                                        InferenceStatus)
+from backend.inference.engines.base import EngineUnloaded
 from backend.inference.supervisor import get_supervisor
 from backend.rag.context import injectable_context
 from backend.request_work import request_work, watch_disconnect, ClientDisconnected
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+
+# Above this many characters the context meter estimates instead of tokenizing (~250k tokens).
+MAX_METER_CHARS = 1_000_000
 
 
 class AdapterActivateRequest(BaseModel):
@@ -68,8 +73,17 @@ def context_usage(req: ContextUsageRequest):
         engine = get_supervisor().current_engine()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    used = engine.count_messages(req.messages)
-    limit = engine.context_size()
+    try:
+        limit = engine.context_size()
+        chars = sum(len(m.content) for m in req.messages)
+        if chars > MAX_METER_CHARS:
+            # Far beyond any local model's context: report "full" without spending seconds tokenizing it.
+            used = chars // 3
+            return ContextUsage(used=used, reserved=req.max_tokens, limit=limit,
+                                fill=fill_of(used, req.max_tokens, limit), exact=False)
+        used = engine.count_messages(req.messages)
+    except EngineUnloaded as exc:   # unloaded between looking the engine up and counting
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ContextUsage(used=used, reserved=req.max_tokens, limit=limit,
                         fill=fill_of(used, req.max_tokens, limit),
                         exact=engine.name == "torch")
@@ -306,6 +320,8 @@ async def chat(req: ChatRequest, request: Request):
 
 @router.post("/completion")
 async def completion(req: CompletionRequest, request: Request):
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt must not be empty")
     sup = get_supervisor()
     def prepare(engine):
         _validate_model(req.model, sup)

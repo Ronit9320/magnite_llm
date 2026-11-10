@@ -6,7 +6,8 @@ import json
 import os
 import sqlite3
 
-from backend.database import connection
+from backend.database import connection, open_or_quarantine
+from backend.textcheck import ensure_utf8
 import threading
 import time
 import uuid
@@ -44,9 +45,9 @@ class DatasetStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, connection(self._db_path) as conn:
-            conn.execute(_SCHEMA)
-            conn.commit()
+        with self._lock:
+            open_or_quarantine(self._db_path, lambda conn: conn.execute(_SCHEMA),
+                               hint="Dataset files on disk were not touched, but they are no longer listed.")
 
     def _conn(self):
         return connection(self._db_path)
@@ -70,6 +71,7 @@ class DatasetStore:
     def ingest_content(self, name: str, content: str, fmt: str = "text",
                        source: str = "") -> DatasetRecord:
         content = content.removeprefix("\ufeff")
+        ensure_utf8(content, "Dataset")
         fmt = fmt.lower()
         if fmt not in ("jsonl", "csv", "text"):
             raise ValueError(f"Unsupported dataset format '{fmt}'")
@@ -87,9 +89,18 @@ class DatasetStore:
 
         dataset_id = uuid.uuid4().hex[:12]
         out_path = os.path.join(self._data_dir, f"{dataset_id}.jsonl")
-        with open(out_path, "w", encoding="utf-8") as f:
-            for s in samples:
-                f.write(json.dumps(s, ensure_ascii=False) + "\n")
+        # Encode everything before creating a file: a JSON \\ud800 escape inside a JSONL sample only
+        # becomes a lone surrogate after parsing, and must not leave a half-written orphan behind.
+        payload = "".join(json.dumps(s, ensure_ascii=False) + "\n" for s in samples)
+        ensure_utf8(payload, "Dataset")
+        tmp_path = out_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp_path, out_path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
         rec = DatasetRecord(
             id=dataset_id,

@@ -4,7 +4,7 @@ import threading
 from contextlib import aclosing
 from typing import AsyncIterator
 
-from backend.inference.engines.base import BaseEngine
+from backend.inference.engines.base import BaseEngine, EngineUnloaded
 from backend.inference.engines.streaming import threaded_stream
 
 
@@ -132,13 +132,19 @@ class TorchPeftEngine(BaseEngine):
                 yield delta
 
     def count_tokens(self, text):
-        return len(self._tokenizer.encode(text))
+        tokenizer = self._tokenizer
+        if tokenizer is None:
+            raise EngineUnloaded("The model was unloaded")
+        return len(tokenizer.encode(text))
 
     def count_messages(self, messages):
         return self.count_tokens(self._messages_to_prompt(messages))
 
     def context_size(self):
-        return int(getattr(self._model.config, "max_position_embeddings", 2048))
+        model = self._model
+        if model is None:
+            raise EngineUnloaded("The model was unloaded")
+        return int(getattr(model.config, "max_position_embeddings", 2048))
 
     def unload(self) -> None:
         super().unload()

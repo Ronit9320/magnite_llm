@@ -18,10 +18,29 @@ async def run_blocking(function, *args):
         raise
 
 
+_active_stops: set[threading.Event] = set()
+_active_lock = threading.Lock()
+
+
+def abort_all_streams() -> int:
+    """Ask every in-flight generation to stop at its next token; returns how many were running.
+
+    Called at shutdown, so quitting during a long answer ends the stream in a token, not at the
+    end of the answer.
+    """
+    with _active_lock:
+        stops = list(_active_stops)
+    for stop in stops:
+        stop.set()
+    return len(stops)
+
+
 async def threaded_stream(producer):
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
     stop = threading.Event()
+    with _active_lock:
+        _active_stops.add(stop)
     done = object()
 
     def send(value):
@@ -58,6 +77,8 @@ async def threaded_stream(producer):
             yield item
     finally:
         stop.set()
+        with _active_lock:
+            _active_stops.discard(stop)
         # Do not allow model unload until its last generation worker has exited.
         with anyio.CancelScope(shield=True):
             await asyncio.to_thread(worker.join)

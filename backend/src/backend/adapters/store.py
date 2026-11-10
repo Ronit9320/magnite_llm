@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 
-from backend.database import connection
+from backend.database import connection, open_or_quarantine
 import threading
 from typing import Optional
 
@@ -43,9 +43,9 @@ class AdapterStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, connection(self._db_path) as conn:
-            conn.execute(_SCHEMA)
-            conn.commit()
+        with self._lock:
+            open_or_quarantine(self._db_path, lambda conn: conn.execute(_SCHEMA),
+                               hint="Adapter files on disk were not touched, but they are no longer listed.")
 
     def _conn(self):
         return connection(self._db_path)

@@ -9,6 +9,7 @@ import time
 import uvicorn
 
 from backend import local_access
+from backend.inference.engines.streaming import abort_all_streams
 from backend.paths import app_home
 from backend.server import app
 
@@ -48,6 +49,20 @@ def _enable_parent_death_signal() -> None:
                              daemon=True).start()
 
 
+class MagniteServer(uvicorn.Server):
+    """uvicorn waits for open streaming responses before it runs shutdown hooks, so a long
+    generation would hold up quitting. Abort generations the moment shutdown is requested."""
+
+    def handle_exit(self, sig, frame):
+        abort_all_streams()
+        super().handle_exit(sig, frame)
+
+    def request_exit(self) -> None:
+        """The authenticated /_desktop/shutdown path (Windows has no SIGTERM for console Python)."""
+        abort_all_streams()
+        self.should_exit = True
+
+
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -79,10 +94,10 @@ def main():
     port = args.port if args.port else find_free_port()
     print(f"Magnite backend starting on http://127.0.0.1:{port}", file=sys.stderr)
     def request_shutdown():
-        server.should_exit = True
+        server.request_exit()
 
     network_app = local_access.LocalAccessMiddleware(app, token, shutdown=request_shutdown)
-    server = uvicorn.Server(uvicorn.Config(network_app, host="127.0.0.1", port=port, log_level="info"))
+    server = MagniteServer(uvicorn.Config(network_app, host="127.0.0.1", port=port, log_level="info"))
     server.run()
 
 

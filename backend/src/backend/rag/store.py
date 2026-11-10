@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 
-from backend.database import connection
+from backend.database import connection, open_or_quarantine
 import threading
 import time
 import uuid
@@ -68,11 +68,13 @@ class RagStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, connection(self._db_path) as conn:
+        def init(conn):
             conn.execute(_DOC_SCHEMA)
             conn.executescript(_CHUNK_SCHEMA)
             conn.execute(_CONFIG_SCHEMA)
-            conn.commit()
+
+        with self._lock:
+            open_or_quarantine(self._db_path, init, hint="Knowledge documents must be added again.")
 
     def _conn(self):
         return connection(self._db_path)

@@ -5,6 +5,7 @@ import os
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.paths import app_home
+from backend.textcheck import MAX_CONTENT_CHARS
 from backend.training.datasets import DatasetStore
 from backend.training.jobs import TrainingJobManager
 from backend.training.trainer import quantization_support
@@ -118,6 +119,8 @@ def ingest_dataset(body: DatasetIngestRequest):
         if body.path:
             return store.ingest_path(body.path, name=body.name, fmt=body.format)
         if body.content:
+            if len(body.content) > MAX_CONTENT_CHARS:
+                raise HTTPException(status_code=413, detail=f"Content too long (limit {MAX_CONTENT_CHARS:,} characters)")
             if not body.name.strip():
                 raise ValueError("'name' is required when sending raw content")
             return store.ingest_content(body.name.strip(), body.content,

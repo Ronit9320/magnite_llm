@@ -6,7 +6,7 @@ from pathlib import Path
 from contextlib import aclosing
 from typing import AsyncIterator
 
-from backend.inference.engines.base import BaseEngine
+from backend.inference.engines.base import BaseEngine, EngineUnloaded
 from backend.inference.engines.streaming import threaded_stream
 
 _GUARD = threading.Lock()
@@ -140,7 +140,14 @@ class LlamaCppEngine(BaseEngine):
                 yield text
 
     def count_tokens(self, text):
-        return len(self._llm.tokenize(text.encode("utf-8")))
+        # No lock: this runs outside the supervisor's operation lock (the meter polls while the
+        # user types), and a lock would let a polling meter starve unload(). Holding our own
+        # reference keeps the llama context alive until tokenizing finishes even if unload()
+        # drops self._llm meanwhile; unload() must therefore never close() it explicitly.
+        llm = self._llm
+        if llm is None:
+            raise EngineUnloaded("The model was unloaded")
+        return len(llm.tokenize(text.encode("utf-8")))
 
     def context_size(self):
         return self.n_ctx

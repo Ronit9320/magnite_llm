@@ -4,6 +4,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+# One bound for both an explicit max_steps and the steps an epochs-based run would take.
+MAX_TOTAL_STEPS = 100_000
+
 
 class DatasetRecord(BaseModel):
     id: str
@@ -32,12 +35,12 @@ class TrainingConfig(BaseModel):
     validation_split: float = Field(0.0, ge=0.0, le=0.5)
 
     epochs: int = Field(3, ge=1, le=100)
-    max_steps: int = Field(0, ge=0, description="0 = derive from epochs")
+    max_steps: int = Field(0, ge=0, le=MAX_TOTAL_STEPS, description="0 = derive from epochs")
     learning_rate: float = Field(2e-4, gt=0.0, le=1.0)
     batch_size: int = Field(1, ge=1, le=128)
     warmup_ratio: float = Field(0.03, ge=0.0, le=1.0)
     max_length: int = Field(512, ge=8, le=8192)
-    seed: int = Field(42)
+    seed: int = Field(42, ge=0, le=2**32 - 1)
 
 
 class TrainingJob(BaseModel):

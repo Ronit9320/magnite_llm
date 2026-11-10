@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import platform
@@ -18,7 +19,9 @@ from backend.inference.engines.vllm import VllmEngine
 from backend.inference.engines.ollama import OllamaEngine
 from backend.inference.engines.streaming import run_blocking
 from backend.inference.schemas import EngineInfo, InferenceStatus
-from backend.training.trainer import _resolve_base
+from backend.models.resolution import resolve_base_offline
+
+logger = logging.getLogger(__name__)
 
 
 def detect_gpu() -> tuple[bool, str]:
@@ -168,11 +171,15 @@ class InferenceSupervisor:
         ename, mref = self._resolve_engine(engine_name, model_ref)
         if not mref:
             raise ValueError("No model selected for inference")
+        # Reject an unusable model before touching the one that works.
+        self._validate_ref(ename, mref)
+        previous = self._snapshot()
         # Unload any existing engine/model (also clears the active adapter).
         self._unload()
 
-        engine = self.make_engine(ename, mref)
+        engine = None
         try:
+            engine = self.make_engine(ename, mref)
             engine.cancel_load = cancelled
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Model loading cancelled")
@@ -180,10 +187,50 @@ class InferenceSupervisor:
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Model loading cancelled")
         except Exception:
-            engine.unload()
+            if engine is not None:
+                engine.unload()
+            self._restore(previous)
             raise
         self._engine = engine
         self.model_ref = mref
+
+    @staticmethod
+    def _validate_ref(engine_name: str, ref: str) -> None:
+        """Cheap checks on a model path, so a bad one never unloads the working model.
+
+        Only absolute paths are checked: registry and Ollama references are resolved by the engine.
+        """
+        if not os.path.isabs(ref):
+            return
+        if not os.path.exists(ref):
+            raise ValueError(f"Model not found: {ref}")
+        if engine_name == "llamacpp" and os.path.isfile(ref):
+            try:
+                with open(ref, "rb") as f:
+                    magic = f.read(4)
+            except OSError as exc:
+                raise ValueError(f"Cannot read model file: {exc}") from exc
+            if magic != b"GGUF":
+                raise ValueError(f"Not a GGUF model file (empty or damaged): {ref}")
+
+    def _snapshot(self):
+        """What is loaded right now: (engine name, model ref, active adapter), or None."""
+        if self._engine is None:
+            return None
+        return (self._engine.name, self.model_ref, self.active_adapter)
+
+    def _restore(self, previous) -> None:
+        """Best-effort reload of what was loaded before a failed swap; never raises."""
+        if previous is None:
+            return
+        name, ref, adapter = previous
+        try:
+            engine = TorchPeftEngine(ref, adapter.path) if adapter is not None else self.make_engine(name, ref)
+            engine.load()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not restore the previous model %s after a failed load: %s", ref, exc)
+            return
+        self._engine, self.model_ref, self.active_adapter = engine, ref, adapter
 
     def activate_adapter(self, adapter_id: str, cancelled=None) -> AdapterRecord:
         with self.operation():
@@ -209,20 +256,26 @@ class InferenceSupervisor:
                 "Adapter inference needs transformers + peft. Install with "
                 "'uv pip install --python .venv/bin/python -e 'backend[ml]''."
             )
-        base = rec.meta.get("resolved_base_model") or _resolve_base(rec.base_model)
+        # Even a pinned value goes through the offline resolver: records imported before imports stripped it can
+        # still carry an archive-chosen name. A pinned local directory is returned unchanged.
+        base = resolve_base_offline(rec.meta.get("resolved_base_model") or rec.base_model)
         if os.path.isabs(base) and not os.path.isdir(base):
             raise ValueError(f"Adapter base snapshot is unavailable: {base}")
 
+        previous = self._snapshot()
         self._unload()
-        engine = TorchPeftEngine(base, rec.path)
+        engine = None
         try:
+            engine = TorchPeftEngine(base, rec.path)
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Adapter loading cancelled")
             engine.load()
             if cancelled is not None and cancelled.is_set():
                 raise RuntimeError("Adapter loading cancelled")
         except Exception:
-            engine.unload()
+            if engine is not None:
+                engine.unload()
+            self._restore(previous)
             raise
         self._engine = engine
         self.model_ref = base

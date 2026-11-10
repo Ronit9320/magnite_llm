@@ -7,10 +7,10 @@ import time
 import uuid
 from typing import Optional
 
-from backend.database import connection
+from backend.database import add_notice, connection, open_or_quarantine
 from backend.adapters.store import AdapterStore
 from backend.training.datasets import DatasetStore
-from backend.training.schemas import TrainingConfig, TrainingJob
+from backend.training.schemas import MAX_TOTAL_STEPS, TrainingConfig, TrainingJob
 from backend.training.trainer import quantization_support, run_training, TrainingCancellation
 
 
@@ -20,6 +20,9 @@ def _now() -> str:
 
 class TrainingJobManager:
     """Serialized training queue with durable terminal history and restart recovery."""
+
+    # While a job runs its state is saved this often, so a crash keeps the last known step.
+    _PROGRESS_SAVE_SECONDS = 5.0
 
     def __init__(self, data_dir: str, adapter_store: AdapterStore,
                  dataset_store: DatasetStore):
@@ -34,22 +37,34 @@ class TrainingJobManager:
         self._cancel: dict[str, threading.Event] = {}
 
         self._db = os.path.join(data_dir, "training_jobs.db")
-        with connection(self._db) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL)")
-            for (record,) in conn.execute("SELECT record FROM jobs"):
-                job = TrainingJob.model_validate_json(record)
-                if job.status in ("queued", "running"):
-                    job.status = "error"
-                    job.error = "Training interrupted by backend shutdown. Submit a new job to retry."
-                    job.message = job.error
-                    job.finished_at = _now()
-                self._jobs[job.id] = job
+        open_or_quarantine(self._db, self._load_jobs, hint="Past training runs are no longer listed.")
         for job in self._jobs.values():
             self._persist(job)
         self._queue = queue.Queue()
         self._closing = False
         self._worker = threading.Thread(target=self._run_queue, daemon=True, name="training-queue")
         self._worker.start()
+
+    def _load_jobs(self, conn) -> None:
+        """Read persisted jobs; a record that cannot be parsed is set aside, not fatal."""
+        self._jobs = {}
+        conn.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+        conn.execute("CREATE TABLE IF NOT EXISTS jobs_quarantine (id TEXT, record TEXT, error TEXT)")
+        for row in conn.execute("SELECT id, record FROM jobs").fetchall():
+            try:
+                job = TrainingJob.model_validate_json(row["record"])
+            except ValueError as exc:  # pydantic.ValidationError is a ValueError
+                conn.execute("INSERT INTO jobs_quarantine VALUES (?, ?, ?)", (row["id"], row["record"], str(exc)[:500]))
+                conn.execute("DELETE FROM jobs WHERE id = ?", (row["id"],))
+                add_notice(f"A training record in training_jobs.db could not be read and was set aside (job {row['id']}).")
+                continue
+            if job.status in ("queued", "running"):
+                where = f" at step {job.current_step}/{job.total_steps}" if job.current_step else ""
+                job.status = "error"
+                job.error = f"Training interrupted{where} by a backend shutdown or crash. Submit a new job to retry."
+                job.message = job.error
+                job.finished_at = _now()
+            self._jobs[job.id] = job
 
     def _persist(self, job):
         # Serialize the snapshot and commit together. Otherwise a shutdown
@@ -64,9 +79,13 @@ class TrainingJobManager:
             if item is None:
                 return
             job, cfg, dataset_path, event = item
+            saver, stop_saving = None, threading.Event()
             try:
                 if event.is_set():
                     continue
+                saver = threading.Thread(target=self._save_progress, args=(job, stop_saving),
+                                         daemon=True, name="training-progress-save")
+                saver.start()
                 run_training(job, cfg, dataset_path, self._adapter_dir, self._adapter_store, event)
             except Exception as exc:
                 job.status = "error"
@@ -74,8 +93,18 @@ class TrainingJobManager:
                 job.message = str(exc)
                 job.finished_at = _now()
             finally:
+                stop_saving.set()
+                if saver is not None:
+                    saver.join(timeout=5)   # no stale "running" snapshot may land after the final one
                 self._datasets.release(cfg.dataset_id)
                 self._persist(job)
+
+    def _save_progress(self, job, stop: threading.Event) -> None:
+        while not stop.wait(self._PROGRESS_SAVE_SECONDS):
+            try:
+                self._persist(job)
+            except Exception:  # a failed save (disk full, locked) must not end the job or this loop
+                pass
 
     def shutdown(self):
         with self._lock:
@@ -107,6 +136,12 @@ class TrainingJobManager:
                 raise ValueError(reason)
         if not cfg.rank or cfg.rank < 1:
             raise ValueError("rank must be >= 1")
+        if cfg.max_steps == 0:
+            steps = cfg.epochs * -(-dataset.rows // cfg.batch_size)
+            if steps > MAX_TOTAL_STEPS:
+                raise ValueError(
+                    f"Training would run {steps} steps; the limit is {MAX_TOTAL_STEPS}. "
+                    "Reduce epochs, use a smaller dataset, or raise the batch size.")
 
     def start(self, cfg: TrainingConfig) -> TrainingJob:
         with self._lock:

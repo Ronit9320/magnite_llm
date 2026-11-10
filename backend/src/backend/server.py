@@ -1,6 +1,7 @@
 from backend._version import RELEASE_VERSION
 from fastapi import FastAPI
 from backend.maintenance import UpdateGate
+from backend.request_limits import BodyLimitMiddleware
 
 from backend.routes.adapters import router as adapters_router, _adapter_setup
 from backend.routes.health import router as health_router
@@ -15,6 +16,7 @@ from backend.routes.training import (
 
 app = FastAPI(title="Magnite LLM Backend", version=RELEASE_VERSION)
 app.add_middleware(UpdateGate)
+app.add_middleware(BodyLimitMiddleware)
 
 
 @app.on_event("shutdown")

@@ -9,6 +9,7 @@ import re
 import stat
 import tempfile
 import threading
+import time
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException
@@ -62,6 +63,35 @@ def _imports_dir() -> str:
     return imports
 
 
+def _prune_exports(exports: str, max_age_s: float = 86400.0, now: float | None = None) -> int:
+    """Delete export zips older than ``max_age_s`` and abandoned ``.export-*`` temp files (> 1 h).
+
+    Exports stay unique and immutable within the window (an earlier download link keeps working
+    for a day), so this ages them out instead of reusing one file per adapter. Files that vanish or
+    cannot be removed (open on Windows) are skipped. Returns how many were deleted.
+    """
+    now = time.time() if now is None else now
+    removed = 0
+    try:
+        entries = list(os.scandir(exports))
+    except OSError:
+        return 0
+    for entry in entries:
+        if entry.name.endswith(".zip"):
+            limit = max_age_s
+        elif entry.name.startswith(".export-"):
+            limit = 3600.0
+        else:
+            continue
+        try:
+            if entry.is_file(follow_symlinks=False) and now - entry.stat().st_mtime > limit:
+                os.unlink(entry.path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 @router.get("", response_model=list[AdapterRecord])
 def list_adapters(q: str = "", base_model: str = ""):
     recs = _get_store().list()
@@ -81,6 +111,7 @@ def export_adapter(adapter_id: str):
     # Each result is immutable, including repeated exports of the same adapter.
     filename = f"{uuid.uuid4().hex}.zip"
     exports = _exports_dir()
+    _prune_exports(exports)
     zip_path = os.path.join(exports, filename)
     temporary = None
     try:
@@ -144,6 +175,8 @@ def _import_adapter(body: AdapterImportRequest):
             if zf.getinfo("record.json").file_size > 1024 * 1024:
                 raise ValueError("Adapter metadata exceeds 1 MiB")
             rec = AdapterRecord.model_validate_json(zf.read("record.json"))
+            # Only this machine's trainer may pin a base-model snapshot; an archive must not.
+            rec.meta.pop("resolved_base_model", None)
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}", rec.id):
                 raise ValueError("Invalid adapter id")
             if _get_store().get(rec.id) is not None:

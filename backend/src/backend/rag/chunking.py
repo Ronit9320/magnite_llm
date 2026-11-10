@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import html as _html
 import os
 import re
+from html.parser import HTMLParser
 
 SUPPORTED_EXTS = ("txt", "md", "html", "pdf")
 
@@ -43,15 +43,58 @@ def _read_text(path: str) -> str:
     raise ValueError(f"Cannot decode text file: {path}")
 
 
-_HANDLER_TAG = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
-_TAG = re.compile(r"<[^>]+>")
+class _TextExtractor(HTMLParser):
+    """Visible text of an HTML document in one linear pass.
+
+    Every tag boundary becomes a space, <script>/<style> bodies are dropped, and character
+    references are unescaped. A script or style that is never closed keeps its text (a browser
+    would swallow the rest of the page; for retrieval, losing the document is worse).
+    """
+
+    _SKIPPED = ("script", "style")
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._out: list[str] = []
+        self._held: list[str] = []
+        self._skip: str | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if self._skip is None and tag in self._SKIPPED:
+            self._skip = tag
+            self._held = []
+        self._out.append(" ")
+
+    def handle_endtag(self, tag):
+        if self._skip == tag:
+            self._skip = None
+            self._held = []
+        self._out.append(" ")
+
+    def handle_data(self, data):
+        (self._held if self._skip else self._out).append(data)
+
+    def handle_comment(self, data):
+        self._out.append(" ")
+
+    def handle_decl(self, decl):
+        self._out.append(" ")
+
+    def handle_pi(self, data):
+        self._out.append(" ")
+
+    def text(self) -> str:
+        self.close()
+        # Some Python releases hand the content of an unclosed <script>/<style> to handle_data at
+        # close(); others leave it unparsed in `rawdata`. Take whichever happened, never both.
+        unclosed = (self._held + [self.rawdata]) if self._skip and self.rawdata else self._held if self._skip else []
+        return "".join(self._out + unclosed)
 
 
 def _strip_html(text: str) -> str:
-    text = _HANDLER_TAG.sub(" ", text)
-    text = _TAG.sub(" ", text)
-    text = _html.unescape(text)
-    return text
+    extractor = _TextExtractor()
+    extractor.feed(text)
+    return extractor.text()
 
 
 def _strip_markdown(text: str) -> str:

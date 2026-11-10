@@ -19,7 +19,7 @@ class QuantizationSupportTests(unittest.TestCase):
             self.assertEqual(bool(reason), not expected)
 
     def test_validate_rejects_quantization_only_when_unsupported(self):
-        manager = types.SimpleNamespace(_datasets=types.SimpleNamespace(get=lambda _id: object()))
+        manager = types.SimpleNamespace(_datasets=types.SimpleNamespace(get=lambda _id: types.SimpleNamespace(rows=10)))   # _validate reads the dataset's row count
         cfg = TrainingConfig(base_model="m", dataset_id="d", quantization="4bit")
         with patch.object(jobs, "quantization_support", return_value=(False, "no QLoRA here")):
             with self.assertRaisesRegex(ValueError, "no QLoRA here"):

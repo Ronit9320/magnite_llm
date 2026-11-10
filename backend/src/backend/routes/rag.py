@@ -19,6 +19,7 @@ from backend.rag.schemas import (
 )
 from backend.rag.store import RagStore, get_rag_store, set_rag_store
 from backend.paths import app_home
+from backend.textcheck import MAX_CONTENT_CHARS, ensure_utf8
 
 rag_router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -81,6 +82,8 @@ async def ingest_document(body: RagIngestRequest, request: Request):
 
 def _ingest_document(body: RagIngestRequest, cancelled=None):
     store = _get_store()
+    if len(body.content) > MAX_CONTENT_CHARS:
+        raise HTTPException(status_code=413, detail=f"Content too long (limit {MAX_CONTENT_CHARS:,} characters)")
     if not body.path.strip() and not body.content.strip():
         raise HTTPException(status_code=400, detail="Provide either 'path' or 'content'")
     if not embeddings.is_available():
@@ -94,6 +97,7 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
             raise HTTPException(status_code=400, detail="'name' is required when sending raw content")
         kind = detect_kind(body.name, body.kind)
         try:
+            ensure_utf8(body.content, "Document")
             text = extract_content(body.content, kind)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -110,6 +114,10 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         size_kb = os.path.getsize(path) / 1024.0
 
+    try:
+        ensure_utf8(text, "Document")   # extraction (e.g. a PDF) can produce one too
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     cfg = store.get_config()
     chunk_size = body.chunk_size or cfg.chunk_size
     chunk_overlap = (body.chunk_overlap

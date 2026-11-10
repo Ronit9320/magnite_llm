@@ -1,6 +1,8 @@
 """Resolve registered identities without silently switching cached revisions."""
 import os
 
+from huggingface_hub import snapshot_download
+
 
 def registered_model(ref):
     from backend.routes.models import _get_registry
@@ -25,3 +27,19 @@ def resolve_base(ref):
     if ref.startswith("huggingface:"):
         return local_model_path(registered_model(ref))
     return ref.removeprefix("hf|")
+
+
+def resolve_base_offline(ref):
+    """Like resolve_base, but never touches the network.
+
+    A bare Hub repo id is accepted only if a snapshot of it is already in the local cache.
+    Adapters can arrive in an imported archive, so the base model they name is untrusted:
+    activating one must not make the backend fetch a model of the archive's choosing.
+    """
+    base = resolve_base(ref)
+    if os.path.isdir(base):
+        return base
+    try:
+        return snapshot_download(base, local_files_only=True)
+    except Exception as exc:  # LocalEntryNotFoundError, HFValidationError, OSError, ...
+        raise ValueError(f"Adapter base model is not downloaded: {ref}") from exc
