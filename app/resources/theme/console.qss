@@ -409,3 +409,8 @@ QLabel#settingsEngineStatus { font-size: 11px; color: @textSecondary; }
 QLabel#settingsKeycap { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; font-size: 12px; padding: 7px 12px; min-width: 120px; }
 
 QLabel#settingsRuntimeStatus[connected="true"] { color: @statusSuccess; }
+
+/* Compact app-owned window controls, shared with dialogs and file pickers. */
+QFrame#appWindowHeader { background: @surfaceFill; border: none; border-bottom: 1px solid @surfaceBorder; }
+QLabel#appWindowTitle { color: @textSecondary; font-size: 12px; }
+QPushButton#windowClose, QPushButton#windowMinimize, QPushButton#windowMaximize { padding: 0; min-height: 0; font-size: 18px; }

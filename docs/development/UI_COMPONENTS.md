@@ -24,6 +24,7 @@ References reviewed: [Button](https://ui.shadcn.com/docs/components/radix/button
 | Tabs | `widgets/tabwidget.h` | A single segmented track with a sliding selected pill. Native pages and selection change immediately; keyboard and disabled-tab behavior remain native. |
 | Progress | `widgets/progressbar.h` | Rounded, interpolated presentation; the actual numeric value and signals update immediately. New-operation resets snap to zero. Indeterminate/vertical bars retain native painting. |
 | Context menus and tooltips | Shared QSS | Themed surfaces, padding, separators, disabled states and quiet selection. Native focus, Escape and menu navigation remain in use. |
+| Window frames | `widgets/windowchrome.h` | Compact app-owned controls replace the system title bar. The main window reuses its workspace masthead; dialogs and Qt file pickers receive a small title/close row. Settings keeps its existing controls. Drag the header to move, drag window edges to resize, or double-click the main masthead to maximize/restore. |
 | Removal confirmation | `widgets/confirmation.h` | Spaced dialog content and shared action buttons. Cancel remains the default and Escape action. |
 
 Use the shared classes when creating ordinary controls. Specialized sidebar,
@@ -53,6 +54,7 @@ is only created when a field is focused. No field is replaced with a fake input.
 ```bash
 cmake -S app -B build
 cmake --build build -j2
+QT_QPA_PLATFORM=offscreen ./build/magnite-app --window-check build/window-controls
 QT_QPA_PLATFORM=offscreen ./build/magnite-app --theme-check
 QT_QPA_PLATFORM=offscreen ./build/magnite-app --ui-check build/component-polish-ui
 QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/magnite-app --ui-check
@@ -89,3 +91,11 @@ than delegating label positioning with a mismatched stylesheet rectangle. UI
 regressions compare rendered text against its content bounds and cover narrow
 multiline actions, accessible labels and tab ink containment at normal/2× scale.
 Updated captures are under `build/darker-layout-ui/`.
+
+The window-control checks cover both themes, normal and 2× scaling, safe dialog
+cancellation, repeated opening, header resizing, maximize/restore, and resize
+cursors. Native Wayland checks use the same test command without the offscreen
+platform override. Minimized state is checked offscreen because
+[Qt's Wayland integration](https://github.com/qt/qtwayland/blob/6.8/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp)
+does not receive that state from the compositor. Native Windows/macOS frame
+behavior still requires acceptance on those platforms.

@@ -45,6 +45,8 @@ configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 set(MAGNITE_SOURCES
     src/update_manager.cpp
     src/update_manager.h
+    src/testing/windowchrome_tests.cpp
+    src/testing/windowchrome_tests.h
     src/testing/settings_tests.cpp
     src/testing/settings_tests.h
     src/testing/uicheck.cpp
@@ -92,6 +94,8 @@ set(MAGNITE_SOURCES
     src/widgets/themechoice.h
     src/widgets/settingssummary.cpp
     src/widgets/settingssummary.h
+    src/widgets/windowchrome.cpp
+    src/widgets/windowchrome.h
     src/widgets/settingswindow.cpp
     src/widgets/settingswindow.h
     src/widgets/shortcuts.h
