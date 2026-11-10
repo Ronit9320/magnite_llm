@@ -1,5 +1,8 @@
 #include "trainingchart.h"
 #include "theme.h"
+#include "widgets/button.h"
+#include <QDialog>
+#include <QVBoxLayout>
 
 #include <QHelpEvent>
 #include <QMouseEvent>
@@ -25,18 +28,25 @@ TrainingChart::TrainingChart(const QString &metric, QWidget *parent)
         }
         update();
     });
+    m_expandButton = new Button("Expand", this);
+    m_expandButton->setObjectName("trainingChartExpand");
+    m_expandButton->setFlat(true);
+    m_expandButton->setFixedSize(72, 28);
+    m_expandButton->setToolTip("Open this graph in a larger, resizable window");
+    connect(m_expandButton, &QPushButton::clicked, this, &TrainingChart::expand);
     setMouseTracking(true);
     setMinimumHeight(150);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setAccessibleName(metric == "loss" ? "Training and validation loss" :
                       metric == "learning_rate" ? "Learning rate" : metric == "step_rate" ? "Measured throughput in steps per second" : "Gradient norm");
+    m_expandButton->setAccessibleName("Expand " + accessibleName());
     m_hoverLabel=new QLabel(this); m_hoverLabel->setObjectName("trainingChartHover");
     m_hoverLabel->setAccessibleName("Measured chart values"); m_hoverLabel->setTextFormat(Qt::PlainText);
     m_hoverLabel->setAttribute(Qt::WA_TransparentForMouseEvents); m_hoverLabel->setFocusPolicy(Qt::NoFocus); m_hoverLabel->hide();
 }
 
 void TrainingChart::setHistory(const QJsonArray &history, int totalSteps) {
-    if (m_comparison) { m_comparison=false; update(); }
+    if (m_comparison) { m_comparison=false; syncExpanded(); update(); }
     if (m_history == history && m_totalSteps == qMax(0,totalSteps)) return;
     const auto previous=samples();
     m_fromStep=previous.isEmpty() ? 0 : previous.last().step;
@@ -51,6 +61,7 @@ void TrainingChart::setHistory(const QJsonArray &history, int totalSteps) {
     m_reveal=1.0;
     if (!values.isEmpty() && isVisible() && !QSettings().value("appearance/studio3ReducedMotion",false).toBool())
         { m_reveal=0.0; m_animation->start(); }
+    syncExpanded();
     updateHover(); update();
 }
 
@@ -66,8 +77,64 @@ void TrainingChart::setComparison(const QJsonArray &first, const QJsonArray &sec
     }
     setHistory(combined,totalSteps);
     m_comparison=true;
+    syncExpanded();
     updateHover(); update();
 }
+void TrainingChart::setSmoothing(bool enabled) {
+    m_smoothed = enabled;
+    syncExpanded();
+    update();
+}
+
+void TrainingChart::syncExpanded() {
+    if (!m_expandedChart) return;
+    m_expandedChart->setHistory(m_history, m_totalSteps);
+    m_expandedChart->m_comparison = m_comparison;
+    m_expandedChart->setSmoothing(m_smoothed);
+    m_expandedChart->updateHover();
+    m_expandedChart->update();
+}
+
+void TrainingChart::expand() {
+    if (m_expandedDialog) {
+        m_expandedDialog->show();
+        m_expandedDialog->raise();
+        m_expandedDialog->activateWindow();
+        return;
+    }
+    auto *dialog = new QDialog(this);
+    dialog->setObjectName("trainingChartExpanded");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(accessibleName());
+    dialog->resize(900, 520);
+    auto *layout = new QVBoxLayout(dialog);
+    m_expandedDialog = dialog;
+    m_expandedChart = new TrainingChart(m_metric, dialog);
+    m_expandedChart->m_expandButton->hide();
+    layout->addWidget(m_expandedChart);
+    auto *close = new Button("Close", dialog);
+    layout->addWidget(close, 0, Qt::AlignRight);
+    connect(close, &QPushButton::clicked, dialog, &QDialog::close);
+    syncExpanded();
+    dialog->show();
+}
+
+void TrainingChart::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    m_expandButton->move(qMax(0, width() - m_expandButton->width() - 6), 0);
+    updateHover();
+}
+
+QPair<double, double> TrainingChart::stepRange(const QList<Sample> &values) {
+    // Polling retains only the most recent history. Fit the measured window,
+    // rather than reserving empty space for steps that are no longer available.
+    if (values.isEmpty()) return {0, 1};
+    const double first = values.first().step;
+    const double last = values.last().step;
+    return first == last ? qMakePair(qMax(0.0, first - 1), first + 1)
+                         : qMakePair(first, last);
+}
+
 void TrainingChart::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
     if (sampleCount()>0 && !QSettings().value("appearance/studio3ReducedMotion",false).toBool()) {
@@ -101,7 +168,7 @@ int TrainingChart::sampleCount() const { return samples().size(); }
 QRectF TrainingChart::plotRect() const {
     QFont axisFont(Theme::monoFont()); axisFont.setPixelSize(9);
     const int left=qMax(42,QFontMetrics(axisFont).horizontalAdvance("-0.0e+00")+8);
-    return QRectF(left,15,qMax(1,width()-left-24),qMax(1,height()-47));
+    return QRectF(left,35,qMax(1,width()-left-24),qMax(1,height()-67));
 }
 
 void TrainingChart::paintEvent(QPaintEvent *) {
@@ -121,8 +188,9 @@ void TrainingChart::paintEvent(QPaintEvent *) {
         return;
     }
     double low=std::numeric_limits<double>::max(), high=std::numeric_limits<double>::lowest();
-    double maxStep=1;
-    for (const auto &s : values) { low=qMin(low,s.value); high=qMax(high,s.value); maxStep=qMax(maxStep,s.step); }
+    const auto [minStep, maxStep] = stepRange(values);
+    const double stepSpan = maxStep - minStep;
+    for (const auto &s : values) { low=qMin(low,s.value); high=qMax(high,s.value); }
     const double padding = high == low ? qMax(std::abs(high)*0.1, 0.000001) : (high-low)*0.1;
     low=qMin(0.0,low-padding); high+=padding;
     if (high>0) {
@@ -131,7 +199,7 @@ void TrainingChart::paintEvent(QPaintEvent *) {
         high=std::ceil(maxValue/unit)*unit;
         if (high<=low) high=low+padding;
     }
-    auto point = [&](const Sample &s) { return QPointF(area.left()+s.step/maxStep*area.width(), area.bottom()-(s.value-low)/(high-low)*area.height()); };
+    auto point = [&](const Sample &s) { return QPointF(area.left()+(s.step-minStep)/stepSpan*area.width(), area.bottom()-(s.value-low)/(high-low)*area.height()); };
     for (int i=0; i<5; ++i) {
         const double y = area.top()+area.height()*i/4;
         const double value=high-(high-low)*i/4;
@@ -141,13 +209,14 @@ void TrainingChart::paintEvent(QPaintEvent *) {
     }
     for (int i=0;i<7;++i) {
         const double x=area.left()+area.width()*i/6;
-        p.drawText(QRectF(x-24,area.bottom()+7,48,18),Qt::AlignHCenter,QString::number(maxStep*i/6,'f',0));
+        p.drawText(QRectF(x-24,area.bottom()+7,48,18),Qt::AlignHCenter,QString::number(minStep+stepSpan*i/6,'f',0));
     }
     double latest=values.last().step;
-    const double revealStep=qMin(m_fromStep,latest)+(latest-qMin(m_fromStep,latest))*m_reveal;
+    const double revealStart=qBound(minStep,m_fromStep,latest);
+    const double revealStep=revealStart+(latest-revealStart)*m_reveal;
     p.save();
     p.setOpacity(0.55+0.45*m_reveal);
-    p.setClipRect(QRectF(area.left()-3,area.top()-3,area.width()*revealStep/maxStep+6,area.height()+6));
+    p.setClipRect(QRectF(area.left()-3,area.top()-3,area.width()*qBound(0.0,(revealStep-minStep)/stepSpan,1.0)+6,area.height()+6));
     for (const QString &key : {m_metric, m_metric == "loss" ? QString("eval_loss") : QString(),
                               "compare_"+m_metric, m_metric == "loss" ? QString("compare_eval_loss") : QString()}) {
         if (key.isEmpty()) continue;
@@ -190,10 +259,11 @@ void TrainingChart::updateHover() {
     if (values.isEmpty() || !area.contains(m_hoverPosition) || !isVisible()) {
         m_hoverLabel->hide(); m_hoverX=-1; return;
     }
-    double maxStep=1; for (const auto &s : values) maxStep=qMax(maxStep,s.step);
-    const double step=(m_hoverPosition.x()-area.left())/area.width()*maxStep;
+    const auto [minStep, maxStep] = stepRange(values);
+    const double stepSpan = maxStep - minStep;
+    const double step=minStep+(m_hoverPosition.x()-area.left())/area.width()*stepSpan;
     const auto nearest=std::min_element(values.begin(),values.end(),[step](const Sample &a,const Sample &b) { return std::abs(a.step-step)<std::abs(b.step-step); });
-    m_hoverX=area.left()+nearest->step/maxStep*area.width();
+    m_hoverX=area.left()+(nearest->step-minStep)/stepSpan*area.width();
     QStringList lines{QString("Step %1 · measured").arg(nearest->step,0,'g',6)};
     for (const QString &key : {m_metric,m_metric=="loss"?QString("eval_loss"):QString(),"compare_"+m_metric,m_metric=="loss"?QString("compare_eval_loss"):QString()}) {
         if (key.isEmpty()) continue;

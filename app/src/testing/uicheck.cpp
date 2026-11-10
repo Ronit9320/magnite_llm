@@ -43,6 +43,7 @@
 #include "widgets/spinbox.h"
 #include <QComboBox>
 #include <QDir>
+#include <QDialog>
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QEventLoop>
@@ -1343,6 +1344,46 @@ int runUiCheck(const QString &captures) {
     QSettings().setValue("appearance/studio3ReducedMotion",true);
     animationSamples.append(QJsonObject{{"step",11},{"loss",0.9}}); animated.setHistory(animationSamples,12);
     check(!animated.isAnimating(),"reduced motion displays measurements immediately");
+    // Simulate a long run after the backend has trimmed its early history.
+    QJsonArray retained;
+    for (int step=6900; step<=7900; step+=10)
+        retained.append(QJsonObject{{"step",step},{"loss",1.2 + (step%30)*0.01},
+                                   {"eval_loss",1.1}});
+    animated.setHistory(retained,20000);
+    const QPointF middle(230,85);
+    QMouseEvent retainedHover(QEvent::MouseMove,middle,middle,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+    QApplication::sendEvent(&animated,&retainedHover);
+    auto *retainedReadout=animated.findChild<QLabel *>("trainingChartHover");
+    const int hoveredStep=retainedReadout->text().section(' ',1,1).toInt();
+    check(hoveredStep>7200 && hoveredStep<7600,"long-run hover maps the middle of the plot to the retained step window");
+    capture(&animated,"training-retained-history");
+    const auto retainedImage=animated.grab().toImage().scaled(animated.size());
+    bool curveAtLeft=false;
+    const QColor series(Theme::accentPrimary());
+    for (int x=80; x<140; ++x) for (int y=36; y<145; ++y) {
+        const QColor pixel=retainedImage.pixelColor(x,y);
+        if (qAbs(pixel.red()-series.red())<12 && qAbs(pixel.green()-series.green())<12 && qAbs(pixel.blue()-series.blue())<12)
+            curveAtLeft=true;
+    }
+    check(curveAtLeft,"retained long-run curve fills the left side of the plot");
+    animated.findChild<Button *>("trainingChartExpand")->click(); pump();
+    auto *expandedDialog=animated.findChild<QDialog *>("trainingChartExpanded");
+    auto *expandedChart=expandedDialog?expandedDialog->findChild<TrainingChart *>():nullptr;
+    check(expandedDialog && expandedDialog->isVisible() && !expandedDialog->isFullScreen() &&
+          expandedChart && expandedChart->width()>animated.width() && animated.width()==420,
+          "expand opens only the graph in a larger window");
+    if (expandedChart) {
+        capture(expandedDialog,"training-expanded-graph");
+        retained.append(QJsonObject{{"step",7910},{"loss",0.8}});
+        animated.setHistory(retained,20000);
+        check(expandedChart->sampleCount()==animated.sampleCount(),"expanded graph follows live history updates");
+        expandedDialog->resize(1000,600); pump();
+        check(expandedChart->width()>900,"expanded graph follows window resizing");
+        expandedDialog->close(); pump();
+        animated.findChild<Button *>("trainingChartExpand")->click(); pump();
+        check(animated.findChild<QDialog *>("trainingChartExpanded")->isVisible(),"expanded graph can be closed and reopened");
+        animated.findChild<QDialog *>("trainingChartExpanded")->close(); pump();
+    }
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     chat.show(); pump();
