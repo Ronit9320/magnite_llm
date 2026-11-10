@@ -1,6 +1,7 @@
 #include <QApplication>
 #include "mainwindow.h"
 #include "theme.h"
+#include "testing/restart_tests.h"
 #include "testing/uicheck.h"
 
 #include <QDir>
@@ -52,6 +53,8 @@ int main(int argc, char *argv[]) {
     // families, then exits. No window is shown.
     if (argc > 1 && QString(argv[1]) == "--theme-check")
         return Theme::selfCheck();
+    if (argc > 1 && QString(argv[1]) == "--restart-policy-check")
+        return runRestartPolicyCheck();
 
     // Phase 5.5.1: bundled fonts + global stylesheet active, default typeface
     // set to DM Sans (falls back to the system font if DM Sans can't load).

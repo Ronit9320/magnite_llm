@@ -44,6 +44,8 @@ set(MAGNITE_SOURCES
     src/update_manager.h
     src/testing/uicheck.cpp
     src/testing/uicheck.h
+    src/testing/restart_tests.cpp
+    src/testing/restart_tests.h
     src/main.cpp
     src/mainwindow.cpp
     src/theme.cpp

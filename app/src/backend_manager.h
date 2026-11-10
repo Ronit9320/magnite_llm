@@ -2,6 +2,9 @@
 
 #include <QObject>
 #include <QProcess>
+#include <QTimer>
+
+#include "restart_policy.h"
 
 class BackendManager : public QObject {
     Q_OBJECT
@@ -14,6 +17,8 @@ public:
     void stop();
     bool stopForUpdate();
     bool isRunning() const;
+    // A backend that dies on its own is relaunched with backoff (off for self-tests, which must fail loudly).
+    void setAutoRestart(bool enabled) { m_autoRestart = enabled; }
     QString baseUrl() const;
     // Per-launch secret the backend requires on every request (adr/0009).
     QString apiToken() const { return m_apiToken; }
@@ -23,6 +28,8 @@ signals:
     void errorOccurred(QProcess::ProcessError error);
     // Another Magnite backend holds the data folder (backend exit code 75).
     void dataDirInUse();
+    // The backend died unexpectedly; `attempt` (1-based) will be relaunched in `delayMs`.
+    void restarting(int attempt, int delayMs);
 
 private slots:
     void onProcessReadyRead();
@@ -46,4 +53,8 @@ private:
     QString m_apiToken;
     bool m_started;
     bool m_stopping;
+    bool m_autoRestart = true;
+    RestartPolicy m_policy;
+    QTimer *m_restartTimer;   // fires start() after the backoff delay
+    QTimer *m_healthyTimer;   // a backend healthy this long earns back its restart budget
 };

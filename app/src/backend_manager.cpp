@@ -28,6 +28,13 @@ BackendManager::BackendManager(QObject *parent)
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (!m_stopping && error == QProcess::FailedToStart) emit errorOccurred(error);
     });
+    m_restartTimer = new QTimer(this);
+    m_restartTimer->setSingleShot(true);
+    connect(m_restartTimer, &QTimer::timeout, this, &BackendManager::start);
+    m_healthyTimer = new QTimer(this);
+    m_healthyTimer->setSingleShot(true);
+    m_healthyTimer->setInterval(60000);
+    connect(m_healthyTimer, &QTimer::timeout, this, [this]() { m_policy.noteHealthy(); });
 }
 
 BackendManager::~BackendManager() {
@@ -52,6 +59,8 @@ void BackendManager::start() {
 
 void BackendManager::stop() {
     m_stopping = true;
+    m_restartTimer->stop();   // a pending relaunch must not fire while we are quitting
+    m_healthyTimer->stop();
     if (m_process->state() != QProcess::NotRunning) {
         requestStop();
         if (!m_process->waitForFinished(15000)) {
@@ -67,6 +76,8 @@ bool BackendManager::isRunning() const {
 
 bool BackendManager::stopForUpdate() {
     m_stopping = true;
+    m_restartTimer->stop();
+    m_healthyTimer->stop();
     if (m_process->state() == QProcess::NotRunning) return true;
     requestStop();
     // Update installation must never force-kill a live ML operation.
@@ -245,6 +256,7 @@ void BackendManager::checkHealth() {
         if (ok) {
             m_started = true;
             fprintf(stderr, "[magnite] backend health OK (%s)\n", qUtf8Printable(baseUrl()));
+            m_healthyTimer->start();
             emit started();
         } else if (isRunning()) {
             qWarning() << "Backend health check failed - retrying";
@@ -291,6 +303,16 @@ void BackendManager::onProcessFinished(int exitCode, QProcess::ExitStatus) {
     if (exitCode == kExitDataDirInUse) {
         emit dataDirInUse();
         return;
+    }
+    m_healthyTimer->stop();
+    if (m_autoRestart) {
+        if (const auto delay = m_policy.nextDelayMs()) {
+            fprintf(stderr, "[magnite] backend exited (code %d); relaunching in %d ms (attempt %d)\n",
+                    exitCode, *delay, m_policy.attempts());
+            emit restarting(m_policy.attempts(), *delay);
+            m_restartTimer->start(*delay);
+            return;
+        }
     }
     emit errorOccurred(QProcess::Crashed);
 }

@@ -222,6 +222,7 @@ QListWidget#historyList::item { padding: 4px 10px; border-radius: 8px; color: @t
 QListWidget#historyList::item:hover { background: @surfaceFillHover; }
 QListWidget#historyList::item:selected { background: @surfaceFill; color: @textPrimary; border: 1px solid @surfaceBorder; }
 QListWidget#historyList:focus { border: none; }
+QLabel#historyNotice { color: @statusWarning; font-size: 11px; padding: 4px 10px; }
 
 /* Quiet popover surfaces and full-size native keyboard targets. */
 QMenu { background: @surfaceFill; color: @textPrimary; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 4px; }

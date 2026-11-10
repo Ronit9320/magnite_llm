@@ -12,6 +12,8 @@
 #include <memory>
 #include <functional>
 
+#include "notice_tracker.h"
+
 class StudioCanvas;
 class BackendManager;
 class BackendClient;
@@ -39,7 +41,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    void setSelfTestMode(bool enabled) { m_selfTest = enabled; }
+    void setSelfTestMode(bool enabled);
     void runSelfTest();
     void captureScreenshots(const QString &dir);
 
@@ -103,6 +105,7 @@ private:
     QPropertyAnimation *m_crossfade;
     bool m_skipFade;
     bool m_selfTest;
+    NoticeTracker m_notices;   // startup repair notices already shown (a restarted backend sends a new list)
     QString m_shotDir;
 
     // Panel indices

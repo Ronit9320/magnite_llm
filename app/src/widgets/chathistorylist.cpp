@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
@@ -36,6 +37,12 @@ ChatHistoryList::ChatHistoryList(QWidget *parent)
     m_list->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     m_list->installEventFilter(this);
     layout->addWidget(m_list);
+    m_notice = new QLabel(this);
+    m_notice->setObjectName("historyNotice");
+    m_notice->setWordWrap(true);
+    m_notice->setToolTip("Damaged chat files are left untouched in the chats folder.");
+    m_notice->hide();
+    layout->addWidget(m_notice);
     layout->addStretch(1);   // spare height stays below the list rather than spreading between the rows
 
     connect(m_new, &QPushButton::clicked, this, &ChatHistoryList::newChatRequested);
@@ -70,6 +77,12 @@ void ChatHistoryList::setChats(const QList<ChatSummary> &chats, const QString &o
     updateHeights();
     m_list->doItemsLayout();   // brings the scroll range up to date so the old position can be restored
     m_list->verticalScrollBar()->setValue(scroll);
+}
+
+void ChatHistoryList::setUnreadableCount(int count) {
+    m_notice->setText(count == 1 ? QStringLiteral("1 chat could not be read")
+                                 : QStringLiteral("%1 chats could not be read").arg(count));
+    m_notice->setVisible(count > 0);
 }
 
 void ChatHistoryList::updateHeights() {

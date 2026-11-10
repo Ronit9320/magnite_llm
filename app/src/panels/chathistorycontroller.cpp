@@ -48,4 +48,5 @@ QString ChatHistoryController::titleOf(const QString &id) const {
 
 void ChatHistoryController::refresh() {
     m_list->setChats(m_store->list(), m_panel->currentChatId());
+    m_list->setUnreadableCount(m_store->unreadableIds().size());
 }

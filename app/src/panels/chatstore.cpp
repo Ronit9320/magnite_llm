@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QTimeZone>
 #include <QSettings>
 #include <QUuid>
 
@@ -25,13 +26,39 @@ QDateTime parseStamp(const QJsonValue &value) {
 ChatStore::ChatStore(const QString &chatsDir, QObject *parent)
     : QObject(parent)
     , m_dir(QDir::cleanPath(chatsDir)) {
-    // One read at launch for titles and dates. Unreadable or inconsistent files are skipped and left alone.
+    // Titles and dates come from the launch index when a file's size and time are unchanged, so a long history
+    // is not parsed on every start; any file that differs is read again. Unreadable or inconsistent files are
+    // skipped, counted and left alone.
+    const QHash<QString, IndexEntry> cached = loadIndex();
+    QHash<QString, IndexEntry> fresh;
+    bool changed = false;
     const QStringList names = QDir(m_dir).entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
     for (const QString &name : names) {
         const QString id = name.chopped(5);
         if (!validId(id)) continue;
-        if (const auto parsed = read(id)) m_chats.append(parsed->summary);
+        const QFileInfo info(pathFor(id));
+        IndexEntry entry;
+        entry.size = info.size();
+        entry.mtime = info.lastModified().toMSecsSinceEpoch();
+        const auto hit = cached.constFind(id);
+        if (hit != cached.cend() && hit->size == entry.size && hit->mtime == entry.mtime) {
+            entry = *hit;
+        } else if (const auto parsed = read(id)) {
+            changed = true;
+            entry.readable = true;
+            entry.summary = parsed->summary;
+        } else {
+            // Not remembered: a read can fail for a moment (a sync client or antivirus holding the file) and
+            // must not hide an intact chat on every later launch. A damaged file is simply tried again.
+            m_unreadable.append(id);
+            continue;
+        }
+        fresh.insert(id, entry);
+        m_chats.append(entry.summary);
     }
+    if (fresh.size() != cached.size()) changed = true;   // a chat file was removed outside the app
+    if (changed && !fresh.isEmpty()) saveIndex(fresh);
+    m_unreadable.sort();
     std::sort(m_chats.begin(), m_chats.end(), [](const ChatSummary &a, const ChatSummary &b) {
         return a.updated != b.updated ? a.updated > b.updated : a.id < b.id;
     });
@@ -55,6 +82,51 @@ QString ChatStore::defaultDir() {
 bool ChatStore::validId(const QString &id) {
     static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"));
     return pattern.match(id).hasMatch();
+}
+
+QHash<QString, ChatStore::IndexEntry> ChatStore::loadIndex() const {
+    QHash<QString, IndexEntry> entries;
+    QFile file(indexPath());
+    if (!file.open(QIODevice::ReadOnly)) return entries;
+    QJsonParseError error;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) return entries;
+    const QJsonObject root = doc.object();
+    if (root.value("version").toInt() != kFileVersion || !root.value("chats").isObject()) return entries;
+    const QJsonObject chats = root.value("chats").toObject();
+    for (auto it = chats.begin(); it != chats.end(); ++it) {
+        const QJsonObject o = it.value().toObject();
+        IndexEntry entry;
+        entry.size = static_cast<qint64>(o.value("size").toDouble(-1));
+        entry.mtime = static_cast<qint64>(o.value("mtime").toDouble(-1));
+        entry.readable = o.value("ok").toBool();
+        if (!entry.readable) continue;   // only readable chats are ever remembered
+        // Epoch milliseconds, not ISO text: parsing thousands of date strings is what a launch would spend its time on.
+        if (!o.value("created").isDouble() || !o.value("updated").isDouble()) continue;   // a bad row is just re-read
+        entry.summary = ChatSummary{it.key(), o.value("title").toString(), o.value("customTitle").toBool(),
+                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("created").toDouble()), QTimeZone::UTC),
+                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("updated").toDouble()), QTimeZone::UTC)};
+        entries.insert(it.key(), entry);
+    }
+    return entries;
+}
+
+void ChatStore::saveIndex(const QHash<QString, IndexEntry> &entries) const {
+    QJsonObject chats;
+    for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
+        QJsonObject o{{"size", static_cast<double>(it->size)}, {"mtime", static_cast<double>(it->mtime)}, {"ok", it->readable}};
+        if (it->readable) {
+            o.insert("title", it->summary.title);
+            o.insert("customTitle", it->summary.customTitle);
+            o.insert("created", static_cast<double>(it->summary.created.toMSecsSinceEpoch()));
+            o.insert("updated", static_cast<double>(it->summary.updated.toMSecsSinceEpoch()));
+        }
+        chats.insert(it.key(), o);
+    }
+    QSaveFile out(indexPath());   // only a cache: a failed write just means the next launch reads the files again
+    if (!out.open(QIODevice::WriteOnly)) return;
+    out.write(QJsonDocument(QJsonObject{{"version", kFileVersion}, {"chats", chats}}).toJson(QJsonDocument::Compact));
+    out.commit();
 }
 
 QString ChatStore::pathFor(const QString &id) const { return m_dir + "/" + id + ".json"; }

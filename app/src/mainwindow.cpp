@@ -91,6 +91,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
     connect(m_backend, &BackendManager::errorOccurred, this, &MainWindow::onBackendError);
     connect(m_backend, &BackendManager::dataDirInUse, this, &MainWindow::onBackendDataDirInUse);
+    connect(m_backend, &BackendManager::restarting, this, [this](int, int) {
+        // The old process and its per-launch token are gone: drop in-flight requests, show it, no dialog.
+        m_backendClient->abortAll();
+        m_backendClient->setBaseUrl(QString());
+        m_backendClient->setAuthToken(QString());
+        setPillState("starting", "Reconnecting");
+    });
 
     loadPanelSettings();
     startBackend();
@@ -142,6 +149,11 @@ MainWindow::MainWindow(QWidget *parent)
     if (!verification && QSettings().value("updates/checkOnStartup", true).toBool())
         QTimer::singleShot(5000, m_updater, &UpdateManager::check);
     if (!verificationRun()) QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
+}
+
+void MainWindow::setSelfTestMode(bool enabled) {
+    m_selfTest = enabled;
+    m_backend->setAutoRestart(!enabled);   // a self-test must fail on a crash, not recover from it
 }
 
 MainWindow::~MainWindow() {
@@ -368,7 +380,9 @@ void MainWindow::setPillState(const char *state, const QString &text) {
         ? "Magnite’s local service is connected.\n" + m_backend->baseUrl()
         : QString::fromLatin1(state) == "err"
             ? "Magnite’s local service is unavailable. Check the backend error for details."
-            : "Starting Magnite’s local service…";
+            : text == "Reconnecting"
+                ? "Magnite’s local service stopped unexpectedly. Reconnecting…"
+                : "Starting Magnite’s local service…";
     m_statusPill->parentWidget()->setToolTip(detail);
     m_statusPill->setAccessibleName("Local service: " + text);
     m_connectionDot->setProperty("state", state);
@@ -453,13 +467,25 @@ void MainWindow::onBackendStarted() {
     m_ragPanel->setBackendClient(m_backendClient);
     m_adaptersPanel->setBackendClient(m_backendClient);
     m_chatPanel->setBackendClient(m_backendClient);
-    connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels);
+    // A corrupt data file is set aside by the backend rather than stopping it; say so once.
+    m_backendClient->get("/health", [this](int status, const QJsonDocument &doc) {
+        if (status != 200) return;
+        QStringList all;
+        for (const QJsonValue &notice : doc.object().value("notices").toArray()) all << notice.toString();
+        const QStringList fresh = m_notices.unseen(all);
+        if (fresh.isEmpty()) return;
+        if (verificationRun()) fprintf(stderr, "[notice] %s\n", qUtf8Printable(fresh.join(" | ")));
+        else QMessageBox::information(this, "Magnite repaired its data files", fresh.join("\n\n"));
+    });
+    // onBackendStarted runs again after every automatic restart: connect each pair once only.
+    connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels,
+            Qt::UniqueConnection);
     connect(m_modelsPanel, &ModelsPanel::modelsChanged,
-            m_trainingPanel, &TrainingPanel::refreshOptions);
+            m_trainingPanel, &TrainingPanel::refreshOptions, Qt::UniqueConnection);
     connect(m_trainingPanel, &TrainingPanel::trainingCompleted,
-            m_adaptersPanel, &AdaptersPanel::refresh);
+            m_adaptersPanel, &AdaptersPanel::refresh, Qt::UniqueConnection);
     connect(m_adaptersPanel, &AdaptersPanel::adapterActivated,
-            m_chatPanel, &ChatPanel::refreshEngineStatus);
+            m_chatPanel, &ChatPanel::refreshEngineStatus, Qt::UniqueConnection);
     // Connection details live in the header; do not create a second status bar.
 }
 

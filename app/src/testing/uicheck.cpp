@@ -2400,6 +2400,92 @@ int runUiCheck(const QString &captures) {
         }
     }
     {
+        // ChatStore at scale: how long does launching with a big history take? (report #13, measured not assumed)
+        QTemporaryDir tmp; const QString dir=tmp.path()+"/chats";
+        {
+            ChatStore seed(dir); const int chats=2000;
+            for(int i=0;i<chats;++i) {
+                ChatTree t; ChatTree::NodeId at=ChatTree::kRoot;
+                for(int m=0;m<3;++m) { at=t.addChild(at,"user",QString("question %1 of chat %2 — a few more words so the file has a realistic size").arg(m).arg(i)); at=t.addChild(at,"assistant",QString("answer %1 ").arg(m).repeated(40)); }
+                seed.save(seed.create(),t);
+            }
+        }
+        QElapsedTimer timer; timer.start();
+        ChatStore cold(dir);   // first launch with this many chats: every file is parsed and the index is written
+        const qint64 coldMs=timer.elapsed();
+        timer.restart();
+        ChatStore warm(dir);   // the next launch: titles and dates come from the index
+        const qint64 warmMs=timer.elapsed();
+        fprintf(stderr,"[ui-check] chat store: 2000 chats listed in %lld ms on the first launch and %lld ms on the next\n",static_cast<long long>(coldMs),static_cast<long long>(warmMs));
+        check(cold.list().size()==2000 && warm.list().size()==2000 && warm.list().first().id==cold.list().first().id,"chat store: 2000 saved chats are all listed, in the same order, after a relaunch");
+        check(warmMs*2<coldMs,"chat store: once the index exists, relaunching with 2000 chats is at least twice as fast (relative, so machine load cannot flip it)");
+    }
+    {
+        // ChatStore: damaged chats are reported and never touched; a sibling index keeps launch cheap and heals itself.
+        QTemporaryDir tmp; const QString dir=tmp.path()+"/chats"; QDir().mkpath(dir);
+        auto raw=[&dir](const QString &id) { QFile f(dir+"/"+id+".json"); f.open(QIODevice::ReadOnly); return f.readAll(); };
+        auto writeRaw=[&dir](const QString &id,const QByteArray &bytes) { QFile f(dir+"/"+id+".json"); f.open(QIODevice::WriteOnly|QIODevice::Truncate); f.write(bytes); };
+        QStringList good;
+        {
+            ChatStore seed(dir);
+            for(int i=0;i<5;++i) { const QString id=seed.create(); ChatTree t; t.addChild(ChatTree::kRoot,"user",QString("chat %1").arg(i)); seed.save(id,t); good<<id; }
+        }
+        const QString truncated=QUuid::createUuid().toString(QUuid::WithoutBraces), garbage=QUuid::createUuid().toString(QUuid::WithoutBraces), newer=QUuid::createUuid().toString(QUuid::WithoutBraces);
+        writeRaw(truncated,"{\"version\":1,\"id\":"); writeRaw(garbage,"this is not json"); writeRaw(newer,"{\"version\":999}");
+        { QFile notes(dir+"/notes.json"); notes.open(QIODevice::WriteOnly); notes.write("not a chat"); }
+        const QByteArray before1=raw(truncated), before2=raw(garbage), before3=raw(newer);
+        QStringList damaged={truncated,garbage,newer}; damaged.sort();
+        {
+            ChatStore store(dir);
+            check(store.list().size()==5 && store.unreadableIds()==damaged,"chat store: damaged chats are counted, healthy ones listed, and a non-chat json file is ignored");
+            check(raw(truncated)==before1 && raw(garbage)==before2 && raw(newer)==before3 && QFile::exists(dir+"/notes.json"),"chat store: damaged files are left exactly as they were");
+        }
+        check(QFile::exists(dir+".index") && !QFile::exists(dir+"/index.json"),"chat store: the launch index lives beside the chats folder, not inside it");
+        {
+            // Same size and modification time: the index is trusted, the file is not parsed again.
+            const QString victim=good.first(); const QByteArray original=raw(victim);
+            const QFileInfo info(dir+"/"+victim+".json"); const QDateTime stampBefore=info.lastModified();
+            writeRaw(victim,QByteArray(original.size(),'x'));
+            { QFile f(dir+"/"+victim+".json"); f.open(QIODevice::ReadWrite); f.setFileTime(stampBefore,QFileDevice::FileModificationTime); }
+            ChatStore cached(dir);
+            check(cached.list().size()==5 && cached.unreadableIds()==damaged,"chat store: an unchanged file (same size and time) is taken from the index, not re-read");
+            // A changed file is re-read: the damage shows up.
+            writeRaw(victim,QByteArray("changed on disk and damaged"));
+            ChatStore healed(dir);
+            check(healed.list().size()==4 && healed.unreadableIds().contains(victim),"chat store: a file that changed since the index was written is read again");
+            writeRaw(victim,original);
+            ChatStore repaired(dir);
+            check(repaired.list().size()==5 && repaired.unreadableIds()==damaged,"chat store: repairing the file brings the chat back");
+        }
+        {
+            // A read that fails only for a moment (a sync client or antivirus holding the file) is not damage and must not be remembered as damage.
+            QString held; { ChatStore s(dir); held=s.create(); ChatTree t; t.addChild(ChatTree::kRoot,"user","a chat on a synced folder"); s.save(held,t); }
+            const QString path=dir+"/"+held+".json"; const auto original=QFile::permissions(path);
+            QFile::setPermissions(path,QFileDevice::Permissions());
+            ChatStore during(dir);
+            check(during.unreadableIds().contains(held) && during.list().size()==5,"chat store: a file that cannot be opened is reported while it is locked");
+            QFile::setPermissions(path,original);
+            ChatStore after(dir);
+            check(after.list().size()==6 && after.unreadableIds()==damaged,"chat store: once the file can be opened again the chat is back (a failed read is not cached as damage)");
+        }
+        {
+            { QFile f(dir+".index"); f.open(QIODevice::WriteOnly|QIODevice::Truncate); f.write("garbage, not json"); }
+            ChatStore rebuilt(dir);
+            check(rebuilt.list().size()==6 && rebuilt.unreadableIds()==damaged,"chat store: a damaged index is ignored and rebuilt");
+            QFile::remove(dir+"/"+good.at(1)+".json");
+            ChatStore afterDelete(dir);
+            check(afterDelete.list().size()==5 && !afterDelete.unreadableIds().contains(good.at(1)),"chat store: a chat deleted outside the app drops out of the list");
+        }
+        {
+            ChatHistoryList history; ChatStore store(dir);
+            history.setUnreadableCount(store.unreadableIds().size());
+            auto *notice=history.findChild<QLabel *>("historyNotice");
+            check(notice && !notice->isHidden() && notice->text()=="3 chats could not be read","sidebar: a visible notice counts the chats that could not be read");
+            history.setUnreadableCount(1); check(notice && notice->text()=="1 chat could not be read","sidebar: the notice is singular for one chat");
+            history.setUnreadableCount(0); check(notice && notice->isHidden(),"sidebar: no notice when every chat is readable");
+        }
+    }
+    {
         // ChatStore: one json file per chat, atomic writes, bad files skipped and never touched.
         const bool hadHome=qEnvironmentVariableIsSet("MAGNITE_HOME");
         const QByteArray savedHome=qgetenv("MAGNITE_HOME");

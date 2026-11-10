@@ -3,9 +3,11 @@
 #include "panels/chattree.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <optional>
 
@@ -34,6 +36,9 @@ public:
     bool rename(const QString &id, const QString &title);
     bool remove(const QString &id);
     QString lastError() const { return m_lastError; }
+    // Chat files that exist but could not be read (damaged, from a newer version, inconsistent). They are never
+    // modified or deleted; the sidebar tells the user how many there are. Sorted.
+    QStringList unreadableIds() const { return m_unreadable; }
 
     static QString titleFor(const ChatTree &tree);
     static bool validId(const QString &id);
@@ -46,6 +51,16 @@ private:
         ChatSummary summary;
         ChatTree tree;
     };
+    // What the launch index remembers about one chat file; trusted only while the file's size and time still match.
+    struct IndexEntry {
+        qint64 size = 0;
+        qint64 mtime = 0;
+        bool readable = false;
+        ChatSummary summary;
+    };
+    QString indexPath() const { return m_dir + ".index"; }   // beside the folder: the chats folder holds chats only
+    QHash<QString, IndexEntry> loadIndex() const;
+    void saveIndex(const QHash<QString, IndexEntry> &entries) const;
     QString pathFor(const QString &id) const;
     std::optional<Parsed> read(const QString &id) const;
     bool write(const QJsonObject &file, const QString &id);
@@ -54,5 +69,6 @@ private:
 
     QString m_dir;
     QList<ChatSummary> m_chats;
+    QStringList m_unreadable;
     QString m_lastError;
 };

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QWidget>
 
+class QLabel;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -23,6 +24,8 @@ public:
 
     // Replaces the rows. The open chat is highlighted; the scroll position is kept.
     void setChats(const QList<ChatSummary> &chats, const QString &openId);
+    // "N chats could not be read" under the list (hidden at zero). Damaged chat files are never touched.
+    void setUnreadableCount(int count);
     // While busy (a reply streaming, a send prepared, a model loading, an editor open): New chat and opening
     // are off, and so are the open chat's own actions.
     void setBusy(bool busy);
@@ -50,6 +53,7 @@ private:
 
     QPushButton *m_new = nullptr;
     QListWidget *m_list = nullptr;
+    QLabel *m_notice = nullptr;
     QString m_openId;
     bool m_busy = false;
 };
