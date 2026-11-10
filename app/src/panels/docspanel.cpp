@@ -1052,7 +1052,12 @@ void DocsPanel::addArticleBody(QVBoxLayout *body, const QString &html) {
             auto *l = new QVBoxLayout(box);
             l->setContentsMargins(17, 14, 17, 14);
             auto *view = new DocsTextView;
-            view->setContent(part, m_large);
+            // Qt rich text does not implement the preview's display:block on
+            // <strong>. Use paragraphs and leave padding to the native frame.
+            const int start = part.indexOf('>') + 1;
+            QString content = part.mid(start, part.lastIndexOf("</div>") - start);
+            content.replace("</strong>", "</strong></p><p>");
+            view->setContent("<p>" + content + "</p>", m_large);
             l->addWidget(view);
             body->addWidget(box);
         } else

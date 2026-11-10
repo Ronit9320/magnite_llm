@@ -88,7 +88,10 @@ void DocsTextView::reflow() {
         return;
     m_reflowing = true;
     document()->setTextWidth(viewport()->width());
-    const int height = qMax(1, int(std::ceil(document()->documentLayout()->documentSize().height())) + 3);
+    // Stylesheet padding and frame insets reduce the actual text viewport.
+    // Include them so an expanding reader never hides its final lines.
+    const int insets = qMax(0, this->height() - viewport()->height());
+    const int height = qMax(1, int(std::ceil(document()->documentLayout()->documentSize().height())) + insets + 3);
     if (height != this->height())
         setFixedHeight(height);
     m_reflowing = false;

@@ -2,6 +2,7 @@
 #include "panels/docspanel.h"
 #include "theme.h"
 #include "widgets/docscontentview.h"
+#include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
@@ -18,6 +19,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QThread>
 #include <QTimer>
 #include <cstdio>
@@ -63,6 +65,12 @@ int runDocsChecks(const QString &captures) {
             pump();
             check(docs.findChildren<DocsTextView *>().size() >= article.sections.size(),
                   "all article sections render as native text");
+            for (auto *view : docs.findChildren<DocsTextView *>())
+                check(view->verticalScrollBar()->maximum() == 0, "article text fits without hidden vertical overflow");
+            for (auto *callout : docs.findChildren<QFrame *>("docsCallout")) {
+                auto *view = callout->findChild<DocsTextView *>();
+                check(view && view->toPlainText().contains('\n'), "callout heading is separated from its explanation");
+            }
             for (const auto &section : article.sections) {
                 check(docs.openLink(DocsLibrary::articleLink(article.id, section.id)),
                       "section links open known sections");
@@ -210,6 +218,24 @@ int runDocsChecks(const QString &captures) {
         pump();
         check(!docs.findChild<QWidget *>("docsNavigation")->isVisible() && scroll->isEnabled(),
               "Escape closes the topic drawer");
+        for (bool shade : {false, true}) {
+            Theme::setDark(shade);
+            docs.openArticle("data-quality", "sequence-training");
+            pump(180);
+            for (int width : {640, 1240}) {
+                docs.resize(width, 760);
+                pump(180);
+                auto *callout = docs.findChild<QFrame *>("docsCallout");
+                auto *view = callout->findChild<DocsTextView *>();
+                check(view && view->verticalScrollBar()->maximum() == 0,
+                      "callout fits at compact and wide widths with larger text in both themes");
+                if (!captures.isEmpty()) {
+                    QDir().mkpath(captures);
+                    callout->grab().save(captures +
+                                     QString("/docs-callout-%1-%2.png").arg(width).arg(shade ? "dark" : "light"));
+                }
+            }
+        }
         if (!captures.isEmpty()) {
             QDir().mkpath(captures);
             for (bool shade : {false, true}) {
