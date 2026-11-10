@@ -42,5 +42,9 @@
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>
         <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+        <file alias="icons/window-close.svg">resources/icons/window-close.svg</file>
+        <file alias="icons/window-minimize.svg">resources/icons/window-minimize.svg</file>
+        <file alias="icons/window-maximize.svg">resources/icons/window-maximize.svg</file>
+        <file alias="icons/window-restore.svg">resources/icons/window-restore.svg</file>
     </qresource>
 </RCC>

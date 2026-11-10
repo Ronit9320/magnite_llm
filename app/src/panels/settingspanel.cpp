@@ -190,6 +190,7 @@ void SettingsPanel::setupUi() {
     headingCopy->setSpacing(8);
     headingCopy->addWidget(label("YOUR WORKSPACE", "settingsEyebrow"));
     m_title = label("", "settingsTitle");
+    m_title->setProperty("windowDragRegion", true);
     headingCopy->addWidget(m_title);
     m_description = label("", "settingsHint");
     headingCopy->addWidget(m_description);
@@ -751,7 +752,9 @@ void SettingsPanel::showText(const QString& title, const QString& text, bool exp
     auto* body = new QVBoxLayout(&dialog);
     body->setContentsMargins(24, 22, 24, 22);
     auto* heading = new QHBoxLayout;
-    heading->addWidget(label(title, "settingsTitle"), 1);
+    auto *dragTitle = label(title, "settingsTitle");
+    dragTitle->setProperty("windowDragRegion", true);
+    heading->addWidget(dragTitle, 1);
     auto* dismiss = button("×", "settingsClose");
     dismiss->setFixedSize(30, 30);
     dismiss->setAccessibleName("Close " + title);
@@ -865,7 +868,9 @@ void SettingsPanel::showShortcuts() {
     auto* heading = new QHBoxLayout;
     auto* copy = new QVBoxLayout;
     copy->addWidget(label("QUICK REFERENCE", "settingsEyebrow"));
-    copy->addWidget(label("Keyboard shortcuts", "settingsTitle"));
+    auto *dragTitle = label("Keyboard shortcuts", "settingsTitle");
+    dragTitle->setProperty("windowDragRegion", true);
+    copy->addWidget(dragTitle);
     heading->addLayout(copy, 1);
     auto* dismiss = button("×", "settingsClose");
     dismiss->setFixedSize(30, 30);

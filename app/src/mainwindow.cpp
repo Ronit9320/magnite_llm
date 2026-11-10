@@ -22,6 +22,7 @@
 #include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
 #include "widgets/settingswindow.h"
+#include "widgets/windowchrome.h"
 #include "widgets/shortcuts.h"
 #include "widgets/brandmark.h"
 #include <QSystemTrayIcon>
@@ -297,8 +298,9 @@ void MainWindow::setupUi() {
     barLayout->setContentsMargins(16,0,16,0);
     auto *breadcrumb = new QLabel("LOCAL WORKSPACE   /   Intelligence, on your terms.",bar);
     breadcrumb->setObjectName("cardMeta");
-    barLayout->addWidget(breadcrumb);
-    barLayout->addStretch();
+    breadcrumb->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    breadcrumb->setToolTip(breadcrumb->text());
+    barLayout->addWidget(breadcrumb, 1);
     barLayout->setSpacing(12);
     barLayout->addWidget(connection);
     auto *separator = new QFrame(bar);
@@ -306,6 +308,7 @@ void MainWindow::setupUi() {
     separator->setFixedSize(1, 16);
     barLayout->addWidget(separator);
     barLayout->addWidget(mode);
+    WindowChrome::attachMainWindow(this, bar);
     workspaceLayout->addWidget(bar);
     m_background = new StudioCanvas(workspace);
     auto *canvasLayout = new QVBoxLayout(m_background);
@@ -551,6 +554,9 @@ void MainWindow::runSelfTest() {
             fprintf(stderr, "[selftest] %s %s\n", ok ? "ok:" : "FAIL:", name);
         };
 
+        checkC(windowFlags().testFlag(Qt::FramelessWindowHint) &&
+               findChild<QPushButton *>("windowClose") && findChild<QPushButton *>("windowMinimize") &&
+               findChild<QPushButton *>("windowMaximize"), "main window uses app-owned window controls");
         auto *mode = findChild<QPushButton *>("themeToggle");
         const bool initialDark = Theme::isDark();
         mode->click();

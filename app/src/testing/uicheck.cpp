@@ -1,5 +1,6 @@
 #include "testing/uicheck.h"
 #include "testing/settings_tests.h"
+#include "testing/windowchrome_tests.h"
 #include "backend_client.h"
 #include "theme.h"
 #include "trainingduration.h"
@@ -389,6 +390,7 @@ int runUiCheck(const QString &captures) {
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
     if (qEnvironmentVariableIsSet("MAGNITE_SETTINGS_DESIGN_CHECK")) return runSettingsChecks(&client,captures)?1:0;
+    failures+=runWindowChromeChecks();
     failures+=runSettingsChecks(&client,QString());
     if (qEnvironmentVariableIsSet("MAGNITE_TRAINING_DESIGN_CHECK")) {
         fixture.designPreview=true; fixture.serveActiveTraining=true;
