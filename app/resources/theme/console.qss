@@ -375,8 +375,9 @@ QPushButton#historyNew:hover, QPushButton#historyNew:focus { border-color: trans
 
 /* Settings utility window; the workspace remains underneath. */
 QDialog#settingsWindow { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
-QWidget#settingsPanel, QWidget#settingsContent { background: @surfaceFill; }
-QWidget#settingsNavigation { background: @canvasBackground; border-right: 1px solid @surfaceBorder; }
+QWidget#settingsPanel { background: transparent; }
+QWidget#settingsContent { background: @surfaceFill; border-top-right-radius: 13px; border-bottom-right-radius: 13px; }
+QWidget#settingsNavigation { background: @canvasBackground; border-right: 1px solid @surfaceBorder; border-top-left-radius: 13px; border-bottom-left-radius: 13px; }
 QPushButton#settingsCategory { padding: 9px 12px; min-height: 22px; text-align: left; border: none; font-size: 12px; }
 QLabel#settingsNavTitle { font-family: @headingFont; font-size: 23px; padding: 0 10px 6px 10px; }
 QLabel#settingsEyebrow { color: @textMuted; font-size: 9px; letter-spacing: 2px; }

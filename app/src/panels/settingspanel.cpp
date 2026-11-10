@@ -744,6 +744,7 @@ void SettingsPanel::deleteChats() {
 void SettingsPanel::showText(const QString& title, const QString& text, bool exportable) {
     QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
     dialog.setObjectName("settingsDetailDialog");
+    dialog.setAttribute(Qt::WA_TranslucentBackground);
     dialog.setWindowTitle(title);
     dialog.resize(620, 430);
     auto* body = new QVBoxLayout(&dialog);
@@ -856,6 +857,7 @@ void SettingsPanel::changeEvent(QEvent* event) {
 void SettingsPanel::showShortcuts() {
     QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
     dialog.setObjectName("settingsDetailDialog");
+    dialog.setAttribute(Qt::WA_TranslucentBackground);
     dialog.setWindowTitle("Keyboard shortcuts");
     dialog.resize(600, 540);
     auto* body = new QVBoxLayout(&dialog);

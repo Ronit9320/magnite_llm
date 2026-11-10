@@ -27,6 +27,7 @@ SettingsWindow::SettingsWindow(SettingsPanel* panel, QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint), m_scrim(new Scrim(parent)),
       m_fade(new QPropertyAnimation(this, "windowOpacity", this)) {
     setObjectName("settingsWindow");
+    setAttribute(Qt::WA_TranslucentBackground);
     setWindowTitle("Settings — Magnite");
     setWindowModality(Qt::WindowModal);
     setMinimumSize(760, 560);
