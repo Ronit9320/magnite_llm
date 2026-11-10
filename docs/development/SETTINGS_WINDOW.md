@@ -98,3 +98,11 @@ version/system/device cards and individual runtime-package status rows.
 
 Focused settings checks at 1× and 2× capture these views and verify that the
 shortcuts dialog requests the frameless window flag. The theme audit also passes.
+
+
+Shortcut reference labels, sidebar tooltips and the send-key preference use Qt's
+native key-sequence text from the same definitions used by activation. macOS
+renders the Command modifier; Windows/Linux render Ctrl. Mixed Ctrl/Command labels
+are no longer hardcoded. Rounded translucent windows explicitly paint an opaque
+surface and border; alpha is reserved for the exterior corners. Focused captures
+check opaque interior pixels and transparent corners in both themes.

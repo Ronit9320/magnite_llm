@@ -13,6 +13,8 @@
 #include "widgets/contextmeter.h"
 #include "widgets/motion.h"
 #include "widgets/settingssummary.h"
+#include "widgets/settingswindow.h"
+#include "widgets/shortcuts.h"
 #include "widgets/themechoice.h"
 #include "widgets/toggleswitch.h"
 #include <QApplication>
@@ -291,8 +293,9 @@ void SettingsPanel::setupUi() {
     m_sendKey = new ComboBox;
     m_sendKey->setObjectName("sendKeyCombo");
     m_sendKey->addItem("Enter to send", "enter");
-    m_sendKey->addItem("Ctrl / ⌘ + Enter", "modified");
-    row(chat, "Send message with", "Shift + Enter always adds a new line.", m_sendKey);
+    m_sendKey->addItem(Shortcuts::label(Shortcuts::modifiedSend()), "modified");
+    row(chat, "Send message with",
+        Shortcuts::label(Shortcuts::newLine()) + " always adds a new line.", m_sendKey);
     m_meterStyle = new ComboBox;
     m_meterStyle->setObjectName("meterStyleCombo");
     m_meterStyle->addItem("Ring", "ring");
@@ -742,9 +745,7 @@ void SettingsPanel::deleteChats() {
     setStatus(QString("Deleted %1 saved conversations.").arg(removed));
 }
 void SettingsPanel::showText(const QString& title, const QString& text, bool exportable) {
-    QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
-    dialog.setObjectName("settingsDetailDialog");
-    dialog.setAttribute(Qt::WA_TranslucentBackground);
+    SettingsDetailDialog dialog(this);
     dialog.setWindowTitle(title);
     dialog.resize(620, 430);
     auto* body = new QVBoxLayout(&dialog);
@@ -855,9 +856,7 @@ void SettingsPanel::changeEvent(QEvent* event) {
 }
 
 void SettingsPanel::showShortcuts() {
-    QDialog dialog(this, Qt::Dialog | Qt::FramelessWindowHint);
-    dialog.setObjectName("settingsDetailDialog");
-    dialog.setAttribute(Qt::WA_TranslucentBackground);
+    SettingsDetailDialog dialog(this);
     dialog.setWindowTitle("Keyboard shortcuts");
     dialog.resize(600, 540);
     auto* body = new QVBoxLayout(&dialog);
@@ -875,10 +874,14 @@ void SettingsPanel::showShortcuts() {
     connect(dismiss, &QPushButton::clicked, &dialog, &QDialog::reject);
     body->addLayout(heading);
     const QList<QPair<QString, QString>> shortcuts = {
-        {"Open settings", "Ctrl / ⌘ + ,"},         {"New chat", "Ctrl / ⌘ + N"},
-        {"Switch workspace", "Ctrl + 1…5"},        {"Open settings from sidebar", "Ctrl + 6"},
-        {"Collapse sidebar", "Ctrl + B"},          {"Close a dialog", "Esc"},
-        {"New line in a message", "Shift + Enter"}};
+        {"Open settings", Shortcuts::label(Shortcuts::settings())},
+        {"New chat", Shortcuts::label(Shortcuts::newChat())},
+        {"Switch workspace", Shortcuts::label(Shortcuts::workspace(0)) + " … " +
+                                 Shortcuts::label(Shortcuts::workspace(4))},
+        {"Open settings from sidebar", Shortcuts::label(Shortcuts::workspace(5))},
+        {"Collapse sidebar", Shortcuts::label(Shortcuts::collapseSidebar())},
+        {"Close a dialog", Shortcuts::label(QKeySequence(Qt::Key_Escape))},
+        {"New line in a message", Shortcuts::label(Shortcuts::newLine())}};
     for (const auto& shortcut : shortcuts) {
         auto* row = new QHBoxLayout;
         row->addWidget(label(shortcut.first, "settingsRowTitle"), 1);

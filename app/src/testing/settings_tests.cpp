@@ -4,6 +4,7 @@
 #include "panels/settingspanel.h"
 #include "theme.h"
 #include "widgets/settingswindow.h"
+#include "widgets/shortcuts.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -12,6 +13,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QGraphicsOpacityEffect>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
@@ -122,19 +124,40 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
             }
         }
     }
-    panel.selectCategory(0);
-    QTimer::singleShot(0, qApp, [&] {
-        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        check(dialog && dialog->objectName() == "settingsDetailDialog" &&
-                  dialog->windowFlags().testFlag(Qt::FramelessWindowHint),
-              "shortcuts uses the settings frame instead of a system title bar");
-        if (dialog) {
-            if (!captures.isEmpty())
-                dialog->grab().save(captures + "/settings-shortcuts.png");
-            dialog->reject();
-        }
-    });
-    panel.findChild<QPushButton*>("settingsShortcuts")->click();
+    for (bool dark : {false, true}) {
+        panel.findChild<QComboBox*>("settingsTheme")->setCurrentIndex(dark ? 1 : 0);
+        panel.selectCategory(0);
+        QTimer::singleShot(0, qApp, [&, dark] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            check(dialog && dialog->objectName() == "settingsDetailDialog" &&
+                      dialog->windowFlags().testFlag(Qt::FramelessWindowHint),
+                  "shortcuts uses the settings frame instead of a system title bar");
+            if (dialog) {
+                const auto frame = dialog->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+                check(qAlpha(frame.pixel(8, frame.height() / 2)) == 255 &&
+                          qAlpha(frame.pixel(frame.width() / 2, frame.height() / 2)) == 255,
+                      "shortcut dialog surface is opaque in both themes");
+                check(qAlpha(frame.pixel(0, 0)) == 0 &&
+                          qAlpha(frame.pixel(frame.width() - 1, 0)) == 0,
+                      "only rounded exterior corners remain transparent");
+                QStringList keycaps;
+                for (auto* key : dialog->findChildren<QLabel*>("settingsKeycap"))
+                    keycaps << key->text();
+                check(keycaps.contains(Shortcuts::settings().toString(QKeySequence::NativeText)) &&
+                          keycaps.contains(Shortcuts::newChat().toString(QKeySequence::NativeText)),
+                      "reference labels use the same native key sequences as activation");
+#ifndef Q_OS_MAC
+                check(!keycaps.join(' ').contains(QString::fromUtf8("⌘")),
+                      "Windows and Linux shortcut labels omit the Mac Command symbol");
+#endif
+                if (!captures.isEmpty())
+                    frame.save(captures + (dark ? "/settings-shortcuts-dark.png"
+                                                : "/settings-shortcuts-light.png"));
+                dialog->reject();
+            }
+        });
+        panel.findChild<QPushButton*>("settingsShortcuts")->click();
+    }
     panel.selectCategory(1);
     auto* size = panel.findChild<QComboBox*>("settingsInterfaceSize");
     const int defaultSize = panel.findChild<QLabel*>("settingsTitle")->font().pixelSize();

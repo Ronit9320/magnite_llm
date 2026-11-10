@@ -93,6 +93,7 @@ set(MAGNITE_SOURCES
     src/widgets/settingssummary.h
     src/widgets/settingswindow.cpp
     src/widgets/settingswindow.h
+    src/widgets/shortcuts.h
     src/widgets/namedialog.cpp
     src/widgets/namedialog.h
     src/widgets/chathistorylist.cpp

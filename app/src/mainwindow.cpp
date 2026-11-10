@@ -22,6 +22,7 @@
 #include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
 #include "widgets/settingswindow.h"
+#include "widgets/shortcuts.h"
 #include "widgets/brandmark.h"
 #include <QSystemTrayIcon>
 #include <QShortcut>
@@ -259,9 +260,9 @@ void MainWindow::setupUi() {
     m_settingsPanel->setChatContext(m_chatStore,m_chatPanel);
     m_settingsPanel->setRuntimeLogs([this]{return m_backend->recentLogs();});
     connect(m_settingsPanel,&SettingsPanel::modelsRequested,this,[this]{m_settingsWindow->accept();switchPanel(PanelModels);});
-    auto *settingsKey=new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma),this);
+    auto *settingsKey=new QShortcut(Shortcuts::settings(),this);
     connect(settingsKey,&QShortcut::activated,this,[this]{switchPanel(PanelSettings);});
-    auto *newChatKey=new QShortcut(QKeySequence::New,this);
+    auto *newChatKey=new QShortcut(Shortcuts::newChat(),this);
     connect(newChatKey,&QShortcut::activated,this,[this]{if(!m_chatPanel->isBusy()){switchPanel(PanelChat);QMetaObject::invokeMethod(m_chatPanel,"onClearChat");}});
     m_notificationTray=new QSystemTrayIcon(BrandMark::icon(),this);
     m_notificationTray->setToolTip("Magnite");

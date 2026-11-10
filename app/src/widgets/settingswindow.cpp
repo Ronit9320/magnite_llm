@@ -10,6 +10,16 @@
 #include <QVBoxLayout>
 
 namespace {
+void paintSurface(QWidget* widget) {
+    QPainter painter(widget);
+    painter.setCompositionMode(QPainter::CompositionMode_Source);
+    painter.fillRect(widget->rect(), Qt::transparent);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(QColor(Theme::surfaceFill()));
+    painter.setPen(QPen(QColor(Theme::surfaceBorder()), 1));
+    painter.drawRoundedRect(QRectF(widget->rect()).adjusted(.5, .5, -.5, -.5), 14, 14);
+}
 class Scrim : public QWidget {
   public:
     explicit Scrim(QWidget* parent) : QWidget(parent) { setAttribute(Qt::WA_NoSystemBackground); }
@@ -23,6 +33,18 @@ class Scrim : public QWidget {
     }
 };
 } // namespace
+SettingsDetailDialog::SettingsDetailDialog(QWidget* parent)
+    : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint) {
+    setObjectName("settingsDetailDialog");
+    setAttribute(Qt::WA_TranslucentBackground);
+}
+void SettingsDetailDialog::paintEvent(QPaintEvent*) {
+    paintSurface(this);
+}
+void SettingsWindow::paintEvent(QPaintEvent*) {
+    paintSurface(this);
+}
+
 SettingsWindow::SettingsWindow(SettingsPanel* panel, QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint), m_scrim(new Scrim(parent)),
       m_fade(new QPropertyAnimation(this, "windowOpacity", this)) {

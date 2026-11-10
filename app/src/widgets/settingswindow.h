@@ -4,6 +4,16 @@ class SettingsPanel;
 class QPropertyAnimation;
 
 // A modal utility window keeps the workspace and its current selection underneath.
+// Paint the opaque surface explicitly: translucent native windows do not reliably
+// receive the default QDialog stylesheet background on every compositor.
+class SettingsDetailDialog : public QDialog {
+  public:
+    explicit SettingsDetailDialog(QWidget* parent = nullptr);
+
+  protected:
+    void paintEvent(QPaintEvent* event) override;
+};
+
 class SettingsWindow : public QDialog {
     Q_OBJECT
   public:
@@ -15,6 +25,7 @@ class SettingsWindow : public QDialog {
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
 
   private:
     void positionWindow();

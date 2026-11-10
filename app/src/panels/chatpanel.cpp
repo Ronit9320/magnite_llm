@@ -16,6 +16,7 @@
 #include "panels/messagerow.h"
 
 #include <QSettings>
+#include "widgets/shortcuts.h"
 #include <QStyle>
 #include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
@@ -251,6 +252,7 @@ void ChatPanel::setupUi() {
     conversation->addWidget(composer->parentWidget());
     conversation->addWidget(m_meter->bar());
     auto *shortcutHint = new QLabel("Enter to send · Shift+Enter for a new line", this);
+    shortcutHint->setProperty("chatShortcutHint",true);
     shortcutHint->setAlignment(Qt::AlignCenter);
     shortcutHint->setObjectName("cardMeta");
     conversation->addWidget(shortcutHint);
@@ -1003,6 +1005,10 @@ QJsonArray ChatPanel::effectiveMessages(int pathCount) const {
 void ChatPanel::reloadContextSettings() {
     using namespace ContextMeterLogic;
     QSettings settings;
+    for(auto* label:findChildren<QLabel*>()) if(label->property("chatShortcutHint").toBool()) {
+        const auto send=settings.value("chat/sendKey","enter").toString()=="modified"?Shortcuts::modifiedSend():QKeySequence(Qt::Key_Enter);
+        label->setText(Shortcuts::label(send)+" to send · "+Shortcuts::label(Shortcuts::newLine())+" for a new line");
+    }
     m_meter->setStyle(parseStyle(settings.value("chat/meterStyle").toString()));
     m_autoCompactPercent = parseAutoCompact(settings.value("chat/autoCompactPercent"));
     m_meter->setAutoCompact(m_autoCompactPercent);

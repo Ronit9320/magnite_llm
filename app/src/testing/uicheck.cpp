@@ -2600,7 +2600,9 @@ int runUiCheck(const QString &captures) {
         sidebar.resize(195,680); sidebar.show(); pump();
         auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto nav=navButtons();
-        const QStringList tips={"Library \u00b7 Ctrl+1","Training \u00b7 Ctrl+2","Knowledge \u00b7 Ctrl+3","Adapters \u00b7 Ctrl+4","Playground \u00b7 Ctrl+5","Settings \u00b7 Ctrl+6"};
+        QStringList tips;
+        const QStringList names={"Library","Training","Knowledge","Adapters","Playground","Settings"};
+        for(int i=0;i<names.size();++i)tips<<names[i]+" · "+QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
         bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
         check(tipsOk&&sidebar.width()==195,"sidebar: six nav buttons with today's tooltips in a 195px column");
         nav[1]->click();
