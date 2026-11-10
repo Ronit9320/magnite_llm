@@ -1424,6 +1424,18 @@ int runUiCheck(const QString &captures) {
     host.hide(); chat.hide();
 
     {
+        // Earlier streaming/clear-chat callbacks must not enter the debounce
+        // request counts. Give these checks their own panel and HTTP fixture.
+        Fixture fixture;
+        if (!fixture.listen(QHostAddress::LocalHost,0)) {
+            check(false,"context usage fixture server: "+fixture.errorString());
+            return 1;
+        }
+        BackendClient client;
+        client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+        ChatPanel chat;
+        chat.resize(1104,628);
+        chat.setBackendClient(&client);
         QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
         QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
         chat.reloadContextSettings(); chat.show(); pump();
