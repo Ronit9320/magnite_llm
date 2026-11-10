@@ -2,6 +2,7 @@
 #include "theme.h"
 #include <QPainter>
 #include <QPainterPath>
+#include <QVariant>
 ThemeChoice::ThemeChoice(const QString& mode, QWidget* parent) : Button(parent), m_mode(mode) {
     setProperty("themeChoice", true);
     setText(mode == "light" ? "Light" : mode == "dark" ? "Dark" : "System");

@@ -56,6 +56,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QLineEdit>
@@ -2712,7 +2713,11 @@ int runUiCheck(const QString &captures) {
         strip.setCollapsed(true); pump();
         auto buttons=nav();
         bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
-        for (int i=0;i<6&&strippedOk;++i) strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&buttons[i]->toolTip().startsWith(labels[i]+" \u00b7 Ctrl+");
+        for (int i=0;i<6&&strippedOk;++i) {
+            const QString shortcut=QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
+            strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&
+                       buttons[i]->toolTip()==labels[i]+" \u00b7 "+shortcut;
+        }
         check(strippedOk,"sidebar: collapsing makes a 52px icon strip; the labels stay as tooltips and accessible names");
         bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
         for (auto *tag : strip.findChildren<QLabel *>("studioTag")) hidden&=!tag->isVisibleTo(&strip);
