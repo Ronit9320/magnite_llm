@@ -18,7 +18,7 @@ class DocsTextView : public QTextBrowser {
     Q_OBJECT
   public:
     explicit DocsTextView(QWidget *parent = nullptr, bool expand = true);
-    void setContent(const QString &html, bool large = false);
+    void setContent(const QString &html);
     void setReferenceMarkdown(const QString &markdown);
     QSize minimumSizeHint() const override { return QSize(0, 0); }
 
@@ -29,7 +29,7 @@ class DocsTextView : public QTextBrowser {
 
   private:
     void reflow();
-    void applyTextTheme(bool large);
+    void applyTextTheme();
     bool m_expand, m_reflowing = false;
 };
 

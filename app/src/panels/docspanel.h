@@ -88,7 +88,7 @@ class DocsPanel : public BasePanel {
     int m_historyIndex = 0;
     QSet<QString> m_saved, m_collapsed;
     QString m_lastArticle, m_activeSection, m_example = "jsonl", m_layoutClass;
-    bool m_large = false, m_focus = false, m_compact = false, m_navOpen = false, m_wrap = true;
+    bool m_focus = false, m_compact = false, m_navOpen = false, m_wrap = true;
     bool m_restoring = false, m_ready = false, m_refreshPending = false;
     int m_generation = 0;
     QWidget *m_shell = nullptr, *m_navigation = nullptr, *m_content = nullptr, *m_toc = nullptr;

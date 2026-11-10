@@ -142,9 +142,7 @@ int runDocsChecks(const QString &captures) {
         key(button(&docs, "docsFocus"), Qt::Key_Escape);
         pump();
         check(!docs.focusMode(), "Escape restores navigation from focus mode");
-        button(&docs, "docsTextSize")->click();
-        pump();
-        check(settings.value("docs/textSize") == "large", "larger reading text persists");
+        check(!button(&docs, "docsTextSize"), "reader has no Aa text-size control");
         docs.showOverview();
         pump();
         auto *featureTitle = docs.findChild<QLabel *>("docsFeatureTitle");
@@ -228,11 +226,11 @@ int runDocsChecks(const QString &captures) {
                 auto *callout = docs.findChild<QFrame *>("docsCallout");
                 auto *view = callout->findChild<DocsTextView *>();
                 check(view && view->verticalScrollBar()->maximum() == 0,
-                      "callout fits at compact and wide widths with larger text in both themes");
+                      "callout fits at compact and wide widths in both themes");
                 if (!captures.isEmpty()) {
                     QDir().mkpath(captures);
                     callout->grab().save(captures +
-                                     QString("/docs-callout-%1-%2.png").arg(width).arg(shade ? "dark" : "light"));
+                                         QString("/docs-callout-%1-%2.png").arg(width).arg(shade ? "dark" : "light"));
                 }
             }
         }

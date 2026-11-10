@@ -127,7 +127,6 @@ DocsPanel::DocsPanel(QWidget *parent) : BasePanel("Docs", parent, true) {
     for (const auto &group : settings.value("docs/collapsedSubjects").toStringList())
         if (groups.contains(group))
             m_collapsed.insert(group);
-    m_large = settings.value("docs/textSize", "standard").toString() == "large";
     m_lastArticle = settings.value("docs/lastArticle").toString();
     m_saveTimer = new QTimer(this);
     m_saveTimer->setSingleShot(true);
@@ -376,7 +375,6 @@ void DocsPanel::savePosition() {
     settings.setValue("docs/positions/" + m_route.id, QVariantMap{{"offset", bar->value()},
                                                                   {"ratio", ratio},
                                                                   {"width", m_scroll->viewport()->width()},
-                                                                  {"large", m_large},
                                                                   {"section", m_activeSection}});
     settings.setValue("docs/lastArticle", m_route.id);
     m_lastArticle = m_route.id;
@@ -546,7 +544,7 @@ void DocsPanel::render(bool keepOffset, const QString &focusObject) {
             else if (m_route.kind == "article") {
                 const auto position = QSettings().value("docs/positions/" + m_route.id).toMap();
                 const bool same = position.value("width").toInt() == m_scroll->viewport()->width() &&
-                                  position.value("large").toBool() == m_large;
+                                  !position.value("large").toBool();
                 bar->setValue(same ? position.value("offset").toInt()
                                    : qRound(position.value("ratio").toDouble() * bar->maximum()));
             } else
@@ -855,19 +853,6 @@ void DocsPanel::renderReader(QVBoxLayout *body) {
     back->setFlat(true);
     tools->addWidget(back);
     tools->addWidget(text(article->shortTitle, "docsHint"), 1);
-    auto *size = action(
-        "Aa",
-        [this] {
-            savePosition();
-            m_large = !m_large;
-            QSettings().setValue("docs/textSize", m_large ? "large" : "standard");
-            render(true, "docsTextSize");
-        },
-        "docsTextSize");
-    size->setCheckable(true);
-    size->setChecked(m_large);
-    size->setAccessibleName(m_large ? "Use standard text size" : "Use larger text size");
-    tools->addWidget(size);
     auto *focus = action(m_focus ? "Show navigation" : "Focus mode", [this] { setFocusMode(!m_focus); }, "docsFocus");
     focus->setCheckable(true);
     focus->setChecked(m_focus);
@@ -1036,7 +1021,7 @@ void DocsPanel::addArticleBody(QVBoxLayout *body, const QString &html) {
         const int end = match.hasMatch() ? match.capturedStart() : html.size();
         if (end > cursor) {
             auto *view = new DocsTextView;
-            view->setContent(html.mid(cursor, end - cursor), m_large);
+            view->setContent(html.mid(cursor, end - cursor));
             connect(view, &QTextBrowser::anchorClicked, this, &DocsPanel::handleTextLink);
             body->addWidget(view);
         }
@@ -1057,7 +1042,7 @@ void DocsPanel::addArticleBody(QVBoxLayout *body, const QString &html) {
             const int start = part.indexOf('>') + 1;
             QString content = part.mid(start, part.lastIndexOf("</div>") - start);
             content.replace("</strong>", "</strong></p><p>");
-            view->setContent("<p>" + content + "</p>", m_large);
+            view->setContent("<p>" + content + "</p>");
             l->addWidget(view);
             body->addWidget(box);
         } else

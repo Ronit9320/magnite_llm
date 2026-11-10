@@ -16,8 +16,9 @@ Keep explanations grounded in the backend contract and current app behavior. Whe
 
 - Search ranks titles and matching sections locally. `/` or the platform's Ctrl/Command+K focuses search while Docs is active.
 - The app's Ctrl/Command+6 opens Docs; Settings moves to Ctrl/Command+7. Ctrl/Command+, still opens Settings. Alt+Left/Right browses Docs history.
-- Saved articles, reading text size, collapsed subjects and quiet reading positions are stored under `docs/` in the existing local `QSettings` preferences. They do not change training data or model files.
-- The reader has a fixed control bar, active section links, related reading, sources, larger text and focus mode. Escape exits focus mode or closes the compact topic drawer. Focus mode restores the app sidebar when leaving Docs without changing its stored collapsed preference.
+- Saved articles, collapsed subjects and quiet reading positions are stored under `docs/` in the existing local `QSettings` preferences. They do not change training data or model files.
+- The reader uses the standard app text size; there is no separate Aa control. A future release will add font-size settings.
+- The reader has a fixed control bar, active section links, related reading, sources and focus mode. Escape exits focus mode or closes the compact topic drawer. Focus mode restores the app sidebar when leaving Docs without changing its stored collapsed preference.
 - Dataset examples offer prompt/response JSONL, chat JSONL and CSV, copy, wrap and atomic UTF-8 download. Arrow keys switch example tabs. These are illustrative records, not the user's imported data.
 - Section links use `magnite-docs://article/<id>?section=<section>`. Copy a section link and paste it into Docs search, then press Enter. This is an internal link format, not an OS-registered URL scheme.
 
@@ -33,4 +34,4 @@ QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/magnite-app --ui-check
 ./build/magnite-app --selftest
 ```
 
-The focused Docs checks run before any loopback fixture is started, exercising the library without a backend. They cover all articles and section links, search, dataset examples, saved articles, reading restoration, focus mode, text size, compact navigation and source behavior. Captures include both themes and compact layouts. Full UI verification also includes these checks; existing desktop selftests exercise six workspaces plus the Settings window. `--screenshot` now captures Docs as `panel-5.png` and Settings as `panel-6.png`.
+The focused Docs checks run before any loopback fixture is started, exercising the library without a backend. They cover all articles and section links, search, dataset examples, saved articles, reading restoration, focus mode, compact navigation and source behavior. Captures include both themes and compact layouts. Full UI verification also includes these checks; existing desktop selftests exercise six workspaces plus the Settings window. `--screenshot` now captures Docs as `panel-5.png` and Settings as `panel-6.png`.

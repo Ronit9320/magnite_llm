@@ -46,11 +46,11 @@ DocsTextView::DocsTextView(QWidget *parent, bool expand) : QTextBrowser(parent),
     connect(document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged, this,
             [this] { reflow(); });
 }
-void DocsTextView::applyTextTheme(bool large) {
+void DocsTextView::applyTextTheme() {
     const int size = qBound(0, QSettings().value("appearance/interfaceSize", 1).toInt(), 2);
     const qreal scale = size == 0 ? .92 : size == 2 ? 1.14 : 1.;
     QFont font(Theme::bodyFont());
-    font.setPixelSize(qRound((large ? 16 : 14) * scale));
+    font.setPixelSize(qRound(14 * scale));
     document()->setDefaultFont(font);
     document()->setDefaultStyleSheet(QString("body { color:%1; font-family:'%2'; } p { margin-top:0px; "
                                              "margin-bottom:14px; line-height:180%; } "
@@ -71,15 +71,15 @@ void DocsTextView::applyTextTheme(bool large) {
     colors.setColor(QPalette::Text, QColor(Theme::textSecondary()));
     setPalette(colors);
 }
-void DocsTextView::setContent(const QString &source, bool large) {
-    applyTextTheme(large);
+void DocsTextView::setContent(const QString &source) {
+    applyTextTheme();
     QString html = source;
     html.replace("<table>", "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"7\">");
     setHtml(html);
     reflow();
 }
 void DocsTextView::setReferenceMarkdown(const QString &markdown) {
-    applyTextTheme(false);
+    applyTextTheme();
     setMarkdown(markdown);
     reflow();
 }
