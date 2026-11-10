@@ -1,6 +1,7 @@
 #include "testing/uicheck.h"
 #include "backend_client.h"
 #include "theme.h"
+#include "trainingduration.h"
 #include "panels/modelspanel.h"
 #include "panels/modelcard.h"
 #include "panels/trainingpanel.h"
@@ -369,6 +370,16 @@ int runUiCheck(const QString &captures) {
         if (!pass) ++failures;
         fprintf(stderr,"[ui-check] %s %s\n",pass?"ok:":"FAIL:",qUtf8Printable(message));
     };
+    check(TrainingTime::duration(0)=="0s" && TrainingTime::duration(59)=="59s" &&
+          TrainingTime::duration(60)=="1m 0s" && TrainingTime::duration(3599)=="59m 59s",
+          "training durations format seconds and minutes at unit boundaries");
+    check(TrainingTime::duration(3600)=="1h 0m" && TrainingTime::duration(8400)=="2h 20m" &&
+          TrainingTime::duration(86399)=="23h 59m" && TrainingTime::duration(86400)=="1d 0h" &&
+          TrainingTime::duration(90061)=="1d 1h",
+          "training durations convert long runs to hours and days");
+    check(TrainingTime::duration(-1)=="—" && TrainingTime::duration(qInf())=="—" &&
+          TrainingTime::duration(qQNaN())=="—",
+          "unavailable training durations do not display invalid values");
     Fixture fixture;
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
