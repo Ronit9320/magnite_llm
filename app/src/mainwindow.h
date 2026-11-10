@@ -25,6 +25,7 @@ class RagPanel;
 class AdaptersPanel;
 class ChatPanel;
 class SettingsPanel;
+class DocsPanel;
 class QPropertyAnimation;
 class QLabel;
 class UpdateManager;
@@ -97,6 +98,7 @@ private:
     RagPanel *m_ragPanel;
     AdaptersPanel *m_adaptersPanel;
     ChatPanel *m_chatPanel;
+    DocsPanel *m_docsPanel = nullptr;
     ChatStore *m_chatStore = nullptr;
     ChatHistoryList *m_history = nullptr;
     ChatHistoryController *m_historyController = nullptr;
@@ -115,5 +117,5 @@ private:
     QString m_shotDir;
 
     // Panel indices
-    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelSettings, PanelCount };
+    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelDocs, PanelSettings, PanelCount };
 };

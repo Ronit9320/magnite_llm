@@ -414,3 +414,45 @@ QLabel#settingsRuntimeStatus[connected="true"] { color: @statusSuccess; }
 QFrame#appWindowHeader { background: @surfaceFill; border: none; border-bottom: 1px solid @surfaceBorder; }
 QLabel#appWindowTitle { color: @textSecondary; font-size: 12px; }
 QPushButton#windowClose, QPushButton#windowMinimize, QPushButton#windowMaximize { padding: 0; min-height: 0; font-size: 18px; }
+
+/* Offline Docs reference workspace. */
+QWidget#docsPanel, QWidget#docsPage, QScrollArea#docsScroll, QTextBrowser#docsRichText { background: transparent; border: none; }
+QFrame#docsToolbar, QFrame#docsReaderTools { background: @surfaceFill; border: none; border-bottom: 1px solid @surfaceBorder; }
+QWidget#docsNavigation { background: @surfaceFill; border-right: 1px solid @surfaceBorder; }
+QWidget#docsContents { border-left: 1px solid @surfaceBorder; }
+QLabel#docsToolbarTitle { font-family: @headingFont; font-weight: 600; font-size: 16px; }
+QLineEdit#docsSearch { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 9px 12px; font-size: 12px; }
+QLineEdit#docsSearch:focus { border-color: @accentPrimary; }
+QLabel#docsHero { font-family: @headingFont; font-size: 36px; font-weight: 500; color: @textPrimary; }
+QLabel#docsHeading { font-family: @headingFont; font-size: 34px; font-weight: 500; color: @textPrimary; }
+QLabel#docsIntro { font-size: 14px; color: @textSecondary; line-height: 160%; }
+QLabel#docsSectionTitle { font-family: @headingFont; font-size: 21px; font-weight: 500; color: @textPrimary; }
+QLabel#docsCardTitle { font-family: @headingFont; font-size: 16px; font-weight: 500; color: @textPrimary; }
+QLabel#docsSmallTitle { font-size: 12px; font-weight: 500; color: @textPrimary; }
+QLabel#docsBody { font-size: 14px; color: @textSecondary; }
+QLabel#docsCardDescription { font-size: 12px; color: @textSecondary; }
+QLabel#docsHint { font-size: 11px; color: @textMuted; }
+QLabel#docsEyebrow { font-size: 10px; font-weight: 600; color: @textMuted; letter-spacing: 1px; }
+QLabel#docsOffline { font-size: 10px; color: @accentLabel; }
+QLabel#docsQuestion { font-size: 13px; color: @textPrimary; }
+QFrame#docsFeature, QFrame#docsInlineContents, QFrame#docsExample { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 12px; }
+QFrame#docsCallout { background: @surfaceFill; border: none; border-left: 3px solid @accentPrimary; border-radius: 6px; }
+QFrame#docsRule { background: @surfaceBorder; border: none; }
+QLabel#docsStatus { background: @surfaceFill; padding: 10px 22px; border-top: 1px solid @surfaceBorder; color: @textSecondary; font-size: 12px; }
+QPushButton#docsNav, QPushButton#docsArticleNav, QPushButton#docsSubject, QPushButton#docsSectionLink { padding: 7px 10px; min-height: 16px; font-size: 12px; }
+QPushButton#docsArticleNav { padding-left: 20px; font-size: 11px; }
+QPushButton#docsSubject { font-weight: 600; font-size: 11px; }
+QPushButton#docsNav:checked, QPushButton#docsArticleNav:checked, QPushButton#docsSectionLink:checked { color: @accentLabel; }
+QPushButton#docsSources { padding: 8px 0; font-size: 11px; }
+QPushButton#docsTextButton, QPushButton#docsRecent { padding: 5px 10px; min-height: 18px; font-size: 12px; }
+QPushButton#docsSectionLink { padding: 8px 6px; font-size: 11px; }
+QPushButton#docsPermalink { min-width: 16px; padding: 4px 6px; color: @textMuted; }
+QPushButton#docsBookmark { padding: 5px 10px; font-size: 11px; }
+QPushButton#docsExampleTab { padding: 6px 9px; font-size: 11px; }
+QPushButton#docsCopyExample, QPushButton#docsWrapExample, QPushButton#docsDownloadExample { padding: 6px 9px; font-size: 11px; }
+QPlainTextEdit#docsExampleCode { background: @canvasBackground; color: @textPrimary; border: none; border-radius: 6px; padding: 12px; font-family: @monoFont; font-size: 12px; }
+
+QWidget#docsPanel { background: @canvasBackground; }
+QLabel#docsFeatureTitle { font-family: @headingFont; font-size: 27px; font-weight: 500; color: @textPrimary; }
+QPushButton#docsHistoryBack, QPushButton#docsHistoryForward, QPushButton#docsMenu { padding: 0; min-width: 0; min-height: 28px; }
+QFrame#docsQuestions { border: none; border-left: 1px solid @surfaceBorder; }

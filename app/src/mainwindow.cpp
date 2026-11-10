@@ -21,6 +21,7 @@
 #include "widgets/sidebarstate.h"
 #include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
+#include "panels/docspanel.h"
 #include "widgets/settingswindow.h"
 #include "widgets/windowchrome.h"
 #include "widgets/shortcuts.h"
@@ -159,6 +160,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() {
     m_settingsWindow->hide();
+    m_docsPanel->flushPosition();
     m_chatPanel->flushSave();   // before anything is torn down: the last change must reach disk
     // Settle replies while the panels referenced by their callbacks still exist.
     m_backendClient->abortAll();
@@ -178,7 +180,8 @@ void MainWindow::setupUi() {
                              {"Training", "graduation-cap", PanelTraining},
                              {"Knowledge", "database", PanelRag},
                              {"Adapters", "layers", PanelAdapters},
-                             {"Playground", "message-circle", PanelChat}},
+                             {"Playground", "message-circle", PanelChat},
+                             {"Docs", "file-text", PanelDocs}},
                             {"Settings", "settings", PanelSettings}, PanelChat);
     m_history = m_sidebar->history();
     connect(m_sidebar, &Sidebar::panelRequested, this, &MainWindow::switchPanel);
@@ -256,6 +259,11 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_ragPanel);
     m_stack->addWidget(m_adaptersPanel);
     m_stack->addWidget(m_chatPanel);
+    m_docsPanel = new DocsPanel;
+    m_stack->addWidget(m_docsPanel);
+    connect(m_docsPanel, &DocsPanel::focusModeChanged, this, [this](bool focus){
+        m_sidebar->setVisible(!(m_stack->currentWidget()==m_docsPanel && focus));
+    });
     m_settingsWindow=new SettingsWindow(m_settingsPanel,this);
     m_settingsPanel->setBackendClient(m_backendClient);
     m_settingsPanel->setChatContext(m_chatStore,m_chatPanel);
@@ -357,6 +365,7 @@ void MainWindow::switchPanel(int index) {
     // selftest), then the incoming panel crossfades in.
     m_workspacePages->setCurrentWidget(m_stack);
     m_stack->setCurrentIndex(index);
+    m_sidebar->setVisible(!(index==PanelDocs && m_docsPanel->focusMode()));
     m_sidebar->setCurrentPanel(index);
     startPanelFade();
     savePanelSettings();
@@ -611,8 +620,19 @@ void MainWindow::runSelfTest() {
             switchPanel(i);
         }
 
-        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelChat, "settings opens as a window above the current workspace");
-        checkC(m_stack->count() == PanelCount-1, "five workspaces plus a settings window");
+        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelDocs, "settings opens as a window above the current workspace");
+        checkC(m_stack->count() == PanelCount-1, "six workspaces plus a settings window");
+        switchPanel(PanelDocs);
+        checkC(m_docsPanel->openArticle("model-learning"), "Docs opens a bundled reference in the real workspace");
+        const bool sidebarCollapsed=m_sidebar->isCollapsed();
+        m_docsPanel->setFocusMode(true);
+        checkC(m_sidebar->isHidden(), "Docs focus mode hides the app sidebar");
+        switchPanel(PanelModels);
+        checkC(!m_sidebar->isHidden() && m_sidebar->isCollapsed()==sidebarCollapsed, "leaving Docs restores the sidebar preference");
+        switchPanel(PanelDocs);
+        m_docsPanel->setFocusMode(false);
+        checkC(!m_sidebar->isHidden(), "leaving focus mode restores the app sidebar");
+
 
         switchPanel(PanelTraining);
         m_trainingPanel->runDetailsRequested("selftest-missing-run");

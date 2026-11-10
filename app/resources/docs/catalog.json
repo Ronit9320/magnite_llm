@@ -1,0 +1,728 @@
+{
+  "sources": {
+    "workflow": {
+      "label": "Magnite · Local workflows",
+      "url": "reference/WORKFLOWS.md",
+      "kind": "Bundled reference"
+    },
+    "api": {
+      "label": "Magnite · Training contract",
+      "url": "reference/LOCAL_API.md",
+      "kind": "Bundled reference"
+    },
+    "limits": {
+      "label": "Magnite · Current limitations",
+      "url": "reference/LIMITATIONS.md",
+      "kind": "Bundled reference"
+    },
+    "install": {
+      "label": "Magnite · Installation",
+      "url": "reference/INSTALL.md",
+      "kind": "Bundled reference"
+    },
+    "troubleshoot": {
+      "label": "Magnite · Troubleshooting",
+      "url": "reference/TROUBLESHOOTING.md",
+      "kind": "Bundled reference"
+    },
+    "privacy": {
+      "label": "Magnite · Storage & privacy",
+      "url": "reference/STORAGE_AND_PRIVACY.md",
+      "kind": "Bundled reference"
+    },
+    "lora": {
+      "label": "Hugging Face PEFT · LoRA",
+      "url": "https://huggingface.co/docs/peft/main/en/conceptual_guides/lora",
+      "kind": "External · internet required"
+    },
+    "quant": {
+      "label": "Hugging Face PEFT · Quantization",
+      "url": "https://huggingface.co/docs/peft/main/en/developer_guides/quantization",
+      "kind": "External · internet required"
+    },
+    "training": {
+      "label": "Hugging Face Transformers · Fine-tuning",
+      "url": "https://huggingface.co/docs/transformers/main/training",
+      "kind": "External · internet required"
+    },
+    "causal": {
+      "label": "Hugging Face Transformers · Causal language modeling",
+      "url": "https://huggingface.co/docs/transformers/en/tasks/language_modeling",
+      "kind": "External · internet required"
+    },
+    "tokens": {
+      "label": "Hugging Face Transformers · Tokenization",
+      "url": "https://huggingface.co/docs/transformers/en/tokenizer_summary",
+      "kind": "External · internet required"
+    },
+    "leakage": {
+      "label": "scikit-learn · Data leakage and preprocessing",
+      "url": "https://scikit-learn.org/stable/common_pitfalls.html",
+      "kind": "External · internet required"
+    },
+    "splits": {
+      "label": "AWS · Dataset splits and leakage",
+      "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/ml-operations-planning/splits-leakage.html",
+      "kind": "External · internet required"
+    },
+    "gradient": {
+      "label": "Google · Gradient descent",
+      "url": "https://developers.google.com/machine-learning/crash-course/linear-regression/gradient-descent",
+      "kind": "External · internet required"
+    },
+    "generalization": {
+      "label": "Google · Generalization and overfitting",
+      "url": "https://developers.google.com/machine-learning/crash-course/overfitting/overfitting",
+      "kind": "External · internet required"
+    }
+  },
+  "articles": [
+    {
+      "id": "model-learning",
+      "title": "What does a language model learn?",
+      "short": "How models learn",
+      "group": "Models & learning",
+      "type": "DEEP DIVE",
+      "icon": "box",
+      "description": "The connection between predictions, loss, gradients and the behavior you observe.",
+      "sources": [
+        "causal",
+        "gradient",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "prediction",
+          "A prediction over possible continuations",
+          "<p>A causal language model estimates which token could follow the tokens already in context. It produces scores over a vocabulary, which become probabilities. Text generation repeatedly chooses a continuation and extends that context.</p><p>That objective is a useful starting point for understanding a training run. The optimization target concerns predictions on examples; the usefulness, accuracy and style of a generated answer are things you still need to evaluate.</p><div class=\"concept-flow\"><span>Context tokens</span><i>→</i><span>Model prediction</span><i>→</i><span>Possible next tokens</span></div>"
+        ],
+        [
+          "objective",
+          "Loss turns an example into a learning signal",
+          "<p>During training, the example supplies target tokens. The loss penalizes predictions that assign insufficient probability to those targets. Many positions in a sequence can contribute to this signal.</p><p>Consequently, the examples you choose shape what the optimizer is rewarded for predicting. A repeated phrase, a particular response format, and a domain-specific answer can all become part of the learning signal.</p>"
+        ],
+        [
+          "updates",
+          "Gradients connect loss to trainable parameters",
+          "<p>A gradient describes how a small change to a parameter would change the loss locally. Gradient-based optimization uses this information to adjust trainable parameters over repeated batches. The learning rate influences the scale of the update; actual optimizers may also maintain state from previous updates.</p><div class=\"article-callout\"><strong>Pretraining and adaptation</strong>Fine-tuning begins with pretrained parameters. In Magnite’s LoRA flow, the base weights stay frozen and the adapter parameters are trained.</div>"
+        ],
+        [
+          "behavior",
+          "A useful way to interpret the result",
+          "<p>Consider the objective, the examples and the evaluation together. A lower training loss describes a closer fit to the training objective. To understand the behavior you have actually changed, compare the base and adapted models on requests relevant to your task.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "tokens-context",
+      "title": "Tokens, context and what the model actually sees",
+      "short": "Tokens, context & truncation",
+      "group": "Models & learning",
+      "type": "DEEP DIVE",
+      "icon": "file-text",
+      "description": "How text becomes model inputs, and why formatting and length affect your data.",
+      "sources": [
+        "tokens",
+        "causal",
+        "api",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "representation",
+          "Text is represented through a tokenizer",
+          "<p>A tokenizer maps text to entries in a model’s vocabulary. A token may represent a whole word, part of a word, punctuation or another unit. Subword methods make it possible to represent many words using a vocabulary of reusable pieces.</p><p>The representation depends on the tokenizer. Equal character counts or word counts do not imply equal token counts, and two models may represent the same string differently.</p><div class=\"concept-flow\"><span>Original text</span><i>→</i><span>Tokenizer + vocabulary</span><i>→</i><span>Token IDs</span></div>"
+        ],
+        [
+          "format",
+          "Formatting becomes part of the input",
+          "<p>Conversation records contain roles and content. Magnite uses the tokenizer’s chat template when available to serialize those messages; otherwise it falls back to readable role/content text. The resulting sequence is what training receives.</p><p>The current trainer applies its objective to the full formatted sequence. Message roles alone do not turn on assistant-only loss masking.</p>"
+        ],
+        [
+          "limits",
+          "Length limits change the examples you train on",
+          "<p>Magnite’s training sequence-length setting limits the tokenized input. If an example is truncated, some of the original text is excluded. Inspect long examples with particular care when the useful answer is near the end.</p><p>A chat context window is a separate runtime limit. Magnite’s context calculation also reserves room for the requested output. Changing a training sequence-length setting does not increase that inference limit.</p>"
+        ],
+        [
+          "interpretation",
+          "Questions to bring to your dataset",
+          "<p>How much of each formatted example fits? Are repeated wrappers consuming space? Does the base model expect a particular chat format? These questions help connect the source data to the actual input representation.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "model-types",
+      "title": "Model weights, GGUF and adapters",
+      "short": "Model files & weights",
+      "group": "Models & learning",
+      "type": "CONCEPT",
+      "icon": "box",
+      "description": "Understand the artifacts you work with and what each one can change.",
+      "sources": [
+        "workflow",
+        "limits"
+      ],
+      "sections": [
+        [
+          "three-artifacts",
+          "Three artifacts, three jobs",
+          "<table><thead><tr><th>Artifact</th><th>What it is for</th></tr></thead><tbody><tr><td>Transformers base weights</td><td>The pretrained model used by Magnite’s LoRA training flow.</td></tr><tr><td>GGUF model</td><td>A model for local inference with a compatible llama.cpp engine.</td></tr><tr><td>LoRA adapter</td><td>A small learned addition that needs its matching base weights.</td></tr></tbody></table>"
+        ],
+        [
+          "choose-a-base",
+          "Choose a base for your task",
+          "<p>Check the model’s architecture, tokenizer, license and runtime support. Start with a model your machine can load reliably. A larger download is not automatically a better starting point for your data or device.</p><p>Use a stable base snapshot when comparing experiments. Keep the same model and evaluation prompts while you test a dataset or recipe change.</p>"
+        ],
+        [
+          "local-engine",
+          "Match the local engine",
+          "<p>Magnite separates inference from training. Auto selects a compatible inference engine; individual overrides live in Playground model settings. Training uses the Python training runtime and supported transformer weights.</p><p>An installed package does not guarantee that every architecture or device will work. Read the capability message and resource estimate for the configuration you select.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "data-quality",
+      "title": "What your dataset is teaching",
+      "short": "Dataset quality & behavior",
+      "group": "Understanding data",
+      "type": "DEEP DIVE",
+      "icon": "database",
+      "description": "Look beyond valid rows: the patterns, omissions and inconsistencies your model will see.",
+      "sources": [
+        "workflow",
+        "api"
+      ],
+      "sections": [
+        [
+          "define-success",
+          "Define a visible result",
+          "<p>Choose a task you can recognize in the output. For example: answer support requests in a specific structure, extract a few fields, or follow a concise house style. Write representative examples of the desired response.</p><p>Training data should demonstrate the behavior you want. Repeated contradictions make the task harder to learn.</p>"
+        ],
+        [
+          "patterns",
+          "The signal includes more than the answer",
+          "<p>A training record can carry several patterns at once: subject matter, response length, tone, formatting, repeated boilerplate and the relationship between the request and its answer. If all examples use the same long introduction, that introduction is part of the signal as well.</p><p>Inspect examples together with their source and intended use. An import can be perfectly valid while the examples omit the situations you care about or give inconsistent answers to similar requests.</p><table><thead><tr><th>What to inspect</th><th>What it can reveal</th></tr></thead><tbody><tr><td>Source and collection context</td><td>Which users, tasks or environments the examples represent.</td></tr><tr><td>Repeated answers and templates</td><td>Which patterns dominate the training signal.</td></tr><tr><td>Length and formatting</td><td>Whether important parts may be truncated or special formatting overrepresented.</td></tr><tr><td>Conflicting targets</td><td>Whether similar inputs ask the model to learn incompatible behavior.</td></tr></tbody></table>"
+        ],
+        [
+          "review-data",
+          "Review examples before importing",
+          "<ul><li>Remove empty rows, malformed records and accidental duplicates.</li><li>Keep instructions and answers consistent with the intended task.</li><li>Inspect unusually long examples; a sequence-length limit can truncate them.</li><li>Use data you are allowed to process, and remove content that should not become part of an adapter.</li></ul>"
+        ],
+        [
+          "holdout",
+          "Keep evaluation data separate",
+          "<p>A held-out set should represent the same task without duplicating the training examples. Magnite can reserve a seeded validation split when enabled. It needs enough rows to keep both training and evaluation nonempty.</p><p>Also keep a fixed set of real prompts for manual comparisons. Similar losses do not guarantee equally useful responses.</p>"
+        ],
+        [
+          "sequence-training",
+          "Understand what is optimized",
+          "<div class=\"article-callout\"><strong>Current Magnite behavior</strong>Conversation records use the tokenizer’s chat template when available, with a readable fallback. The trainer learns from the full formatted sequence; importing messages does not enable assistant-only loss masking.</div>"
+        ]
+      ]
+    },
+    {
+      "id": "data-distribution",
+      "title": "Data distributions, duplication and leakage",
+      "short": "Distributions & leakage",
+      "group": "Understanding data",
+      "type": "DEEP DIVE",
+      "icon": "database",
+      "description": "Understand which patterns dominate, which cases are missing, and what a split really separates.",
+      "sources": [
+        "splits",
+        "leakage",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "distribution",
+          "Your dataset has a distribution",
+          "<p>A collection of examples has a composition: sources, topics, languages, answer lengths and recurring templates. Understanding that composition is part of understanding the experiment.</p><figure class=\"distribution-example\"><figcaption>Illustrative dataset · 1,000 support examples</figcaption><div><span>Refund requests</span><i style=\"--share:80%\"></i><strong>800</strong></div><div><span>Setup questions</span><i style=\"--share:18%\"></i><strong>180</strong></div><div><span>Other situations</span><i style=\"--share:2%\"></i><strong>20</strong></div></figure><p>This example supplies far more refund-related patterns than other situations. A single average evaluation score could conceal weak behavior on the small category. The numbers illustrate composition; they are not measurements of your files.</p>"
+        ],
+        [
+          "duplicates",
+          "Repeated records can cross a split",
+          "<p>A random row split can put copies or near-copies of an example on both sides. Evaluation then measures familiarity with related material as well as performance on unseen cases. Review duplicates and shared origins before treating a held-out set as independent.</p>"
+        ],
+        [
+          "split",
+          "The boundary should match the question",
+          "<p>If you want to evaluate new users, documents or conversations, separate those groups across the split. If the intended use concerns future data, consider the time boundary. Row-level randomness alone does not enforce these distinctions.</p><div class=\"article-callout\"><strong>Magnite’s current split</strong>The validation split is a seeded row-level split. It does not automatically deduplicate, stratify, or isolate users, documents and time periods. Prepare those boundaries in your source datasets when needed.</div>"
+        ],
+        [
+          "leakage",
+          "Preprocessing can leak information too",
+          "<p>Leakage occurs when evaluation information influences model development in a way that would not be available for a genuinely new request. Fit learned preprocessing on training data, and use the corresponding transformation on held-out data. Revising a recipe repeatedly against the same test set also changes what that score can tell you.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "dataset-format",
+      "title": "Dataset structure and conversation formats",
+      "short": "Dataset formats & structure",
+      "group": "Understanding data",
+      "type": "REFERENCE",
+      "icon": "file-text",
+      "description": "How text, prompt/response pairs and messages are represented and imported.",
+      "sources": [
+        "workflow",
+        "api"
+      ],
+      "sections": [
+        [
+          "formats",
+          "Pick a supported format",
+          "<p>Magnite accepts UTF-8 JSONL, CSV and plain text. JSONL stores one complete JSON object per line. Message records preserve roles; a prompt/response pair is normalized into a user message and an assistant message.</p><div id=\"dataset-example\"></div><div class=\"article-callout\"><strong>These are format examples</strong>The sample contains only two rows. It is meant to test ingestion, not train a useful assistant.</div>"
+        ],
+        [
+          "other-fields",
+          "Other supported record shapes",
+          "<p>You can also use a text field, instruction/input/output records, or a messages array with valid role and content strings. Plain-text import creates normalized training examples.</p><p>Keep a consistent schema within a file. Check row-level errors rather than assuming an import skipped a malformed record.</p>"
+        ],
+        [
+          "import-checks",
+          "Check the imported result",
+          "<p>Open Training, import the file, and verify the row count and dataset selection. Dataset files referenced by queued or running jobs cannot be deleted. Magnite’s current CSV field limit is 131,072 characters.</p><p>For conversational examples, inspect how the selected model’s tokenizer formats messages. The training sequence length is a separate setting from the number of dataset rows.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "parameters",
+      "title": "How training parameters change the experiment",
+      "short": "Training parameters",
+      "group": "Training & evaluation",
+      "type": "REFERENCE",
+      "icon": "settings",
+      "description": "Connect learning rate, batch size, sequence length and rank to the learning process.",
+      "sources": [
+        "api",
+        "training",
+        "lora"
+      ],
+      "sections": [
+        [
+          "recipe",
+          "Read the recipe in groups",
+          "<table><thead><tr><th>Control</th><th>What to consider</th></tr></thead><tbody><tr><td>Learning rate</td><td>The starting optimizer step size. Record it and compare controlled runs.</td></tr><tr><td>Epochs / max steps</td><td>How long training runs. A positive max-step setting limits the run by optimizer steps.</td></tr><tr><td>Batch size</td><td>Examples processed together per device. It affects memory requirements.</td></tr><tr><td>Sequence length</td><td>The maximum training input length after tokenization; longer examples can be truncated.</td></tr><tr><td>Rank / alpha</td><td>Adapter size and scaling.</td></tr><tr><td>Validation split / seed</td><td>Held-out evaluation and reproducibility of the data split.</td></tr></tbody></table>"
+        ],
+        [
+          "controlled-run",
+          "Make the comparison interpretable",
+          "<p>Save a named configuration, use the same base snapshot and dataset, and change one major control at a time. A seed helps make a comparison more repeatable, but results can still differ across hardware and runtime versions.</p><p>Use a short run to check that the chosen inputs and runtime work. Evaluate quality with held-out examples before increasing the duration.</p>"
+        ],
+        [
+          "capability",
+          "Read capability messages",
+          "<p>Magnite probes supported quantization and estimates memory for the selected recipe. Treat the estimate as advisory. If a target-module name is not present on an architecture, the current fallback may use all-linear; inspect the saved run and log.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "generalization",
+      "title": "Generalization and the meaning of evaluation",
+      "short": "Generalization & evaluation",
+      "group": "Training & evaluation",
+      "type": "DEEP DIVE",
+      "icon": "refresh-cw",
+      "description": "Separate fitting your examples from evidence about behavior on new inputs.",
+      "sources": [
+        "generalization",
+        "splits",
+        "leakage",
+        "causal",
+        "api"
+      ],
+      "sections": [
+        [
+          "fit",
+          "Fitting examples and handling new inputs",
+          "<p>Generalization concerns performance beyond the examples used to fit a model. Overfitting describes a model fitting the training data more closely than is useful for unseen data. Different data, model capacity and optimization choices can change this balance.</p><p>For a language-model adapter, examine both the recorded objective and the behavior on representative requests. Success on the examples used for training is limited evidence about new inputs.</p>"
+        ],
+        [
+          "sets",
+          "Training, validation and test sets answer different questions",
+          "<table><thead><tr><th>Set</th><th>Role in the experiment</th></tr></thead><tbody><tr><td>Training</td><td>Examples used for parameter updates.</td></tr><tr><td>Validation</td><td>Held-out examples used while comparing recipes and making development choices.</td></tr><tr><td>Test</td><td>A separate evaluation reserved for judging the resulting choices.</td></tr></tbody></table><p>Check how each set was collected and whether related records overlap. A named split is not, by itself, evidence of independence.</p>"
+        ],
+        [
+          "score",
+          "A metric is a view of behavior",
+          "<p>Training loss summarizes the fitted objective. Validation loss can help reveal a widening gap between training and held-out behavior. Rising validation loss alongside falling training loss is a reason to investigate overfitting, rather than assume more updates will help.</p><p>Compare loss with consistent preprocessing and evaluation data. Also inspect task-specific behavior: answer correctness, useful formatting, failure cases and performance on less common inputs. A single average can leave important differences hidden.</p>"
+        ],
+        [
+          "magnite",
+          "What Magnite records",
+          "<p>Magnite records held-out evaluation loss when a validation split is enabled, at epoch boundaries. A split of zero does not produce that evidence. It does not automatically run a separate final test suite or certify the quality of a completed adapter.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "read-run",
+      "title": "Interpreting loss and runtime measurements",
+      "short": "Loss & measurements",
+      "group": "Training & evaluation",
+      "type": "DEEP DIVE",
+      "icon": "refresh-cw",
+      "description": "What the recorded signals mean, which comparisons are meaningful, and where uncertainty remains.",
+      "sources": [
+        "api",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "loss",
+          "Training loss is one signal",
+          "<p>Training loss measures the objective on training examples. A lower value by itself does not establish that the adapter performs better on new requests. Check outputs against your task and compare with the base model.</p>"
+        ],
+        [
+          "validation",
+          "Look for held-out evidence",
+          "<p>Enable a validation split before starting if you want held-out validation loss. With the split enabled, Magnite records evaluation loss at epoch boundaries. Runs without that measurement should show it as unavailable.</p><p>Compare runs using the same data split and prompts. If training loss improves while validation worsens, inspect possible overfitting or a mismatch between training and evaluation data before extending the run.</p>"
+        ],
+        [
+          "telemetry",
+          "Separate device and run readings",
+          "<table><thead><tr><th>Signal</th><th>How to read it</th></tr></thead><tbody><tr><td>Loss / validation</td><td>Recorded measurements for the selected run.</td></tr><tr><td>Steps per second</td><td>Training throughput, not generated chat tokens per second.</td></tr><tr><td>Device memory / utilization</td><td>Device-wide usage; other processes may contribute.</td></tr><tr><td>Missing value</td><td>Unknown or not measured, never an assumed zero.</td></tr></tbody></table>"
+        ],
+        [
+          "next-step",
+          "Choose the next experiment",
+          "<p>Inspect the event log for failures, preserve the run configuration, and test the adapter on fixed prompts. Use Observatory for comparisons. A cancelled job and a completed job are different outcomes; check the recorded status before using an output.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "memory",
+      "title": "Where training memory goes",
+      "short": "Memory & hardware",
+      "group": "Training & evaluation",
+      "type": "DEEP DIVE",
+      "icon": "cpu",
+      "description": "Weights, activations and optimizer state contribute to the memory a run needs.",
+      "sources": [
+        "install",
+        "limits",
+        "quant",
+        "api"
+      ],
+      "sections": [
+        [
+          "budget",
+          "Training has several memory costs",
+          "<p>Loading base weights is only part of the budget. Adapter training also needs intermediate activations and optimizer-related state. A model that fits for inference can still exceed memory during training.</p><p>Quantized base weights may reduce one part of the requirement. They do not remove all other allocations.</p>"
+        ],
+        [
+          "reduce",
+          "If a run runs out of memory",
+          "<ol><li>Read the reported error and the capability probe.</li><li>Stop other work that uses the same device.</li><li>Try a smaller batch or training sequence length.</li><li>Use a smaller compatible base model if necessary.</li><li>Consider a supported quantized training configuration.</li></ol><p>Preserve a copy of the recipe so you can tell which change helped. Avoid treating a resource estimate as a promise that a job will fit.</p>"
+        ],
+        [
+          "platform",
+          "Check the platform",
+          "<p>Supported devices and optional packages vary by build. Magnite’s Diagnostics view shows package availability and device measurements. Missing measurements remain unknown. The current app does not support QLoRA on macOS.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "lora",
+      "title": "LoRA, QLoRA and the base model",
+      "short": "LoRA & quantization",
+      "group": "Adaptation & inference",
+      "type": "CONCEPT",
+      "icon": "layers",
+      "description": "What adapter training changes, what stays frozen, and where memory savings come from.",
+      "sources": [
+        "lora",
+        "quant",
+        "workflow",
+        "limits"
+      ],
+      "sections": [
+        [
+          "lora-concept",
+          "A small addition to a frozen base",
+          "<p>LoRA keeps the pretrained weights fixed and learns smaller update matrices. The trained adapter works together with the base model. You can keep separate adapters for different tasks without copying a full trained model for each one.</p><div class=\"flow-diagram\"><div class=\"flow-node\">Base weights<br><small>Frozen</small></div><span class=\"flow-arrow\">+</span><div class=\"flow-node adapter\">LoRA adapter<br><small>Trainable</small></div><span class=\"flow-arrow\">→</span><div class=\"flow-node\">Adapted model<br><small>Base + adapter</small></div></div>"
+        ],
+        [
+          "rank",
+          "What rank changes",
+          "<p>Rank controls the size of the low-rank update. A larger rank adds trainable parameters and memory cost; it is not a guarantee of better output. Alpha affects update scaling, and target modules determine where the adapter is applied.</p>"
+        ],
+        [
+          "quantization",
+          "Where QLoRA fits",
+          "<p>Quantization stores base weights at lower precision. Training adapters on a quantized base can reduce memory needs, but still requires memory for activations and training state. Supported quantization methods depend on the backend and hardware.</p><div class=\"article-callout\"><strong>In Magnite</strong>Use the capability probe for the selected environment. QLoRA is not supported on macOS in the current app. A GGUF inference model is not a substitute for the transformer base used by this training flow.</div>"
+        ]
+      ]
+    },
+    {
+      "id": "rag",
+      "title": "Retrieval, context and model knowledge",
+      "short": "Retrieval & context",
+      "group": "Adaptation & inference",
+      "type": "CONCEPT",
+      "icon": "folder",
+      "description": "How local documents influence an answer without changing the model weights.",
+      "sources": [
+        "workflow",
+        "limits",
+        "privacy"
+      ],
+      "sections": [
+        [
+          "retrieval",
+          "How retrieval works in Magnite",
+          "<p>Knowledge imports documents, divides their text into chunks and stores searchable embeddings locally. A query retrieves relevant passages that can be added to the chat context. This does not update the chat model’s weights.</p>"
+        ],
+        [
+          "choose",
+          "Choose the workflow for your goal",
+          "<p>For changing reference material, try retrieval and check the passages it finds. For a repeated output behavior, consider an adapter and evaluate it on held-out examples. You can use both workflows, but evaluate each contribution separately.</p>"
+        ],
+        [
+          "local",
+          "What to check locally",
+          "<p>The first embedding-model use can require a download. Current chunk size and overlap controls are measured in words. Scanned PDFs need OCR that Magnite does not currently provide.</p><p>A retrieved passage does not guarantee a faithful response from the model. Read the source passage and verify important details. Removing a document from the index does not remove the original source file.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "adapters",
+      "title": "Adapters, base compatibility and portability",
+      "short": "Adapter compatibility",
+      "group": "Adaptation & inference",
+      "type": "REFERENCE",
+      "icon": "layers",
+      "description": "Understand what you are loading, switching and exporting with an adapter.",
+      "sources": [
+        "workflow",
+        "limits"
+      ],
+      "sections": [
+        [
+          "activate",
+          "Activate with the matching base",
+          "<p>Open Adapters after a successful run and activate the new adapter. Magnite uses its recorded base model with the PEFT/torch inference flow. Activation restarts the inference model; it is not a zero-restart multi-adapter switch.</p><p>Make sure the resolved base snapshot remains accessible. An adapter is not a standalone set of full model weights.</p>"
+        ],
+        [
+          "compare",
+          "Compare responses",
+          "<p>Use the evaluation prompts you set aside before training. Check formatting, correctness and task behavior. Also inspect whether an unrelated prompt has become less useful.</p><p>Deactivating the adapter unloads inference. Load the base model again to compare the unadapted behavior.</p>"
+        ],
+        [
+          "export",
+          "Export a portable copy",
+          "<p>Magnite exports an adapter archive with metadata and safetensors weights. It does not include the base model. Import expects a valid Magnite adapter export and rejects a duplicate registered ID.</p><p>Keep a known-good export before deleting an adapter. Record the dataset and run configuration alongside your result.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "first-run",
+      "title": "Anatomy of a training run",
+      "short": "Anatomy of a run",
+      "group": "Magnite reference",
+      "type": "WORKFLOW",
+      "icon": "graduation-cap",
+      "description": "How data, a base model, optimization and evaluation fit together inside Magnite.",
+      "sources": [
+        "workflow",
+        "api",
+        "limits"
+      ],
+      "sections": [
+        [
+          "before-you-start",
+          "The parts of an experiment",
+          "<p>A training run connects four decisions: which pretrained behavior you start with, which examples you supply, which parameters can change, and how you judge the result. The buttons in the app correspond to these decisions; a successful job only confirms that the computation completed.</p><p>The training base is a compatible Transformers model. A GGUF snapshot belongs to the inference workflow. The dataset supplies the examples, the recipe controls optimization, and the resulting adapter must be evaluated with its matching base.</p>"
+        ],
+        [
+          "prepare",
+          "Prepare the base and dataset",
+          "<p>In Library, download or locate compatible transformer weights. In Training, import a UTF-8 JSONL, CSV or text file. Review the imported row count and inspect the examples before starting.</p><p>A useful first dataset is consistent, easy to inspect, and specific to your task. Keep a separate set of evaluation prompts that the model will not train on.</p>"
+        ],
+        [
+          "configure",
+          "Make a small, named experiment",
+          "<p>Open the run configuration in Training. Select the base model and imported dataset. Give the adapter a descriptive name. Begin with LoRA and quantization None when your setup supports them.</p><p>Choose a batch size and sequence length that fit your machine. The resource estimate is advisory. A successful short run checks the workflow; it does not prove the recipe will generalize.</p><div class=\"article-callout\"><strong>Keep the comparison simple</strong>Record the dataset, base snapshot and configuration. Change one important setting at a time.</div>"
+        ],
+        [
+          "observe",
+          "Watch the run",
+          "<p>Follow status, steps and loss in Studio. Open Observatory to review history and compare runs. Enable a validation split when you have enough examples for a held-out set; a split of zero produces no held-out validation measurements.</p><p>Missing telemetry means unknown, not zero. Device-wide memory can include other applications. Use the event log to understand a failed or stopped run.</p>"
+        ],
+        [
+          "evaluate",
+          "Test and keep the result",
+          "<p>After a successful run, open Adapters and activate the new adapter with its matching base. Try your held-out prompts and compare the responses with the base model. Check the behavior you wanted to improve and a few unrelated prompts.</p><p>Export the adapter if you want a portable copy. The export does not include the full base model, which must remain accessible.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Investigating a training problem",
+      "short": "Troubleshooting",
+      "group": "Magnite reference",
+      "type": "TROUBLESHOOTING",
+      "icon": "file-text",
+      "description": "Interpret errors and unexpected behavior using your inputs, configuration and runtime.",
+      "sources": [
+        "troubleshoot",
+        "limits",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "import",
+          "Dataset import fails",
+          "<p>Check the encoding, file format and row number in the error. JSONL needs one valid JSON object per line. Prompt/response values need nonempty strings. The current CSV field-size limit can reject oversized records.</p>"
+        ],
+        [
+          "load",
+          "Base model or runtime is unavailable",
+          "<p>Confirm that training is using compatible transformer weights, not a GGUF-only snapshot. Review installed package versions in Diagnostics and the selected run’s capability message. Keep the original base snapshot accessible when activating an adapter.</p>"
+        ],
+        [
+          "memory",
+          "Training stops with a memory error",
+          "<p>Inspect the device-wide memory reading and other active work. Reduce batch size or sequence length, then retry a short run with one change recorded. Use a smaller model if the available memory remains insufficient.</p>"
+        ],
+        [
+          "result",
+          "Training completes but the output is poor",
+          "<p>Inspect your dataset for inconsistent targets and repeated examples. Compare the adapter against the base on prompts that were not used for training. Confirm that the intended adapter is active. A successful training status confirms execution, not model quality.</p>"
+        ],
+        [
+          "report",
+          "Collect a useful report",
+          "<p>Record the configuration and error text. Settings → Diagnostics offers a reviewable report with runtime details. Local logs can include file paths and model names; inspect what you copy before sharing.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "glossary",
+      "title": "Machine learning vocabulary",
+      "short": "Glossary",
+      "group": "Magnite reference",
+      "type": "REFERENCE",
+      "icon": "file-text",
+      "description": "Definitions of the terms used across model training, data preparation and inference.",
+      "sources": [
+        "workflow",
+        "api",
+        "lora"
+      ],
+      "sections": [
+        [
+          "terms",
+          "The working vocabulary",
+          "<table><thead><tr><th>Term</th><th>Meaning here</th></tr></thead><tbody><tr><td>Base model</td><td>The pretrained weights an adapter is built for.</td></tr><tr><td>Adapter</td><td>Learned task-specific parameters used with the base.</td></tr><tr><td>Dataset</td><td>The examples imported for a training job.</td></tr><tr><td>Token</td><td>A piece of text produced by the model’s tokenizer.</td></tr><tr><td>Sequence length</td><td>The training input-length limit after tokenization.</td></tr><tr><td>Epoch</td><td>A pass through the training examples.</td></tr><tr><td>Step</td><td>A recorded optimizer update in the run.</td></tr><tr><td>Validation</td><td>Evaluation on held-out examples.</td></tr><tr><td>Quantization</td><td>A lower-precision representation of model weights.</td></tr><tr><td>RAG</td><td>Retrieval-augmented generation: add relevant passages to the context.</td></tr></tbody></table>"
+        ],
+        [
+          "read-controls",
+          "Read controls in context",
+          "<p>A token count is not a word count. Training sequence length and a chat context window are related to input length but belong to different workflows. In Magnite’s retrieval controls, chunk size and overlap are currently measured in words.</p>"
+        ]
+      ]
+    }
+  ],
+  "examples": {
+    "jsonl": {
+      "name": "Prompt / response",
+      "filename": "magnite-format-example.jsonl",
+      "content": "{\"prompt\":\"Where is the equipment cabinet?\",\"response\":\"The equipment cabinet is in Room Cedar.\"}\n{\"prompt\":\"When is the library open?\",\"response\":\"Tuesday and Thursday, 18:00–21:00.\"}\n"
+    },
+    "messages": {
+      "name": "Chat JSONL",
+      "filename": "magnite-chat-example.jsonl",
+      "content": "{\"messages\":[{\"role\":\"user\",\"content\":\"Where is the equipment cabinet?\"},{\"role\":\"assistant\",\"content\":\"The equipment cabinet is in Room Cedar.\"}]}\n{\"messages\":[{\"role\":\"user\",\"content\":\"When is the library open?\"},{\"role\":\"assistant\",\"content\":\"Tuesday and Thursday, 18:00–21:00.\"}]}\n"
+    },
+    "csv": {
+      "name": "CSV",
+      "filename": "magnite-format-example.csv",
+      "content": "prompt,response\n\"Where is the equipment cabinet?\",\"The equipment cabinet is in Room Cedar.\"\n\"When is the library open?\",\"Tuesday and Thursday, 18:00–21:00.\"\n"
+    }
+  },
+  "related": {
+    "model-learning": [
+      "tokens-context",
+      "parameters",
+      "lora"
+    ],
+    "tokens-context": [
+      "dataset-format",
+      "data-quality",
+      "memory"
+    ],
+    "model-types": [
+      "model-learning",
+      "lora",
+      "adapters"
+    ],
+    "data-quality": [
+      "data-distribution",
+      "tokens-context",
+      "generalization"
+    ],
+    "data-distribution": [
+      "data-quality",
+      "generalization",
+      "dataset-format"
+    ],
+    "dataset-format": [
+      "tokens-context",
+      "data-quality",
+      "data-distribution"
+    ],
+    "parameters": [
+      "model-learning",
+      "generalization",
+      "memory"
+    ],
+    "generalization": [
+      "data-distribution",
+      "read-run",
+      "data-quality"
+    ],
+    "read-run": [
+      "generalization",
+      "parameters",
+      "memory"
+    ],
+    "memory": [
+      "tokens-context",
+      "lora",
+      "parameters"
+    ],
+    "lora": [
+      "model-learning",
+      "memory",
+      "adapters"
+    ],
+    "adapters": [
+      "model-types",
+      "lora",
+      "generalization"
+    ],
+    "rag": [
+      "tokens-context",
+      "lora",
+      "model-learning"
+    ],
+    "first-run": [
+      "model-learning",
+      "data-quality",
+      "read-run"
+    ],
+    "troubleshooting": [
+      "memory",
+      "data-quality",
+      "read-run"
+    ],
+    "glossary": [
+      "model-learning",
+      "tokens-context",
+      "data-distribution"
+    ]
+  },
+  "format_version": 1,
+  "reviewed": "2026-11-11"
+}

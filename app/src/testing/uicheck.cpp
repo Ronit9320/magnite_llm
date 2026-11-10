@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "testing/docs_tests.h"
 #include "testing/settings_tests.h"
 #include "testing/windowchrome_tests.h"
 #include "backend_client.h"
@@ -385,11 +386,13 @@ int runUiCheck(const QString &captures) {
     check(TrainingTime::duration(-1)=="—" && TrainingTime::duration(qInf())=="—" &&
           TrainingTime::duration(qQNaN())=="—",
           "unavailable training durations do not display invalid values");
+    if (qEnvironmentVariableIsSet("MAGNITE_DOCS_DESIGN_CHECK")) return runDocsChecks(captures)?1:0;
     Fixture fixture;
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
     if (qEnvironmentVariableIsSet("MAGNITE_SETTINGS_DESIGN_CHECK")) return runSettingsChecks(&client,captures)?1:0;
+    failures+=runDocsChecks();
     failures+=runWindowChromeChecks();
     failures+=runSettingsChecks(&client,QString());
     if (qEnvironmentVariableIsSet("MAGNITE_TRAINING_DESIGN_CHECK")) {
