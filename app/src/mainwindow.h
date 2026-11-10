@@ -12,6 +12,8 @@
 #include <memory>
 #include <functional>
 
+class SettingsWindow;
+class QSystemTrayIcon;
 class StudioCanvas;
 class BackendManager;
 class BackendClient;
@@ -43,6 +45,9 @@ public:
     void runSelfTest();
     void captureScreenshots(const QString &dir);
 
+protected:
+    void changeEvent(QEvent *event) override;
+
 private slots:
     void onBackendStarted();
     void onBackendError(QProcess::ProcessError error);
@@ -54,6 +59,7 @@ private:
     void chatErrorSelfTest(std::shared_ptr<int> failures, std::function<void()> finish, int scenario = 0);
     void setupUi();
     void startBackend();
+    void notifyCompletion(const QString &kind, bool success, bool preview=false);
     // First launch only: asks what to call the user (for the greeting). Never during verification runs.
     void askForNameIfNeeded();
     void loadPanelSettings();
@@ -96,8 +102,11 @@ private:
     ChatHistoryController *m_historyController = nullptr;
     std::unique_ptr<QTemporaryDir> m_chatTemp;   // verification runs keep their chats here, never in the real data folder
     SettingsPanel *m_settingsPanel;
+    SettingsWindow *m_settingsWindow=nullptr;
+    QSystemTrayIcon *m_notificationTray=nullptr;
 
     Sidebar *m_sidebar = nullptr;
+    QPushButton *m_themeButton=nullptr;
     QLabel *m_statusPill;
     QLabel *m_connectionDot = nullptr;
     QPropertyAnimation *m_crossfade;

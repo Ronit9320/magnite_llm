@@ -607,11 +607,13 @@ void ModelsPanel::onPullPoll() {
         if (jobStatus == "done") {
             resetDownload();
             setStatus("Download complete. Refreshing local models...", "ok");
+            emit downloadFinished(true);
             switchToLocalView();
             refresh();
         } else if (jobStatus == "error") {
             resetDownload();
             setStatus("Download failed: " + job.value("error").toString(), "error");
+            emit downloadFinished(false);
         } else if (jobStatus == "cancelled") {
             resetDownload();
             setStatus("Download cancelled. Partial files were removed.");

@@ -372,3 +372,25 @@ QWidget#sidebar[collapsed="true"] QPushButton#navBtn:checked { border: 1px solid
 QPushButton#themeToggle:focus, QPushButton#navBtn:hover,
 QPushButton#navBtn:focus, QPushButton#navBtn:checked:focus,
 QPushButton#historyNew:hover, QPushButton#historyNew:focus { border-color: transparent; }
+
+/* Settings utility window; the workspace remains underneath. */
+QDialog#settingsWindow { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
+QWidget#settingsPanel, QWidget#settingsContent { background: @surfaceFill; }
+QWidget#settingsNavigation { background: @canvasBackground; border-right: 1px solid @surfaceBorder; }
+QPushButton#settingsCategory { padding: 9px 12px; min-height: 22px; text-align: left; border: none; font-size: 12px; }
+QLabel#settingsNavTitle { font-family: @headingFont; font-size: 23px; padding: 0 10px 6px 10px; }
+QLabel#settingsEyebrow { color: @textMuted; font-size: 9px; letter-spacing: 2px; }
+QLabel#settingsTitle { font-family: @headingFont; font-size: 28px; }
+QLabel#settingsHint { color: @textMuted; font-size: 12px; }
+QLabel#settingsRowTitle { font-size: 13px; font-weight: 500; }
+QLabel#settingsFooter { color: @textMuted; font-size: 10px; padding: 16px 0; }
+QFrame#settingsRule { background: @surfaceBorder; border: none; }
+QFrame#settingsNote { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QLabel#settingsStorageSummary { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 18px; }
+QLabel#settingsVersion { font-family: @headingFont; font-size: 30px; padding: 12px 0; }
+QLabel#settingsDiagnosticSummary { font-size: 13px; padding: 12px 0; }
+QPushButton#settingsClose { padding: 0; min-height: 0; font-size: 22px; }
+QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget, QScrollArea#settingsScroll > QWidget > QWidget { background: transparent; border: none; }
+QPushButton#deleteAllChats { color: @statusError; }
+
+QPushButton[themeChoice="true"] { min-height: 143px; max-height: 143px; min-width: 110px; padding: 0; }

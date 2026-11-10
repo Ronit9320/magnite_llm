@@ -1021,6 +1021,7 @@ void TrainingPanel::onPollStatus() {
             }
             if (st=="done" || st=="error" || st=="cancelled") {
                 m_pollTimer->stop();
+                if(st!="cancelled")emit runFinished(st=="done");
                 finishJob(message,st=="done" ? "ok" : st=="cancelled" ? "warn" : "error");
             } else reportPollingStatus({});
         });

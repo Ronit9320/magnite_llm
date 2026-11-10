@@ -43,7 +43,8 @@ BasePanel::BasePanel(const QString &title, QWidget *parent, bool customHeader)
     content->setLayout(m_contentLayout);
     m_contentLayout->setContentsMargins(0,0,0,0);
     m_contentLayout->setSpacing(8);
-    if (title == "Chat") {
+    if (title == "Chat" || title == "Settings") {
+        if (title == "Settings") root->setContentsMargins(0,0,0,0);
         root->addWidget(content,1);
         return;
     }

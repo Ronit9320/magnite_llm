@@ -21,6 +21,17 @@
 #include "widgets/sidebarstate.h"
 #include "widgets/namedialog.h"
 #include "panels/settingspanel.h"
+#include "widgets/settingswindow.h"
+#include "widgets/brandmark.h"
+#include <QSystemTrayIcon>
+#include <QShortcut>
+#include <QSignalBlocker>
+#ifdef MAGNITE_DESKTOP_DBUS
+#include <QDBusConnection>
+#include <QDBusInterface>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#endif
 #include "theme.h"
 #include "widgets/studiocanvas.h"
 
@@ -145,6 +156,7 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+    m_settingsWindow->hide();
     m_chatPanel->flushSave();   // before anything is torn down: the last change must reach disk
     // Settle replies while the panels referenced by their callbacks still exist.
     m_backendClient->abortAll();
@@ -171,6 +183,7 @@ void MainWindow::setupUi() {
     auto *brandSeal = m_sidebar->brandSeal();
 
     auto *mode = new QPushButton("Dark mode", central);
+    m_themeButton=mode;
     mode->setObjectName("themeToggle");
     mode->setCheckable(true);
     mode->setChecked(Theme::isDark());
@@ -180,6 +193,7 @@ void MainWindow::setupUi() {
     connect(mode, &QPushButton::toggled, this, [this, mode](bool dark) {
         Theme::setDark(dark);
         QSettings().setValue("appearance/studio3Dark", dark);
+        QSettings().setValue("appearance/themeMode", dark?"dark":"light");
         mode->setText(dark ? "Light mode" : "Dark mode");
         m_sidebar->refreshIcons();
     });
@@ -240,8 +254,25 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_ragPanel);
     m_stack->addWidget(m_adaptersPanel);
     m_stack->addWidget(m_chatPanel);
-    m_stack->addWidget(m_settingsPanel);
+    m_settingsWindow=new SettingsWindow(m_settingsPanel,this);
+    m_settingsPanel->setBackendClient(m_backendClient);
+    m_settingsPanel->setChatContext(m_chatStore,m_chatPanel);
+    m_settingsPanel->setRuntimeLogs([this]{return m_backend->recentLogs();});
+    connect(m_settingsPanel,&SettingsPanel::modelsRequested,this,[this]{m_settingsWindow->accept();switchPanel(PanelModels);});
+    auto *settingsKey=new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma),this);
+    connect(settingsKey,&QShortcut::activated,this,[this]{switchPanel(PanelSettings);});
+    auto *newChatKey=new QShortcut(QKeySequence::New,this);
+    connect(newChatKey,&QShortcut::activated,this,[this]{if(!m_chatPanel->isBusy()){switchPanel(PanelChat);QMetaObject::invokeMethod(m_chatPanel,"onClearChat");}});
+    m_notificationTray=new QSystemTrayIcon(BrandMark::icon(),this);
+    m_notificationTray->setToolTip("Magnite");
+    connect(m_notificationTray,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason){showNormal();raise();activateWindow();});
+    connect(m_modelsPanel,&ModelsPanel::downloadFinished,this,[this](bool success){notifyCompletion("downloads",success);});
+    connect(m_trainingPanel,&TrainingPanel::runFinished,this,[this](bool success){notifyCompletion("training",success);});
+    connect(m_settingsPanel,&SettingsPanel::notificationPreviewRequested,this,[this]{notifyCompletion("training",true,true);});
 
+    connect(m_settingsPanel,&SettingsPanel::settingsChanged,this,[this,mode]{
+        QSignalBlocker block(mode);mode->setChecked(Theme::isDark());mode->setText(Theme::isDark()?"Light mode":"Dark mode");m_sidebar->refreshIcons();
+    });
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, m_chatPanel, &ChatPanel::reloadContextSettings);
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, [this]() {
@@ -311,6 +342,12 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::switchPanel(int index) {
+    if(index==PanelSettings) {
+        m_sidebar->setCurrentPanel(m_stack->currentIndex());
+        m_settingsWindow->openSettings();return;
+    }
+    if(index<0 || index>=m_stack->count())return;
+    if(m_settingsWindow->isVisible())m_settingsWindow->reject();
     // Persist whichever panel we're leaving, then show the new one. The nav
     // buttons mirror the active panel (also on programmatic switches, e.g.
     // selftest), then the incoming panel crossfades in.
@@ -406,7 +443,7 @@ void MainWindow::captureNextPanel(int index) {
     }
     switchPanel(index);
     QTimer::singleShot(300, this, [this, index]() {
-        const QPixmap pm = this->grab();
+        const QPixmap pm = index==PanelSettings ? m_settingsWindow->grab() : this->grab();
         const QString path = QStringLiteral("%1/panel-%2.png").arg(m_shotDir).arg(index);
         if (!pm.save(path)) {
             fprintf(stderr, "[screenshot] FAIL: %s\n", qUtf8Printable(path));
@@ -453,6 +490,7 @@ void MainWindow::onBackendStarted() {
     m_ragPanel->setBackendClient(m_backendClient);
     m_adaptersPanel->setBackendClient(m_backendClient);
     m_chatPanel->setBackendClient(m_backendClient);
+    if(m_settingsWindow->isVisible())m_settingsPanel->refreshDetails();
     connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels);
     connect(m_modelsPanel, &ModelsPanel::modelsChanged,
             m_trainingPanel, &TrainingPanel::refreshOptions);
@@ -490,6 +528,7 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
     m_backendClient->setBaseUrl(QString());
     m_backendClient->setAuthToken(QString());
     setPillState("error", msg);
+    m_settingsPanel->refreshDetails();
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
     else QMessageBox::warning(this, "Backend Error", msg);
 }
@@ -565,8 +604,8 @@ void MainWindow::runSelfTest() {
             switchPanel(i);
         }
 
-        checkC(m_stack->currentIndex() == PanelSettings, "navigated through all panels");
-        checkC(m_stack->count() == PanelCount, "panel count");
+        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelChat, "settings opens as a window above the current workspace");
+        checkC(m_stack->count() == PanelCount-1, "five workspaces plus a settings window");
 
         switchPanel(PanelTraining);
         m_trainingPanel->runDetailsRequested("selftest-missing-run");
@@ -577,7 +616,7 @@ void MainWindow::runSelfTest() {
         m_adaptersPanel->runDetailsRequested("selftest-missing-run");
         checkC(m_workspacePages->currentWidget()==m_runPanel,"adapters opens contextual run page");
         switchPanel(PanelSettings);
-        checkC(m_workspacePages->currentWidget()==m_stack,"sidebar exits run review");
+        checkC(m_workspacePages->currentWidget()==m_runPanel && m_settingsWindow->isVisible(),"settings preserves the contextual run review underneath");
 
         // Left menu: collapse button, the + under Playground and the busy state.
         {
@@ -1282,4 +1321,42 @@ void MainWindow::ragSelfTest(std::shared_ptr<int> failCount,
                         });
                 });
         });
+}
+
+void MainWindow::notifyCompletion(const QString &kind,bool success,bool preview) {
+    if(!preview && (verificationRun() || isActiveWindow() || m_settingsWindow->isActiveWindow()))return;
+    if(!preview && !QSettings().value("notifications/"+kind,true).toBool())return;
+    const QString title=kind=="training"?(success?"Training finished":"Training needs attention"):(success?"Model download finished":"Model download needs attention");
+    const QString message=preview?"Test notification — your workspace is ready.":title;
+    const bool sound=QSettings().value("notifications/sound",false).toBool();
+#ifdef MAGNITE_DESKTOP_DBUS
+    QDBusInterface service("org.freedesktop.Notifications","/org/freedesktop/Notifications","org.freedesktop.Notifications",QDBusConnection::sessionBus());
+    if(service.isValid()) {
+        QVariantMap hints;hints.insert("suppress-sound",!sound);if(sound)hints.insert("sound-name","complete");
+        const QList<QVariant> args={QString("Magnite"),uint(0),QString(),QString("Magnite"),message,QStringList(),hints,int(8000)};
+        auto *watcher=new QDBusPendingCallWatcher(service.asyncCallWithArgumentList("Notify",args),this);
+        connect(watcher,&QDBusPendingCallWatcher::finished,this,[this,preview](QDBusPendingCallWatcher *pending){
+            QDBusPendingReply<uint> reply=*pending;
+            if(reply.isError()&&preview)QMessageBox::information(m_settingsWindow,"Notifications unavailable","The desktop notification service rejected the request. Check your system notification settings.");
+            pending->deleteLater();
+        });return;
+    }
+#endif
+    if(!QSystemTrayIcon::isSystemTrayAvailable() || !QSystemTrayIcon::supportsMessages()) {
+        if(preview)QMessageBox::information(m_settingsWindow,"Notifications unavailable","This desktop session does not provide notifications. Completion status remains available in the relevant panel.");
+        return;
+    }
+    m_notificationTray->show();
+    m_notificationTray->showMessage("Magnite",message,success?QSystemTrayIcon::Information:QSystemTrayIcon::Warning,8000);
+    if(sound)QApplication::beep();
+}
+
+void MainWindow::changeEvent(QEvent *event) {
+    QMainWindow::changeEvent(event);
+    if(event->type()==QEvent::ApplicationPaletteChange && m_themeButton && m_sidebar) {
+        QSignalBlocker block(m_themeButton);
+        m_themeButton->setChecked(Theme::isDark());
+        m_themeButton->setText(Theme::isDark()?"Light mode":"Dark mode");
+        m_sidebar->refreshIcons();
+    }
 }

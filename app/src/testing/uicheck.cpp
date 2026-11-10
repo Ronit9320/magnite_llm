@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "testing/settings_tests.h"
 #include "backend_client.h"
 #include "theme.h"
 #include "panels/modelspanel.h"
@@ -345,6 +346,9 @@ struct Fixture : QTcpServer {
                             body+="data: {\"done\":true}\n\n";
                         }
                     }
+                    else if (path == "/system/info") body=R"({"version":"v0.1-preview","system":"Fixture OS","architecture":"test","python":"3.12","engines":{"llama.cpp":"test","vLLM":null,"torch":null,"PEFT":null},"device":{"device":"Fixture CPU","kind":"RAM","total_bytes":17179869184,"accelerator":"SYSTEM"}})";
+                    else if (path == "/system/storage") body=R"({"data_directory":"/fixture/magnite","model_cache":"/fixture/model-cache","workspace":{"bytes":820000000,"complete":true},"models":{"bytes":17800000000,"complete":false},"free_bytes":80000000000,"combined_locations":false})";
+                    else if (path == "/system/logs") body=R"({"text":"Runtime ready\nNo model loaded","truncated":false})";
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
                     else if (path == "/rag/status") body=R"({"documents":2,"chunks":36,"engine_ready":true,"model":"local embeddings"})";
@@ -372,6 +376,8 @@ int runUiCheck(const QString &captures) {
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+    if (qEnvironmentVariableIsSet("MAGNITE_SETTINGS_DESIGN_CHECK")) return runSettingsChecks(&client,captures)?1:0;
+    failures+=runSettingsChecks(&client,QString());
     if (qEnvironmentVariableIsSet("MAGNITE_TRAINING_DESIGN_CHECK")) {
         fixture.designPreview=true; fixture.serveActiveTraining=true;
         TrainingPanel training; training.resize(1245,1350); training.setBackendClient(&client); training.show(); pump(900);
@@ -693,19 +699,18 @@ int runUiCheck(const QString &captures) {
                       QString("%1 fits %2px in %3 mode").arg(name).arg(width).arg(dark?"dark":"light"));
                 capture(panel,QString("%1-%2-%3").arg(dark?"dark":"light").arg(width).arg(name));
                 if (name == "settings") {
-                    auto *tabs = settings.findChild<QTabWidget *>();
-                    for (int tab = 1; tab < tabs->count(); ++tab) {
-                        tabs->setCurrentIndex(tab); pump();
-                        capture(panel, QString("%1-%2-settings-tab-%3")
-                                .arg(dark?"dark":"light").arg(width).arg(tab));
+                    for (int category = 1; category < 8; ++category) {
+                        settings.selectCategory(category); pump();
+                        capture(panel, QString("%1-%2-settings-category-%3").arg(dark?"dark":"light").arg(width).arg(category));
                     }
-                    tabs->setCurrentIndex(0); pump();
+                    settings.selectCategory(3); pump();
                 }
                 if (width == 848 && (name == "settings" || name == "training")) {
                     if (name=="training") {
                         training.findChild<QPushButton *>("trainingSettingsToggle")->setChecked(true); pump();
                     }
                     auto *combo = panel->findChild<QComboBox *>();
+                    if(name=="settings")for(auto *candidate:settings.findChildren<QComboBox *>())if(candidate->accessibleName()=="Default inference engine")combo=candidate;
                     const int previous = combo->currentIndex();
                     combo->setFocus();
                     key(combo, Qt::Key_Down, Qt::AltModifier);
@@ -2245,7 +2250,7 @@ int runUiCheck(const QString &captures) {
     check(!hosted && engineCombo && engineCombo->count()==3,"Settings exposes only supported local engines");
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
-    settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
+    settings.selectCategory(1); pump(); capture(&settings,"settings-appearance"); settings.hide();
     LogoAnimation logo;
     check(logo.frameCount()==540 && logo.framesPerSecond()==30,"restored logo has 540 frames at 30 fps");
     auto renderLogo = [&logo](qint64 ms, int size = 420) {

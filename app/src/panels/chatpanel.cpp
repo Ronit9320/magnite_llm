@@ -303,7 +303,9 @@ bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
     if (watched == m_input && event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
-            && !(key->modifiers() & Qt::ShiftModifier)) {
+            && !(key->modifiers() & Qt::ShiftModifier)
+            && (QSettings().value("chat/sendKey","enter").toString() != "modified"
+                || (key->modifiers() & Qt::ControlModifier))) {
             if (!key->isAutoRepeat() && m_sendButton->isEnabled()) onSend();
             return true;
         }
@@ -927,14 +929,16 @@ void ChatPanel::markDirty() {
     m_saveTimer->start();
 }
 
-void ChatPanel::flushSave() {
-    if (!m_store || m_chatId.isEmpty() || !m_saveDirty) return;
+bool ChatPanel::flushSave() {
+    if (!m_store || m_chatId.isEmpty() || !m_saveDirty) return true;
     m_saveTimer->stop();
     m_saveDirty = false;
     if (!m_store->save(m_chatId, m_tree)) {
         m_saveDirty = true;   // still unsaved: the next flush (switching chats, closing) tries again
         setStatus("Could not save this chat: " + m_store->lastError(), "warn");
+        return false;
     }
+    return true;
 }
 
 bool ChatPanel::openChat(const QString &id) {
