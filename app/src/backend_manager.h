@@ -15,6 +15,7 @@ public:
     bool stopForUpdate();
     bool isRunning() const;
     QString baseUrl() const;
+    QString recentLogs() const;
     // Per-launch secret the backend requires on every request (adr/0009).
     QString apiToken() const { return m_apiToken; }
 
@@ -43,6 +44,7 @@ private:
     QProcess *m_process;
     quint16 m_port;
     QByteArray m_stderrBuffer;
+    QByteArray m_recentLogs;
     QString m_apiToken;
     bool m_started;
     bool m_stopping;

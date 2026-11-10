@@ -34,6 +34,7 @@ public:
 
 signals:
     void modelsChanged();
+    void downloadFinished(bool success);
     void loadRequested(const QString &id);
     void workspaceRequested(int panel);
 

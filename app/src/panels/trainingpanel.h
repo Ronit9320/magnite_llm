@@ -44,6 +44,7 @@ public:
 
 signals:
     void trainingCompleted();
+    void runFinished(bool success);
     void runDetailsRequested(const QString &jobId);
 
 public slots:

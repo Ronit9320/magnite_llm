@@ -33,6 +33,8 @@ public:
     std::optional<ChatTree> load(const QString &id) const;     // nullopt for anything missing, unreadable, too new or inconsistent
     bool rename(const QString &id, const QString &title);
     bool remove(const QString &id);
+    QString directory() const { return m_dir; }
+    bool exportAll(QJsonObject *result, QString *error) const;
     QString lastError() const { return m_lastError; }
 
     static QString titleFor(const ChatTree &tree);

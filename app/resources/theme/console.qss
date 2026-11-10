@@ -372,3 +372,40 @@ QWidget#sidebar[collapsed="true"] QPushButton#navBtn:checked { border: 1px solid
 QPushButton#themeToggle:focus, QPushButton#navBtn:hover,
 QPushButton#navBtn:focus, QPushButton#navBtn:checked:focus,
 QPushButton#historyNew:hover, QPushButton#historyNew:focus { border-color: transparent; }
+
+/* Settings utility window; the workspace remains underneath. */
+QDialog#settingsWindow { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
+QWidget#settingsPanel { background: transparent; }
+QWidget#settingsContent { background: @surfaceFill; border-top-right-radius: 13px; border-bottom-right-radius: 13px; }
+QWidget#settingsNavigation { background: @canvasBackground; border-right: 1px solid @surfaceBorder; border-top-left-radius: 13px; border-bottom-left-radius: 13px; }
+QPushButton#settingsCategory { padding: 9px 12px; min-height: 22px; text-align: left; border: none; font-size: 12px; }
+QLabel#settingsNavTitle { font-family: @headingFont; font-size: 23px; padding: 0 10px 6px 10px; }
+QLabel#settingsEyebrow { color: @textMuted; font-size: 9px; letter-spacing: 2px; }
+QLabel#settingsTitle { font-family: @headingFont; font-size: 28px; }
+QLabel#settingsHint { color: @textMuted; font-size: 12px; }
+QLabel#settingsRowTitle { font-size: 13px; font-weight: 500; }
+QLabel#settingsFooter { color: @textMuted; font-size: 10px; padding: 16px 0; }
+QFrame#settingsRule { background: @surfaceBorder; border: none; }
+QFrame#settingsNote { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QPushButton#settingsClose { padding: 0; min-height: 0; font-size: 22px; }
+QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget, QScrollArea#settingsScroll > QWidget > QWidget { background: transparent; border: none; }
+QPushButton#deleteAllChats { color: @statusError; }
+
+QPushButton[themeChoice="true"] { min-height: 143px; max-height: 143px; min-width: 110px; padding: 0; }
+
+/* Structured settings summaries and matching utility dialogs. */
+QDialog#settingsDetailDialog { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
+QFrame#settingsStorageOverview { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QLabel#settingsStorageTotal { font-family: @headingFont; font-size: 29px; }
+QLabel#settingsStorageFree { font-weight: 500; font-size: 12px; }
+QFrame#settingsMetric { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QFrame#settingsStorageOverview QFrame#settingsMetric { background: @surfaceFill; }
+QLabel#settingsMetricValue { font-family: @headingFont; font-size: 17px; }
+QFrame[metricTone="models"] QLabel#settingsHint { color: @accentLabel; }
+QFrame[metricTone="workspace"] QLabel#settingsHint { color: @comparisonSeries; }
+QLabel#settingsRuntimeStatus { color: @textMuted; background: @canvasBackground; padding: 6px 10px; border-radius: 10px; font-size: 11px; }
+QFrame#settingsEngineRow { background: @canvasBackground; border-radius: 6px; }
+QLabel#settingsEngineStatus { font-size: 11px; color: @textSecondary; }
+QLabel#settingsKeycap { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; font-size: 12px; padding: 7px 12px; min-width: 120px; }
+
+QLabel#settingsRuntimeStatus[connected="true"] { color: @statusSuccess; }
