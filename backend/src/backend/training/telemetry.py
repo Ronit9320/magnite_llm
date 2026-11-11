@@ -5,6 +5,7 @@ import csv
 import math
 import platform
 import subprocess
+import time
 
 
 def _number(value: str) -> float | None:
@@ -15,7 +16,43 @@ def _number(value: str) -> float | None:
         return None
 
 
+_CPU_MIN_WINDOW_SECONDS = 1.0
+_cpu_last_time: float | None = None
+_cpu_last_value: float | None = None
+
+
+def _cpu() -> tuple[float | None, int | None]:
+    """System-wide CPU over a window of at least a second.
+
+    Several callers share one counter (Training polls it, Settings reads it), and a window of a few
+    milliseconds reads as 0%. Callers inside the window get the last measured value; the very first
+    call only sets the baseline, so it is unknown rather than a guess.
+    """
+    global _cpu_last_time, _cpu_last_value
+    try:
+        import psutil
+        count = psutil.cpu_count(logical=True)
+        now = time.monotonic()
+        if _cpu_last_time is None:
+            psutil.cpu_percent(interval=None)
+            _cpu_last_time = now
+        elif now - _cpu_last_time >= _CPU_MIN_WINDOW_SECONDS:
+            percent = float(psutil.cpu_percent(interval=None))
+            _cpu_last_time = now
+            _cpu_last_value = percent if math.isfinite(percent) and 0 <= percent <= 100 else None
+    except (ImportError, OSError):
+        return None, None
+    return _cpu_last_value, count
+
+
 def device_telemetry() -> dict:
+    cpu_percent, cpu_count = _cpu()
+    data = _device_readings()
+    data["cpu_percent"], data["cpu_count"] = cpu_percent, cpu_count
+    return data
+
+
+def _device_readings() -> dict:
     """Report one GPU, never aggregate several devices or infer job allocation."""
     try:
         result = subprocess.run(
@@ -41,4 +78,4 @@ def device_telemetry() -> dict:
                 "accelerator": "SYSTEM", "total_bytes": total,
                 "used_bytes": max(0, total - available) if total is not None and available is not None else None,
                 "utilization_percent": None, "temperature_c": None, "power_w": None,
-                "detail": "GPU telemetry unavailable. Memory readings describe the local system."}
+                "detail": "GPU utilization is not exposed on this system. CPU and memory are system-wide."}

@@ -7,6 +7,7 @@
 # Model weights, vLLM and Ollama are not bundled. Resolved versions are recorded in
 # Contents/Resources/build-info/ inside the app.
 fastapi==0.141.1
+psutil==7.2.2
 uvicorn[standard]==0.52.4
 httpx==0.28.1
 pydantic==2.13.5

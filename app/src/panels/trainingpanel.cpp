@@ -308,7 +308,7 @@ void TrainingPanel::setupUi() {
     auto *deviceFrame=new QFrame(this); deviceFrame->setObjectName("trainingDeviceFrame");
     auto *deviceBody=new QVBoxLayout(deviceFrame); deviceBody->setContentsMargins(0,0,0,17); deviceBody->addLayout(deviceRow); compute->addWidget(deviceFrame);
     auto metricRow=[this,label,compute](const QString &name,const QString &key) {
-        auto *row=new QHBoxLayout(); row->addWidget(label(name,"trainingMicro")); row->addStretch();
+        auto *row=new QHBoxLayout(); auto *title=label(name,"trainingMicro"); m_computeValues[key+"Title"]=title; row->addWidget(title); row->addStretch();
         auto *value=label("—","trainingMono"); m_computeValues[key]=value; row->addWidget(value); compute->addLayout(row);
     };
     metricRow("GPU utilization","utilization");
@@ -1610,29 +1610,41 @@ void TrainingPanel::refreshTelemetry() {
     m_telemetryPending=true;
     m_client->get("/training/telemetry",[this](int status,const QJsonDocument &doc) {
         m_telemetryPending=false;
-        const auto data=status==200 && doc.isObject()?doc.object():QJsonObject();
-        auto number=[](QJsonValue value,int places=0) {
-            return value.isDouble() && std::isfinite(value.toDouble()) ? QString::number(value.toDouble(),'f',places) : QString("—");
-        };
-        auto gb=[&number](QJsonValue bytes) { return bytes.isDouble()?number(bytes.toDouble()/(1024.0*1024*1024),1)+" GB":QString("—"); };
-        m_computeValues["accelerator"]->setText(data["accelerator"].toString("LOCAL"));
-        m_computeValues["device"]->setText(data["device"].toString("Device telemetry unavailable"));
-        m_computeValues["capacity"]->setText(gb(data["total_bytes"])+" "+data["kind"].toString("memory"));
-        m_computeValues["utilization"]->setText(data["utilization_percent"].isDouble()?number(data["utilization_percent"])+"%":"—");
-        m_computeValues["memory"]->setText(gb(data["used_bytes"])+" / "+gb(data["total_bytes"]));
-        const double used=data["used_bytes"].toDouble(),total=data["total_bytes"].toDouble();
-        auto *memory=findChild<QProgressBar *>("trainingDeviceMemory");
-        memory->setValue(total>0?qBound(0,qRound(used/total*100),100):0);
-        m_computeValues["memoryDetail"]->setText(data["used_bytes"].isDouble()&&total>0?"Device-wide usage       Free "+gb(qMax(0.0,total-used)):"Device-wide memory unavailable");
-        m_computeValues["temperature"]->setText("Temperature   "+(data["temperature_c"].isDouble()?number(data["temperature_c"])+"°C":"—"));
-        m_computeValues["power"]->setText("Power   "+(data["power_w"].isDouble()?number(data["power_w"])+" W":"—"));
-        m_computeCard->setToolTip(data["detail"].toString("This backend does not expose device telemetry."));
-        const int active=data["utilization_percent"].isDouble()?qRound(data["utilization_percent"].toDouble()/100*32):0;
-        for (int i=0;i<m_utilSegments.size();++i) {
-            auto *bar=m_utilSegments[i]; const bool lit=i<active;
-            if (bar->property("lit").toBool()!=lit) { bar->setProperty("lit",lit); bar->style()->unpolish(bar); bar->style()->polish(bar); }
-        }
+        applyTelemetry(status==200 && doc.isObject()?doc.object():QJsonObject());
     });
+}
+
+QString TrainingPanel::computeText(const QString &key) const { auto *value=m_computeValues.value(key); return value?value->text():QString(); }
+int TrainingPanel::litUtilizationSegments() const { int lit=0; for (auto *bar:m_utilSegments) lit+=bar->property("lit").toBool()?1:0; return lit; }
+
+void TrainingPanel::applyTelemetry(const QJsonObject &data) {
+    auto number=[](QJsonValue value,int places=0) {
+        return value.isDouble() && std::isfinite(value.toDouble()) ? QString::number(value.toDouble(),'f',places) : QString("—");
+    };
+    auto gb=[&number](QJsonValue bytes) { return bytes.isDouble()?number(bytes.toDouble()/(1024.0*1024*1024),1)+" GB":QString("—"); };
+    m_computeValues["accelerator"]->setText(data["accelerator"].toString("LOCAL"));
+    m_computeValues["device"]->setText(data["device"].toString("Device telemetry unavailable"));
+    m_computeValues["capacity"]->setText(gb(data["total_bytes"])+" "+data["kind"].toString("memory"));
+    // GPU utilization when the device reports it; otherwise system CPU, never a guess.
+    const bool gpuShown=data["utilization_percent"].isDouble();
+    const QJsonValue shown=gpuShown?data["utilization_percent"]:data["cpu_percent"];
+    m_computeValues["utilizationTitle"]->setText(!gpuShown && shown.isDouble()?"CPU utilization":"GPU utilization");
+    m_computeValues["utilization"]->setText(shown.isDouble()?number(shown)+"%":"—");
+    m_computeValues["memory"]->setText(gb(data["used_bytes"])+" / "+gb(data["total_bytes"]));
+    const double used=data["used_bytes"].toDouble(),total=data["total_bytes"].toDouble();
+    auto *memory=findChild<QProgressBar *>("trainingDeviceMemory");
+    memory->setValue(total>0?qBound(0,qRound(used/total*100),100):0);
+    m_computeValues["memoryDetail"]->setText(data["used_bytes"].isDouble()&&total>0?"Device-wide usage       Free "+gb(qMax(0.0,total-used)):"Device-wide memory unavailable");
+    m_computeValues["temperature"]->setText("Temperature   "+(data["temperature_c"].isDouble()?number(data["temperature_c"])+"°C":"—"));
+    m_computeValues["power"]->setText("Power   "+(data["power_w"].isDouble()?number(data["power_w"])+" W":"—"));
+    m_computeCard->setToolTip(data["detail"].toString("This backend does not expose device telemetry."));
+    // Any measured load above zero lights at least one segment so light activity stays visible.
+    const double level=shown.isDouble()?qBound(0.0,shown.toDouble(),100.0):0.0;
+    const int active=level>0?qMax(1,qRound(level/100*32)):0;
+    for (int i=0;i<m_utilSegments.size();++i) {
+        auto *bar=m_utilSegments[i]; const bool lit=i<active;
+        if (bar->property("lit").toBool()!=lit) { bar->setProperty("lit",lit); bar->style()->unpolish(bar); bar->style()->polish(bar); }
+    }
 }
 
 void TrainingPanel::openRunDialog() {

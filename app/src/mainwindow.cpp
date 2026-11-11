@@ -469,7 +469,9 @@ void MainWindow::captureNextPanel(int index) {
         return;
     }
     switchPanel(index);
-    QTimer::singleShot(300, this, [this, index]() {
+    // MAGNITE_SCREENSHOT_DWELL_MS keeps each panel up long enough for its polled data to arrive.
+    const int dwell = qBound(300, qEnvironmentVariable("MAGNITE_SCREENSHOT_DWELL_MS", "300").toInt(), 30000);
+    QTimer::singleShot(dwell, this, [this, index]() {
         const QPixmap pm = index==PanelSettings ? m_settingsWindow->grab() : this->grab();
         const QString path = QStringLiteral("%1/panel-%2.png").arg(m_shotDir).arg(index);
         if (!pm.save(path)) {

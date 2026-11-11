@@ -77,7 +77,9 @@ int main(int argc, char *argv[]) {
     // Dev tool: capture every panel to <dir>/panel-<n>.png, then exit.
     if (argc > 2 && QString(argv[1]) == "--screenshot") {
         if (qEnvironmentVariableIsSet("MAGNITE_SCREENSHOT_COMPACT")) window.resize(1024,680);
-        QTimer::singleShot(400, &window, [&window, dir = QString(argv[2])]() {
+        // MAGNITE_SCREENSHOT_DELAY_MS waits for the backend so panels capture live data.
+        const int delay = qBound(400, qEnvironmentVariable("MAGNITE_SCREENSHOT_DELAY_MS", "400").toInt(), 120000);
+        QTimer::singleShot(delay, &window, [&window, dir = QString(argv[2])]() {
             window.captureScreenshots(dir);
         });
     }

@@ -35,7 +35,12 @@ def memory_budget() -> dict:
             return {"kind": "System RAM", "available_bytes": status.available, "total_bytes": status.total}
         if sys.platform == "darwin":
             total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], timeout=2))
-            return {"kind": "Unified/system RAM", "available_bytes": None, "total_bytes": total}
+            try:
+                import psutil
+                available = int(psutil.virtual_memory().available)
+            except (ImportError, OSError, ValueError):
+                available = None
+            return {"kind": "Unified/system RAM", "available_bytes": available, "total_bytes": total}
         values = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
         return {"kind": "System RAM", "available_bytes": int(values["MemAvailable"].split()[0])*1024,
                 "total_bytes": int(values["MemTotal"].split()[0])*1024}

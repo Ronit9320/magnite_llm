@@ -42,6 +42,11 @@ public:
     QString settingsJson() const override;
     void applySettingsJson(const QString &json) override;
 
+    // Renders one /training/telemetry payload; also the seam the UI checks drive with fixtures.
+    void applyTelemetry(const QJsonObject &data);
+    QString computeText(const QString &key) const;
+    int litUtilizationSegments() const;
+
 signals:
     void trainingCompleted();
     void runFinished(bool success);

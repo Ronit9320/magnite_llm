@@ -601,6 +601,20 @@ int runUiCheck(const QString &captures) {
     models.setBackendClient(&client); training.setBackendClient(&client);
     knowledge.setBackendClient(&client); adapters.setBackendClient(&client); chat.setBackendClient(&client);
     pump(200);
+    {
+        auto telemetry=[](const char *json) { return QJsonDocument::fromJson(json).object(); };
+        training.applyTelemetry(telemetry(R"({"accelerator":"CUDA","device":"GPU","utilization_percent":94,"cpu_percent":10,"used_bytes":6442450944,"total_bytes":12884901888})"));
+        check(training.computeText("utilizationTitle")=="GPU utilization" && training.computeText("utilization")=="94%" && training.litUtilizationSegments()==30,"compute card prefers the GPU reading when the device reports one");
+        training.applyTelemetry(telemetry(R"({"accelerator":"SYSTEM","device":"Local system","cpu_percent":40,"used_bytes":6000000000,"total_bytes":8000000000})"));
+        check(training.computeText("utilizationTitle")=="CPU utilization" && training.computeText("utilization")=="40%" && training.litUtilizationSegments()==13,"compute card shows system CPU when there is no GPU reading");
+        check(training.computeText("memory")=="5.6 GB / 7.5 GB","compute card shows measured system memory");
+        training.applyTelemetry(telemetry(R"({"accelerator":"SYSTEM","cpu_percent":1.2})"));
+        check(training.litUtilizationSegments()==1,"any measured utilization above zero lights at least one segment");
+        training.applyTelemetry(telemetry(R"({"accelerator":"SYSTEM","cpu_percent":0})"));
+        check(training.computeText("utilization")=="0%" && training.litUtilizationSegments()==0,"zero utilization lights nothing but still reads 0%");
+        training.applyTelemetry(telemetry("{}"));
+        check(training.computeText("utilizationTitle")=="GPU utilization" && training.computeText("utilization")=="—" && training.litUtilizationSegments()==0,"compute card never invents a utilization value");
+    }
     const QList<QPair<QString,QWidget *>> panels={{"library",&models},{"training",&training},{"knowledge",&knowledge},{"adapters",&adapters},{"chat",&chat},{"settings",&settings}};
     bool allSwitches=true;
     for (const auto &entry : panels)
