@@ -4,6 +4,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.inference.supervisor import get_supervisor
 from backend.paths import app_home
 from backend.textcheck import MAX_CONTENT_CHARS
 from backend.training.datasets import DatasetStore
@@ -57,11 +58,26 @@ def _training_setup() -> None:
 @training_router.post("/start", response_model=TrainingJob, status_code=202)
 def start_training(cfg: TrainingConfig):
     try:
-        return _get_manager().start(cfg)
+        job = _get_manager().start(cfg)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return job.model_copy(update={"warnings": _start_warnings()})
+
+
+_MEMORY_WARNING = ("A chat model is loaded and shares memory with training. "
+                   "If training is killed, unload the chat model first.")
+
+
+def _start_warnings() -> list[str]:
+    """Training runs in its own process but shares the machine's memory with a loaded chat model."""
+    try:
+        if get_supervisor().status().loaded_model:
+            return [_MEMORY_WARNING]
+    except Exception:  # noqa: BLE001 -- a warning must never get in the way of starting
+        pass
+    return []
 
 
 @training_router.post("/estimate")

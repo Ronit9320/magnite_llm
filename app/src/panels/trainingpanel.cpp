@@ -961,12 +961,16 @@ void TrainingPanel::onStart() {
             m_startButton->setText("Training…");
             m_jobId = doc.object()["id"].toString();
             m_selectedRunId=m_jobId; closeRunDialog(); setStatus({});
+            QStringList warnings;
+            for (const QJsonValue &w : doc.object()["warnings"].toArray()) warnings << w.toString();
+            if (!warnings.isEmpty()) setStatus(warnings.join(' '), "warn");   // shown, never a refusal
             refreshJobs();
             m_lastMessage.clear();
             m_progress->setValue(0);
             m_progressLabel->setText("Queued");
             m_metrics->setText("Waiting for the first training step.");
             addRunEvent("Training request accepted. Waiting for measured steps.","info",m_jobId,"queued");
+            for (const QString &w : warnings) addRunEvent(w,"warn",m_jobId,"start-warning");
             m_stopButton->setEnabled(true);
             m_pollTimer->start();
             onPollStatus();

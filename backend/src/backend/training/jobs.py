@@ -11,7 +11,9 @@ from backend.database import add_notice, connection, open_or_quarantine
 from backend.adapters.store import AdapterStore
 from backend.training.datasets import DatasetStore
 from backend.training.schemas import MAX_TOTAL_STEPS, TrainingConfig, TrainingJob
-from backend.training.trainer import quantization_support, run_training, TrainingCancellation
+from backend.training import runner
+from backend.training.runner import run_training_isolated as run_training
+from backend.training.trainer import quantization_support, TrainingCancellation
 
 
 def _now() -> str:
@@ -23,6 +25,8 @@ class TrainingJobManager:
 
     # While a job runs its state is saved this often, so a crash keeps the last known step.
     _PROGRESS_SAVE_SECONDS = 5.0
+    # On shutdown a training process gets this long to stop by itself before it is killed.
+    _WORKER_GRACE_SECONDS = 5.0
 
     def __init__(self, data_dir: str, adapter_store: AdapterStore,
                  dataset_store: DatasetStore):
@@ -118,6 +122,7 @@ class TrainingJobManager:
                     job.finished_at = _now()
                 self._persist(job)
             self._queue.put(None)
+        runner.terminate_all(self._WORKER_GRACE_SECONDS)
         self._worker.join(timeout=2)
 
     def _validate(self, cfg: TrainingConfig) -> None:

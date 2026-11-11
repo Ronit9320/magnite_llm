@@ -61,6 +61,8 @@ class TrainingJob(BaseModel):
     created_at: str = ""
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    # Notes for the person who started the job; only the start response fills them.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DatasetIngestRequest(BaseModel):

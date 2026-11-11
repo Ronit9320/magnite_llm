@@ -8,6 +8,8 @@ import json
 import os
 import signal
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -835,3 +837,794 @@ class Finding12FastShutdown(unittest.IsolatedAsyncioTestCase):
             server.request_exit()
         abort.assert_called_once()
         self.assertTrue(server.should_exit)
+
+
+def _fake_ml(model, trainer_factory=None):
+    """The ML stack replaced by mocks, as test_backend_audit does; returns (ml, peft, datasets)."""
+    import types
+    ml = {name: MagicMock() for name in ('torch', 'AutoModelForCausalLM', 'AutoTokenizer',
+          'BitsAndBytesConfig', 'DataCollatorForLanguageModeling', 'TrainingArguments', 'Trainer')}
+    ml['TrainerCallback'] = object
+    ml['torch'].cuda.is_available.return_value = False
+    ml['AutoModelForCausalLM'].from_pretrained.return_value = model
+    if trainer_factory is not None:
+        ml['Trainer'].side_effect = trainer_factory
+    peft = types.ModuleType('peft')
+    peft.LoraConfig = MagicMock()
+    peft.get_peft_model = MagicMock(return_value=model)
+    peft.prepare_model_for_kbit_training = MagicMock(return_value=model)
+    datasets = types.ModuleType('datasets')
+    datasets.Dataset = MagicMock()
+    return ml, peft, datasets
+
+
+class Break2TrainerSplit(unittest.TestCase):
+    """break-02 Task B1: run_training = train_lora + apply_event + publish_adapter."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "adapters").mkdir()
+        self.store = AdapterStore(str(self.root / "adapters.db"))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def job(self, job_id="j1"):
+        return TrainingJob(id=job_id, name="n", status="queued", base_model="b", dataset_id="d")
+
+    def test_the_new_names_exist(self):
+        from backend.training import trainer
+        for name in ("TrainOutcome", "train_lora", "apply_event", "publish_adapter"):
+            self.assertTrue(hasattr(trainer, name), name)
+
+    def test_apply_event_drops_a_nan_loss(self):
+        from backend.training.trainer import apply_event
+        job = self.job()
+        apply_event(job, {"log": {"step": 2, "logs": {"loss": 0.5}, "elapsed": 1.0, "epoch": 0.1}})
+        apply_event(job, {"log": {"step": 3, "logs": {"loss": float("nan")}, "elapsed": 2.0, "epoch": 0.2}})
+        apply_event(job, {"log": {"step": 4, "logs": {"loss": float("inf")}, "elapsed": 3.0, "epoch": 0.3}})
+        self.assertEqual(job.loss, 0.5)
+        self.assertEqual([h["step"] for h in job.history], [2])
+
+    def test_apply_event_records_a_finite_loss_and_step(self):
+        from backend.training.trainer import apply_event
+        job = self.job()
+        apply_event(job, {"total_steps": 10})
+        apply_event(job, {"log": {"step": 3, "logs": {"loss": 1.25, "grad_norm": 0.5}, "elapsed": 1.5, "epoch": 0.3}})
+        self.assertEqual((job.current_step, job.loss), (3, 1.25))
+        self.assertEqual(job.history[0]["grad_norm"], 0.5)
+        self.assertEqual(job.message, "Training (step 3/10): loss=1.2500")
+
+    def test_apply_event_applies_status_message_progress_and_steps(self):
+        from backend.training.trainer import apply_event
+        job = self.job()
+        apply_event(job, {"status": "running", "message": "Loading base model", "progress": 2.0})
+        self.assertEqual((job.status, job.message, job.progress), ("running", "Loading base model", 2.0))
+        self.assertTrue(job.started_at)
+        apply_event(job, {"current_step": 4, "progress": 40.0})
+        apply_event(job, {"unknown": "ignored"})
+        self.assertEqual((job.current_step, job.progress), (4, 40.0))
+
+    def outcome(self, **over):
+        from backend.training.trainer import TrainOutcome
+        adapter_dir = self.root / "adapters" / "adapter-j1"
+        adapter_dir.mkdir(exist_ok=True)
+        (adapter_dir / "adapter_model.safetensors").write_bytes(b"x" * 2048)
+        values = dict(adapter_dir=str(adapter_dir), architecture="Arch", size_mb=0.0, global_step=5,
+                      total_steps=5, training_loss=0.7, resolved_base="/cache/base")
+        values.update(over)
+        return TrainOutcome(**values)
+
+    def test_publish_adapter_registers_and_finishes_the_job(self):
+        from backend.training.trainer import TrainingCancellation, publish_adapter
+        job = self.job()
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", name="mine")
+        publish_adapter(job, cfg, self.outcome(), self.store, TrainingCancellation())
+        rec = self.store.get("adapter:j1")
+        self.assertEqual((job.status, job.adapter_id, job.loss, job.progress), ("done", "adapter:j1", 0.7, 100.0))
+        self.assertEqual((rec.name, rec.base_model, rec.architecture, rec.status), ("mine", "org/base", "Arch", "ready"))
+        self.assertEqual(rec.meta["resolved_base_model"], "/cache/base")
+        self.assertEqual(rec.meta["current_step"], 5)
+
+    def test_publish_adapter_never_registers_for_a_cancelled_job(self):
+        from backend.training.trainer import TrainingCancellation, _Cancelled, publish_adapter
+        cancel = TrainingCancellation()
+        cancel.set()
+        job = self.job()
+        out = self.outcome()
+        with self.assertRaises(_Cancelled):
+            publish_adapter(job, TrainingConfig(base_model="b", dataset_id="d"), out, self.store, cancel)
+        self.assertIsNone(self.store.get("adapter:j1"))
+        self.assertFalse(Path(out.adapter_dir).exists())
+
+    def test_a_nan_final_loss_does_not_replace_the_last_good_one(self):
+        from backend.training.trainer import TrainingCancellation, publish_adapter
+        job = self.job()
+        job.loss = 0.9
+        publish_adapter(job, TrainingConfig(base_model="b", dataset_id="d"),
+                        self.outcome(training_loss=float("nan")), self.store, TrainingCancellation())
+        self.assertEqual((job.status, job.loss), ("done", 0.9))
+
+    def test_train_lora_reports_events_and_returns_the_outcome(self):
+        import types
+        from backend.training.trainer import TrainingCancellation, train_lora
+        model = MagicMock()
+        model.config.architectures = ["TestModel"]
+        model.save_pretrained.side_effect = lambda p: Path(p, "adapter_model.safetensors").write_bytes(b"y" * (2 * 1024 * 1024))
+        callbacks = []
+
+        def make_trainer(**kw):
+            callbacks.extend(kw["callbacks"])
+            trainer = MagicMock()
+
+            def train():
+                cb = callbacks[0]
+                state = types.SimpleNamespace(max_steps=2, global_step=0, epoch=0.0)
+                control = types.SimpleNamespace(should_training_stop=False)
+                cb.on_train_begin(None, state, control)
+                for step in (1, 2):
+                    state.global_step = step
+                    cb.on_log(None, state, control, logs={"loss": float("nan") if step == 1 else 0.4, "extra": object()})
+                    cb.on_step_end(None, state, control)
+                return types.SimpleNamespace(global_step=2, training_loss=0.4)
+            trainer.train.side_effect = train
+            return trainer
+
+        ml, peft, datasets = _fake_ml(model, make_trainer)
+        events = []
+        cfg = TrainingConfig(base_model="test/base", dataset_id="d", max_steps=2, target_modules="all-linear")
+        with patch("backend.training.trainer._require_ml", return_value=ml), \
+                patch("backend.training.trainer._resolve_base", return_value="/resolved"), \
+                patch("backend.training.trainer._tokenize_jsonl", return_value=[{"input_ids": [1]}]), \
+                patch.dict("sys.modules", {"peft": peft, "datasets": datasets}):
+            outcome = train_lora(cfg, "unused.jsonl", str(self.root / "adapters"), "j9", events.append,
+                                 TrainingCancellation())
+        self.assertEqual(events[0]["status"], "running")
+        self.assertEqual(events[0]["message"], "Loading base model")
+        self.assertIn({"total_steps": 2}, events)
+        logs = [e["log"] for e in events if "log" in e]
+        self.assertEqual([entry["step"] for entry in logs], [1, 2])
+        self.assertNotIn("extra", logs[1]["logs"])          # only plain numbers cross the process boundary
+        self.assertEqual(outcome.adapter_dir, str(self.root / "adapters" / "adapter-j9"))
+        self.assertEqual((outcome.architecture, outcome.global_step, outcome.total_steps, outcome.resolved_base),
+                         ("TestModel", 2, 2, "/resolved"))
+        self.assertGreater(outcome.size_mb, 0)
+        self.assertEqual(events[-1]["message"], "Saving adapter")
+
+
+class Break2Worker(unittest.TestCase):
+    """break-02 Task B2: the training child process speaks one JSON object per stdout line."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.spec = self.root / "spec.json"
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", max_steps=3)
+        self.spec.write_text(json.dumps({"cfg": cfg.model_dump(), "dataset_path": "data.jsonl",
+                                         "adapter_dir_root": str(self.root / "adapters"), "job_id": "w1"}))
+        watch = patch("backend.training.train_worker._start_parent_watch")
+        self.watch = watch.start()
+        self.addCleanup(watch.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def run_worker(self, train, stdin_text=""):
+        import io
+        from backend.training import train_worker
+        out = io.StringIO()
+        with patch.object(train_worker, "train_lora", train):
+            code = train_worker.main([str(self.spec)], out=out, stdin=io.StringIO(stdin_text))
+        return code, [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+
+    def outcome(self):
+        from backend.training.trainer import TrainOutcome
+        return TrainOutcome(adapter_dir="/a/adapter-w1", architecture="Arch", size_mb=1.5, global_step=3,
+                            total_steps=3, training_loss=0.5, resolved_base="/cache/base")
+
+    def test_progress_events_then_one_result_line(self):
+        seen = {}
+
+        def train(cfg, dataset_path, root, job_id, report, cancel, base=None):
+            seen.update(cfg=cfg, dataset_path=dataset_path, root=root, job_id=job_id)
+            report({"message": "Loading base model"})
+            report({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+            return self.outcome()
+
+        code, lines = self.run_worker(train)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines[:2], [{"message": "Loading base model"},
+                                     {"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}}])
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[2]["result"], "ok")
+        self.assertEqual(lines[2]["outcome"]["adapter_dir"], "/a/adapter-w1")
+        self.assertEqual(lines[2]["outcome"]["resolved_base"], "/cache/base")
+        self.assertIsInstance(seen["cfg"], TrainingConfig)
+        self.assertEqual((seen["cfg"].max_steps, seen["dataset_path"], seen["job_id"]), (3, "data.jsonl", "w1"))
+        self.watch.assert_called_once()
+
+    def test_an_exception_becomes_one_error_line(self):
+        def train(*args, **kwargs):
+            raise RuntimeError("out of luck")
+        code, lines = self.run_worker(train)
+        self.assertEqual(code, 1)
+        self.assertEqual(lines, [{"error": "out of luck"}])
+
+    def test_cancel_on_stdin_sets_the_event_and_reports_cancelled(self):
+        from backend.training.trainer import _Cancelled
+        seen = {}
+
+        def train(cfg, dataset_path, root, job_id, report, cancel, base=None):
+            seen["set"] = cancel.wait(5)
+            raise _Cancelled()
+        code, lines = self.run_worker(train, stdin_text="cancel\n")
+        self.assertTrue(seen["set"])
+        self.assertEqual((code, lines), (0, [{"result": "cancelled"}]))
+
+    def test_bad_usage_exits_2(self):
+        import io
+        from backend.training import train_worker
+        out = io.StringIO()
+        self.assertEqual(train_worker.main([], out=out, stdin=io.StringIO("")), 2)
+        self.assertEqual(train_worker.main([str(self.root / "missing.json")], out=out, stdin=io.StringIO("")), 2)
+        self.assertEqual(len([line for line in out.getvalue().splitlines() if '"error"' in line]), 2)
+
+
+_FAKE_WORKER_HEAD = '''
+import json, os, signal, sys, threading, time
+spec = json.load(open(sys.argv[1]))
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+def adapter_dir():
+    d = os.path.join(spec["adapter_dir_root"], "adapter-" + spec["job_id"])
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "adapter_model.safetensors"), "wb").write(b"x")
+    return d
+def ok():
+    emit({"result": "ok", "outcome": {"adapter_dir": adapter_dir(), "architecture": "Arch", "size_mb": 0.1,
+          "global_step": 2, "total_steps": 2, "training_loss": 0.5, "resolved_base": "/b"}})
+cancel = threading.Event()
+def read_stdin():
+    for line in sys.stdin:
+        if line.strip() == "cancel":
+            cancel.set()
+threading.Thread(target=read_stdin, daemon=True).start()
+'''
+
+
+class Break2Runner(unittest.TestCase):
+    """break-02 Task B3: the job manager supervises a training child process."""
+
+    def setUp(self):
+        from backend.training import runner
+        self.runner = runner
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "adapters").mkdir()
+        self.store = AdapterStore(str(self.root / "adapters.db"))
+        self.specs = []
+        # These tests use fake workers; whether torch is installed here must not matter
+        # (CI's base install has no [ml] extras). One test below restores the real check.
+        patcher = patch("backend.training.runner.require_ml_installed")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def script(self, body, name="worker.py"):
+        path = self.root / name
+        path.write_text(_FAKE_WORKER_HEAD + body)
+        return path
+
+    def command(self, *scripts):
+        """Patch the worker command: the n-th launch runs the n-th script (the last one repeats)."""
+        launches = []
+
+        def make(spec_path):
+            self.specs.append(spec_path)
+            script = scripts[min(len(launches), len(scripts) - 1)]
+            launches.append(script)
+            return [sys.executable, str(script), spec_path]
+        return patch("backend.training.runner._default_train_command", make)
+
+    def run_job(self, job_id="r1", cancel=None):
+        from backend.training.trainer import TrainingCancellation
+        job = TrainingJob(id=job_id, name="n", status="queued", base_model="b", dataset_id="d")
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", name="mine", max_steps=2)
+        self.runner.run_training_isolated(job, cfg, "data.jsonl", str(self.root / "adapters"), self.store,
+                                          cancel or TrainingCancellation())
+        return job
+
+    def test_events_are_applied_and_the_adapter_is_registered(self):
+        script = self.script('''
+emit({"status": "running", "message": "Loading base model", "progress": 2.0})
+emit({"total_steps": 2})
+print("a stray line from some library")
+emit({"log": {"step": 1, "logs": {"loss": 1.5}, "elapsed": 0.1, "epoch": 0.5}})
+emit({"log": {"step": 2, "logs": {"loss": float("nan")}, "elapsed": 0.2, "epoch": 1.0}})
+emit({"log": {}})
+ok()
+''')
+        with self.command(script):
+            job = self.run_job()
+        self.assertEqual((job.status, job.adapter_id, job.current_step, job.total_steps), ("done", "adapter:r1", 2, 2))
+        self.assertEqual(job.loss, 0.5)
+        self.assertEqual([h["step"] for h in job.history], [1])        # the NaN step left no history entry
+        self.assertEqual(self.store.get("adapter:r1").name, "mine")
+        self.assertEqual(self.store.get("adapter:r1").base_model, "org/base")
+
+    def test_the_spec_file_is_removed_and_describes_the_job(self):
+        seen = {}
+        script = self.script('''
+ok()
+''')
+
+        def make(spec_path):
+            seen.update(json.loads(Path(spec_path).read_text()))
+            self.specs.append(spec_path)
+            return [sys.executable, str(script), spec_path]
+        with patch("backend.training.runner._default_train_command", make):
+            self.run_job()
+        self.assertEqual(seen["job_id"], "r1")
+        self.assertEqual(seen["dataset_path"], "data.jsonl")
+        self.assertEqual(seen["cfg"]["name"], "mine")
+        self.assertFalse(os.path.exists(self.specs[0]))
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_a_killed_worker_ends_the_job_with_an_out_of_memory_message(self):
+        script = self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+os.kill(os.getpid(), signal.SIGKILL)
+''')
+        with self.command(script):
+            job = self.run_job()
+        self.assertEqual(job.status, "error")
+        self.assertIn("ran out of memory", job.message)
+        self.assertEqual(job.current_step, 1)
+        self.assertIsNone(self.store.get("adapter:r1"))
+        self.assertFalse((self.root / "adapters" / "adapter-r1").exists())
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_a_crash_does_not_stop_the_queue(self):
+        crash = self.script('os.kill(os.getpid(), signal.SIGKILL)\n', "crash.py")
+        good = self.script('ok()\n', "good.py")
+        datasets = DatasetStore(str(self.root / "datasets"), str(self.root / "datasets.db"))
+        dataset = datasets.ingest_content("x", "sample")
+        with self.command(crash, good):
+            manager = TrainingJobManager(self.temp.name, self.store, datasets)
+            try:
+                first = manager.start(TrainingConfig(base_model="org/base", dataset_id=dataset.id, max_steps=1))
+                second = manager.start(TrainingConfig(base_model="org/base", dataset_id=dataset.id, max_steps=1))
+                deadline = time.time() + 20
+                while time.time() < deadline and manager.get(second.id).status not in ("done", "error"):
+                    time.sleep(0.05)
+                self.assertEqual(manager.get(first.id).status, "error")
+                self.assertEqual(manager.get(second.id).status, "done")
+            finally:
+                manager.shutdown()
+
+    def test_exit_zero_without_a_result_is_an_error(self):
+        script = self.script('emit({"message": "almost"})\n')
+        with self.command(script):
+            job = self.run_job()
+        self.assertEqual(job.status, "error")
+        self.assertIn("without reporting a result", job.message)
+        self.assertIsNone(self.store.get("adapter:r1"))
+
+    def test_a_nonzero_exit_without_an_error_line_names_the_code(self):
+        script = self.script('print("Traceback: boom"); sys.exit(3)\n')
+        with self.command(script):
+            job = self.run_job()
+        self.assertEqual(job.status, "error")
+        self.assertIn("code 3", job.message)
+        self.assertIn("boom", job.message)
+
+    def test_an_error_line_becomes_the_job_error(self):
+        script = self.script('emit({"error": "dataset is empty"}); sys.exit(1)\n')
+        with self.command(script):
+            job = self.run_job()
+        self.assertEqual((job.status, job.error), ("error", "dataset is empty"))
+        self.assertEqual(job.message, "Failed: dataset is empty")
+
+    def test_cancel_before_the_result_line_registers_nothing(self):
+        from backend.training.trainer import TrainingCancellation
+        script = self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+time.sleep(1.0)      # a worker that finishes anyway, after the cancel was accepted
+ok()
+''')
+        cancel = TrainingCancellation()
+        job = TrainingJob(id="r1", name="n", status="queued", base_model="b", dataset_id="d")
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", name="mine", max_steps=2)
+
+        def canceller():
+            deadline = time.time() + 10
+            while time.time() < deadline and job.current_step < 1:
+                time.sleep(0.02)
+            cancel.set()
+        thread = threading.Thread(target=canceller)
+        thread.start()
+        with self.command(script), patch.object(self.runner, "_CANCEL_GRACE_SECONDS", 10.0):
+            self.runner.run_training_isolated(job, cfg, "data.jsonl", str(self.root / "adapters"), self.store, cancel)
+        thread.join()
+        self.assertEqual(job.status, "cancelled")
+        self.assertIsNone(self.store.get("adapter:r1"))
+        self.assertFalse((self.root / "adapters" / "adapter-r1").exists())
+        self.assertFalse(os.path.exists(self.specs[0]))
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_a_worker_that_ignores_cancel_is_killed_after_the_grace_period(self):
+        from backend.training.trainer import TrainingCancellation
+        script = self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(60)
+''')
+        cancel = TrainingCancellation()
+        job = TrainingJob(id="r1", name="n", status="queued", base_model="b", dataset_id="d")
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", max_steps=2)
+
+        def canceller():
+            deadline = time.time() + 10
+            while time.time() < deadline and job.current_step < 1:
+                time.sleep(0.02)
+            cancel.set()
+        thread = threading.Thread(target=canceller)
+        thread.start()
+        started = time.time()
+        with self.command(script), patch.object(self.runner, "_CANCEL_GRACE_SECONDS", 0.2):
+            self.runner.run_training_isolated(job, cfg, "data.jsonl", str(self.root / "adapters"), self.store, cancel)
+        thread.join()
+        self.assertEqual(job.status, "cancelled")
+        self.assertLess(time.time() - started, 8)
+
+    def test_a_cooperative_worker_is_asked_to_stop_not_killed(self):
+        from backend.training.trainer import TrainingCancellation
+        script = self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+cancel.wait(30)
+emit({"result": "cancelled"})
+''')
+        cancel = TrainingCancellation()
+        job = TrainingJob(id="r1", name="n", status="queued", base_model="b", dataset_id="d")
+        cfg = TrainingConfig(base_model="org/base", dataset_id="d", max_steps=2)
+        threading.Timer(1.0, cancel.set).start()
+        started = time.time()
+        with self.command(script):
+            self.runner.run_training_isolated(job, cfg, "data.jsonl", str(self.root / "adapters"), self.store, cancel)
+        self.assertEqual((job.status, job.message), ("cancelled", "Cancelled by user"))
+        self.assertLess(time.time() - started, 5)
+
+    def test_describe_exit_wording(self):
+        describe = self.runner.describe_exit
+        self.assertIn("ran out of memory", describe(-9))
+        self.assertEqual(describe(-11), "The training process crashed (signal 11).")
+        self.assertEqual(describe(3), "The training process exited unexpectedly (code 3).")
+
+    def test_the_default_command_uses_the_worker_module_and_keeps_isolation(self):
+        command = self.runner._default_train_command("/tmp/spec.json")
+        self.assertEqual(command[0], sys.executable)
+        self.assertIn("-B", command)
+        self.assertEqual(command[-3:], ["-m", "backend.training.train_worker", "/tmp/spec.json"])
+        with patch.object(sys, "flags", MagicMock(isolated=1)):
+            self.assertIn("-I", self.runner._default_train_command("/tmp/spec.json"))
+
+    def test_the_job_manager_uses_the_isolated_runner(self):
+        from backend.training import jobs
+        self.assertIs(jobs.run_training, self.runner.run_training_isolated)
+
+    def test_missing_ml_packages_fail_fast_without_starting_a_process(self):
+        real = __import__("importlib.util").util.find_spec
+
+        def find_spec(name, *args):
+            return None if name == "torch" else real(name, *args)
+        launched = []
+        from backend.training import trainer
+        with patch("backend.training.trainer.importlib.util.find_spec", find_spec), \
+                patch("backend.training.runner.require_ml_installed", trainer.require_ml_installed), \
+                patch("backend.training.runner._default_train_command", lambda p: launched.append(p) or ["false"]):
+            job = self.run_job()
+        self.assertEqual(launched, [])
+        self.assertEqual(job.status, "error")
+        self.assertIn("ML extras", job.error)
+
+    def test_an_import_hook_that_hides_packages_counts_as_missing(self):
+        def find_spec(name, *args):
+            raise ImportError("ML dependency intentionally unavailable")
+        from backend.training import trainer
+        with patch("backend.training.trainer.importlib.util.find_spec", find_spec):
+            with self.assertRaises(RuntimeError) as caught:
+                trainer.require_ml_installed()
+        self.assertIn("ML extras", str(caught.exception))
+
+
+class Break2WorkerLifecycle(unittest.TestCase):
+    """break-02 Task B4: no training process outlives the backend that started it."""
+
+    def setUp(self):
+        from backend.training import runner
+        self.runner = runner
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.store = AdapterStore(str(self.root / "adapters.db"))
+        self.datasets = DatasetStore(str(self.root / "datasets"), str(self.root / "datasets.db"))
+        self.dataset = self.datasets.ingest_content("x", "sample")
+        patcher = patch("backend.training.runner.require_ml_installed")   # fake workers; see Break2Runner
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def script(self, body):
+        path = self.root / "worker.py"
+        path.write_text(_FAKE_WORKER_HEAD + f'''
+open(os.path.join({str(self.root)!r}, "worker.pid"), "w").write(str(os.getpid()))
+''' + body)
+        return path
+
+    def start(self, script):
+        patcher = patch("backend.training.runner._default_train_command",
+                        lambda spec: [sys.executable, str(script), spec])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        manager = TrainingJobManager(self.temp.name, self.store, self.datasets)
+        job = manager.start(TrainingConfig(base_model="org/base", dataset_id=self.dataset.id, max_steps=1))
+        deadline = time.time() + 20
+        while time.time() < deadline and manager.get(job.id).current_step < 1:
+            time.sleep(0.05)
+        self.assertGreaterEqual(manager.get(job.id).current_step, 1, "worker never reported progress")
+        return manager, job
+
+    def pid(self):
+        return int((self.root / "worker.pid").read_text())
+
+    def alive(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_shutdown_ends_a_worker_that_ignores_cancel_within_the_grace_period(self):
+        manager, job = self.start(self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+time.sleep(60)
+'''))
+        pid = self.pid()
+        self.assertTrue(self.alive(pid))
+        started = time.time()
+        with patch.object(TrainingJobManager, "_WORKER_GRACE_SECONDS", 1.0):
+            manager.shutdown()
+        self.assertLess(time.time() - started, 2.5)
+        deadline = time.time() + 2
+        while time.time() < deadline and self.alive(pid):
+            time.sleep(0.05)
+        self.assertFalse(self.alive(pid))
+        self.assertEqual(manager.get(job.id).status, "cancelled")
+        self.assertEqual(self.runner.live_workers(), 0)
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_shutdown_lets_a_cooperative_worker_stop_by_itself(self):
+        manager, job = self.start(self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+cancel.wait(30)
+emit({"result": "cancelled"})
+'''))
+        started = time.time()
+        manager.shutdown()
+        self.assertLess(time.time() - started, 2.5)
+        self.assertEqual(manager.get(job.id).status, "cancelled")
+        self.assertFalse(self.alive(self.pid()))
+
+    def test_workers_are_tracked_only_while_they_run(self):
+        self.assertEqual(self.runner.live_workers(), 0)
+        manager, job = self.start(self.script('''
+emit({"log": {"step": 1, "logs": {"loss": 1.0}, "elapsed": 0.1, "epoch": 0.1}})
+time.sleep(60)
+'''))
+        try:
+            self.assertEqual(self.runner.live_workers(), 1)
+            manager.cancel(job.id)
+            deadline = time.time() + 15
+            while time.time() < deadline and manager.get(job.id).status == "running":
+                time.sleep(0.05)
+        finally:
+            manager.shutdown()
+        self.assertEqual(self.runner.live_workers(), 0)
+
+    def test_terminate_all_with_nothing_running_returns_at_once(self):
+        started = time.time()
+        self.runner.terminate_all(5.0)
+        self.assertLess(time.time() - started, 0.5)
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX signals (SIGKILL, os.kill(pid, 0))")
+    def test_a_worker_whose_backend_was_killed_exits_by_itself(self):
+        helper = self.root / "helper.py"
+        spec = self.root / "spec.json"
+        spec.write_text(json.dumps({"cfg": TrainingConfig(base_model="b", dataset_id="d").model_dump(),
+                                    "dataset_path": "x", "adapter_dir_root": str(self.root), "job_id": "o1"}))
+        launcher = self.root / "launch_worker.py"
+        # The real worker `main` (so the real parent watch), with the training itself replaced by a sleep.
+        launcher.write_text(f'''
+import sys, time
+sys.path.insert(0, {str(Path(__file__).resolve().parents[1] / "src")!r})
+from backend.training import train_worker
+train_worker.train_lora = lambda *args: time.sleep(120)
+sys.exit(train_worker.main([sys.argv[1]]))
+''')
+        helper.write_text(f'''
+import subprocess, sys, time
+child = subprocess.Popen([sys.executable, {str(launcher)!r}, {str(spec)!r}], stdin=subprocess.PIPE)
+print(child.pid, flush=True)
+time.sleep(120)
+''')
+        parent = subprocess.Popen([sys.executable, str(helper)], stdout=subprocess.PIPE, text=True)
+        try:
+            pid = int(parent.stdout.readline())
+            time.sleep(2.0)                       # let the worker start its parent watch
+            self.assertTrue(self.alive(pid))
+            parent.send_signal(signal.SIGKILL)
+            parent.wait()
+            deadline = time.time() + 3
+            while time.time() < deadline and self.alive(pid):
+                time.sleep(0.1)
+            alive = self.alive(pid)
+            if alive:
+                os.kill(pid, signal.SIGKILL)
+            self.assertFalse(alive, "the orphaned worker kept running")
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+
+
+class Break2MemoryWarning(unittest.TestCase):
+    """break-02 Task B5: training starts with a warning, never a refusal, when a chat model is loaded."""
+
+    def start(self, loaded_model=None, status_error=None):
+        job = TrainingJob(id="m1", name="n", status="queued", base_model="b", dataset_id="d")
+        manager = MagicMock()
+        manager.start.return_value = job
+        supervisor = MagicMock()
+        if status_error:
+            supervisor.status.side_effect = status_error
+        else:
+            supervisor.status.return_value.loaded_model = loaded_model
+        cfg = TrainingConfig(base_model="b", dataset_id="d")
+        with patch.object(training_routes, "_manager", manager), \
+                patch.object(training_routes, "get_supervisor", return_value=supervisor):
+            response = training_routes.start_training(cfg)
+        manager.start.assert_called_once()
+        return response
+
+    def test_a_loaded_chat_model_adds_one_warning(self):
+        response = self.start(loaded_model="some/model.gguf")
+        self.assertEqual(response.warnings, [
+            "A chat model is loaded and shares memory with training. "
+            "If training is killed, unload the chat model first."])
+        self.assertEqual(response.status, "queued")
+
+    def test_no_loaded_model_means_no_warning(self):
+        self.assertEqual(self.start(loaded_model=None).warnings, [])
+
+    def test_a_failing_status_check_never_blocks_the_start(self):
+        self.assertEqual(self.start(status_error=RuntimeError("engine probe failed")).warnings, [])
+
+    def test_jobs_have_an_empty_warning_list_by_default(self):
+        job = TrainingJob(id="x", name="n", status="queued", base_model="b", dataset_id="d")
+        self.assertEqual(job.model_dump()["warnings"], [])
+
+
+class Break2RegistryRefs(unittest.TestCase):
+    """Final review C1: the child has no model registry, so the parent resolves the base model."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "adapters").mkdir()
+        self.store = AdapterStore(str(self.root / "adapters.db"))
+        # A fresh child process has no registry; make this process look the same.
+        patcher = patch("backend.routes.models._registry", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_the_worker_trains_on_the_base_the_parent_resolved(self):
+        import io
+        import types
+        from backend.training import train_worker
+        model = MagicMock()
+        model.config.architectures = ["TestModel"]
+        model.save_pretrained.side_effect = lambda p: Path(p, "adapter_model.safetensors").write_bytes(b"w")
+
+        def make_trainer(**kw):
+            trainer = MagicMock()
+            trainer.train.return_value = types.SimpleNamespace(global_step=1, training_loss=0.5)
+            return trainer
+        ml, peft, datasets = _fake_ml(model, make_trainer)
+        cfg = TrainingConfig(base_model="huggingface:org--tiny", dataset_id="d", max_steps=1, target_modules="all-linear")
+        spec = self.root / "spec.json"
+        spec.write_text(json.dumps({"cfg": cfg.model_dump(), "dataset_path": "x", "base": "/cache/org--tiny/snapshot",
+                                    "adapter_dir_root": str(self.root / "adapters"), "job_id": "c1"}))
+        out = io.StringIO()
+        with patch("backend.training.train_worker._start_parent_watch"), \
+                patch("backend.training.trainer._require_ml", return_value=ml), \
+                patch("backend.training.trainer._tokenize_jsonl", return_value=[{"input_ids": [1]}]), \
+                patch.dict("sys.modules", {"peft": peft, "datasets": datasets}):
+            code = train_worker.main([str(spec)], out=out, stdin=io.StringIO(""))
+        lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+        self.assertEqual((code, lines[-1].get("result"), lines[-1].get("error")), (0, "ok", None))
+        ml["AutoModelForCausalLM"].from_pretrained.assert_called_once()
+        self.assertEqual(ml["AutoModelForCausalLM"].from_pretrained.call_args.args[0], "/cache/org--tiny/snapshot")
+        self.assertEqual(lines[-1]["outcome"]["resolved_base"], "/cache/org--tiny/snapshot")
+
+    def run_isolated(self, base_model):
+        from backend.training import runner
+        from backend.training.trainer import TrainingCancellation
+        job = TrainingJob(id="c1", name="n", status="queued", base_model=base_model, dataset_id="d")
+        cfg = TrainingConfig(base_model=base_model, dataset_id="d", max_steps=1)
+        launched = []
+        worker = self.root / "worker.py"
+        worker.write_text(_FAKE_WORKER_HEAD + "ok()\n")
+
+        def command(spec):
+            launched.append(json.loads(Path(spec).read_text()))
+            return [sys.executable, str(worker), spec]
+        with patch("backend.training.runner._default_train_command", command), \
+                patch("backend.training.runner.require_ml_installed"):
+            runner.run_training_isolated(job, cfg, "data.jsonl", str(self.root / "adapters"), self.store,
+                                         TrainingCancellation())
+        return job, launched
+
+    def test_the_parent_resolves_a_registry_reference_into_the_spec(self):
+        with patch("backend.training.trainer._resolve_base", return_value="/cache/org--tiny/snapshot") as resolve:
+            job, launched = self.run_isolated("huggingface:org--tiny")
+        resolve.assert_called_once_with("huggingface:org--tiny")
+        self.assertEqual(launched[0]["base"], "/cache/org--tiny/snapshot")
+        self.assertEqual(job.status, "done", job.error)
+
+    def test_an_unresolvable_base_fails_the_job_without_starting_a_process(self):
+        with patch("backend.training.trainer._resolve_base",
+                   side_effect=ValueError("Model is no longer registered: huggingface:org--gone")):
+            job, launched = self.run_isolated("huggingface:org--gone")
+        self.assertEqual(launched, [])
+        self.assertEqual(job.status, "error")
+        self.assertEqual(job.message, "Failed: Model is no longer registered: huggingface:org--gone")
+
+
+class Break2ProtocolFraming(unittest.TestCase):
+    """Final review I3: stderr is merged into the pipe, so a half-written line must not eat a protocol line."""
+
+    def parse(self, text):
+        """What the runner does: universal newlines, one JSON object per line, anything else is noise."""
+        found = []
+        for line in io_lines(text):
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict):
+                found.append(message)
+        return found
+
+    def test_a_progress_bar_fragment_does_not_swallow_the_result_line(self):
+        import io
+        from backend.training.train_worker import _Writer
+        stream = io.StringIO()
+        write = _Writer(stream)
+        stream.write("\r 50%|#####     | 5/10")            # a library's unterminated stderr fragment
+        write({"result": "ok", "outcome": {"adapter_dir": "/a"}})
+        stream.write("a warning without a newline")
+        write({"message": "after"})
+        self.assertEqual(self.parse(stream.getvalue()),
+                         [{"result": "ok", "outcome": {"adapter_dir": "/a"}}, {"message": "after"}])
+
+
+def io_lines(text):
+    import io
+    return io.StringIO(text, newline=None).read().splitlines()

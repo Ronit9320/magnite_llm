@@ -8,6 +8,8 @@ import sys
 from contextlib import nullcontext
 import threading
 import time
+from dataclasses import dataclass
+from typing import Callable
 
 from backend.adapters.schemas import AdapterRecord
 from backend.adapters.store import AdapterStore
@@ -40,6 +42,20 @@ def _require_ml():
     except ImportError as exc:
         raise RuntimeError(_ML_HELP) from exc
     return locals()
+
+
+def require_ml_installed() -> None:
+    """Raise the ML-extras message when the training stack is absent, without importing it.
+
+    The training child process would only discover this after starting; asking `find_spec`
+    keeps the backend itself free of torch and answers at once."""
+    for name in ("torch", "transformers", "peft", "datasets"):
+        try:
+            found = importlib.util.find_spec(name)
+        except (ImportError, ValueError):   # a finder that refuses the package counts as absent
+            found = None
+        if found is None:
+            raise RuntimeError(_ML_HELP)
 
 
 class _CancelHandler:
@@ -205,11 +221,62 @@ def split_dataset(dataset, cfg: TrainingConfig):
     return parts["train"], parts["test"]
 
 
-def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
-                 adapter_dir_root: str, adapter_store: AdapterStore,
-                 cancel_event: threading.Event) -> None:
-    """Run a LoRA/QLoRA fine-tune in the caller's (background) thread and
-    register the resulting adapter in `adapter_store`."""
+@dataclass
+class TrainOutcome:
+    """What a finished fine-tune hands to publication; plain data so a child process can report it."""
+    adapter_dir: str
+    architecture: str
+    size_mb: float
+    global_step: int
+    total_steps: int
+    training_loss: float | None
+    resolved_base: str
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def adapter_dir_for(adapter_dir_root: str, job_id: str) -> str:
+    """Names are display text, never filesystem paths: each job owns its weights."""
+    return os.path.join(adapter_dir_root, f"adapter-{job_id}")
+
+
+def apply_event(job: TrainingJob, event: dict) -> None:
+    """Apply one progress event from `train_lora` to the job (in-process or from a worker).
+
+    Parent-side on purpose: `record_metrics` drops NaN/inf, whatever the sender reports."""
+    if "status" in event:
+        job.status = event["status"]
+        if event["status"] == "running" and not job.started_at:
+            job.started_at = _now()
+    if "message" in event:
+        job.message = event["message"]
+    if "progress" in event:
+        job.progress = event["progress"]
+    if "total_steps" in event:
+        job.total_steps = event["total_steps"]
+    if "current_step" in event:
+        job.current_step = event["current_step"]
+    log = event.get("log")
+    if log:
+        logs = log.get("logs") or {}
+        job.current_step = log["step"]
+        record_metrics(job, log["step"], logs, log.get("elapsed", 0.0), log.get("epoch"))
+        if "loss" in logs and job.loss is not None:
+            job.message = f"Training (step {log['step']}/{job.total_steps}): loss={job.loss:.4f}"
+
+
+def train_lora(cfg: TrainingConfig, dataset_path: str, adapter_dir_root: str, job_id: str,
+               report: Callable[[dict], None], cancel: threading.Event,
+               base: str | None = None) -> TrainOutcome:
+    """Fine-tune and save the adapter weights; no job, no store (so it can run in a child process).
+
+    `base` is the already-resolved base model (path or Hub id). A child process has no model
+    registry, so its parent resolves `cfg.base_model` and passes the result; None resolves here.
+
+    `report` receives {"status", "message", "progress", "current_step", "total_steps"} (any subset)
+    and {"log": {"step", "logs", "elapsed", "epoch"}}. Raises `_Cancelled` or the underlying error."""
     ml = _require_ml()
     torch, AutoModelForCausalLM = ml["torch"], ml["AutoModelForCausalLM"]
     AutoTokenizer = ml["AutoTokenizer"]
@@ -217,52 +284,43 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
     DataCollatorForLanguageModeling = ml["DataCollatorForLanguageModeling"]
     Trainer = ml["Trainer"]
     TrainingArguments = ml["TrainingArguments"]
+    steps = {"total": 0}
 
     class _ProgressCallback(ml["TrainerCallback"]):
-        """Bridge from the transformers `Trainer` into the shared `TrainingJob`
-        model so `GET /training/status/{id}` pollers see live loss/steps."""
+        """Bridge from the transformers `Trainer` into `report`, so pollers see live loss/steps."""
 
-        def __init__(self, job: TrainingJob, cancel_event: threading.Event):
-            self._job = job
-            self._cancel = cancel_event
+        def __init__(self):
             self._began = time.monotonic()
 
         def on_train_begin(self, args, state, control, **kwargs):
-            self._job.status = "running"
-            self._job.total_steps = state.max_steps
-            self._job.progress = 5.0
-            self._job.message = "Training..."
+            steps["total"] = state.max_steps
+            report({"status": "running", "message": "Training...", "progress": 5.0,
+                    "total_steps": state.max_steps})
             self._began = time.monotonic()
-            if self._cancel.is_set():
+            if cancel.is_set():
                 control.should_training_stop = True
 
         def on_log(self, args, state, control, logs=None, **kwargs):
-            self._job.current_step = state.global_step
-            record_metrics(self._job, state.global_step, logs or {},
-                           time.monotonic() - self._began, state.epoch)
-            if logs and "loss" in logs and self._job.loss is not None:
-                self._job.message = (
-                    f"Training (step {state.global_step}/{self._job.total_steps}): "
-                    f"loss={self._job.loss:.4f}"
-                )
+            # Only plain numbers cross the process boundary.
+            plain = {k: v for k, v in (logs or {}).items()
+                     if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            report({"log": {"step": state.global_step, "logs": plain,
+                            "elapsed": time.monotonic() - self._began, "epoch": state.epoch}})
 
         def on_step_end(self, args, state, control, **kwargs):
-            self._job.current_step = state.global_step
-            if self._job.total_steps > 0:
-                self._job.progress = 5.0 + 85.0 * min(
-                    1.0, state.global_step / self._job.total_steps)
-            if self._cancel.is_set():
+            event = {"current_step": state.global_step}
+            if steps["total"] > 0:
+                event["progress"] = 5.0 + 85.0 * min(1.0, state.global_step / steps["total"])
+            report(event)
+            if cancel.is_set():
                 control.should_training_stop = True
 
     work_dir = None
     try:
-        base = _resolve_base(cfg.base_model)
+        base = base or _resolve_base(cfg.base_model)
 
-        job.message = "Loading base model"
-        job.status = "running"
-        job.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        job.progress = 2.0
-        if cancel_event.is_set():
+        report({"status": "running", "message": "Loading base model", "progress": 2.0})
+        if cancel.is_set():
             raise _Cancelled()
 
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -281,8 +339,8 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         except Exception:  # noqa: BLE001
             architecture = getattr(model.config, "model_type", "") or ""
 
-        job.message = "Preparing dataset"
-        if cancel_event.is_set():
+        report({"message": "Preparing dataset"})
+        if cancel.is_set():
             raise _Cancelled()
 
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training  # noqa: F811
@@ -294,12 +352,11 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         resolved_targets = _target_modules(cfg, model, torch)
         explicit = _target_modules(cfg)
         if isinstance(resolved_targets, list) and resolved_targets != explicit:
-            job.message = (f"Auto-mapped target modules to: "
-                           f"{', '.join(resolved_targets)}")
+            report({"message": f"Auto-mapped target modules to: {', '.join(resolved_targets)}"})
         elif (resolved_targets == "all-linear"
               and isinstance(explicit, list) and explicit):
-            job.message = ("Requested target modules not found on this model; "
-                           "training all linear layers")
+            report({"message": "Requested target modules not found on this model; "
+                               "training all linear layers"})
 
         lora = LoraConfig(
             r=cfg.rank,
@@ -315,7 +372,8 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         train_ds, eval_ds = split_dataset(train_ds, cfg)
         steps_per_epoch = max(1, (len(train_ds) + cfg.batch_size - 1) // cfg.batch_size)
         total_steps = cfg.max_steps if cfg.max_steps > 0 else steps_per_epoch * cfg.epochs
-        job.total_steps = total_steps
+        steps["total"] = total_steps
+        report({"total_steps": total_steps})
         warmup_steps = int(cfg.warmup_ratio * total_steps)
 
         args = TrainingArguments(
@@ -340,15 +398,13 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
 
         collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-        progress = _ProgressCallback(job, cancel_event)
-
         trainer = Trainer(
             model=model,
             args=args,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
             data_collator=collator,
-            callbacks=[progress],
+            callbacks=[_ProgressCallback()],
         )
 
         try:
@@ -356,19 +412,16 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
         except SystemExit:
             raise
         except Exception as exc:  # noqa: BLE001
-            if cancel_event.is_set():
+            if cancel.is_set():
                 raise _Cancelled() from exc
             raise
 
-        if cancel_event.is_set():
+        if cancel.is_set():
             raise _Cancelled()
 
-        job.message = "Saving adapter"
-        job.progress = 95.0
+        report({"message": "Saving adapter", "progress": 95.0})
 
-        # Names are display text, never filesystem paths. Each job owns its
-        # weights even when two jobs use the same name.
-        work_dir = os.path.join(adapter_dir_root, f"adapter-{job.id}")
+        work_dir = adapter_dir_for(adapter_dir_root, job_id)
         os.makedirs(work_dir, exist_ok=True)
         model.save_pretrained(work_dir)
         try:
@@ -383,56 +436,91 @@ def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
                     size_mb += os.path.getsize(os.path.join(root, name))
                 except OSError:
                     pass
-        size_mb = round(size_mb / (1024 * 1024), 2)
-
-        adapter_id = f"adapter:{job.id}"
-        rec = AdapterRecord(
-            id=adapter_id,
-            name=cfg.name or job.name,
-            base_model=cfg.base_model,
-            architecture=architecture,
-            rank=cfg.rank,
-            alpha=cfg.alpha,
-            target_modules=cfg.target_modules,
-            method="qlora" if _quantized(cfg) else "lora",
-            quantization=cfg.quantization,
-            path=work_dir,
-            size_mb=size_mb,
-            training_job_id=job.id,
-            trained_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            meta={"current_step": train_result.global_step, "total_steps": total_steps,
-                  "resolved_base_model": base},
-            status="ready",
-        )
-        with getattr(cancel_event, "publication_lock", nullcontext()):
-            if cancel_event.is_set():
-                raise _Cancelled()
-            adapter_store.upsert(rec)
-            job.adapter_id = adapter_id
-
-            job.status = "done"
-            job.progress = 100.0
-            job.loss = train_result.training_loss
-            job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            job.message = (f"Done — adapter '{rec.name}' saved ({size_mb} MB)")
+        return TrainOutcome(adapter_dir=work_dir, architecture=architecture,
+                            size_mb=round(size_mb / (1024 * 1024), 2),
+                            global_step=train_result.global_step, total_steps=total_steps,
+                            training_loss=train_result.training_loss, resolved_base=base)
     except _Cancelled:
-        job.status = "cancelled"
-        job.error = None
-        job.message = "Cancelled by user"
-        job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    except Exception as exc:  # noqa: BLE001
-        job.status = "error"
-        job.error = str(exc)
-        job.message = f"Failed: {exc}"
-        job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    finally:
-        if work_dir and job.status == "cancelled":
+        if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+    except BaseException:
         if work_dir and _is_empty(work_dir):
             try:
                 os.rmdir(work_dir)
             except OSError:
                 pass
+        raise
+
+
+def publish_adapter(job: TrainingJob, cfg: TrainingConfig, outcome: TrainOutcome,
+                    adapter_store: AdapterStore, cancel: threading.Event) -> None:
+    """Register the saved weights and finish the job, unless the job was cancelled first.
+
+    A cancel accepted before this point (it takes the same lock) wins: nothing is registered
+    and the weights are removed; raises `_Cancelled`."""
+    adapter_id = f"adapter:{job.id}"
+    rec = AdapterRecord(
+        id=adapter_id,
+        name=cfg.name or job.name,
+        base_model=cfg.base_model,
+        architecture=outcome.architecture,
+        rank=cfg.rank,
+        alpha=cfg.alpha,
+        target_modules=cfg.target_modules,
+        method="qlora" if _quantized(cfg) else "lora",
+        quantization=cfg.quantization,
+        path=outcome.adapter_dir,
+        size_mb=outcome.size_mb,
+        training_job_id=job.id,
+        trained_at=_now(),
+        meta={"current_step": outcome.global_step, "total_steps": outcome.total_steps,
+              "resolved_base_model": outcome.resolved_base},
+        status="ready",
+    )
+    with getattr(cancel, "publication_lock", nullcontext()):
+        if cancel.is_set():
+            shutil.rmtree(outcome.adapter_dir, ignore_errors=True)
+            raise _Cancelled()
+        adapter_store.upsert(rec)
+        job.adapter_id = adapter_id
+
+        job.status = "done"
+        job.progress = 100.0
+        loss = outcome.training_loss
+        if isinstance(loss, (int, float)) and math.isfinite(loss):
+            job.loss = float(loss)      # a non-finite final loss never replaces the last good one
+        job.finished_at = _now()
+        job.message = f"Done — adapter '{rec.name}' saved ({outcome.size_mb} MB)"
+
+
+def mark_cancelled(job: TrainingJob) -> None:
+    job.status = "cancelled"
+    job.error = None
+    job.message = "Cancelled by user"
+    job.finished_at = _now()
+
+
+def mark_failed(job: TrainingJob, message: str) -> None:
+    job.status = "error"
+    job.error = message
+    job.message = f"Failed: {message}"
+    job.finished_at = _now()
+
+
+def run_training(job: TrainingJob, cfg: TrainingConfig, dataset_path: str,
+                 adapter_dir_root: str, adapter_store: AdapterStore,
+                 cancel_event: threading.Event) -> None:
+    """Run a LoRA/QLoRA fine-tune in the caller's (background) thread and
+    register the resulting adapter in `adapter_store`."""
+    try:
+        outcome = train_lora(cfg, dataset_path, adapter_dir_root, job.id,
+                             lambda event: apply_event(job, event), cancel_event)
+        publish_adapter(job, cfg, outcome, adapter_store, cancel_event)
+    except _Cancelled:
+        mark_cancelled(job)
+    except Exception as exc:  # noqa: BLE001
+        mark_failed(job, str(exc))
 
 
 class _Cancelled(Exception):
