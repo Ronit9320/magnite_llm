@@ -104,8 +104,8 @@ QHash<QString, ChatStore::IndexEntry> ChatStore::loadIndex() const {
         // Epoch milliseconds, not ISO text: parsing thousands of date strings is what a launch would spend its time on.
         if (!o.value("created").isDouble() || !o.value("updated").isDouble()) continue;   // a bad row is just re-read
         entry.summary = ChatSummary{it.key(), o.value("title").toString(), o.value("customTitle").toBool(),
-                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("created").toDouble()), QTimeZone::UTC),
-                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("updated").toDouble()), QTimeZone::UTC)};
+                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("created").toDouble()), QTimeZone::utc()),
+                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("updated").toDouble()), QTimeZone::utc())};
         entries.insert(it.key(), entry);
     }
     return entries;
