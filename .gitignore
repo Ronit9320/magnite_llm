@@ -68,3 +68,6 @@ build-windows/
 
 # Brainstorming mockups and local executor scratch (superpowers workflow)
 .superpowers/
+
+# Local test reports and probes
+docs/testing/

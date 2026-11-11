@@ -158,11 +158,23 @@ private:
 };
 } // namespace
 
+// macOS keeps its native frame (traffic lights, title bar, resize and drag), so
+// the app-owned chrome below is installed on Linux and Windows only.
 void WindowChrome::install(QApplication &application) {
+#ifdef Q_OS_MACOS
+    Q_UNUSED(application);
+#else
     application.installEventFilter(new ChromeEvents(&application));
+#endif
 }
 
 void WindowChrome::attachMainWindow(QWidget *window, QWidget *masthead) {
+#ifdef Q_OS_MACOS
+    Q_UNUSED(window);
+    Q_UNUSED(masthead);
+    return;
+#else
     window->setWindowFlag(Qt::FramelessWindowHint);
     addControls(window, masthead, true);
+#endif
 }

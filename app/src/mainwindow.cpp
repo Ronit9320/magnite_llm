@@ -589,9 +589,15 @@ void MainWindow::runSelfTest() {
             fprintf(stderr, "[selftest] %s %s\n", ok ? "ok:" : "FAIL:", name);
         };
 
+#ifdef Q_OS_MACOS
+        checkC(!windowFlags().testFlag(Qt::FramelessWindowHint) &&
+               !findChild<QPushButton *>("windowClose") && !findChild<QPushButton *>("windowMinimize") &&
+               !findChild<QPushButton *>("windowMaximize"), "main window keeps native macOS window controls");
+#else
         checkC(windowFlags().testFlag(Qt::FramelessWindowHint) &&
                findChild<QPushButton *>("windowClose") && findChild<QPushButton *>("windowMinimize") &&
                findChild<QPushButton *>("windowMaximize"), "main window uses app-owned window controls");
+#endif
         auto *mode = findChild<QPushButton *>("themeToggle");
         const bool initialDark = Theme::isDark();
         mode->click();

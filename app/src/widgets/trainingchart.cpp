@@ -188,7 +188,8 @@ void TrainingChart::paintEvent(QPaintEvent *) {
         return;
     }
     double low=std::numeric_limits<double>::max(), high=std::numeric_limits<double>::lowest();
-    const auto [minStep, maxStep] = stepRange(values);
+    const auto stepBounds = stepRange(values);
+    const double minStep = stepBounds.first, maxStep = stepBounds.second;
     const double stepSpan = maxStep - minStep;
     for (const auto &s : values) { low=qMin(low,s.value); high=qMax(high,s.value); }
     const double padding = high == low ? qMax(std::abs(high)*0.1, 0.000001) : (high-low)*0.1;

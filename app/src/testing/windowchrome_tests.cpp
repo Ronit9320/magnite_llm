@@ -43,6 +43,22 @@ int runWindowChromeChecks(const QString &captures) {
     WindowChrome::attachMainWindow(&main, masthead);
     main.resize(700, 450);
     main.show(); pump();
+#ifdef Q_OS_MACOS
+    // macOS keeps its native title bar and traffic lights; the app draws no controls.
+    check(!main.windowFlags().testFlag(Qt::FramelessWindowHint), "main window keeps the native macOS frame");
+    check(!main.findChild<Button *>("windowClose") && !main.findChild<Button *>("windowMinimize") &&
+          !main.findChild<Button *>("windowMaximize"), "main window draws no custom window controls");
+    QDialog nativeDialog(&main);
+    nativeDialog.setWindowTitle("Native dialog");
+    new QVBoxLayout(&nativeDialog);
+    nativeDialog.show(); pump();
+    check(!nativeDialog.windowFlags().testFlag(Qt::FramelessWindowHint) &&
+          !nativeDialog.findChild<QWidget *>("appWindowHeader") && nativeDialog.contentsMargins().top() == 0,
+          "dialogs keep the native macOS frame without an app header");
+    nativeDialog.reject();
+    fprintf(stderr, "[window-check] %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
+    return failures;
+#endif
     check(main.windowFlags().testFlag(Qt::FramelessWindowHint), "main frame omits system decoration");
     check(main.contentsMargins().top() == 0 && masthead->height() == 52,
           "main controls reuse the masthead without adding a title strip");
