@@ -67,8 +67,8 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         // Storage capacity bar: Models | Workspace | Other used | Free, all measured, never guessed.
         constexpr double GiB = 1073741824.0;
         auto size = [](double bytes) { return QLocale().formattedDataSize(qint64(bytes)); };
-        auto fixture = [&](bool onVolume, bool complete, QJsonValue free, QJsonValue total, double workspace = 2 * GiB) {
-            return QJsonObject{{"workspace", QJsonObject{{"bytes", workspace}, {"complete", complete}}},
+        auto fixture = [&](bool onVolume, bool complete, QJsonValue free, QJsonValue total) {
+            return QJsonObject{{"workspace", QJsonObject{{"bytes", 2 * GiB}, {"complete", complete}}},
                                {"models", QJsonObject{{"bytes", 6 * GiB}, {"complete", true}}},
                                {"combined_locations", false}, {"cache_on_data_volume", onVolume},
                                {"free_bytes", free}, {"disk_total_bytes", total}};
