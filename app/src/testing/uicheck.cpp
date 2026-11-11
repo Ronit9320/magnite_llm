@@ -1,6 +1,10 @@
 #include "testing/uicheck.h"
+#include "testing/docs_tests.h"
+#include "testing/settings_tests.h"
+#include "testing/windowchrome_tests.h"
 #include "backend_client.h"
 #include "theme.h"
+#include "trainingduration.h"
 #include "panels/modelspanel.h"
 #include "panels/modelcard.h"
 #include "panels/trainingpanel.h"
@@ -43,6 +47,7 @@
 #include "widgets/spinbox.h"
 #include <QComboBox>
 #include <QDir>
+#include <QDialog>
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QEventLoop>
@@ -51,6 +56,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QLineEdit>
@@ -345,6 +351,9 @@ struct Fixture : QTcpServer {
                             body+="data: {\"done\":true}\n\n";
                         }
                     }
+                    else if (path == "/system/info") body=R"({"version":"v0.1-preview","system":"Fixture OS","architecture":"test","python":"3.12","engines":{"llama.cpp":"test","vLLM":null,"torch":null,"PEFT":null},"device":{"device":"Fixture CPU","kind":"RAM","total_bytes":17179869184,"accelerator":"SYSTEM"}})";
+                    else if (path == "/system/storage") body=R"({"data_directory":"/fixture/magnite","model_cache":"/fixture/model-cache","workspace":{"bytes":820000000,"complete":true},"models":{"bytes":17800000000,"complete":false},"free_bytes":80000000000,"combined_locations":false})";
+                    else if (path == "/system/logs") body=R"({"text":"Runtime ready\nNo model loaded","truncated":false})";
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
                     else if (path == "/rag/status") body=R"({"documents":2,"chunks":36,"engine_ready":true,"model":"local embeddings"})";
@@ -368,10 +377,25 @@ int runUiCheck(const QString &captures) {
         if (!pass) ++failures;
         fprintf(stderr,"[ui-check] %s %s\n",pass?"ok:":"FAIL:",qUtf8Printable(message));
     };
+    check(TrainingTime::duration(0)=="0s" && TrainingTime::duration(59)=="59s" &&
+          TrainingTime::duration(60)=="1m 0s" && TrainingTime::duration(3599)=="59m 59s",
+          "training durations format seconds and minutes at unit boundaries");
+    check(TrainingTime::duration(3600)=="1h 0m" && TrainingTime::duration(8400)=="2h 20m" &&
+          TrainingTime::duration(86399)=="23h 59m" && TrainingTime::duration(86400)=="1d 0h" &&
+          TrainingTime::duration(90061)=="1d 1h",
+          "training durations convert long runs to hours and days");
+    check(TrainingTime::duration(-1)=="—" && TrainingTime::duration(qInf())=="—" &&
+          TrainingTime::duration(qQNaN())=="—",
+          "unavailable training durations do not display invalid values");
+    if (qEnvironmentVariableIsSet("MAGNITE_DOCS_DESIGN_CHECK")) return runDocsChecks(captures)?1:0;
     Fixture fixture;
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+    if (qEnvironmentVariableIsSet("MAGNITE_SETTINGS_DESIGN_CHECK")) return runSettingsChecks(&client,captures)?1:0;
+    failures+=runDocsChecks();
+    failures+=runWindowChromeChecks();
+    failures+=runSettingsChecks(&client,QString());
     if (qEnvironmentVariableIsSet("MAGNITE_TRAINING_DESIGN_CHECK")) {
         fixture.designPreview=true; fixture.serveActiveTraining=true;
         TrainingPanel training; training.resize(1245,1350); training.setBackendClient(&client); training.show(); pump(900);
@@ -693,19 +717,18 @@ int runUiCheck(const QString &captures) {
                       QString("%1 fits %2px in %3 mode").arg(name).arg(width).arg(dark?"dark":"light"));
                 capture(panel,QString("%1-%2-%3").arg(dark?"dark":"light").arg(width).arg(name));
                 if (name == "settings") {
-                    auto *tabs = settings.findChild<QTabWidget *>();
-                    for (int tab = 1; tab < tabs->count(); ++tab) {
-                        tabs->setCurrentIndex(tab); pump();
-                        capture(panel, QString("%1-%2-settings-tab-%3")
-                                .arg(dark?"dark":"light").arg(width).arg(tab));
+                    for (int category = 1; category < 8; ++category) {
+                        settings.selectCategory(category); pump();
+                        capture(panel, QString("%1-%2-settings-category-%3").arg(dark?"dark":"light").arg(width).arg(category));
                     }
-                    tabs->setCurrentIndex(0); pump();
+                    settings.selectCategory(3); pump();
                 }
                 if (width == 848 && (name == "settings" || name == "training")) {
                     if (name=="training") {
                         training.findChild<QPushButton *>("trainingSettingsToggle")->setChecked(true); pump();
                     }
                     auto *combo = panel->findChild<QComboBox *>();
+                    if(name=="settings")for(auto *candidate:settings.findChildren<QComboBox *>())if(candidate->accessibleName()=="Default inference engine")combo=candidate;
                     const int previous = combo->currentIndex();
                     combo->setFocus();
                     key(combo, Qt::Key_Down, Qt::AltModifier);
@@ -1343,6 +1366,46 @@ int runUiCheck(const QString &captures) {
     QSettings().setValue("appearance/studio3ReducedMotion",true);
     animationSamples.append(QJsonObject{{"step",11},{"loss",0.9}}); animated.setHistory(animationSamples,12);
     check(!animated.isAnimating(),"reduced motion displays measurements immediately");
+    // Simulate a long run after the backend has trimmed its early history.
+    QJsonArray retained;
+    for (int step=6900; step<=7900; step+=10)
+        retained.append(QJsonObject{{"step",step},{"loss",1.2 + (step%30)*0.01},
+                                   {"eval_loss",1.1}});
+    animated.setHistory(retained,20000);
+    const QPointF middle(230,85);
+    QMouseEvent retainedHover(QEvent::MouseMove,middle,middle,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+    QApplication::sendEvent(&animated,&retainedHover);
+    auto *retainedReadout=animated.findChild<QLabel *>("trainingChartHover");
+    const int hoveredStep=retainedReadout->text().section(' ',1,1).toInt();
+    check(hoveredStep>7200 && hoveredStep<7600,"long-run hover maps the middle of the plot to the retained step window");
+    capture(&animated,"training-retained-history");
+    const auto retainedImage=animated.grab().toImage().scaled(animated.size());
+    bool curveAtLeft=false;
+    const QColor series(Theme::accentPrimary());
+    for (int x=80; x<140; ++x) for (int y=36; y<145; ++y) {
+        const QColor pixel=retainedImage.pixelColor(x,y);
+        if (qAbs(pixel.red()-series.red())<12 && qAbs(pixel.green()-series.green())<12 && qAbs(pixel.blue()-series.blue())<12)
+            curveAtLeft=true;
+    }
+    check(curveAtLeft,"retained long-run curve fills the left side of the plot");
+    animated.findChild<Button *>("trainingChartExpand")->click(); pump();
+    auto *expandedDialog=animated.findChild<QDialog *>("trainingChartExpanded");
+    auto *expandedChart=expandedDialog?expandedDialog->findChild<TrainingChart *>():nullptr;
+    check(expandedDialog && expandedDialog->isVisible() && !expandedDialog->isFullScreen() &&
+          expandedChart && expandedChart->width()>animated.width() && animated.width()==420,
+          "expand opens only the graph in a larger window");
+    if (expandedChart) {
+        capture(expandedDialog,"training-expanded-graph");
+        retained.append(QJsonObject{{"step",7910},{"loss",0.8}});
+        animated.setHistory(retained,20000);
+        check(expandedChart->sampleCount()==animated.sampleCount(),"expanded graph follows live history updates");
+        expandedDialog->resize(1000,600); pump();
+        check(expandedChart->width()>900,"expanded graph follows window resizing");
+        expandedDialog->close(); pump();
+        animated.findChild<Button *>("trainingChartExpand")->click(); pump();
+        check(animated.findChild<QDialog *>("trainingChartExpanded")->isVisible(),"expanded graph can be closed and reopened");
+        animated.findChild<QDialog *>("trainingChartExpanded")->close(); pump();
+    }
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     chat.show(); pump();
@@ -1361,6 +1424,18 @@ int runUiCheck(const QString &captures) {
     host.hide(); chat.hide();
 
     {
+        // Earlier streaming/clear-chat callbacks must not enter the debounce
+        // request counts. Give these checks their own panel and HTTP fixture.
+        Fixture fixture;
+        if (!fixture.listen(QHostAddress::LocalHost,0)) {
+            check(false,"context usage fixture server: "+fixture.errorString());
+            return 1;
+        }
+        BackendClient client;
+        client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+        ChatPanel chat;
+        chat.resize(1104,628);
+        chat.setBackendClient(&client);
         QSettings().remove("chat/meterStyle"); QSettings().remove("chat/autoCompactPercent");
         QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection);
         chat.reloadContextSettings(); chat.show(); pump();
@@ -2043,7 +2118,10 @@ int runUiCheck(const QString &captures) {
                 releaseChat();
 
                 // Every kind of change is saved.
-                check(sendAndWait("history two") && savedTexts(id1).size()==4 && savedTexts(id1).at(2)=="history two","history: a finished reply is saved");
+                // Stream completion and the debounced disk save are separate events.
+                check(sendAndWait("history two") && waitUntil([&] {
+                    return savedTexts(id1)==QStringList({"history one","reply A","history two","reply A"});
+                }),"history: a finished reply is saved");
                 fixture.chatReply="reply B"; int before=fixture.chatRequests.size();
                 check(openEditor(2),"history: the second message can be edited"); saveEdit(2,"history two edited"); check(waitDone(before),"history: the edit is sent"); pump(300);
                 {
@@ -2245,7 +2323,7 @@ int runUiCheck(const QString &captures) {
     check(!hosted && engineCombo && engineCombo->count()==3,"Settings exposes only supported local engines");
     auto *motion=settings.findChild<QCheckBox *>("reducedMotionToggle"); motion->setChecked(true);
     check(QSettings().value("appearance/studio3ReducedMotion").toBool(),"reduced motion saves immediately");
-    settings.findChild<QTabWidget *>()->setCurrentIndex(2); pump(); capture(&settings,"settings-appearance"); settings.hide();
+    settings.selectCategory(1); pump(); capture(&settings,"settings-appearance"); settings.hide();
     LogoAnimation logo;
     check(logo.frameCount()==540 && logo.framesPerSecond()==30,"restored logo has 540 frames at 30 fps");
     auto renderLogo = [&logo](qint64 ms, int size = 420) {
@@ -2681,7 +2759,9 @@ int runUiCheck(const QString &captures) {
         sidebar.resize(195,680); sidebar.show(); pump();
         auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto nav=navButtons();
-        const QStringList tips={"Library \u00b7 Ctrl+1","Training \u00b7 Ctrl+2","Knowledge \u00b7 Ctrl+3","Adapters \u00b7 Ctrl+4","Playground \u00b7 Ctrl+5","Settings \u00b7 Ctrl+6"};
+        QStringList tips;
+        const QStringList names={"Library","Training","Knowledge","Adapters","Playground","Settings"};
+        for(int i=0;i<names.size();++i)tips<<names[i]+" · "+QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
         bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
         check(tipsOk&&sidebar.width()==195,"sidebar: six nav buttons with today's tooltips in a 195px column");
         nav[1]->click();
@@ -2734,7 +2814,11 @@ int runUiCheck(const QString &captures) {
         strip.setCollapsed(true); pump();
         auto buttons=nav();
         bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
-        for (int i=0;i<6&&strippedOk;++i) strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&buttons[i]->toolTip().startsWith(labels[i]+" \u00b7 Ctrl+");
+        for (int i=0;i<6&&strippedOk;++i) {
+            const QString shortcut=QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
+            strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&
+                       buttons[i]->toolTip()==labels[i]+" \u00b7 "+shortcut;
+        }
         check(strippedOk,"sidebar: collapsing makes a 52px icon strip; the labels stay as tooltips and accessible names");
         bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
         for (auto *tag : strip.findChildren<QLabel *>("studioTag")) hidden&=!tag->isVisibleTo(&strip);

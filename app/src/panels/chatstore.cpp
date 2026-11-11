@@ -257,3 +257,18 @@ bool ChatStore::remove(const QString &id) {
     emit changed();
     return true;
 }
+
+
+bool ChatStore::exportAll(QJsonObject *result, QString *error) const {
+    QJsonArray chats;
+    for (const auto &summary : m_chats) {
+        if (!read(summary.id)) { *error="A saved conversation could not be read: "+summary.id; return false; }
+        QFile file(pathFor(summary.id));
+        if (!file.open(QIODevice::ReadOnly)) { *error=file.errorString(); return false; }
+        QJsonParseError parse; const auto doc=QJsonDocument::fromJson(file.readAll(),&parse);
+        if(parse.error!=QJsonParseError::NoError || !doc.isObject()) { *error="A saved conversation changed during export."; return false; }
+        chats.append(doc.object());
+    }
+    *result=QJsonObject{{"format","magnite-chat-export"},{"version",1},{"exported_at",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"chats",chats}};
+    return true;
+}

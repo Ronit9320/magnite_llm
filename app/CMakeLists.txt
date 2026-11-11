@@ -24,6 +24,9 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Svg)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Qt6 QUIET COMPONENTS DBus)
+endif()
 
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_version.py" MAGNITE_SEQUENCE_LINE REGEX "^UPDATE_SEQUENCE = ")
 string(REGEX MATCH "[0-9]+" MAGNITE_UPDATE_SEQUENCE "${MAGNITE_SEQUENCE_LINE}")
@@ -40,14 +43,27 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/testing/docs_tests.cpp
+    src/testing/docs_tests.h
+    src/panels/docslibrary.cpp
+    src/panels/docslibrary.h
+    src/panels/docspanel.cpp
+    src/panels/docspanel.h
+    src/widgets/docscontentview.cpp
+    src/widgets/docscontentview.h
     src/update_manager.cpp
     src/update_manager.h
+    src/testing/windowchrome_tests.cpp
+    src/testing/windowchrome_tests.h
+    src/testing/settings_tests.cpp
+    src/testing/settings_tests.h
     src/testing/uicheck.cpp
     src/testing/uicheck.h
     src/testing/restart_tests.cpp
     src/testing/restart_tests.h
     src/main.cpp
     src/mainwindow.cpp
+    src/trainingduration.h
     src/theme.cpp
     src/backend_manager.cpp
     src/backend_client.cpp
@@ -84,6 +100,15 @@ set(MAGNITE_SOURCES
     src/widgets/contextmeter.h
     src/widgets/versionswitcher.cpp
     src/widgets/versionswitcher.h
+    src/widgets/themechoice.cpp
+    src/widgets/themechoice.h
+    src/widgets/settingssummary.cpp
+    src/widgets/settingssummary.h
+    src/widgets/windowchrome.cpp
+    src/widgets/windowchrome.h
+    src/widgets/settingswindow.cpp
+    src/widgets/settingswindow.h
+    src/widgets/shortcuts.h
     src/widgets/namedialog.cpp
     src/widgets/namedialog.h
     src/widgets/chathistorylist.cpp
@@ -174,6 +199,11 @@ target_link_libraries(magnite-app PRIVATE
     Qt6::Svg
     OpenSSL::Crypto
 )
+
+if(TARGET Qt6::DBus)
+    target_link_libraries(magnite-app PRIVATE Qt6::DBus)
+    target_compile_definitions(magnite-app PRIVATE MAGNITE_DESKTOP_DBUS)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(magnite-update-helper ../packaging/update_helper.cpp)

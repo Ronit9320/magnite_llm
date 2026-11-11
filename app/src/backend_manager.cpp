@@ -196,6 +196,7 @@ void BackendManager::launchBackend() {
 void BackendManager::onProcessReadyRead() {
     QByteArray chunk = m_process->readAllStandardError();
     m_stderrBuffer += chunk;
+    m_recentLogs=(m_recentLogs+chunk).right(65536);
     fprintf(stderr, "%s", chunk.constData());
     fflush(stderr);
 
@@ -357,3 +358,11 @@ void BackendManager::closeProcessJob() {
     if (m_processJob) { CloseHandle(m_processJob); m_processJob = nullptr; }
 }
 #endif
+
+QString BackendManager::recentLogs() const {
+    QString text=QString::fromUtf8(m_recentLogs);
+    if(!m_apiToken.isEmpty())text.replace(m_apiToken,"[redacted]");
+    text.replace(QRegularExpression("(?i)(bearer\\s+)\\S+"),"\\1[redacted]");
+    text.replace(QRegularExpression("(?i)((?:api[_-]?key|token|password|secret)\\s*[=:]\\s*)[^\\s,;]+"),"\\1[redacted]");
+    return text.isEmpty()?QString("No backend messages have been recorded in this session."):text;
+}

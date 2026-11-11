@@ -103,6 +103,12 @@ authentication themselves; the CLI access wrapper protects them when a token is
 configured. Direct `uvicorn backend.server:app` bypasses that wrapper and the
 data-directory lock. See [update architecture](development/RELEASE_PIPELINE.md).
 
+Dataset ingestion accepts JSONL, CSV and plain text and stores normalized JSONL.
+JSONL supports `messages`, `text`, `instruction`/`output` (with optional `input`),
+`prompt`/`completion`, and `prompt`/`response` rows. A `prompt`/`response` pair
+becomes user/assistant chat messages; both fields must be nonempty strings.
+CSV files with `prompt,response` headers use the same chat normalization.
+
 Training example body after dataset ingestion:
 
 ```json
@@ -151,3 +157,28 @@ If GPU telemetry is unavailable, the response labels system/unified memory and
 leaves unsupported scalars `null`. These are device-wide readings, not an
 assertion that the selected training job uses that GPU. The desktop refreshes
 this card while its training page is visible, with one request in flight.
+
+### Settings and local diagnostics
+
+These read-only endpoints use the desktop launch credential like other routes
+(except `/health`). They are also covered by update quiescing.
+
+- `GET /system/info`: backend version, OS/architecture, Python version, installed
+  inference/training package versions and device telemetry. Missing packages and
+  measurements are `null`; package inspection does not import ML runtimes.
+  Installed packages do not guarantee hardware/model compatibility.
+- `GET /system/storage`: resolved `data_directory` and Hugging Face `model_cache`,
+  `workspace` and `models` objects (`bytes`, `complete`), `free_bytes` for the data
+  volume, and `combined_locations`. Scans are bounded by time and entry count,
+  exclude symbolic links and avoid counting nested locations twice. Incomplete
+  scans are lower bounds. Cache storage is shared and may be outside app home.
+- `GET /system/logs`: a bounded 64 KiB tail of the local vLLM log, with common
+  credential patterns redacted, plus `truncated`. No arbitrary path is accepted.
+  Logs can contain local file paths/model names and are never part of the default
+  diagnostic report. A missing log is represented by explanatory text.
+
+Chat export/deletion are native operations over the existing chat store, rather
+than new backend routes. Export format `magnite-chat-export` version 1 contains
+an `exported_at` timestamp and a `chats` array of complete existing chat records,
+including branch trees. Export writes atomically and fails if a listed chat is
+unreadable. It is a portable export, not an automatic backup/import feature.

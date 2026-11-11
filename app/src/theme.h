@@ -13,6 +13,9 @@ class QPixmap;
 namespace Theme {
 
 bool isDark();
+void applyPreferences();
+inline QString previewPaper() { return QStringLiteral("#FFFEF8"); }
+inline QString previewGraphite() { return QStringLiteral("#111113"); }
 void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
 
 // ---- Paper, graphite and orange palette ----

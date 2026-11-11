@@ -50,7 +50,7 @@ public:
     // Streaming, preparing a send, loading a model, or a message editor open.
     bool isBusy() const;
     // Writes any pending change now.
-    void flushSave();
+    bool flushSave();
     // Test hook: the hour the greeting uses (default: the clock). An empty function restores the clock.
     void setHourProviderForTest(std::function<int()> provider) { m_hourProvider = std::move(provider); }
     // Open a saved chat. False, changing nothing, when busy, unknown or unreadable.

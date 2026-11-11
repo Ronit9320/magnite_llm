@@ -2,7 +2,9 @@
 #include "mainwindow.h"
 #include "theme.h"
 #include "testing/restart_tests.h"
+#include "widgets/windowchrome.h"
 #include "testing/uicheck.h"
+#include "testing/windowchrome_tests.h"
 
 #include <QDir>
 #include <QFont>
@@ -18,7 +20,9 @@
 #endif
 
 int main(int argc, char *argv[]) {
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
+    WindowChrome::install(app);
     QCoreApplication::setOrganizationName("Magnite");
     QCoreApplication::setOrganizationDomain("magnite.local");
     QCoreApplication::setApplicationName("Magnite LLM");
@@ -42,7 +46,8 @@ int main(int argc, char *argv[]) {
 
     const bool selftest = argc > 1 && QString(argv[1]) == "--selftest";
     const bool uiCheck = argc > 1 && QString(argv[1]) == "--ui-check";
-    if (selftest || uiCheck) {
+    const bool windowCheck = argc > 1 && QString(argv[1]) == "--window-check";
+    if (selftest || uiCheck || windowCheck) {
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                           QDir::tempPath() + "/magnite-selftest-" + QString::number(QCoreApplication::applicationPid()));
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -63,6 +68,7 @@ int main(int argc, char *argv[]) {
     appFont.setFamily(Theme::bodyFont());
     app.setFont(appFont);
 
+    if (windowCheck) return runWindowChromeChecks(argc > 2 ? QString::fromLocal8Bit(argv[2]) : QString()) ? 1 : 0;
     if (uiCheck) return runUiCheck(argc > 2 ? QString::fromLocal8Bit(argv[2]) : QString());
 
     MainWindow window;

@@ -20,6 +20,7 @@ public:
     // A backend that dies on its own is relaunched with backoff (off for self-tests, which must fail loudly).
     void setAutoRestart(bool enabled) { m_autoRestart = enabled; }
     QString baseUrl() const;
+    QString recentLogs() const;
     // Per-launch secret the backend requires on every request (adr/0009).
     QString apiToken() const { return m_apiToken; }
 
@@ -50,6 +51,7 @@ private:
     QProcess *m_process;
     quint16 m_port;
     QByteArray m_stderrBuffer;
+    QByteArray m_recentLogs;
     QString m_apiToken;
     bool m_started;
     bool m_stopping;

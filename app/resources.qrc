@@ -1,5 +1,13 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="docs/catalog.json">resources/docs/catalog.json</file>
+        <file alias="docs/reference/WORKFLOWS.md">resources/docs/reference/WORKFLOWS.md</file>
+        <file alias="docs/reference/LOCAL_API.md">resources/docs/reference/LOCAL_API.md</file>
+        <file alias="docs/reference/INSTALL.md">resources/docs/reference/INSTALL.md</file>
+        <file alias="docs/reference/LIMITATIONS.md">resources/docs/reference/LIMITATIONS.md</file>
+        <file alias="docs/reference/STORAGE_AND_PRIVACY.md">resources/docs/reference/STORAGE_AND_PRIVACY.md</file>
+        <file alias="docs/reference/TROUBLESHOOTING.md">resources/docs/reference/TROUBLESHOOTING.md</file>
+
         <!-- Theme stylesheet (placeholders resolved by Theme::qss at runtime) -->
         <file alias="theme/theme.qss">resources/theme/console.qss</file>
 
@@ -42,5 +50,9 @@
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>
         <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+        <file alias="icons/window-close.svg">resources/icons/window-close.svg</file>
+        <file alias="icons/window-minimize.svg">resources/icons/window-minimize.svg</file>
+        <file alias="icons/window-maximize.svg">resources/icons/window-maximize.svg</file>
+        <file alias="icons/window-restore.svg">resources/icons/window-restore.svg</file>
     </qresource>
 </RCC>

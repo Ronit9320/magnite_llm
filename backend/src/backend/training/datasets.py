@@ -235,6 +235,11 @@ def _normalize_sample(obj: dict, row_num: int) -> Optional[dict]:
             raise ValueError(f"Row {row_num}: prompt and completion must be strings")
         text = f"{obj['prompt']}\n{obj['completion']}".strip()
         return {"text": text} if text else None
+    if "prompt" in obj and "response" in obj:
+        if not all(isinstance(obj[k], str) and obj[k].strip() for k in ("prompt", "response")):
+            raise ValueError(f"Row {row_num}: prompt and response must be nonempty strings")
+        return {"messages": [{"role": "user", "content": obj["prompt"]},
+                             {"role": "assistant", "content": obj["response"]}]}
     for key in ("input", "instruction", "content"):
         if key in obj:
             if not isinstance(obj[key], str) or not obj[key].strip():

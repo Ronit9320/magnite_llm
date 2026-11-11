@@ -35,6 +35,8 @@ public:
     std::optional<ChatTree> load(const QString &id) const;     // nullopt for anything missing, unreadable, too new or inconsistent
     bool rename(const QString &id, const QString &title);
     bool remove(const QString &id);
+    QString directory() const { return m_dir; }
+    bool exportAll(QJsonObject *result, QString *error) const;
     QString lastError() const { return m_lastError; }
     // Chat files that exist but could not be read (damaged, from a newer version, inconsistent). They are never
     // modified or deleted; the sidebar tells the user how many there are. Sorted.

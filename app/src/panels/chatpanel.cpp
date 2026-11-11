@@ -16,6 +16,7 @@
 #include "panels/messagerow.h"
 
 #include <QSettings>
+#include "widgets/shortcuts.h"
 #include <QStyle>
 #include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
@@ -251,6 +252,7 @@ void ChatPanel::setupUi() {
     conversation->addWidget(composer->parentWidget());
     conversation->addWidget(m_meter->bar());
     auto *shortcutHint = new QLabel("Enter to send · Shift+Enter for a new line", this);
+    shortcutHint->setProperty("chatShortcutHint",true);
     shortcutHint->setAlignment(Qt::AlignCenter);
     shortcutHint->setObjectName("cardMeta");
     conversation->addWidget(shortcutHint);
@@ -303,7 +305,9 @@ bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
     if (watched == m_input && event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
-            && !(key->modifiers() & Qt::ShiftModifier)) {
+            && !(key->modifiers() & Qt::ShiftModifier)
+            && (QSettings().value("chat/sendKey","enter").toString() != "modified"
+                || (key->modifiers() & Qt::ControlModifier))) {
             if (!key->isAutoRepeat() && m_sendButton->isEnabled()) onSend();
             return true;
         }
@@ -927,14 +931,16 @@ void ChatPanel::markDirty() {
     m_saveTimer->start();
 }
 
-void ChatPanel::flushSave() {
-    if (!m_store || m_chatId.isEmpty() || !m_saveDirty) return;
+bool ChatPanel::flushSave() {
+    if (!m_store || m_chatId.isEmpty() || !m_saveDirty) return true;
     m_saveTimer->stop();
     m_saveDirty = false;
     if (!m_store->save(m_chatId, m_tree)) {
         m_saveDirty = true;   // still unsaved: the next flush (switching chats, closing) tries again
         setStatus("Could not save this chat: " + m_store->lastError(), "warn");
+        return false;
     }
+    return true;
 }
 
 bool ChatPanel::openChat(const QString &id) {
@@ -999,6 +1005,10 @@ QJsonArray ChatPanel::effectiveMessages(int pathCount) const {
 void ChatPanel::reloadContextSettings() {
     using namespace ContextMeterLogic;
     QSettings settings;
+    for(auto* label:findChildren<QLabel*>()) if(label->property("chatShortcutHint").toBool()) {
+        const auto send=settings.value("chat/sendKey","enter").toString()=="modified"?Shortcuts::modifiedSend():QKeySequence(Qt::Key_Enter);
+        label->setText(Shortcuts::label(send)+" to send · "+Shortcuts::label(Shortcuts::newLine())+" for a new line");
+    }
     m_meter->setStyle(parseStyle(settings.value("chat/meterStyle").toString()));
     m_autoCompactPercent = parseAutoCompact(settings.value("chat/autoCompactPercent"));
     m_meter->setAutoCompact(m_autoCompactPercent);

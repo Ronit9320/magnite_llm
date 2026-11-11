@@ -1,4 +1,5 @@
 #include "widgets/sidebar.h"
+#include "widgets/shortcuts.h"
 
 #include "theme.h"
 #include "widgets/brandmark.h"
@@ -95,7 +96,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     navigation->addWidget(local);
     navigation->addWidget(makeNavButton(settings));
 
-    auto *collapseKey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_B), this);
+    auto *collapseKey = new QShortcut(Shortcuts::collapseSidebar(), this);
     collapseKey->setContext(Qt::WindowShortcut);
     connect(collapseKey, &QShortcut::activated, this, &Sidebar::toggle);
     m_slide = new QVariantAnimation(this);
@@ -120,9 +121,9 @@ QPushButton *Sidebar::makeNavButton(const NavItem &item) {
     button->setProperty("panel", item.panel);
     button->setProperty("label", item.label);
     connect(button, &QPushButton::clicked, this, [this, item]() { emit panelRequested(item.panel); });
-    button->setToolTip(item.label + " · Ctrl+" + QString::number(item.panel + 1));
+    button->setToolTip(item.label + " · " + Shortcuts::label(Shortcuts::workspace(item.panel)));
     button->setMinimumHeight(40);
-    auto *shortcut = new QShortcut(QKeySequence(QString("Ctrl+%1").arg(item.panel + 1)), this);
+    auto *shortcut = new QShortcut(Shortcuts::workspace(item.panel), this);
     connect(shortcut, &QShortcut::activated, button, &QPushButton::click);
     m_buttons.append(button);
     return button;

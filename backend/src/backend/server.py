@@ -5,6 +5,7 @@ from backend.request_limits import BodyLimitMiddleware
 
 from backend.routes.adapters import router as adapters_router, _adapter_setup
 from backend.routes.health import router as health_router
+from backend.routes.system import router as system_router
 from backend.routes.inference import router as inference_router
 from backend.routes.models import router as models_router, _registry_setup
 from backend.routes.rag import _rag_setup, rag_router
@@ -43,6 +44,7 @@ async def startup():
 
 
 app.include_router(health_router)
+app.include_router(system_router)
 app.include_router(models_router)
 app.include_router(inference_router)
 app.include_router(training_router)

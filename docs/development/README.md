@@ -9,6 +9,8 @@ repository root unless stated otherwise.
 | [Architecture](architecture.md) | System boundaries, components, storage, and service interactions |
 | [CMake build process](CMAKE_BUILD_PROCESS.md) | Desktop configuration, compilation, and build lifecycle |
 | [Frontend analysis](FRONTEND_ANALYSIS.md) | Qt client structure and implementation review |
+| [Docs reference](DOCS_REFERENCE.md) | Offline article library, native reading tools, content maintenance and verification |
+| [Settings window](SETTINGS_WINDOW.md) | Native settings, data actions, diagnostics, notifications and verification |
 | [Training mockup workflow](TRAINING_MOCKUP_WORKFLOW.md) | Separate browser prototype, design review, screenshots and native translation |
 | [Training visualisation](TRAINING_VISUALISATION.md) | Studio, Observatory, measured charts, configuration and verification |
 | [Backend process](BACKEND_PROCESS.md) | Startup, function calls, request flows, and shutdown |

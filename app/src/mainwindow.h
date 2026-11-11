@@ -14,6 +14,8 @@
 
 #include "notice_tracker.h"
 
+class SettingsWindow;
+class QSystemTrayIcon;
 class StudioCanvas;
 class BackendManager;
 class BackendClient;
@@ -25,6 +27,7 @@ class RagPanel;
 class AdaptersPanel;
 class ChatPanel;
 class SettingsPanel;
+class DocsPanel;
 class QPropertyAnimation;
 class QLabel;
 class UpdateManager;
@@ -45,6 +48,9 @@ public:
     void runSelfTest();
     void captureScreenshots(const QString &dir);
 
+protected:
+    void changeEvent(QEvent *event) override;
+
 private slots:
     void onBackendStarted();
     void onBackendError(QProcess::ProcessError error);
@@ -56,6 +62,7 @@ private:
     void chatErrorSelfTest(std::shared_ptr<int> failures, std::function<void()> finish, int scenario = 0);
     void setupUi();
     void startBackend();
+    void notifyCompletion(const QString &kind, bool success, bool preview=false);
     // First launch only: asks what to call the user (for the greeting). Never during verification runs.
     void askForNameIfNeeded();
     void loadPanelSettings();
@@ -93,13 +100,17 @@ private:
     RagPanel *m_ragPanel;
     AdaptersPanel *m_adaptersPanel;
     ChatPanel *m_chatPanel;
+    DocsPanel *m_docsPanel = nullptr;
     ChatStore *m_chatStore = nullptr;
     ChatHistoryList *m_history = nullptr;
     ChatHistoryController *m_historyController = nullptr;
     std::unique_ptr<QTemporaryDir> m_chatTemp;   // verification runs keep their chats here, never in the real data folder
     SettingsPanel *m_settingsPanel;
+    SettingsWindow *m_settingsWindow=nullptr;
+    QSystemTrayIcon *m_notificationTray=nullptr;
 
     Sidebar *m_sidebar = nullptr;
+    QPushButton *m_themeButton=nullptr;
     QLabel *m_statusPill;
     QLabel *m_connectionDot = nullptr;
     QPropertyAnimation *m_crossfade;
@@ -109,5 +120,5 @@ private:
     QString m_shotDir;
 
     // Panel indices
-    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelSettings, PanelCount };
+    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelDocs, PanelSettings, PanelCount };
 };

@@ -59,7 +59,7 @@ void Button::paintEvent(QPaintEvent *) {
     QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
     const auto name=objectName();
     const bool primary=name=="primaryBtn" || name=="cardPrimary" || name=="editSave";
-    const bool danger=name=="destructiveBtn" || name=="cardDanger" || name=="cancelDownload";
+    const bool danger=name=="destructiveBtn" || name=="cardDanger" || name=="cancelDownload" || name=="deleteAllChats";
     const bool ghost=isFlat() || name=="historyNew";
     QColor base(primary?Theme::accentPrimary():Theme::surfaceFill());
     QColor hover(primary?Theme::accentHover():danger?Theme::dangerHover():Theme::surfaceFillHover());

@@ -17,6 +17,9 @@
 #include <QPalette>
 #include <QLabel>
 #include <QAbstractButton>
+#include <QStyleHints>
+#include <QStyle>
+#include <QTimer>
 
 #include <algorithm>
 #include <cstdio>
@@ -25,6 +28,8 @@
 
 namespace {
 bool darkMode = false;
+bool themeApplied = false;
+bool systemDark = false;
 
 // Read a qt resource file (":/...").
 QString loadText(const QString &path) {
@@ -158,15 +163,22 @@ void Theme::setupApplicationTheme() {
         appearance.setValue("appearance/studio3Dark", true);
         appearance.setValue("appearance/darkRefinementApplied", true);
     }
-    setDark(appearance.value("appearance/studio3Dark", true).toBool());
+    systemDark=qApp->palette().color(QPalette::Window).lightness()<128;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    systemDark=qApp->styleHints()->colorScheme()==Qt::ColorScheme::Dark;
+    QObject::connect(qApp->styleHints(),&QStyleHints::colorSchemeChanged,qApp,[](Qt::ColorScheme scheme){
+        systemDark=scheme==Qt::ColorScheme::Dark;
+        if(QSettings().value("appearance/themeMode").toString()=="system") Theme::applyPreferences();
+    });
+#endif
+    applyPreferences();
 }
 
 bool Theme::isDark() { return darkMode; }
 
 void Theme::setDark(bool dark) {
-    static bool applied=false;
-    if (applied && darkMode==dark) return;
-    applied=true;
+    if (themeApplied && darkMode==dark) return;
+    themeApplied=true;
     // Apply palette and stylesheet as one visual change, including open dialogs.
     QList<QWidget *> updatingWindows;
     for (auto *window : QApplication::topLevelWidgets()) if (window->updatesEnabled()) {
@@ -198,6 +210,15 @@ void Theme::setDark(bool dark) {
     for (auto *window : updatingWindows) { window->setUpdatesEnabled(true); window->update(); }
 }
 
+void Theme::applyPreferences() {
+    QSettings settings;
+    const auto mode=settings.value("appearance/themeMode").toString();
+    const bool dark=mode=="system"?systemDark:mode=="light"?false:mode=="dark"?true:settings.value("appearance/studio3Dark",true).toBool();
+    settings.setValue("appearance/studio3Dark",dark);
+    themeApplied=false;
+    setDark(dark);
+}
+
 QString Theme::qss() {
     QString tpl = loadText(QStringLiteral(":/theme/theme.qss"));
     if (tpl.isEmpty()) return QString();
@@ -209,6 +230,15 @@ QString Theme::qss() {
     });
     for (const auto &tk : replacements)
         tpl.replace(tk.name, tk.value);
+    const int size=qBound(0,QSettings().value("appearance/interfaceSize",1).toInt(),2);
+    const qreal scale=size==0?.92:size==2?1.14:1.;
+    if(size!=1) {
+        QRegularExpression expression("font-size:\\s*(\\d+)px");
+        auto matches=expression.globalMatch(tpl);
+        QList<QRegularExpressionMatch> replacements;
+        while(matches.hasNext()) replacements.prepend(matches.next());
+        for(const auto &match:replacements) tpl.replace(match.capturedStart(),match.capturedLength(),QString("font-size: %1px").arg(qRound(match.captured(1).toInt()*scale)));
+    }
     return tpl;
 }
 
@@ -241,6 +271,7 @@ int Theme::selfCheck() {
     check("statusError", Theme::statusError() == "#B13D24");
     check("meterTrack valid", QColor(Theme::meterTrack()).isValid() && Theme::meterTrack() == Theme::surfaceBorder());
     check("motion timings", Theme::motionFastMs()>0 && Theme::motionFastMs()<=Theme::motionStandardMs() && Theme::motionStandardMs()<=200);
+    check("preview palette",QColor(Theme::previewPaper()).isValid() && QColor(Theme::previewGraphite()).isValid());
     check("headingFont", Theme::headingFont() == "Space Grotesk");
     check("bodyFont", Theme::bodyFont() == "DM Sans");
     check("monoFont resolves", !Theme::monoFont().isEmpty());
