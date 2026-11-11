@@ -2118,7 +2118,10 @@ int runUiCheck(const QString &captures) {
                 releaseChat();
 
                 // Every kind of change is saved.
-                check(sendAndWait("history two") && savedTexts(id1).size()==4 && savedTexts(id1).at(2)=="history two","history: a finished reply is saved");
+                // Stream completion and the debounced disk save are separate events.
+                check(sendAndWait("history two") && waitUntil([&] {
+                    return savedTexts(id1)==QStringList({"history one","reply A","history two","reply A"});
+                }),"history: a finished reply is saved");
                 fixture.chatReply="reply B"; int before=fixture.chatRequests.size();
                 check(openEditor(2),"history: the second message can be edited"); saveEdit(2,"history two edited"); check(waitDone(before),"history: the edit is sent"); pump(300);
                 {
