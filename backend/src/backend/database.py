@@ -47,22 +47,39 @@ def _quarantine(path: str) -> str:
     return target
 
 
+_SQLITE_CORRUPT, _SQLITE_NOTADB = 11, 26
+_CORRUPTION_MESSAGES = ("file is not a database", "database disk image is malformed")
+
+
+def _is_corruption(exc: sqlite3.DatabaseError) -> bool:
+    """True only for a file SQLite cannot read: garbage, truncated or malformed.
+
+    Python 3.11+ exposes the SQLite error code (its low byte is the primary code, the rest an extended
+    code such as SQLITE_CORRUPT_VTAB); 3.10 does not, so the two known messages are the fallback.
+    A code, when there is one, wins over the message.
+    """
+    code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return (code & 0xFF) in (_SQLITE_CORRUPT, _SQLITE_NOTADB)
+    return any(text in str(exc).lower() for text in _CORRUPTION_MESSAGES)
+
+
 def open_or_quarantine(path: str, init: Callable[[sqlite3.Connection], None], hint: str = "") -> None:
     """Run ``init(conn)`` against the database at ``path``.
 
-    If the file is not a usable SQLite database (garbage, truncated, malformed) it is moved
-    aside to ``<path>.corrupt-<UTC stamp>`` with its journal files, ``init`` runs once more on a
-    fresh file, and a notice is recorded. ``OperationalError`` (locked, disk full, cannot open)
-    is *not* corruption: it propagates and the file is left alone.
+    If the file is not a usable SQLite database (garbage, truncated, malformed: see
+    ``_is_corruption``) it is moved aside to ``<path>.corrupt-<UTC stamp>`` with its journal files,
+    ``init`` runs once more on a fresh file, and a notice is recorded. Any other error
+    (``OperationalError``: locked, disk full, cannot open; or ``IntegrityError``,
+    ``ProgrammingError`` ...) is *not* corruption: it propagates and the file is left alone.
     """
     try:
         with connection(path) as conn:
             init(conn)
         return
-    except sqlite3.OperationalError:
-        raise
-    except sqlite3.DatabaseError:
-        pass
+    except sqlite3.DatabaseError as exc:
+        if isinstance(exc, sqlite3.OperationalError) or not _is_corruption(exc):
+            raise
     name = os.path.basename(path)
     aside = os.path.basename(_quarantine(path))
     add_notice(f"{name} could not be read, so it was set aside as {aside} and a new one was created. {hint}".strip())

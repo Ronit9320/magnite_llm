@@ -122,6 +122,77 @@ class Finding1TolerantStartup(unittest.TestCase):
         self.assertEqual(glob.glob(db + ".corrupt-*"), [])
         self.assertTrue(os.path.exists(db))
 
+    # ---- deferred minor #2: only real corruption is quarantined ----
+
+    def healthy_db(self):
+        db = self.path("models.db")
+        ModelStore(db)
+        database.NOTICES.clear()
+        return db
+
+    @staticmethod
+    def failing(error):
+        def init(conn):
+            raise error
+        return init
+
+    @staticmethod
+    def failing_once(error):
+        calls = []
+        def init(conn):
+            calls.append(1)
+            if len(calls) == 1:
+                raise error
+        return init
+
+    @staticmethod
+    def with_code(message, code):
+        error = sqlite3.DatabaseError(message)
+        error.sqlite_errorcode = code
+        return error
+
+    def assert_left_alone(self, db):
+        self.assertEqual(glob.glob(db + ".corrupt-*"), [])
+        self.assertTrue(os.path.exists(db))
+        self.assertEqual(database.NOTICES, [])
+
+    def test_integrity_error_is_not_corruption(self):
+        db = self.healthy_db()
+        with self.assertRaises(sqlite3.IntegrityError):
+            database.open_or_quarantine(db, self.failing(sqlite3.IntegrityError("UNIQUE constraint failed: t.x")))
+        self.assert_left_alone(db)
+
+    def test_programming_error_is_not_corruption(self):
+        db = self.healthy_db()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            database.open_or_quarantine(db, self.failing(sqlite3.ProgrammingError("Cannot operate on a closed database.")))
+        self.assert_left_alone(db)
+
+    def test_error_code_beats_message(self):
+        db = self.healthy_db()
+        constraint = self.with_code("database disk image is malformed", 19)   # SQLITE_CONSTRAINT
+        with self.assertRaises(sqlite3.DatabaseError):
+            database.open_or_quarantine(db, self.failing(constraint))
+        self.assert_left_alone(db)
+
+    def test_message_only_corruption_is_quarantined(self):
+        # Python 3.10 has no sqlite_errorcode: the two known corruption messages must still be recognized.
+        for message in ("database disk image is malformed", "file is not a database"):
+            db = self.healthy_db()
+            before = len(glob.glob(db + ".corrupt-*"))
+            database.open_or_quarantine(db, self.failing_once(sqlite3.DatabaseError(message)))
+            self.assertEqual(len(glob.glob(db + ".corrupt-*")), before + 1, message)
+            self.assertEqual(len(database.NOTICES), 1)
+            os.remove(db)
+
+    def test_corruption_error_codes_are_quarantined_including_extended_ones(self):
+        for code in (11, 26, 267):   # SQLITE_CORRUPT, SQLITE_NOTADB, SQLITE_CORRUPT_VTAB (extended)
+            db = self.healthy_db()
+            before = len(glob.glob(db + ".corrupt-*"))
+            database.open_or_quarantine(db, self.failing_once(self.with_code("unrelated text", code)))
+            self.assertEqual(len(glob.glob(db + ".corrupt-*")), before + 1, code)
+            os.remove(db)
+
     def test_healthy_database_is_untouched(self):
         db = self.path("models.db")
         ModelStore(db)
