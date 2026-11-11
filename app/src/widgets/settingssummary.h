@@ -1,7 +1,9 @@
 #pragma once
 #include <QFrame>
 #include <QJsonObject>
+#include <QList>
 class QLabel;
+class QGridLayout;
 class StorageDistribution;
 
 class StorageSummary : public QFrame {
@@ -9,9 +11,17 @@ class StorageSummary : public QFrame {
     explicit StorageSummary(QWidget* parent = nullptr);
     void setMeasurements(const QJsonObject& data);
     void setUnavailable(const QString& message);
+    // Bar segments in bytes: models, workspace, other used, free (test and accessibility seam).
+    QList<double> segments() const;
+    QString freeText() const;
+    QString otherText() const;
+    QString otherTitle() const;
+    bool otherHidden() const;
 
   private:
-    QLabel *m_total, *m_caption, *m_models, *m_workspace, *m_free;
+    QLabel *m_total, *m_caption, *m_models, *m_workspace, *m_other, *m_otherTitle, *m_free;
+    QFrame* m_otherCard;
+    QGridLayout* m_metrics;
     StorageDistribution* m_distribution;
 };
 

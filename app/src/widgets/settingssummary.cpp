@@ -41,13 +41,15 @@ class StorageDistribution : public QWidget {
     explicit StorageDistribution(QWidget* parent = nullptr) : QWidget(parent) {
         setObjectName("settingsStorageDistribution");
         setFixedHeight(8);
-        setAccessibleName("Measured file-size distribution");
+        setAccessibleName("Storage distribution");
     }
-    void setSizes(double models, double workspace) {
-        m_models = models;
-        m_workspace = workspace;
+    // models, workspace, other used, free. Without disk capacity the last two are zero and the
+    // bar divides only the measured files between models and workspace.
+    void setSegments(const QList<double>& segments) {
+        m_segments = segments;
         update();
     }
+    QList<double> segments() const { return m_segments; }
 
   protected:
     void paintEvent(QPaintEvent*) override {
@@ -56,17 +58,28 @@ class StorageDistribution : public QWidget {
         QPainterPath clip;
         clip.addRoundedRect(QRectF(rect()), 4, 4);
         p.setClipPath(clip);
-        p.fillRect(rect(), QColor(Theme::surfaceBorder()));
-        const double total = m_models + m_workspace;
+        // The free portion is the bare track, so the bar reads as the whole disk.
+        p.fillRect(rect(), QColor(Theme::meterTrack()));
+        double total = 0;
+        for (double value : m_segments)
+            total += value;
         if (total <= 0)
             return;
-        const qreal split = width() * m_models / total;
-        p.fillRect(QRectF(0, 0, split, height()), QColor(Theme::accentPrimary()));
-        p.fillRect(QRectF(split, 0, width() - split, height()), QColor(Theme::comparisonSeries()));
+        const QColor colors[3] = {QColor(Theme::accentPrimary()), QColor(Theme::comparisonSeries()),
+                                  QColor(Theme::textMuted())};
+        qreal x = 0;
+        for (int i = 0; i < 3 && i < m_segments.size(); ++i) {
+            if (m_segments[i] <= 0)
+                continue;
+            // A measured but tiny share stays visible instead of vanishing below one pixel.
+            const qreal w = qMax<qreal>(3, width() * m_segments[i] / total);
+            p.fillRect(QRectF(x, 0, w, height()), colors[i]);
+            x += w;
+        }
     }
 
   private:
-    double m_models = 0, m_workspace = 0;
+    QList<double> m_segments{0, 0, 0, 0};
 };
 StorageSummary::StorageSummary(QWidget* parent) : QFrame(parent) {
     setObjectName("settingsStorageOverview");
@@ -81,29 +94,45 @@ StorageSummary::StorageSummary(QWidget* parent) : QFrame(parent) {
     m_distribution = new StorageDistribution;
     body->addWidget(m_distribution);
     auto* metrics = new QGridLayout;
+    m_metrics = metrics;
     metrics->setSpacing(10);
     auto* models = metricCard("●  Shared model cache", &m_models);
     models->setProperty("metricTone", "models");
     auto* workspace = metricCard("●  Workspace", &m_workspace);
     workspace->setProperty("metricTone", "workspace");
+    m_otherCard = metricCard("●  Other used", &m_other);
+    m_otherCard->setProperty("metricTone", "other");
+    m_otherTitle = m_otherCard->findChildren<QLabel*>().first();
+    m_otherCard->setVisible(false);
     metrics->addWidget(models, 0, 0);
     metrics->addWidget(workspace, 0, 1);
+    metrics->addWidget(m_otherCard, 0, 2);
     metrics->setColumnStretch(0, 1);
     metrics->setColumnStretch(1, 1);
+    metrics->setColumnStretch(2, 0);
     body->addLayout(metrics);
     auto* free = new QHBoxLayout;
     free->addWidget(text("Free on data volume", "settingsHint"), 1);
     m_free = text("Unknown", "settingsStorageFree");
+    m_free->setWordWrap(false); // "X of Y" stays on one line; the hint beside it can wrap instead
     free->addWidget(m_free);
     body->addLayout(free);
 }
+QList<double> StorageSummary::segments() const { return m_distribution->segments(); }
+QString StorageSummary::freeText() const { return m_free->text(); }
+QString StorageSummary::otherText() const { return m_other->text(); }
+QString StorageSummary::otherTitle() const { return m_otherTitle->text(); }
+bool StorageSummary::otherHidden() const { return m_otherCard->isHidden(); }
 void StorageSummary::setUnavailable(const QString& message) {
     m_caption->setText(message);
     m_total->setText("—");
     m_models->setText("Unknown");
     m_workspace->setText("Unknown");
+    m_other->setText("Unknown");
+    m_otherCard->setVisible(false);
+    m_metrics->setColumnStretch(2, 0);
     m_free->setText("Unknown");
-    m_distribution->setSizes(0, 0);
+    m_distribution->setSegments({0, 0, 0, 0});
 }
 void StorageSummary::setMeasurements(const QJsonObject& data) {
     const auto workspace = data["workspace"].toObject(), models = data["models"].toObject();
@@ -122,11 +151,31 @@ void StorageSummary::setMeasurements(const QJsonObject& data) {
     };
     m_models->setText(combined ? "Included in workspace" : measured(models));
     m_workspace->setText(measured(workspace));
-    m_free->setText(fileSizeText(data["free_bytes"]));
-    m_distribution->setSizes(modelBytes, workspaceBytes);
+
+    const bool freeKnown = data["free_bytes"].isDouble();
+    const bool capacity = freeKnown && data["disk_total_bytes"].toDouble() > 0;
+    QList<double> segments{modelBytes, workspaceBytes, 0, 0};
+    if (capacity) {
+        const double total = data["disk_total_bytes"].toDouble(), free = data["free_bytes"].toDouble();
+        // Capacity is that of the data volume; a cache on another disk does not use it.
+        const double modelsOnDisk = data["cache_on_data_volume"].toBool(true) ? modelBytes : 0;
+        const double other = qMax(0.0, total - free - modelsOnDisk - workspaceBytes);
+        segments = {modelsOnDisk, workspaceBytes, other, free};
+        // What is left over also covers anything the bounded scan did not reach.
+        m_otherTitle->setText(complete ? "●  Other used" : "●  Other & unscanned");
+        m_other->setText((complete ? QString() : QString("≤ ")) + fileSizeText(other));
+        m_free->setText(fileSizeText(free) + " of " + fileSizeText(total));
+    } else {
+        m_free->setText(freeKnown ? fileSizeText(data["free_bytes"]) : QString("Unknown"));
+    }
+    m_otherCard->setVisible(capacity);
+    m_metrics->setColumnStretch(2, capacity ? 1 : 0); // no empty third column without capacity
+    m_distribution->setSegments(segments);
     m_distribution->setAccessibleDescription(
-        "Model cache: " + m_models->text() + ". Workspace: " + m_workspace->text() +
-        ". File-size distribution across measured locations, not disk capacity.");
+        capacity ? "Models: " + m_models->text() + ". Workspace: " + m_workspace->text() +
+                       ". Other: " + m_other->text() + ". Free: " + m_free->text() + "."
+                 : "Model cache: " + m_models->text() + ". Workspace: " + m_workspace->text() +
+                       ". File-size distribution across measured locations, not disk capacity.");
     setAccessibleDescription(
         m_total->text() + " measured files. " +
         (complete ? "Scan complete." : "Partial scan; values are lower bounds."));

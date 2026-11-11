@@ -1,4 +1,5 @@
 """Settings reads remain bounded, private and independent of optional ML imports."""
+import collections
 import importlib.metadata
 from pathlib import Path
 import tempfile
@@ -44,6 +45,36 @@ class SystemSettingsTests(unittest.TestCase):
                     info = system.storage_info()
                 self.assertEqual(info["workspace"]["bytes"] + info["models"]["bytes"], 8)
                 self.assertEqual(info["combined_locations"], home == cache)
+
+    def _storage(self, home, cache, **patches):
+        with patch.object(system, "app_home", return_value=str(home)), patch(
+                "huggingface_hub.constants.HF_HUB_CACHE", str(cache)):
+            return system.storage_info()
+
+    def test_storage_reports_disk_capacity_for_the_data_volume(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("shutil.disk_usage", return_value=collections.namedtuple("usage", "total used free")(100, 40, 60)):
+            info = self._storage(directory, directory)
+        self.assertEqual(info["disk_total_bytes"], 100)
+        self.assertEqual(info["free_bytes"], 60)
+        self.assertTrue(info["cache_on_data_volume"])
+
+    def test_cache_on_another_volume_is_flagged(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cache, \
+             patch.object(system, "_volume_id", side_effect=lambda path: 1 if Path(path) == Path(home).resolve() else 2):
+            info = self._storage(home, cache)
+        self.assertFalse(info["cache_on_data_volume"])
+
+    def test_missing_cache_directory_uses_its_nearest_existing_parent_volume(self):
+        with tempfile.TemporaryDirectory() as home:
+            info = self._storage(home, Path(home) / "not" / "created" / "yet")
+        self.assertTrue(info["cache_on_data_volume"])
+
+    def test_unreadable_disk_usage_is_unknown_not_zero(self):
+        with tempfile.TemporaryDirectory() as directory, patch("shutil.disk_usage", side_effect=OSError):
+            info = self._storage(directory, directory)
+        self.assertIsNone(info["disk_total_bytes"])
+        self.assertIsNone(info["free_bytes"])
 
     def test_diagnostics_has_no_environment_or_personal_path_fields(self):
         with patch("backend.training.telemetry.device_telemetry", return_value={"total_bytes": None}), \

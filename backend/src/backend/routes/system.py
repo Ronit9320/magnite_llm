@@ -68,6 +68,28 @@ def directory_size(root: Path, *, exclude: Path | None = None,
     return {"bytes": total, "complete": complete}
 
 
+def _existing_ancestor(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def _volume_id(path: Path) -> int | None:
+    try:
+        return os.stat(_existing_ancestor(path)).st_dev
+    except OSError:
+        return None
+
+
+def _disk_usage(path: Path) -> dict:
+    import shutil
+    try:
+        usage = shutil.disk_usage(_existing_ancestor(path))
+        return {"total": usage.total, "free": usage.free}
+    except OSError:
+        return {"total": None, "free": None}
+
+
 @router.get("/storage")
 def storage_info():
     from huggingface_hub.constants import HF_HUB_CACHE
@@ -76,20 +98,14 @@ def storage_info():
     home_size = directory_size(home, exclude=cache if cache != home else None)
     cache_size = ({"bytes": 0, "complete": True} if home == cache else
                   directory_size(cache, exclude=home))
+    disk = _disk_usage(home)
+    home_volume, cache_volume = _volume_id(home), _volume_id(cache)
     return {"data_directory": str(home), "model_cache": str(cache),
             "workspace": home_size, "models": cache_size,
             "combined_locations": home == cache,
-            "free_bytes": _free_space(home)}
-
-
-def _free_space(path: Path) -> int | None:
-    import shutil
-    while not path.exists() and path != path.parent:
-        path = path.parent
-    try:
-        return shutil.disk_usage(path).free
-    except OSError:
-        return None
+            # Capacity describes the data volume only; the cache may live on another disk.
+            "cache_on_data_volume": home == cache or (home_volume is not None and home_volume == cache_volume),
+            "disk_total_bytes": disk["total"], "free_bytes": disk["free"]}
 
 
 def redact_log(text: str) -> str:

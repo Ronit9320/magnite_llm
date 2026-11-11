@@ -3,6 +3,7 @@
 #include "panels/chatstore.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
+#include "widgets/settingssummary.h"
 #include "widgets/settingswindow.h"
 #include "widgets/shortcuts.h"
 #include <QApplication>
@@ -19,6 +20,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -60,6 +62,39 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
             ++failures;
         fprintf(stderr, "[settings-check] %s %s\n", ok ? "ok:" : "FAIL:", name);
     };
+    {
+        // Storage capacity bar: Models | Workspace | Other used | Free, all measured, never guessed.
+        constexpr double GiB = 1073741824.0;
+        auto size = [](double bytes) { return QLocale().formattedDataSize(qint64(bytes)); };
+        auto fixture = [&](bool onVolume, bool complete, QJsonValue free, QJsonValue total, double workspace = 2 * GiB) {
+            return QJsonObject{{"workspace", QJsonObject{{"bytes", workspace}, {"complete", complete}}},
+                               {"models", QJsonObject{{"bytes", 6 * GiB}, {"complete", true}}},
+                               {"combined_locations", false}, {"cache_on_data_volume", onVolume},
+                               {"free_bytes", free}, {"disk_total_bytes", total}};
+        };
+        StorageSummary full;
+        full.setMeasurements(fixture(true, true, 20 * GiB, 100 * GiB));
+        check(full.segments() == QList<double>({6 * GiB, 2 * GiB, 72 * GiB, 20 * GiB}),
+              "storage bar splits the disk into models, workspace, other used and free");
+        check(full.freeText() == size(20 * GiB) + " of " + size(100 * GiB), "storage shows free space against disk capacity");
+        check(full.otherText() == size(72 * GiB) && full.otherTitle().contains("Other used") && !full.otherHidden(),
+              "storage shows what else uses the disk");
+        StorageSummary elsewhere;
+        elsewhere.setMeasurements(fixture(false, true, 20 * GiB, 100 * GiB));
+        check(elsewhere.segments() == QList<double>({0, 2 * GiB, 78 * GiB, 20 * GiB}),
+              "a model cache on another volume is not subtracted from this disk");
+        StorageSummary partial;
+        partial.setMeasurements(fixture(true, false, 20 * GiB, 100 * GiB));
+        check(partial.otherTitle().contains("unscanned") && partial.otherText().startsWith("≤"),
+              "an incomplete scan labels other used as an upper bound");
+        StorageSummary unknown;
+        unknown.setMeasurements(fixture(true, true, QJsonValue(), QJsonValue()));
+        check(unknown.segments() == QList<double>({6 * GiB, 2 * GiB, 0, 0}) && unknown.freeText() == "Unknown" && unknown.otherHidden(),
+              "unknown capacity falls back to the size split without claiming free space");
+        StorageSummary racing;
+        racing.setMeasurements(fixture(true, true, 95 * GiB, 100 * GiB));
+        check(racing.segments()[2] == 0, "measured files larger than disk usage never produce negative other");
+    }
     QSettings preferences;
     QMap<QString, QVariant> saved;
     for (const auto& key : preferences.allKeys())
