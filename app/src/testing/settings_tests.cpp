@@ -140,6 +140,24 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
           "settings opens as a modal native utility window");
     auto* pages = panel.findChild<QStackedWidget*>("settingsPages");
     check(pages && pages->count() == 8, "all eight reviewed categories exist");
+    {
+        // Headings carry only the title: no tagline above the title, none beneath it, none in the nav.
+        const QStringList taglines = {
+            "YOUR WORKSPACE", "Make it yours.", "A few details to make Magnite feel like home.",
+            "A familiar space, in the light that suits you.", "Shape the way you work with your models.",
+            "Choose how models run on your machine.", "A home for your models, chats and documents.",
+            "Know when longer tasks need your attention.",
+            "Understand your local runtime and troubleshoot problems.",
+            "Keep your local workspace up to date."};
+        bool clean = true;
+        for (int category = 0; category < 8; ++category) {
+            panel.selectCategory(category);
+            for (auto* label : panel.findChildren<QLabel*>())
+                clean = clean && !taglines.contains(label->text());
+        }
+        check(clean, "settings headings have no taglines above or below the title");
+        panel.selectCategory(0);
+    }
     for (bool dark : {false, true}) {
         panel.findChild<QComboBox*>("settingsTheme")->setCurrentIndex(dark ? 1 : 0);
         Theme::setDark(dark);

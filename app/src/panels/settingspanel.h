@@ -80,7 +80,6 @@ class SettingsPanel : public BasePanel {
     QPushButton* m_updateCancel = nullptr;
     QStackedWidget* m_pages = nullptr;
     QLabel* m_title = nullptr;
-    QLabel* m_description = nullptr;
     StorageSummary* m_storageInfo = nullptr;
     QLabel* m_cachePath = nullptr;
     QLabel* m_effectivePath = nullptr;

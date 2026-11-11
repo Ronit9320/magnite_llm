@@ -49,14 +49,6 @@
 namespace {
 const QStringList titles = {"General",           "Appearance",    "Chat",        "Runtime",
                             "Storage & privacy", "Notifications", "Diagnostics", "Updates"};
-const QStringList descriptions = {"A few details to make Magnite feel like home.",
-                                  "A familiar space, in the light that suits you.",
-                                  "Shape the way you work with your models.",
-                                  "Choose how models run on your machine.",
-                                  "A home for your models, chats and documents.",
-                                  "Know when longer tasks need your attention.",
-                                  "Understand your local runtime and troubleshoot problems.",
-                                  "Keep your local workspace up to date."};
 const QStringList icons = {"settings", "layers", "message-circle", "cpu",
                            "database", "box",    "file-text",      "refresh-cw"};
 QLabel* label(const QString& text, const char* name, QWidget* parent = nullptr) {
@@ -158,7 +150,6 @@ void SettingsPanel::setupUi() {
     navBody->setContentsMargins(16, 28, 16, 22);
     navBody->setSpacing(4);
     navBody->addWidget(label("Settings", "settingsNavTitle"));
-    navBody->addWidget(label("Make it yours.", "settingsHint"));
     navBody->addSpacing(22);
     for (int i = 0; i < titles.size(); ++i) {
         if (i == 7) {
@@ -188,12 +179,9 @@ void SettingsPanel::setupUi() {
     auto* heading = new QHBoxLayout;
     auto* headingCopy = new QVBoxLayout;
     headingCopy->setSpacing(8);
-    headingCopy->addWidget(label("YOUR WORKSPACE", "settingsEyebrow"));
     m_title = label("", "settingsTitle");
     m_title->setProperty("windowDragRegion", true);
     headingCopy->addWidget(m_title);
-    m_description = label("", "settingsHint");
-    headingCopy->addWidget(m_description);
     heading->addLayout(headingCopy, 1);
     auto* close = button("×", "settingsClose");
     close->setAccessibleName("Close settings");
@@ -577,7 +565,6 @@ void SettingsPanel::selectCategory(int index) {
     const bool change = index != m_pages->currentIndex();
     m_pages->setCurrentIndex(index);
     m_title->setText(titles[index]);
-    m_description->setText(descriptions[index]);
     refreshNavigation();
     if (change && isVisible()) {
         m_pageMotion->snap(.86);
