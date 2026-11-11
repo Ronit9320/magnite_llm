@@ -188,6 +188,7 @@ struct Fixture : QTcpServer {
     bool omitTrainingHistory = false;
     bool serveActiveTraining = false;
     bool designPreview = false;
+    bool packageInstallRunning = false;
     bool emptyTrainingJobs = false;
     bool includeSubmittedTraining = false;
     bool deferTrainingCancellation = false;
@@ -355,6 +356,10 @@ struct Fixture : QTcpServer {
                         }
                     }
                     else if (path == "/system/info") body=R"({"version":"v0.1-preview","system":"Fixture OS","architecture":"test","python":"3.12","engines":{"llama.cpp":"test","vLLM":null,"torch":null,"PEFT":null},"device":{"device":"Fixture CPU","kind":"RAM","total_bytes":17179869184,"accelerator":"SYSTEM"}})";
+                    else if (path == "/system/packages/install" && method == "GET") body=QJsonDocument(QJsonObject{{"id",packageInstallRunning?QJsonValue("torch"):QJsonValue()},{"state",packageInstallRunning?"running":"idle"},{"log_tail",""}}).toJson();
+                    else if (path == "/system/packages/torch/install" && method == "POST") { packageInstallRunning=true; status=202; body=R"({"id":"torch","state":"running","log_tail":""})"; }
+                    else if (path == "/system/packages/install/cancel" && method == "POST") { packageInstallRunning=false; body=R"({"cancelled":true})"; }
+                    else if (path == "/system/packages") body=R"({"packages":[{"id":"llama.cpp","label":"llama.cpp","role":"Chat engine for GGUF models","installed_version":"0.3.35","state":"installed","reason":null,"size_hint":"May compile on install","installable":false},{"id":"vLLM","label":"vLLM","role":"High-throughput GPU model server","installed_version":null,"state":"unsupported","reason":"Not available on macOS","size_hint":"Several GB","installable":false},{"id":"torch","label":"PyTorch","role":"Training, adapters and Transformers inference","installed_version":null,"state":"missing","reason":null,"size_hint":"Large download, from 200 MB to several GB","installable":true},{"id":"PEFT","label":"PEFT","role":"LoRA adapters for Transformers models","installed_version":null,"state":"blocked","reason":"Needs PyTorch first","size_hint":"Small, but pulls in PyTorch dependencies","installable":false}]})";
                     else if (path == "/system/storage") body=R"({"data_directory":"/fixture/magnite","model_cache":"/fixture/model-cache","workspace":{"bytes":820000000,"complete":true},"models":{"bytes":17800000000,"complete":false},"free_bytes":80000000000,"disk_total_bytes":245000000000,"cache_on_data_volume":true,"combined_locations":false})";
                     else if (path == "/system/logs") body=R"({"text":"Runtime ready\nNo model loaded","truncated":false})";
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";

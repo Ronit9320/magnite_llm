@@ -405,8 +405,12 @@ QLabel#settingsMetricValue { font-family: @headingFont; font-size: 17px; }
 QFrame[metricTone="models"] QLabel#settingsHint { color: @accentLabel; }
 QFrame[metricTone="workspace"] QLabel#settingsHint { color: @comparisonSeries; }
 QLabel#settingsRuntimeStatus { color: @textMuted; background: @canvasBackground; padding: 6px 10px; border-radius: 10px; font-size: 11px; }
-QFrame#settingsEngineRow { background: @canvasBackground; border-radius: 6px; }
-QLabel#settingsEngineStatus { font-size: 11px; color: @textSecondary; }
+QFrame#settingsPackageCard { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QLabel#settingsPackageStatus { font-size: 11px; color: @textSecondary; }
+QLabel#settingsPackageStatus[packageState="installed"] { color: @statusSuccess; }
+QLabel#settingsPackageStatus[packageState="installing"] { color: @accentLabel; }
+QLabel#settingsPackageStatus[packageState="failed"] { color: @statusError; }
+QLabel#settingsPackageNote { font-size: 11px; color: @textMuted; }
 QLabel#settingsKeycap { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; font-size: 12px; padding: 7px 12px; min-width: 120px; }
 
 QLabel#settingsRuntimeStatus[connected="true"] { color: @statusSuccess; }

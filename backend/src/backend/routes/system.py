@@ -34,6 +34,34 @@ def system_info():
             "device": device_telemetry()}
 
 
+@router.get("/packages")
+def runtime_packages():
+    from backend import runtime_packages as catalogue
+    return {"packages": catalogue.status()}
+
+
+@router.post("/packages/{package_id}/install", status_code=202)
+def install_package(package_id: str):
+    from backend import runtime_packages as catalogue
+    try:
+        catalogue.get_manager().start(package_id)
+    except catalogue.InstallRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return catalogue.get_manager().status()
+
+
+@router.get("/packages/install")
+def install_status():
+    from backend import runtime_packages as catalogue
+    return catalogue.get_manager().status()
+
+
+@router.post("/packages/install/cancel")
+def install_cancel():
+    from backend import runtime_packages as catalogue
+    return {"cancelled": catalogue.get_manager().cancel()}
+
+
 def directory_size(root: Path, *, exclude: Path | None = None,
                    budget_seconds: float = 1.0, max_entries: int = 30000) -> dict:
     """Bounded scan; never follow links or present an incomplete scan as exact."""

@@ -42,6 +42,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QStyle>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -404,6 +405,11 @@ void SettingsPanel::setupUi() {
         label("Notifications contain no prompts, responses or document content.", "settingsHint"));
     auto* diagnostics = columns[6];
     m_diagnostics = new DiagnosticsSummary;
+    m_diagnostics->setInstallHandlers([this](const QJsonObject& package) { installPackage(package); },
+                                      [this] { cancelInstall(); });
+    m_installPoll = new QTimer(this);
+    m_installPoll->setInterval(1500);
+    connect(m_installPoll, &QTimer::timeout, this, &SettingsPanel::pollInstall);
     diagnostics->addWidget(m_diagnostics);
     auto* refresh = button("Refresh details");
     diagnostics->addWidget(refresh, 0, Qt::AlignLeft);
@@ -635,6 +641,7 @@ void SettingsPanel::refreshDetails() {
         m_info = doc.object();
         m_diagnostics->setDetails(m_info);
     });
+    refreshPackages();
     m_client->get("/system/storage", [this](int status, const QJsonDocument& doc) {
         m_detailsPending = false;
         if (status != 200 || !doc.isObject()) {
@@ -649,6 +656,72 @@ void SettingsPanel::refreshDetails() {
         m_activeDataPath = o["data_directory"].toString();
         m_effectivePath->setText(m_activeDataPath);
         m_storageInfo->setMeasurements(o);
+    });
+}
+void SettingsPanel::refreshPackages() {
+    if (!m_client || !m_client->isReady())
+        return;
+    m_client->get("/system/packages", [this](int status, const QJsonDocument& doc) {
+        if (status == 200 && doc.isObject())
+            m_diagnostics->setPackages(doc.object()["packages"].toArray());
+    });
+    m_client->get("/system/packages/install", [this](int status, const QJsonDocument& doc) {
+        if (status != 200 || !doc.isObject())
+            return;
+        m_diagnostics->setInstallJob(doc.object());
+        if (doc.object()["state"].toString() == "running")
+            m_installPoll->start(); // an install started earlier is still going
+    });
+}
+void SettingsPanel::installPackage(const QJsonObject& package) {
+    if (!m_client || !m_client->isReady())
+        return;
+    const QString label = package["label"].toString(), id = package["id"].toString();
+    if (!Ui::confirmAction(this, "Install " + label + "?",
+                           label + " will be downloaded from the network (" +
+                               package["size_hint"].toString().toLower() +
+                               ") and added to Magnite's own packages folder. Your models, chats and "
+                               "the app itself are not changed.",
+                           "Install"))
+        return;
+    m_client->post("/system/packages/" + QString::fromUtf8(QUrl::toPercentEncoding(id)) + "/install",
+                   QJsonObject{}, [this, label](int status, const QJsonDocument& doc) {
+                       if (status != 202 || !doc.isObject()) {
+                           setStatus(doc.object()["detail"].toString("Could not start the install."));
+                           return;
+                       }
+                       m_diagnostics->setInstallJob(doc.object());
+                       m_installPoll->start();
+                       setStatus("Installing " + label + "…");
+                   });
+}
+void SettingsPanel::cancelInstall() {
+    if (!m_client || !m_client->isReady())
+        return;
+    m_client->post("/system/packages/install/cancel", QJsonObject{},
+                   [this](int, const QJsonDocument&) { pollInstall(); });
+}
+void SettingsPanel::pollInstall() {
+    if (!m_client || !m_client->isReady() || m_installPolling)
+        return;
+    m_installPolling = true;
+    m_client->get("/system/packages/install", [this](int status, const QJsonDocument& doc) {
+        m_installPolling = false;
+        if (status != 200 || !doc.isObject())
+            return;
+        const auto job = doc.object();
+        const QString state = job["state"].toString();
+        m_diagnostics->setInstallJob(job);
+        if (state == "running")
+            return;
+        m_installPoll->stop();
+        refreshPackages();
+        if (state == "done")
+            setStatus("Installed " + job["id"].toString() + ". It is ready to use.");
+        else if (state == "failed")
+            setStatus("Install failed. The details are shown on the package.");
+        else if (state == "cancelled")
+            setStatus("Install cancelled.");
     });
 }
 void SettingsPanel::resetPreferences() {

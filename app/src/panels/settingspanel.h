@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <functional>
 
+class QTimer;
 class StorageSummary;
 class DiagnosticsSummary;
 class QComboBox;
@@ -97,5 +98,11 @@ class SettingsPanel : public BasePanel {
     QString m_cacheDirectory;
     std::function<QString()> m_runtimeLogs;
     bool m_loading = false;
+    void refreshPackages();
+    void installPackage(const QJsonObject& package);
+    void cancelInstall();
+    void pollInstall();
     bool m_detailsPending = false;
+    bool m_installPolling = false;
+    QTimer* m_installPoll = nullptr;
 };

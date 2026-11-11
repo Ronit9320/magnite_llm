@@ -64,6 +64,9 @@ def _watch_for_cancel(stdin, cancel: threading.Event) -> None:
 
 def main(argv: list[str] | None = None, out=None, stdin=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    # This child runs isolated (-I) and would not see packages the user installed from Settings.
+    from backend import runtime_packages
+    runtime_packages.activate()
     write = _Writer(out if out is not None else sys.stdout)
     if len(argv) != 1:
         write({"error": "usage: train_worker <spec.json>"})

@@ -34,6 +34,8 @@ async def shutdown():
 
 @app.on_event("startup")
 async def startup():
+    from backend import runtime_packages
+    runtime_packages.activate()   # user-installed packages must be importable before engines are probed
     _registry_setup()
     _training_setup()
     store = _adapter_setup()

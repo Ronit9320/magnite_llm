@@ -1,5 +1,6 @@
 #include "widgets/settingssummary.h"
 #include "theme.h"
+#include "widgets/button.h"
 #include <QCoreApplication>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -7,6 +8,8 @@
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
+#include <QProgressBar>
+#include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -210,20 +213,16 @@ DiagnosticsSummary::DiagnosticsSummary(QWidget* parent) : QFrame(parent) {
     deviceBody->addWidget(m_device);
     deviceBody->addWidget(m_memory);
     body->addWidget(device);
-    body->addWidget(text("Installed runtime packages", "settingsRowTitle"));
-    for (const auto& engine : QStringList{"llama.cpp", "vLLM", "torch", "PEFT"}) {
-        auto* host = new QFrame;
-        host->setObjectName("settingsEngineRow");
-        auto* row = new QHBoxLayout(host);
-        row->setContentsMargins(12, 9, 12, 9);
-        row->addWidget(text(engine, "settingsRowTitle"), 1);
-        auto* version = text("Unknown", "settingsEngineStatus");
-        row->addWidget(version);
-        m_engines << version;
-        body->addWidget(host);
-    }
-    body->addWidget(text("Installed packages do not guarantee hardware or model compatibility.",
+    body->addWidget(text("Runtime packages", "settingsRowTitle"));
+    auto* packages = new QWidget;
+    m_packages = new QVBoxLayout(packages);
+    m_packages->setContentsMargins(0, 0, 0, 0);
+    m_packages->setSpacing(8);
+    body->addWidget(packages);
+    body->addWidget(text("Installed packages do not guarantee hardware or model compatibility. "
+                         "Installs go to Magnite's own packages folder; the app itself is never modified.",
                          "settingsHint"));
+    setPackages({});
     m_application->setText(QCoreApplication::applicationVersion());
 }
 void DiagnosticsSummary::setUnavailable(const QString& message) {
@@ -237,8 +236,9 @@ void DiagnosticsSummary::setUnavailable(const QString& message) {
     m_python->setText("Unknown");
     m_device->setText("Not measured");
     m_memory->setText(message);
-    for (auto* engine : m_engines)
-        engine->setText("Unknown");
+    m_rows = {};
+    m_job = {};
+    renderPackages();
 }
 void DiagnosticsSummary::setDetails(const QJsonObject& data) {
     m_status->setText("● Connected");
@@ -254,10 +254,126 @@ void DiagnosticsSummary::setDetails(const QJsonObject& data) {
     m_memory->setText(fileSizeText(device["total_bytes"]) + " · " +
                       device["kind"].toString("Memory") + " · " +
                       device["accelerator"].toString("Unknown accelerator"));
-    const auto engines = data["engines"].toObject();
-    const QStringList keys = {"llama.cpp", "vLLM", "torch", "PEFT"};
-    for (int i = 0; i < keys.size(); ++i)
-        m_engines[i]->setText(engines[keys[i]].isString()
-                                  ? "Installed · " + engines[keys[i]].toString()
-                                  : "Not installed");
+}
+void DiagnosticsSummary::setInstallHandlers(std::function<void(const QJsonObject&)> install,
+                                            std::function<void()> cancel) {
+    m_install = std::move(install);
+    m_cancel = std::move(cancel);
+}
+void DiagnosticsSummary::setPackages(const QJsonArray& rows) {
+    m_rows = rows;
+    renderPackages();
+}
+void DiagnosticsSummary::setInstallJob(const QJsonObject& job) {
+    m_job = job;
+    renderPackages();
+}
+QString DiagnosticsSummary::packageStatus(const QString& id) const {
+    auto* card = m_cards.value(id);
+    auto* status = card ? card->findChild<QLabel*>("settingsPackageStatus") : nullptr;
+    return status ? status->text() : QString();
+}
+QString DiagnosticsSummary::packageNote(const QString& id) const {
+    auto* card = m_cards.value(id);
+    auto* note = card ? card->findChild<QLabel*>("settingsPackageNote") : nullptr;
+    return note ? note->text() : QString();
+}
+static QPushButton* packageButton(QFrame* card, const char* kind) {
+    if (!card)
+        return nullptr;
+    for (auto* button : card->findChildren<QPushButton*>())
+        if (button->property("packageButton").toString() == kind)
+            return button;
+    return nullptr;
+}
+QPushButton* DiagnosticsSummary::installButton(const QString& id) const {
+    return packageButton(m_cards.value(id), "install");
+}
+QPushButton* DiagnosticsSummary::cancelButton() const {
+    for (auto* card : m_cards)
+        if (auto* cancel = packageButton(card, "cancel"))
+            return cancel;
+    return nullptr;
+}
+void DiagnosticsSummary::renderPackages() {
+    m_cards.clear();
+    while (auto* item = m_packages->takeAt(0)) {
+        if (auto* old = item->widget()) {
+            old->hide();
+            old->setParent(nullptr);
+            old->deleteLater();
+        }
+        delete item;
+    }
+    if (m_rows.isEmpty()) {
+        m_packages->addWidget(text("Package status appears once the local backend is connected.", "settingsHint"));
+        return;
+    }
+    const bool installing = m_job["state"].toString() == "running";
+    for (const auto& value : m_rows) {
+        const auto row = value.toObject();
+        const QString id = row["id"].toString(), state = row["state"].toString();
+        const bool thisJob = m_job["id"].toString() == id;
+        const QString jobState = thisJob ? m_job["state"].toString() : QString();
+        QString status, tone = "muted", note;
+        if (jobState == "running") {
+            status = "Installing…";
+            tone = "installing";
+        } else if (state == "installed") {
+            status = "Installed · " + row["installed_version"].toString("unknown version");
+            tone = "installed";
+        } else if (jobState == "failed") {
+            status = "Install failed";
+            tone = "failed";
+            note = m_job["log_tail"].toString().trimmed();
+        } else if (state == "missing") {
+            status = "Not installed";
+            note = row["installable"].toBool() ? row["size_hint"].toString() : row["reason"].toString();
+            if (jobState == "cancelled")
+                note = "Install cancelled. " + note;
+        } else {
+            status = row["reason"].toString("Unavailable");
+        }
+        auto* card = new QFrame;
+        card->setObjectName("settingsPackageCard");
+        card->setProperty("packageId", id);
+        auto* body = new QVBoxLayout(card);
+        body->setContentsMargins(14, 11, 14, 11);
+        body->setSpacing(5);
+        auto* head = new QHBoxLayout;
+        head->addWidget(text(row["label"].toString(id), "settingsRowTitle"), 1);
+        auto* pill = text(status, "settingsPackageStatus");
+        pill->setWordWrap(false); // a status such as "Not available on macOS" stays on one line
+        pill->setProperty("packageState", tone);
+        head->addWidget(pill);
+        body->addLayout(head);
+        body->addWidget(text(row["role"].toString(), "settingsHint"));
+        if (!note.isEmpty())
+            body->addWidget(text(note, "settingsPackageNote"));
+        if (jobState == "running") {
+            auto* bar = new QProgressBar;
+            bar->setRange(0, 0); // pip reports no total, so the bar stays indeterminate
+            bar->setTextVisible(false);
+            bar->setFixedHeight(8);
+            body->addWidget(bar);
+            auto* cancel = new Button("Cancel");
+            cancel->setObjectName("secondaryBtn");
+            cancel->setProperty("packageButton", "cancel");
+            cancel->setAccessibleName("Cancel installing " + row["label"].toString(id));
+            QObject::connect(cancel, &QPushButton::clicked, card, [this] { if (m_cancel) m_cancel(); });
+            body->addWidget(cancel, 0, Qt::AlignRight);
+        } else if (state == "missing" && row["installable"].toBool()) {
+            auto* install = new Button(jobState == "failed" ? "Retry" : "Install");
+            install->setObjectName("secondaryBtn");
+            install->setProperty("packageButton", "install");
+            install->setAccessibleName("Install " + row["label"].toString(id));
+            install->setEnabled(!installing);
+            if (installing)
+                install->setToolTip("Another install is in progress.");
+            QObject::connect(install, &QPushButton::clicked, card, [this, row] { if (m_install) m_install(row); });
+            body->addWidget(install, 0, Qt::AlignRight);
+        }
+        m_cards.insert(id, card);
+        m_packages->addWidget(card);
+    }
 }

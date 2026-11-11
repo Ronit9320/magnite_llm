@@ -62,10 +62,15 @@ class VllmEngine(BaseEngine):
         ]
         os.makedirs(app_home(), exist_ok=True)
         self._log = open(os.path.join(app_home(), "vllm.log"), "ab")
+        # The server is a separate process: let it import packages installed from Settings.
+        from backend.runtime_packages import packages_dir
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [env.get("PYTHONPATH"), str(packages_dir())]))
         self._proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=self._log,
+            env=env,
         )
         # Wait until the server is responsive.
         try:

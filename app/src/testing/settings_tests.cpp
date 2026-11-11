@@ -1,4 +1,5 @@
 #include "testing/settings_tests.h"
+#include "backend_client.h"
 #include "panels/chatpanel.h"
 #include "panels/chatstore.h"
 #include "panels/settingspanel.h"
@@ -95,6 +96,45 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         racing.setMeasurements(fixture(true, true, 95 * GiB, 100 * GiB));
         check(racing.segments()[2] == 0, "measured files larger than disk usage never produce negative other");
     }
+    {
+        // Runtime packages: status per package, Install only where it can work, one install at a time.
+        auto row = [](const char* id, const char* state, const char* version, const char* reason, bool installable) {
+            return QJsonObject{{"id", id}, {"label", id}, {"role", "Role of " + QString(id)}, {"state", state},
+                               {"installed_version", version[0] ? QJsonValue(version) : QJsonValue()},
+                               {"reason", reason[0] ? QJsonValue(reason) : QJsonValue()},
+                               {"size_hint", "About 1 GB"}, {"installable", installable}};
+        };
+        const QJsonArray rows{row("llama.cpp", "installed", "0.3.35", "", false),
+                              row("vLLM", "unsupported", "", "Not available on macOS", false),
+                              row("torch", "missing", "", "", true),
+                              row("PEFT", "blocked", "", "Needs PyTorch first", false)};
+        QString installed, cancelled;
+        DiagnosticsSummary summary;
+        summary.setInstallHandlers([&](const QJsonObject& package) { installed = package["id"].toString(); },
+                                   [&] { cancelled = "cancel"; });
+        summary.setPackages(rows);
+        check(summary.packageStatus("llama.cpp") == "Installed · 0.3.35" && summary.packageStatus("vLLM") == "Not available on macOS" &&
+                  summary.packageStatus("torch") == "Not installed" && summary.packageStatus("PEFT") == "Needs PyTorch first",
+              "package cards state installed, unsupported, missing and blocked packages plainly");
+        check(summary.installButton("torch") && !summary.installButton("llama.cpp") && !summary.installButton("vLLM") && !summary.installButton("PEFT"),
+              "only a missing, installable package offers Install");
+        summary.installButton("torch")->click();
+        check(installed == "torch", "Install hands the chosen package to the panel");
+        summary.setInstallJob(QJsonObject{{"id", "torch"}, {"state", "running"}, {"log_tail", ""}});
+        check(summary.packageStatus("torch") == "Installing…" && summary.cancelButton() && !summary.installButton("torch"),
+              "a running install shows progress and Cancel instead of Install");
+        summary.cancelButton()->click();
+        check(cancelled == "cancel", "Cancel reaches the panel");
+        summary.setPackages(QJsonArray{row("torch", "missing", "", "", true), row("llama.cpp", "missing", "", "", true)});
+        check(summary.installButton("llama.cpp") && !summary.installButton("llama.cpp")->isEnabled(),
+              "other packages cannot start an install while one is running");
+        summary.setInstallJob(QJsonObject{{"id", "torch"}, {"state", "failed"}, {"log_tail", "ERROR: no matching distribution"}});
+        check(summary.packageStatus("torch") == "Install failed" && summary.packageNote("torch").contains("no matching distribution") &&
+                  summary.installButton("torch")->text() == "Retry",
+              "a failed install shows the reason and offers Retry");
+        summary.setUnavailable("offline");
+        check(!summary.installButton("torch") && !summary.cancelButton(), "no package actions without a backend");
+    }
     QSettings preferences;
     QMap<QString, QVariant> saved;
     for (const auto& key : preferences.allKeys())
@@ -140,6 +180,35 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
           "settings opens as a modal native utility window");
     auto* pages = panel.findChild<QStackedWidget*>("settingsPages");
     check(pages && pages->count() == 8, "all eight reviewed categories exist");
+    for (int waited = 0; client && !client->isReady() && waited < 4000; waited += 100)
+        pump(100);
+    check(client && client->isReady(), "fixture backend is connected for the runtime-package flow");
+    if (client && client->isReady()) {
+        // The panel end to end: confirm, install, see progress, cancel.
+        panel.selectCategory(6);
+        panel.refreshDetails();
+        pump(500);
+        auto* packages = static_cast<DiagnosticsSummary*>(panel.findChild<QFrame*>("settingsDiagnosticsOverview"));
+        check(packages && packages->packageStatus("torch") == "Not installed" &&
+                  packages->packageStatus("vLLM") == "Not available on macOS",
+              "diagnostics lists runtime packages from the backend");
+        if (packages && packages->installButton("torch")) {
+            answer("Cancel");
+            packages->installButton("torch")->click();
+            pump(300);
+            check(packages->packageStatus("torch") == "Not installed", "declining the confirmation starts no install");
+            answer("Install");
+            packages->installButton("torch")->click();
+            pump(500);
+            check(packages->packageStatus("torch") == "Installing…" && packages->cancelButton(),
+                  "confirming starts the install and shows progress");
+            packages->cancelButton()->click();
+            pump(800);
+            check(packages->packageStatus("torch") == "Not installed" && !packages->cancelButton(),
+                  "cancelling returns the package to not installed");
+        }
+        panel.selectCategory(0);
+    }
     {
         // Headings carry only the title: no tagline above the title, none beneath it, none in the nav.
         const QStringList taglines = {
@@ -174,6 +243,12 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                         captures +
                         QString("/settings-%1-%2.png").arg(dark ? "dark" : "light").arg(category)),
                     "capture native settings window");
+                if (category == 6 && scroll) { // the package list sits below the fold
+                    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+                    pump(120);
+                    window.grab().save(captures + QString("/settings-%1-6-bottom.png").arg(dark ? "dark" : "light"));
+                    scroll->verticalScrollBar()->setValue(0);
+                }
             }
         }
     }

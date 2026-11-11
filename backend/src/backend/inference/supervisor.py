@@ -62,6 +62,14 @@ class InferenceSupervisor:
         self.vllm_ok = VllmEngine.is_available()
         self.torch_peft_ok = TorchPeftEngine.is_available()
 
+    def refresh_availability(self) -> None:
+        """Re-probe optional engines after a package was installed at runtime."""
+        import importlib
+        importlib.invalidate_caches()
+        self.llamacpp_ok = LlamaCppEngine.is_available()
+        self.vllm_ok = VllmEngine.is_available()
+        self.torch_peft_ok = TorchPeftEngine.is_available()
+
     def set_adapter_store(self, store: AdapterStore) -> None:
         self._adapter_store = store
 
