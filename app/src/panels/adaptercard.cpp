@@ -9,10 +9,11 @@
 #include <QVBoxLayout>
 #include <QDateTime>
 
-AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
+AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     : QFrame(parent)
     , m_activateButton(nullptr)
     , m_id(data.value("id").toString())
+    , m_data(data)
 {
     setObjectName(QStringLiteral("adapterCard"));
     setMinimumWidth(230);
@@ -90,12 +91,16 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     if (!trainingJob.isEmpty()) {
         auto *run=new Button("View run data",this); run->setObjectName("cardBtn");
         run->setAccessibleName("View training run for "+m_id);
-        layout->addWidget(run,0,Qt::AlignLeft);
+        if (compact) {
+            run->setText("Run data");
+            metaRow->insertWidget(metaRow->count() - 1, run, 0, Qt::AlignVCenter);
+        } else layout->addWidget(run, 0, Qt::AlignLeft);
         connect(run,&QPushButton::clicked,this,[this,trainingJob] { emit runDetailsRequested(trainingJob); });
     }
 
     // Row 3: activation, export and deletion actions.
     auto *btnRow = new QHBoxLayout();
+    btnRow->setObjectName("libraryItemActions");
     btnRow->setSpacing(6);
     m_activateButton = new Button(QStringLiteral("Activate"), this);
     m_activateButton->setObjectName(QStringLiteral("cardPrimary"));
@@ -109,8 +114,17 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent)
     btnRow->addWidget(m_activateButton);
     btnRow->addWidget(exportButton);
     btnRow->addWidget(deleteButton);
-    btnRow->addStretch(1);
-    layout->addLayout(btnRow);
+    if (compact) {
+        setProperty("libraryRow", true);
+        layout->setSpacing(4);
+        row->setContentsMargins(14, 10, 14, 10);
+        auto *actions = new QVBoxLayout;
+        actions->addLayout(btnRow);
+        row->addLayout(actions);
+    } else {
+        btnRow->addStretch(1);
+        layout->addLayout(btnRow);
+    }
 
     connect(m_activateButton, &QPushButton::clicked, this, [this]() {
         emit activateRequested(this);

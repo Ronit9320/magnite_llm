@@ -1445,6 +1445,7 @@ void ModelHubPanel::finishDownload(const QString &message, bool success) {
         emit modelsChanged();
         emit downloadFinished(true);
     } else if (message.startsWith("Download failed") || message.startsWith("Could not start")) emit downloadFinished(false);
+    emit downloadActivity(repo, success ? "Completed" : message.startsWith("Download cancelled") ? "Cancelled" : "Failed", message);
     status(message, success ? "ok" : QString());
     updateDownloadUi();
     if (m_pages->currentIndex() == 0) renderCards();

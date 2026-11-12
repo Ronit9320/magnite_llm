@@ -135,7 +135,7 @@ class InferenceSupervisor:
         ref = model_ref or self.model_ref
         if requested and requested not in ("torch", "llamacpp", "vllm", "ollama"):
             raise ValueError(f"Unsupported inference engine: {requested}")
-        if ref and ref.startswith(("huggingface:", "ollama:")):
+        if ref and ref.startswith(("huggingface:", "ollama:", "local:")):
             from backend.routes.models import _get_registry
             record = _get_registry().get_model(ref)
             if record is None:
@@ -146,6 +146,10 @@ class InferenceSupervisor:
                 return "ollama", record.ref
             from backend.models.resolution import local_model_path
             ref = local_model_path(record)
+            if record.source == "local":
+                if requested and requested != "llamacpp":
+                    raise ValueError("Local GGUF models require Auto or llama.cpp")
+                return "llamacpp", ref
         if ref and os.path.isdir(ref) and not requested and not self.engine_override:
             if any(Path(ref).rglob("*.gguf")):
                 return "llamacpp", ref

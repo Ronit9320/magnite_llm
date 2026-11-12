@@ -38,9 +38,11 @@ signals:
     void modelsChanged();
     void deviceUpdated();
     void downloadFinished(bool success);
+    void downloadActivity(const QString &repo, const QString &status, const QString &detail);
 
 public slots:
     void refresh();
+    void revealRepository(const QString &repo) { openDetails(repo); }
     void refreshLocalState();
 
 protected:

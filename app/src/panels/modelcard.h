@@ -20,7 +20,7 @@ class ModelCard : public QFrame {
 
 public:
     // isHub selects which fields are rendered from `data`.
-    ModelCard(const QJsonObject &data, bool isHub, QWidget *parent = nullptr);
+    ModelCard(const QJsonObject &data, bool isHub, QWidget *parent = nullptr, bool compact = false);
 
     QString id() const { return m_id; }
     bool isCardSelected() const { return m_selected; }

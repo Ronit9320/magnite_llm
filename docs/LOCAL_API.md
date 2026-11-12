@@ -186,3 +186,8 @@ including branch trees. Export writes atomically and fails if a listed chat is
 unreadable. It is a portable export, not an automatic backup/import feature.
 
 The native Model Hub filters and sorts the loaded results. Its download action fetches the complete repository using the existing pull API. Metadata detail requests may cache a bounded `config.json` pinned to the returned revision. Missing metadata stays unknown.
+
+`POST /models/import` registers a local GGUF file and returns its model record
+with status 201. Send `{"path":"/absolute/path/model.gguf"}`. The registry
+references the original file in place. Deleting its record leaves that file
+on disk. Load the returned `local:` ID using Auto or llama.cpp.

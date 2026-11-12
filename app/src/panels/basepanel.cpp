@@ -43,7 +43,7 @@ BasePanel::BasePanel(const QString &title, QWidget *parent, bool customHeader)
     content->setLayout(m_contentLayout);
     m_contentLayout->setContentsMargins(0,0,0,0);
     m_contentLayout->setSpacing(8);
-    if (title == "Chat" || title == "Settings" || title == "Docs" || title == "Model hub") {
+    if (title == "Chat" || title == "Settings" || title == "Docs" || title == "Model hub" || title == "Library") {
         if (title == "Settings" || title == "Docs") root->setContentsMargins(0,0,0,0);
         root->addWidget(content,1);
         return;
@@ -69,4 +69,15 @@ void BasePanel::applyStatusTone(QLabel *label, const QString &tone) {
     label->setProperty("state", tone);
     label->style()->unpolish(label);
     label->style()->polish(label);
+}
+
+void BasePanel::embedInWorkspace() {
+    auto *root = qobject_cast<QVBoxLayout *>(layout());
+    root->setContentsMargins(0, 0, 0, 0);
+    m_contentLayout->setContentsMargins(0, 0, 0, 0);
+    for (int i = root->count() - 1; i >= 0; --i) {
+        auto *item = root->itemAt(i);
+        if (auto *label = qobject_cast<QLabel *>(item->widget())) label->hide();
+        if (item->spacerItem()) delete root->takeAt(i);
+    }
 }

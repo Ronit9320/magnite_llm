@@ -1,3 +1,4 @@
+#include "widgets/librarydialog.h"
 #include "widgets/confirmation.h"
 #include "panels/modelspanel.h"
 
@@ -225,10 +226,41 @@ void ModelsPanel::useLibraryWorkspace() {
     m_downloadButton->hide();
     findChild<QWidget *>("libraryDiscoveryLinks")->hide();
     m_emptyRack->setText("Your library starts here\n\nExplore Model Hub to find and download a model. Downloaded models appear here.");
-    setHeaderSubtitle("Manage downloaded weights and load models into Playground.");
-    auto *browse = new Button("Explore Model Hub", this);
-    connect(browse, &QPushButton::clicked, this, &ModelsPanel::hubRequested);
-    contentLayout()->insertWidget(0, browse, 0, Qt::AlignRight);
+    embedInWorkspace();
+    findChild<QWidget *>("studioNote")->hide();
+    for (auto *tile : m_overviewTiles) tile->hide();
+    m_deleteButton->hide();
+    m_refreshButton->hide();
+    auto *scrollBody = new QWidget;
+    auto *rows = new QVBoxLayout(scrollBody);
+    rows->setContentsMargins(0, 0, 0, 0);
+    rows->setSpacing(0);
+    m_scrollArea->takeWidget();
+    rows->addWidget(m_cardHost, 0, Qt::AlignTop);
+    rows->addStretch();
+    m_scrollArea->setWidget(scrollBody);
+    m_cardHost->setObjectName("libraryListSurface");
+    m_flowLayout->setContentsMargins(1, 1, 1, 1);
+    m_flowLayout->setItemSpacing(0, 0);
+    m_flowLayout->setMaximumColumns(1);
+}
+
+void ModelsPanel::importModel() {
+    if (!m_client || !m_client->isReady()) {
+        setStatus("Connect to the local service before importing a model.", "error");
+        return;
+    }
+    const auto path = Ui::chooseLibraryImport(this, "Import model", "Choose a GGUF file to add to Library. Magnite uses the file in its current location.", "GGUF weights (*.gguf)", "gguf");
+    if (path.isEmpty()) return;
+    m_client->post("/models/import", QJsonObject{{"path", path}}, [this](int status, const QJsonDocument &doc) {
+        if (status != 201) {
+            setStatus("Import failed. " + doc.object().value("detail").toString(), "error");
+            return;
+        }
+        emit modelImported(doc.object().value("name").toString());
+        m_afterRefreshNote = "Model imported. The original file stays in place.";
+        refresh();
+    });
 }
 
 void ModelsPanel::setBackendClient(BackendClient *client) {
@@ -311,7 +343,7 @@ void ModelsPanel::addCards(const QJsonArray &items, bool isHub, bool append) {
                                                  : "Your library starts here\n\nSearch a repository above and download a model to get started.");
     }
     for (const auto &value : items) {
-        auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
+        auto *card = new ModelCard(value.toObject(), isHub, m_cardHost, m_libraryOnly && !isHub);
         connect(card, &ModelCard::cardClicked, this, &ModelsPanel::onCardClicked);
         connect(card, &ModelCard::cancelRequested, this, [this](ModelCard *) { onCancelDownload(); });
         connect(card, &ModelCard::deleteRequested, this, [this](ModelCard *selected) {
@@ -335,7 +367,7 @@ void ModelsPanel::showLocalModels(const QJsonArray &models) {
     clearCards();
     addCards(models, false);
     QString summary = models.isEmpty() ? QString("No local models yet. Search the Hub and download one.")
-                                       : QString("%1 local model(s).").arg(models.size());
+                                       : QString(models.size() == 1 ? "%1 local model." : "%1 local models.").arg(models.size());
     if (!m_afterRefreshNote.isEmpty()) summary = m_afterRefreshNote + "  " + summary;
     m_afterRefreshNote.clear();
     setStatus(summary);
@@ -670,6 +702,8 @@ void ModelsPanel::confirmAndDelete(const QJsonObject &model, int dependentAdapte
     QString message = QString("Delete “%1” from your library?\n\nThis removes its files from this computer")
                           .arg(id);
     message += size == "-" ? "." : QString(" and frees about %1.").arg(size);
+    if (source == "local")
+        message = QString("Remove “%1” from Library? The original GGUF file stays in place.").arg(model.value("name").toString());
     if (source == "huggingface")
         message += "\n\nIt is stored in the shared Hugging Face cache, so other tools that use that cache will lose it too.";
     else if (source == "ollama")
@@ -677,16 +711,17 @@ void ModelsPanel::confirmAndDelete(const QJsonObject &model, int dependentAdapte
     if (dependentAdapters > 0)
         message += QString("\n\n%1 adapter%2 trained on it will stop working until you download it again.")
                        .arg(dependentAdapters).arg(dependentAdapters == 1 ? "" : "s");
-    message += "\n\nYou would need to download it again to use it.";
+    if (source != "local") message += "\n\nYou would need to download it again to use it.";
     if (!Ui::confirmRemoval(this, "Delete model?", message)) return;
 
     m_deleting = true;
     updateActionButtons();
     setStatus(QString("Deleting “%1”…").arg(id));
-    m_client->remove("/models/" + id, [this, id, size](int status, const QJsonDocument &doc) {
+    m_client->remove("/models/" + id, [this, id, size, source](int status, const QJsonDocument &doc) {
         m_deleting = false;
         if (status == 204) {
-            m_afterRefreshNote = size == "-" ? QString("Deleted “%1”.").arg(id)
+            emit modelRemoved(id);
+            m_afterRefreshNote = source == "local" || size == "-" ? QString("Deleted “%1”.").arg(id)
                                              : QString("Deleted “%1”. Freed about %2.").arg(id, size);
             setStatus(m_afterRefreshNote);
             refresh();

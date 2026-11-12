@@ -1,3 +1,4 @@
+#include "panels/librarypanel.h"
 #include "widgets/clickfeedback.h"
 #include "widgets/brandmark.h"
 #include <QShortcut>
@@ -193,7 +194,6 @@ void MainWindow::setupUi() {
                              {"Library", "box", PanelModels},
                              {"Training", "graduation-cap", PanelTraining},
                              {"Knowledge", "database", PanelRag},
-                             {"Adapters", "layers", PanelAdapters},
                              {"Playground", "message-circle", PanelChat},
                              {"Docs", "file-text", PanelDocs}},
                             {"Settings", "settings", PanelSettings}, PanelChat);
@@ -251,11 +251,17 @@ void MainWindow::setupUi() {
     m_trainingPanel = new TrainingPanel();
     m_ragPanel = new RagPanel();
     m_adaptersPanel = new AdaptersPanel();
+    m_adaptersPanel->useLibraryWorkspace();
+    m_libraryPanel = new LibraryPanel(m_modelsPanel, m_adaptersPanel);
     m_chatPanel = new ChatPanel();
     // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
     m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
     m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
     m_chatPanel->setChatStore(m_chatStore);
+    m_libraryPanel->setChatStore(m_chatStore);
+    connect(m_libraryPanel, &LibraryPanel::openChatRequested, this, [this](const QString &id) {
+        if (m_chatPanel->openChat(id)) switchPanel(PanelChat);
+    });
     m_historyController = new ChatHistoryController(m_chatStore, m_chatPanel, m_history, this, this);
     // The strip's + asks exactly like the list's New chat row, and is busy exactly when the row is.
     connect(m_sidebar, &Sidebar::newChatRequested, m_history, &ChatHistoryList::newChatRequested);
@@ -272,10 +278,10 @@ void MainWindow::setupUi() {
         switchPanel(PanelChat);
         m_chatPanel->loadModel(id);
     });
-    m_stack->addWidget(m_modelsPanel);
+    m_stack->addWidget(m_libraryPanel);
     m_stack->addWidget(m_trainingPanel);
     m_stack->addWidget(m_ragPanel);
-    m_stack->addWidget(m_adaptersPanel);
+    m_stack->addWidget(new QWidget); // Preserve the existing workspace indices.
     m_stack->addWidget(m_chatPanel);
     m_docsPanel = new DocsPanel;
     m_stack->addWidget(m_docsPanel);
@@ -285,6 +291,24 @@ void MainWindow::setupUi() {
         m_chatPanel->loadModel(id);
     });
     connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_modelsPanel, &ModelsPanel::refresh);
+    connect(m_modelsPanel, &ModelsPanel::modelImported, m_libraryPanel, [this](const QString &name) {
+        m_libraryPanel->recordActivity(name, "Import", "Completed");
+    });
+    connect(m_modelsPanel, &ModelsPanel::modelRemoved, m_libraryPanel, [this](const QString &id) {
+        m_libraryPanel->recordActivity(id, "Removal", "Completed");
+    });
+    connect(m_adaptersPanel, &AdaptersPanel::adapterActivity, m_libraryPanel,
+            [this](const QString &name, const QString &action, const QString &status) {
+        m_libraryPanel->recordActivity(name, action, status);
+    });
+    connect(m_modelHubPanel, &ModelHubPanel::downloadActivity, m_libraryPanel,
+            [this](const QString &repo, const QString &status, const QString &detail) {
+        m_libraryPanel->recordActivity(repo, "Download", status, detail);
+    });
+    connect(m_libraryPanel, &LibraryPanel::retryDownload, this, [this](const QString &repo) {
+        switchPanel(PanelHub);
+        m_modelHubPanel->revealRepository(repo);
+    });
     connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels);
     connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_trainingPanel, &TrainingPanel::refreshOptions);
     connect(m_modelHubPanel, &ModelHubPanel::downloadFinished, this, [this](bool success) { notifyCompletion("downloads", success); });
@@ -382,6 +406,10 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::switchPanel(int index) {
+    if (index == PanelAdapters) {
+        m_libraryPanel->showAdapters();
+        index = PanelModels;
+    }
     if(index==PanelSettings) {
         m_sidebar->setCurrentPanel(m_stack->currentIndex());
         m_settingsWindow->openSettings();return;
@@ -530,6 +558,7 @@ void MainWindow::onBackendStarted() {
     m_backendClient->setAuthToken(m_backend->apiToken());
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
+    m_libraryPanel->setBackendClient(m_backendClient);
     m_modelHubPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
     m_runPanel->setBackendClient(m_backendClient);
@@ -635,7 +664,7 @@ void MainWindow::runSelfTest() {
             QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
             QApplication::sendEvent(tile, &press);
             QApplication::sendEvent(tile, &release);
-            checkC(m_stack->currentIndex() == tile->panel(), "Space activates overview shortcut");
+            checkC(m_stack->currentIndex() == (tile->panel() == PanelAdapters ? PanelModels : tile->panel()), "Space activates overview shortcut");
         }
         switchPanel(PanelChat);
         QMetaObject::invokeMethod(m_chatPanel, "onClearChat", Qt::DirectConnection);

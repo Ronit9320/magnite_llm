@@ -7,6 +7,7 @@
 #include "theme.h"
 #include "trainingduration.h"
 #include "panels/modelspanel.h"
+#include "panels/librarypanel.h"
 #include "panels/modelcard.h"
 #include "panels/trainingpanel.h"
 #include "panels/trainingrunpanel.h"
@@ -411,6 +412,157 @@ int runUiCheck(const QString &captures) {
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }
     BackendClient client;
     client.setBaseUrl(QString("http://127.0.0.1:%1").arg(fixture.serverPort()));
+    if (qEnvironmentVariableIsSet("MAGNITE_LIBRARY_DESIGN_CHECK")) {
+        auto *models = new ModelsPanel;
+        auto *adapters = new AdaptersPanel;
+        models->useLibraryWorkspace();
+        adapters->useLibraryWorkspace();
+        QSettings().setValue("library/organization", QByteArray(R"({"projects":["Local assistant","Document search"],"folders":["Chat models","Embeddings"],"items":{"model:studio/sample-model":{"projects":["Local assistant"],"folder":"Chat models"},"adapter:fixture-adapter":{"projects":["Local assistant"],"folder":"Chat models","pinned":true}}})"));
+        QTemporaryDir chatData;
+        ChatStore store(chatData.path() + "/chats");
+        ChatTree conversation;
+        conversation.addChild(ChatTree::kRoot, "user", "Project planning");
+        const auto chatId = store.create();
+        check(store.save(chatId, conversation), "Library fixture saves a real chat");
+        LibraryPanel library(models, adapters);
+        library.setChatStore(&store);
+        library.setBackendClient(&client);
+        library.resize(980, 700);
+        library.show();
+        models->setBackendClient(&client);
+        adapters->setBackendClient(&client);
+        pump(450);
+        auto *tabs = library.findChild<QTabWidget *>("libraryTabs");
+        check(tabs && tabs->count() == 5, "Library exposes five native views");
+        check(!models->findChildren<ModelCard *>().isEmpty(), "Library displays real registry records");
+        library.recordActivity("example/model", "Download", "Failed", "Connection interrupted");
+        library.recordActivity("Local weights", "Import", "Completed");
+        if (tabs) {
+            tabs->setCurrentIndex(2);
+            pump();
+            const auto openCollection = [&](const QString &name) {
+                for (auto *button : tabs->currentWidget()->findChildren<QPushButton *>()) {
+                    if (button->accessibleName() != "Open " + name) continue;
+                    button->click();
+                    pump();
+                    return true;
+                }
+                return false;
+            };
+            check(openCollection("Local assistant"), "Project list opens a detail page");
+            bool foundModel = false, foundAdapter = false;
+            for (auto *label : tabs->currentWidget()->findChildren<QLabel *>()) {
+                foundModel |= label->text() == "Sample local model" && label->isVisible();
+                foundAdapter |= label->text() == "Support assistant" && label->isVisible();
+            }
+            check(tabs->currentIndex() == 2 && foundModel && foundAdapter, "Project opens assigned contents within its own tab");
+            const auto clickVisible = [&](QWidget *root, const QString &label) {
+                for (auto *button : root->findChildren<QPushButton *>()) {
+                    if (button->isVisible() && button->text() == label) {
+                        button->click();
+                        return true;
+                    }
+                }
+                return false;
+            };
+            const auto armDialog = [&](const QString &title, const QString &action, const QString &name = {}) {
+                QTimer::singleShot(40, &library, [&, title, action, name] {
+                    auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                    check(dialog && dialog->windowTitle() == title, "Library opens " + title);
+                    if (!dialog) return;
+                    check(dialog->grab().toImage().pixelColor(0, 0).alpha() == 0, title + " has a transparent rounded corner");
+                    if (!name.isEmpty()) {
+                        if (auto *field = dialog->findChild<QLineEdit *>()) field->setText(name);
+                    }
+                    if (!captures.isEmpty()) {
+                        QDir().mkpath(captures);
+                        dialog->grab().save(QDir(captures).filePath(title.toLower().replace(' ', '-') + ".png"));
+                    }
+                    if (!clickVisible(dialog, action)) dialog->reject();
+                });
+            };
+            QString openedChat;
+            QObject::connect(&library, &LibraryPanel::openChatRequested, &library, [&](const QString &id) { openedChat = id; });
+            armDialog("Move chat", "Move chat");
+            check(clickVisible(tabs->currentWidget(), "Move chat here…"), "Project offers to move a saved chat");
+            pump();
+            check(clickVisible(tabs->currentWidget(), "Open chat") && openedChat == chatId && store.load(chatId).has_value(),
+                  "Project opens the original saved chat after moving it");
+            const auto organization = [] {
+                return QJsonDocument::fromJson(QSettings().value("library/organization").toByteArray()).object();
+            };
+            armDialog("Delete project", "Cancel");
+            check(clickVisible(tabs->currentWidget(), "Delete project…"), "Project detail offers deletion");
+            check(organization()["projects"].toArray().contains("Local assistant"), "Cancelling keeps the project");
+            armDialog("Delete project", "Delete project");
+            check(clickVisible(tabs->currentWidget(), "Delete project…"), "Project deletion opens confirmation");
+            pump();
+            const auto afterProject = organization();
+            const auto projectItems = afterProject["items"].toObject();
+            const auto adapter = projectItems["adapter:fixture-adapter"].toObject();
+            check(tabs->currentIndex() == 2 && !openCollection("Local assistant") &&
+                  !afterProject["projects"].toArray().contains("Local assistant"),
+                  "Deleting the open project returns to the project list");
+            check(adapter["projects"].toArray().isEmpty() && adapter["folder"].toString() == "Chat models" &&
+                  adapter["pinned"].toBool() &&
+                  projectItems["chat:" + chatId].toObject()["projects"].toArray().isEmpty() &&
+                  store.load(chatId).has_value(), "Project deletion clears assignments and preserves source items");
+            armDialog("New project", "Create project", "Research notes");
+            check(clickVisible(&library, "New project…"), "Project creation opens its form");
+            pump();
+            check(tabs->currentIndex() == 2 && clickVisible(tabs->currentWidget(), "← All projects"),
+                  "New projects open their own contents view");
+            tabs->setCurrentIndex(3);
+            pump();
+            check(openCollection("Chat models") && tabs->currentIndex() == 3, "Folder opens within its own tab");
+            check(clickVisible(tabs->currentWidget(), "← All folders"), "Folder has a back action");
+            pump();
+            for (auto *button : tabs->currentWidget()->findChildren<QPushButton *>()) {
+                if (button->accessibleName() != "Delete Chat models") continue;
+                armDialog("Delete folder", "Delete folder");
+                button->click();
+                break;
+            }
+            pump();
+            const auto afterFolder = organization();
+            const auto folderItems = afterFolder["items"].toObject();
+            check(!openCollection("Chat models") && afterFolder["folders"].toArray().contains("Embeddings") &&
+                  folderItems["model:studio/sample-model"].toObject()["folder"].toString().isEmpty() &&
+                  folderItems["adapter:fixture-adapter"].toObject()["pinned"].toBool(),
+                  "Folder list deletion clears its assignments and preserves other folders and pins");
+            armDialog("New folder", "Create folder", "Reference material");
+            check(clickVisible(&library, "New folder…"), "Folder creation opens its form");
+            for (int index : {0, 1}) {
+                tabs->setCurrentIndex(index);
+                pump();
+                const QString title = index == 0 ? "Import model" : "Import adapter";
+                armDialog(title, "Cancel");
+                check(clickVisible(&library, title + "…"), title + " opens its own rounded form");
+                pump();
+            }
+            for (int index = 0; index < tabs->count(); ++index) {
+                tabs->setCurrentIndex(index);
+                pump();
+                check(library.minimumSizeHint().width() <= 980, "Library view fits desktop width");
+                if (!captures.isEmpty()) {
+                    QDir().mkpath(captures);
+                    library.grab().save(QDir(captures).filePath("library-" + tabs->tabText(index).toLower() + ".png"));
+                }
+            }
+            auto *filter = library.findChild<QComboBox *>();
+            for (auto *combo : library.findChildren<QComboBox *>())
+                if (combo->accessibleName() == "Filter Library") filter = combo;
+            if (filter) filter->setCurrentText("Failed");
+            pump();
+            int retry = 0;
+            for (auto *button : tabs->currentWidget()->findChildren<QPushButton *>())
+                retry += button->text() == "Retry…" && button->isVisible();
+            check(retry == 1, "History exposes retry for failed downloads");
+        }
+        client.abortAll();
+        QSettings().remove("library/organization");
+        return failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("MAGNITE_SETTINGS_DESIGN_CHECK")) return runSettingsChecks(&client,captures)?1:0;
     failures+=runDocsChecks();
     failures+=runWindowChromeChecks();
@@ -1189,7 +1341,7 @@ int runUiCheck(const QString &captures) {
         // A model nothing depends on gets a plain confirmation.
         QString plain; armDialog(false,&plain);
         cardDelete(layout)->click(); waitUntil([&]() { return !plain.isEmpty(); }); pump(100);
-        check(plain.contains(layout) && !plain.contains("Hugging Face cache") && !plain.contains("adapter"),"confirmation only mentions what applies");
+        check(plain.contains("Layout review") && plain.contains("original GGUF file stays in place") && !plain.contains("Hugging Face cache") && !plain.contains("adapter"),"imported model confirmation explains that the original file stays in place");
         check(fixture.deleteRequests.isEmpty(),"declining from a card deletes nothing either");
 
         // A refusal from the backend is explained and leaves everything in place.

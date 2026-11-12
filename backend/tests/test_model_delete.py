@@ -59,6 +59,26 @@ class DeleteFixture(unittest.TestCase):
 
 
 class RegistryDeleteTests(DeleteFixture):
+    def test_removing_imported_gguf_preserves_original_file(self):
+        path = self.root / "local-model.gguf"
+        path.write_bytes(b"GGUF" + bytes(32))
+        record = self.registry.import_gguf(str(path))
+        self.assertEqual(record.source, "local")
+        self.assertEqual(record.path, str(path))
+        self.assertEqual(self.registry.import_gguf(str(path)).id, record.id)
+        with patch.object(models, "_registry", self.registry):
+            self.assertEqual(get_supervisor()._resolve_engine(None, record.id), ("llamacpp", str(path)))
+        self.assertTrue(self.registry.delete_model(record.id))
+        self.assertIsNone(self.registry.get_model(record.id))
+        self.assertTrue(path.is_file())
+
+    def test_import_rejects_files_without_a_gguf_header(self):
+        path = self.root / "invalid.gguf"
+        path.write_bytes(b"not weights")
+        with self.assertRaisesRegex(ValueError, "GGUF header"):
+            self.registry.import_gguf(str(path))
+        self.assertEqual(self.registry.list_synced(source="local"), [])
+
     def test_delete_removes_files_record_and_lock_folder(self):
         folder = self.cached_model()
         record = self.synced()[0]

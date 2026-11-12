@@ -1,4 +1,5 @@
 #include "widgets/confirmation.h"
+#include "widgets/librarydialog.h"
 #include <QFileInfo>
 #include "panels/adapterspanel.h"
 
@@ -44,7 +45,10 @@ QWidget *AdaptersPanel::makeCardHost() {
 void AdaptersPanel::setupUi() {
     auto *layout = contentLayout();
 
-    auto *toolbar = new QHBoxLayout();
+    auto *toolbarHost = new QWidget(this);
+    toolbarHost->setObjectName("adapterRegistryToolbar");
+    auto *toolbar = new QHBoxLayout(toolbarHost);
+    toolbar->setContentsMargins(0, 0, 0, 0);
     auto *rackLabel = new QLabel("ADAPTER REGISTRY",this);
     rackLabel->setObjectName("heroKicker");
     toolbar->addWidget(rackLabel);
@@ -54,7 +58,7 @@ void AdaptersPanel::setupUi() {
     importButton->setObjectName("primaryBtn");
     toolbar->addWidget(refreshButton);
     toolbar->addWidget(importButton);
-    layout->addLayout(toolbar);
+    layout->addWidget(toolbarHost);
     connect(refreshButton,&QPushButton::clicked,this,&AdaptersPanel::refresh);
 
     m_scrollArea = new QScrollArea(this);
@@ -101,6 +105,23 @@ void AdaptersPanel::setupUi() {
     connect(importButton, &QPushButton::clicked, this, &AdaptersPanel::onImportAdapter);
 }
 
+void AdaptersPanel::useLibraryWorkspace() {
+    m_embedded = true;
+    auto *scrollBody = new QWidget;
+    auto *rows = new QVBoxLayout(scrollBody);
+    rows->setContentsMargins(0, 0, 0, 0);
+    rows->setSpacing(0);
+    m_scrollArea->takeWidget();
+    rows->addWidget(m_cardHost, 0, Qt::AlignTop);
+    rows->addStretch();
+    m_scrollArea->setWidget(scrollBody);
+    m_cardHost->setObjectName("libraryListSurface");
+    m_cardLayout->setContentsMargins(1, 1, 1, 1);
+    m_cardLayout->setSpacing(0);
+    embedInWorkspace();
+    findChild<QWidget *>("adapterRegistryToolbar")->hide();
+}
+
 void AdaptersPanel::setBackendClient(BackendClient *client) {
     m_client = client;
     if (client && client->isReady()) {
@@ -124,7 +145,7 @@ void AdaptersPanel::refresh() {
         for (const auto &value : arr) {
             if (!value.isObject()) continue;
             const QJsonObject adapter = value.toObject();
-            auto *card = new AdapterCard(adapter, m_cardHost);
+            auto *card = new AdapterCard(adapter, m_cardHost, m_embedded);
             connect(card, &AdapterCard::runDetailsRequested, this, &AdaptersPanel::runDetailsRequested);
             connect(card, &AdapterCard::activateRequested, this, &AdaptersPanel::onActivate);
             connect(card, &AdapterCard::exportRequested, this, &AdaptersPanel::onExportAdapter);
@@ -148,6 +169,7 @@ void AdaptersPanel::refresh() {
             setStatus(QString("%1 adapter(s). The marked adapter is active in Playground.")
                           .arg(arr.size()));
         }
+        emit registryRefreshed();
     });
 }
 
@@ -197,6 +219,7 @@ void AdaptersPanel::onDeleteAdapter(AdapterCard *card) {
     if (!Ui::confirmRemoval(this,"Delete adapter?","Delete “"+id+"” and its local weights? Export a copy first if you want to keep it.")) return;
     m_client->remove("/adapters/" + id, [this, id](int status, const QJsonDocument &) {
         if (status == 204 || status == 404) {
+            if (status == 204) emit adapterActivity(id, "Removal", "Completed");
             if (m_activeAdapterId == id) {
                 m_activeAdapterId.clear();
                 emit adapterActivated();
@@ -234,15 +257,21 @@ void AdaptersPanel::onExportAdapter(AdapterCard *card) {
 }
 
 void AdaptersPanel::onImportAdapter() {
-    const QString path = QFileDialog::getOpenFileName(
-        this, "Import Magnite Adapter Export", QString(), "Magnite adapter (*.zip)");
-    if (path.isEmpty() || !m_client || !m_client->isReady()) return;
+    if (!m_client || !m_client->isReady()) {
+        setStatus("Connect to the local service before importing an adapter.", "error");
+        return;
+    }
+    const auto path = Ui::chooseLibraryImport(this, "Import adapter",
+        "Choose a Magnite adapter export. The archive includes the weights and the base model information.",
+        "Magnite adapter (*.zip)", "zip");
+    if (path.isEmpty()) return;
     QJsonObject body;
     body["path"] = path;
     setStatus("Importing adapter...");
     m_client->post("/adapters/import", body, [this](int status, const QJsonDocument &doc) {
         if (status == 201) {
             const QJsonObject obj = doc.object();
+            emit adapterActivity(obj["name"].toString(), "Import", "Completed");
             setStatus(QString("Imported adapter '%1'.").arg(obj["name"].toString()));
             refresh();
         } else {

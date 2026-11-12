@@ -9,7 +9,7 @@ from pydantic import StringConstraints
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from backend.models.registry import ModelRegistry
-from backend.models.schemas import HubSearchResult, ModelRecord, PullJob, PullRequest
+from backend.models.schemas import HubSearchResult, ImportModelRequest, ModelRecord, PullJob, PullRequest
 from backend.paths import app_home
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -43,6 +43,14 @@ def list_models(
     q: str = Query(default="", description="Name/ref substring filter"),
 ):
     return _get_registry().list_synced(source=source, q=q)
+
+
+@router.post("/import", response_model=ModelRecord, status_code=201)
+def import_local_model(body: ImportModelRequest):
+    try:
+        return _get_registry().import_gguf(body.path)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/search", response_model=list[HubSearchResult])

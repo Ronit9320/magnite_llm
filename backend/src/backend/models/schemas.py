@@ -10,7 +10,7 @@ class ModelRecord(BaseModel):
 
     id: str
     name: str
-    source: str = Field(description="'huggingface' or 'ollama'")
+    source: str = Field(description="huggingface, ollama, or local")
     ref: str = Field(description="Original repo id / ollama name")
     path: str = Field(description="Local cache path (HF dir) or ollama name")
     architecture: str = ""
@@ -38,6 +38,10 @@ class HubSearchResult(BaseModel):
     context_length: int | None = None
     languages: list[str] = Field(default_factory=list)
     formats: list[str] = Field(default_factory=list)
+
+
+class ImportModelRequest(BaseModel):
+    path: str = Field(min_length=1)
 
 
 class PullRequest(BaseModel):

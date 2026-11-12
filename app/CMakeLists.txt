@@ -72,6 +72,8 @@ set(MAGNITE_SOURCES
     src/backend_manager.cpp
     src/backend_client.cpp
     src/panels/basepanel.cpp
+    src/panels/librarypanel.cpp
+    src/widgets/librarydialog.h
     src/panels/modelspanel.cpp
     src/panels/modelcard.cpp
     src/panels/adaptercard.cpp

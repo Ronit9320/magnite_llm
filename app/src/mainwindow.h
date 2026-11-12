@@ -19,6 +19,7 @@ class QSystemTrayIcon;
 class StudioCanvas;
 class BackendManager;
 class BackendClient;
+class LibraryPanel;
 class BasePanel;
 class ModelsPanel;
 class ModelHubPanel;
@@ -98,6 +99,7 @@ private:
 
     ModelHubPanel *m_modelHubPanel = nullptr;
     ModelsPanel *m_modelsPanel;
+    LibraryPanel *m_libraryPanel = nullptr;
     TrainingPanel *m_trainingPanel;
     RagPanel *m_ragPanel;
     AdaptersPanel *m_adaptersPanel;

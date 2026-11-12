@@ -23,16 +23,19 @@ public:
 signals:
     // Emitted when the active adapter changes (activate/clear/delete).
     void adapterActivated();
+    void registryRefreshed();
+    void adapterActivity(const QString &name, const QString &action, const QString &status);
     void runDetailsRequested(const QString &jobId);
 
 public slots:
     void refresh();
+    void onImportAdapter();
+    void useLibraryWorkspace();
 
 private slots:
     void onActivate(AdapterCard *card);
     void onDeleteAdapter(AdapterCard *card);
     void onExportAdapter(AdapterCard *card);
-    void onImportAdapter();
 
 private:
     void setupUi();
@@ -42,6 +45,7 @@ private:
     void loadActiveAdapter();
     QWidget *makeCardHost();
 
+    bool m_embedded = false;
     BackendClient *m_client;
     QScrollArea *m_scrollArea;
     QVBoxLayout *m_cardLayout;

@@ -542,3 +542,18 @@ QFrame#hubModelCard[selected="true"] { border-color: @accentPrimary; }
 QPushButton#hubCardCompare { font-size: 11px; padding: 3px 8px; min-height: 0; }
 
 QPushButton#hubDialogClose { padding: 0; min-height: 0; min-width: 0; border: none; }
+
+/* Library inventory and collection lists share one rounded surface. */
+QWidget#libraryListSurface { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QFrame#modelCard[libraryRow="true"], QFrame#adapterCard[libraryRow="true"], QFrame#libraryListRow {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid @surfaceBorder;
+    border-radius: 0;
+}
+QFrame#modelCard[libraryRow="true"][selected="true"], QFrame#adapterCard[libraryRow="true"][active="true"] {
+    background: @surfaceFillHover;
+}
+QFrame#modelCard[libraryRow="true"][lastRow="true"], QFrame#adapterCard[libraryRow="true"][lastRow="true"], QFrame#libraryListRow[lastRow="true"] {
+    border-bottom: none;
+}

@@ -14,6 +14,8 @@ public:
 
     // Other card workspaces keep the original two-column geometry.
     void setColumnMinimumWidth(int width) { m_columnMinimumWidth = width; m_maxColumns = 3; invalidate(); }
+    void setItemSpacing(int horizontal, int vertical) { m_hSpace = horizontal; m_vSpace = vertical; invalidate(); }
+    void setMaximumColumns(int columns) { m_maxColumns = columns; invalidate(); }
     void addItem(QLayoutItem *item) override;
     int count() const override;
     QLayoutItem *itemAt(int index) const override;

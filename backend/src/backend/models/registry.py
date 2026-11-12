@@ -3,6 +3,8 @@ from __future__ import annotations
 import collections
 import concurrent.futures
 import itertools
+import hashlib
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -684,6 +686,29 @@ class ModelRegistry:
 
     def get_model(self, identifier: str) -> Optional[ModelRecord]:
         return self._store.get(identifier)
+
+    def import_gguf(self, filename: str) -> ModelRecord:
+        """Register a GGUF in place. Removing its record never deletes the file."""
+        path = Path(filename)
+        if not path.is_absolute() or path.suffix.lower() != ".gguf":
+            raise ValueError("Choose a local GGUF file.")
+        path = path.resolve(strict=True)
+        if not path.is_file():
+            raise ValueError("Choose a regular GGUF file.")
+        with path.open("rb") as weights:
+            if weights.read(4) != b"GGUF":
+                raise ValueError("This file does not have a GGUF header.")
+        identifier = "local:" + hashlib.sha256(os.fsencode(os.path.normcase(path))).hexdigest()
+        with self._sync_lock:
+            record = self._store.get(identifier)
+            if record is not None:
+                return record
+            record = ModelRecord(id=identifier, name=path.stem, source="local",
+                                 ref=path.name, path=str(path), architecture="GGUF",
+                                 size_mb=path.stat().st_size / 1e6,
+                                 downloaded_at=datetime.now(timezone.utc).isoformat())
+            self._store.upsert(record)
+            return record
 
     def list_synced(self, source: Optional[str] = None, q: str = "") -> list[ModelRecord]:
         """Refresh local HF snapshots and Ollama before applying list filters."""

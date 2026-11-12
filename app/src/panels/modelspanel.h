@@ -35,6 +35,8 @@ public:
 
 signals:
     void modelsChanged();
+    void modelImported(const QString &name);
+    void modelRemoved(const QString &id);
     void downloadFinished(bool success);
     void loadRequested(const QString &id);
     void workspaceRequested(int panel);
@@ -42,6 +44,7 @@ signals:
 
 public slots:
     void refresh();
+    void importModel();
 
 private slots:
     void onSearch();

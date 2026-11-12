@@ -24,7 +24,7 @@ def resolve_base(ref):
         raise ValueError("base_model is required")
     if ref.startswith("ollama:"):
         raise ValueError("Ollama models cannot be LoRA fine-tuned locally")
-    if ref.startswith("huggingface:"):
+    if ref.startswith(("huggingface:", "local:")):
         return local_model_path(registered_model(ref))
     return ref.removeprefix("hf|")
 

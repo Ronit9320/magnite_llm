@@ -14,6 +14,8 @@ class BasePanel : public QWidget {
 public:
     explicit BasePanel(const QString &title, QWidget *parent = nullptr, bool customHeader = false);
 
+    void embedInWorkspace();
+
     QString title() const { return m_title; }
 
     // Implementations may return a JSON object describing their persistent

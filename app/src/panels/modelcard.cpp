@@ -15,7 +15,7 @@
 #include <QStyle>
 #include <QVBoxLayout>
 
-ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
+ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent, bool compact)
     : QFrame(parent)
     , m_id(isHub ? data.value("repo_id").toString() : data.value("id").toString())
     , m_data(data)
@@ -40,16 +40,18 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     // Row 1: name (Space Grotesk) + architecture pill.
     auto *nameRow = new QHBoxLayout();
     nameRow->setSpacing(8);
-    auto *name = new QLabel(m_id, this);
+    auto *name = new QLabel(compact ? data.value("name").toString(m_id) : m_id, this);
     name->setObjectName(QStringLiteral("cardTitle"));
     name->setWordWrap(true);
     name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
     name->setToolTip(m_id);
     nameRow->addWidget(name, 1);
+    QLabel *architecture = nullptr;
     if (!isHub) {
         const QString arch = data.value("architecture").toString();
         if (!arch.isEmpty()) {
             auto *badge = new QLabel(arch, this);
+            architecture = badge;
             badge->setObjectName(QStringLiteral("archBadge"));
             badge->setWordWrap(true);
             badge->setMaximumWidth(110);
@@ -113,6 +115,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     licenseLabel->setWordWrap(true);
     appendProgressRow();
     auto *actions = new QHBoxLayout();
+    actions->setObjectName("libraryItemActions");
     // Hub hits already in the library offer to load them instead of downloading again.
     const QString stateText = !isHub ? QStringLiteral("✓ Ready locally")
         : m_downloaded ? QStringLiteral("✓ Downloaded") : QStringLiteral("Available on the Hub");
@@ -137,6 +140,44 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent)
     }
     actions->addWidget(action);
     layout->addLayout(actions);
+    if (compact) {
+        setProperty("libraryRow", true);
+        layout->setContentsMargins(14, 10, 14, 10);
+        layout->removeItem(nameRow);
+        layout->removeItem(metaRow);
+        layout->removeItem(footRow);
+        delete footRow;
+        licenseLabel->hide();
+        state->hide();
+        layout->removeItem(actions);
+        auto *identity = new QVBoxLayout;
+        identity->setSpacing(4);
+        identity->addLayout(nameRow);
+        identity->addLayout(metaRow);
+        auto *row = new QHBoxLayout;
+        row->setSpacing(12);
+        row->addLayout(identity, 1);
+        auto *tagColumn = new QWidget(this);
+        tagColumn->setFixedWidth(108);
+        auto *tags = new QHBoxLayout(tagColumn);
+        tags->setContentsMargins(0, 0, 0, 0);
+        if (architecture) {
+            nameRow->removeWidget(architecture);
+            architecture->setWordWrap(false);
+            architecture->setToolTip(architecture->text());
+            architecture->setText(architecture->fontMetrics().elidedText(architecture->text(), Qt::ElideRight, 84));
+            tags->addWidget(architecture, 0, Qt::AlignLeft | Qt::AlignVCenter);
+        }
+        row->addWidget(tagColumn);
+        row->addLayout(actions);
+        layout->insertLayout(0, row);
+        const QString added = data.value("downloaded_at").toString().left(10);
+        if (!added.isEmpty()) {
+            auto *date = new QLabel(added, this);
+            date->setObjectName("cardMeta");
+            metaRow->insertWidget(metaRow->count() - 1, date);
+        }
+    }
     action->setAccessibleName((loads ? "Load " : "Download ")+m_id);
     for (auto *label : findChildren<QLabel *>()) {
         label->setTextFormat(Qt::PlainText);
