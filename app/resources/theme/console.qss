@@ -461,3 +461,84 @@ QWidget#docsPanel { background: @canvasBackground; }
 QLabel#docsFeatureTitle { font-family: @headingFont; font-size: 27px; font-weight: 500; color: @textPrimary; }
 QPushButton#docsHistoryBack, QPushButton#docsHistoryForward, QPushButton#docsMenu { padding: 0; min-width: 0; min-height: 28px; }
 QFrame#docsQuestions { border: none; border-left: 1px solid @surfaceBorder; }
+
+
+/* Native desktop model discovery. */
+QLabel#hubPageTitle { font-family: @headingFont; font-size: 30px; font-weight: 600; color: @textPrimary; }
+QLabel#hubCardTitle { font-family: @headingFont; font-size: 18px; font-weight: 600; color: @textPrimary; }
+QLabel#hubSectionTitle { font-family: @headingFont; font-size: 17px; font-weight: 600; color: @textPrimary; }
+QLabel#hubStatValue { font-family: @headingFont; font-size: 21px; color: @textPrimary; }
+QLabel#hubMeta { font-size: 12px; color: @textSecondary; }
+QLabel#hubSmallMeta { font-size: 11px; color: @textMuted; }
+QLabel#hubValue { font-size: 13px; color: @textPrimary; }
+QLabel#hubLocalState { font-size: 11px; color: @statusSuccess; }
+QLabel#hubTag { background: @canvasBackground; padding: 4px 7px; border-radius: 4px; font-size: 11px; color: @textSecondary; }
+QLabel#hubCallout { background: @insetBackground; border-left: 2px solid @accentPrimary; padding: 12px; color: @textSecondary; }
+QFrame#hubModelCard, QFrame#hubFilters, QFrame#hubDownloadStrip, QFrame#hubCompareTray { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QFrame#hubModelCard:hover { background: @surfaceFill; }
+QPushButton#hubFiltersToggle:checked { background: @surfaceFillActive; color: @accentLabel; }
+QPushButton#hubViewDetails { background: transparent; border: none; color: @textPrimary; padding: 6px 8px; }
+QPushButton#hubViewDetails:hover { background: @surfaceFillHover; }
+
+QWidget#modelHubPanel QCheckBox::indicator {
+    width: 13px; height: 13px;
+    border: 1px solid @surfaceBorder;
+    border-radius: 3px;
+    background: @canvasBackground;
+}
+QWidget#modelHubPanel QCheckBox::indicator:checked {
+    background: @accentPrimary;
+    border-color: @accentPrimary;
+    image: url(:/icons/check.svg);
+}
+
+/* Model Hub reference layout: native desktop cards, model page and utility dialogs. */
+QFrame#hubDeviceCard, QFrame#hubSurface, QFrame#hubStats {
+    background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 8px;
+}
+QLabel#hubDeviceTitle { font-size: 12px; font-weight: 500; color: @textPrimary; }
+QLabel#hubPublisherAvatar { background: @canvasBackground; color: @textPrimary; border-radius: 5px; font-family: @headingFont; font-size: 13px; font-weight: 600; }
+QLabel#hubPublisher { font-size: 11px; color: @textSecondary; }
+QPushButton#hubModelName, QPushButton#hubComparisonModelName {
+    font-family: @headingFont; font-size: 18px; font-weight: 600;
+    padding: 0; min-height: 0; border: none; background: transparent; text-align: left;
+}
+QPushButton#hubComparisonModelName { font-size: 16px; }
+QPushButton#hubViewDetails, QPushButton#hubTextLink, QPushButton#hubDeviceDetails {
+    border: none; background: transparent; font-size: 11px; min-height: 20px; padding: 3px 4px;
+}
+QLabel#hubCardDescription { font-size: 12px; color: @textSecondary; }
+QLabel#hubPill { background: @canvasBackground; color: @textSecondary; padding: 3px 6px; border-radius: 3px; font-size: 10px; }
+QLabel#hubLocalPill { background: @insetBackground; color: @statusSuccess; padding: 3px 6px; border-radius: 3px; font-size: 10px; }
+QLabel#hubCardValue { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QFrame#hubRule { background: @surfaceBorder; border: none; }
+QLabel#hubDetailTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; color: @textPrimary; }
+QFrame#hubStatCell { background: transparent; border: none; border-left: 1px solid @surfaceBorder; }
+QFrame#hubStatCell[first="true"] { border-left: none; }
+QLabel#hubBody { color: @textSecondary; font-size: 13px; }
+QLabel#hubSmallTitle { color: @textPrimary; font-size: 12px; font-weight: 500; }
+QFrame#hubUseCase { background: @canvasBackground; border: none; border-radius: 6px; }
+QLabel#hubCallout { background: @accentSurface; border: none; border-left: 2px solid @accentPrimary; border-radius: 0; padding: 12px 14px; font-size: 12px; color: @textSecondary; }
+QFrame#hubSpecRow { background: transparent; border: none; border-bottom: 1px solid @surfaceBorder; }
+QLabel#hubMemoryEstimate { font-family: @headingFont; font-size: 23px; color: @textPrimary; }
+QLabel#hubEstimateStatus { font-size: 11px; font-weight: 500; color: @textMuted; }
+QLabel#hubEstimateStatus[state="ok"] { color: @statusSuccess; }
+QLabel#hubEstimateStatus[warning="true"] { color: @statusWarning; }
+QLabel#hubWeightKey { font-size: 10px; color: @accentLabel; }
+QLabel#hubCacheKey { font-size: 10px; color: @comparisonSeries; }
+QPushButton#hubDownloadModel { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; padding: 9px 10px; }
+QDialog#hubCompareDialog, QDialog#hubDeviceDialog, QDialog#hubDownloadDialog { background: transparent; }
+QLabel#hubDialogTitle { font-family: @headingFont; font-size: 24px; font-weight: 600; color: @textPrimary; }
+QFrame#hubComparisonCell { background: transparent; border: none; border-bottom: 1px solid @surfaceBorder; }
+QFrame#hubComparisonHeader { background: transparent; border: none; border-bottom: 1px solid @surfaceBorder; }
+QDialog#hubCompareDialog QScrollArea, QDialog#hubDeviceDialog QScrollArea { background: transparent; border: none; }
+QTableWidget#hubFileTable, QTableWidget#hubEvaluationTable { background: @surfaceFill; color: @textPrimary; border: none; selection-background-color: @surfaceFillHover; }
+QTableWidget#hubFileTable::item, QTableWidget#hubEvaluationTable::item { border-bottom: 1px solid @surfaceBorder; padding: 10px 8px; }
+QTableWidget#hubFileTable QHeaderView::section, QTableWidget#hubEvaluationTable QHeaderView::section { background: @surfaceFill; color: @textMuted; font-size: 11px; border: none; border-bottom: 1px solid @surfaceBorder; padding: 10px 8px; }
+
+/* Keep shortlist selection visible while browsing. */
+QFrame#hubModelCard[selected="true"] { border-color: @accentPrimary; }
+
+QPushButton#hubCardCompare { font-size: 11px; padding: 3px 8px; min-height: 0; }
+
+QPushButton#hubDialogClose { padding: 0; min-height: 0; min-width: 0; border: none; }

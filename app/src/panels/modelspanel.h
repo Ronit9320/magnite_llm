@@ -28,6 +28,7 @@ public:
     explicit ModelsPanel(QWidget *parent = nullptr);
 
     void setBackendClient(BackendClient *client);
+    void useLibraryWorkspace();
 
     QString settingsJson() const override;
     void applySettingsJson(const QString &json) override;
@@ -37,6 +38,7 @@ signals:
     void downloadFinished(bool success);
     void loadRequested(const QString &id);
     void workspaceRequested(int panel);
+    void hubRequested();
 
 public slots:
     void refresh();
@@ -102,6 +104,7 @@ private:
     QString m_downloadingId;
     QString m_lastSearch;
     bool m_searching = false;
+    bool m_libraryOnly = false;
     // Cancel was pressed before the start request returned a job id, or the cancel
     // request is in flight; either way, do not send another.
     bool m_cancelPending = false;

@@ -7,8 +7,29 @@
 #include <QHelpEvent>
 #include <QToolTip>
 #include <QIcon>
+#include <QTextLayout>
+#include <QTextOption>
 
 namespace {
+QTextOption wrappedTextOption() {
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    return option;
+}
+int wrappedTextHeight(const QString &text, const QFont &font, int width) {
+    QTextLayout layout(text, font);
+    layout.setTextOption(wrappedTextOption());
+    layout.beginLayout();
+    qreal height = 0;
+    for (;;) {
+        auto line = layout.createLine();
+        if (!line.isValid()) break;
+        line.setLineWidth(qMax(1, width));
+        height += line.height();
+    }
+    layout.endLayout();
+    return qCeil(height);
+}
 QColor mix(const QColor &a,const QColor &b,qreal t) {
     return QColor::fromRgbF(a.redF()+(b.redF()-a.redF())*t,a.greenF()+(b.greenF()-a.greenF())*t,
                            a.blueF()+(b.blueF()-a.blueF())*t,a.alphaF()+(b.alphaF()-a.alphaF())*t);
@@ -39,11 +60,11 @@ QRect Button::labelRect() const {
     return contents.intersected(rect().adjusted(inset,2,-inset,-2));
 }
 int Button::heightForWidth(int width) const {
-    if (!text().contains('\n')) return sizeHint().height();
+    if (!text().contains('\n') && !property("wordWrap").toBool()) return sizeHint().height();
     const auto content=labelRect();
     const int chrome=qMax(12,this->width()-content.width());
     const int textWidth=qMax(1,width-chrome-(icon().isNull()?0:iconSize().width()+6));
-    const int height=fontMetrics().boundingRect(QRect(0,0,textWidth,16777215),Qt::TextWordWrap|Qt::TextShowMnemonic,text()).height();
+    const int height=property("wordWrap").toBool() ? wrappedTextHeight(text(), font(), textWidth) : fontMetrics().boundingRect(QRect(0,0,textWidth,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,text()).height();
     return qMax(sizeHint().height(),height+qMax(8,this->height()-content.height()));
 }
 bool Button::event(QEvent *event) {
@@ -58,7 +79,7 @@ void Button::paintEvent(QPaintEvent *) {
     QStyleOptionButton option; initStyleOption(&option);
     QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
     const auto name=objectName();
-    const bool primary=name=="primaryBtn" || name=="cardPrimary" || name=="editSave";
+    const bool primary=property("primary").toBool() || name=="primaryBtn" || name=="cardPrimary" || name=="editSave";
     const bool danger=name=="destructiveBtn" || name=="cardDanger" || name=="cancelDownload" || name=="deleteAllChats";
     const bool ghost=isFlat() || name=="historyNew";
     QColor base(primary?Theme::accentPrimary():Theme::surfaceFill());
@@ -81,13 +102,13 @@ void Button::paintEvent(QPaintEvent *) {
     if (isDown()) painter.translate(0,0.5);
     painter.setFont(font()); painter.setPen(ink);
     const bool rtl=layoutDirection()==Qt::RightToLeft;
-    const bool multiline=text().contains('\n');
+    const bool multiline=text().contains('\n') || property("wordWrap").toBool();
     const bool leftAligned=name=="promptSuggestion" || name=="historyNew" || property("leftAligned").toBool();
     const int gap=icon().isNull() || text().isEmpty()?0:6;
     const int iconWidth=icon().isNull()?0:qMin(option.iconSize.width(),content.width());
     const int available=qMax(0,content.width()-iconWidth-gap);
     const QString display=multiline?text():fontMetrics().elidedText(text(),Qt::ElideRight,available,Qt::TextShowMnemonic);
-    m_truncated=multiline ? fontMetrics().boundingRect(QRect(0,0,available,16777215),Qt::TextWordWrap|Qt::TextShowMnemonic,display).height()>content.height() : display!=text();
+    m_truncated=property("wordWrap").toBool() ? wrappedTextHeight(display, font(), available)>content.height() : multiline ? fontMetrics().boundingRect(QRect(0,0,available,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,display).height()>content.height() : display!=text();
     const int textWidth=qMin(available,fontMetrics().size(Qt::TextShowMnemonic,display).width());
     const int groupWidth=iconWidth+gap+textWidth;
     int start=leftAligned?(rtl?content.right()-groupWidth+1:content.left()):content.left()+(content.width()-groupWidth)/2;
@@ -100,6 +121,12 @@ void Button::paintEvent(QPaintEvent *) {
     }
     const int mnemonic=style()->styleHint(QStyle::SH_UnderlineShortcut,nullptr,this)?Qt::TextShowMnemonic:Qt::TextHideMnemonic;
     const int align=leftAligned?(rtl?Qt::AlignRight:Qt::AlignLeft):Qt::AlignHCenter;
-    painter.drawText(textRect,Qt::AlignVCenter|align|mnemonic|(multiline?Qt::TextWordWrap:Qt::TextSingleLine),display);
+    if (property("wordWrap").toBool()) {
+        auto textOption = wrappedTextOption();
+        textOption.setAlignment(Qt::Alignment::fromInt(Qt::AlignVCenter | align));
+        painter.drawText(QRectF(textRect), display, textOption);
+    } else {
+        painter.drawText(textRect,Qt::AlignVCenter|align|mnemonic|(multiline?(Qt::TextWordWrap|Qt::TextWrapAnywhere):Qt::TextSingleLine),display);
+    }
     painter.restore();
 }

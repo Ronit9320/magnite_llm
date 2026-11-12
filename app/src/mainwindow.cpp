@@ -8,6 +8,7 @@
 #include "update_config.h"
 #include "panels/basepanel.h"
 #include "panels/modelspanel.h"
+#include "panels/modelhubpanel.h"
 #include "panels/trainingpanel.h"
 #include "panels/trainingrunpanel.h"
 #include "panels/ragpanel.h"
@@ -188,7 +189,8 @@ void MainWindow::setupUi() {
     mainLayout->setSpacing(0);
 
     // ---- Left menu ----
-    m_sidebar = new Sidebar({{"Library", "box", PanelModels},
+    m_sidebar = new Sidebar({{"Model hub", "search", PanelHub},
+                             {"Library", "box", PanelModels},
                              {"Training", "graduation-cap", PanelTraining},
                              {"Knowledge", "database", PanelRag},
                              {"Adapters", "layers", PanelAdapters},
@@ -244,6 +246,8 @@ void MainWindow::setupUi() {
 
     // ---- Panels ----
     m_modelsPanel = new ModelsPanel();
+    m_modelsPanel->useLibraryWorkspace();
+    m_modelHubPanel = new ModelHubPanel();
     m_trainingPanel = new TrainingPanel();
     m_ragPanel = new RagPanel();
     m_adaptersPanel = new AdaptersPanel();
@@ -261,6 +265,8 @@ void MainWindow::setupUi() {
     m_settingsPanel = new SettingsPanel();
 
     connect(m_modelsPanel,&ModelsPanel::workspaceRequested,this,&MainWindow::switchPanel);
+    connect(m_modelsPanel, &ModelsPanel::hubRequested, this, [this] { switchPanel(PanelHub); });
+    connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_modelHubPanel, &ModelHubPanel::refreshLocalState);
 
     connect(m_modelsPanel,&ModelsPanel::loadRequested,this,[this](const QString &id) {
         switchPanel(PanelChat);
@@ -273,6 +279,15 @@ void MainWindow::setupUi() {
     m_stack->addWidget(m_chatPanel);
     m_docsPanel = new DocsPanel;
     m_stack->addWidget(m_docsPanel);
+    m_stack->addWidget(m_modelHubPanel);
+    connect(m_modelHubPanel, &ModelHubPanel::loadRequested, this, [this](const QString &id) {
+        switchPanel(PanelChat);
+        m_chatPanel->loadModel(id);
+    });
+    connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_modelsPanel, &ModelsPanel::refresh);
+    connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels);
+    connect(m_modelHubPanel, &ModelHubPanel::modelsChanged, m_trainingPanel, &TrainingPanel::refreshOptions);
+    connect(m_modelHubPanel, &ModelHubPanel::downloadFinished, this, [this](bool success) { notifyCompletion("downloads", success); });
     connect(m_docsPanel, &DocsPanel::focusModeChanged, this, [this](bool focus){
         m_sidebar->setVisible(!(m_stack->currentWidget()==m_docsPanel && focus));
     });
@@ -362,6 +377,7 @@ void MainWindow::setupUi() {
     setCentralWidget(central);
     new ClickFeedback(this);
 
+    m_stack->setCurrentIndex(PanelHub);
     m_sidebar->setCurrentPanel(m_stack->currentIndex());
 }
 
@@ -487,7 +503,7 @@ void MainWindow::captureNextPanel(int index) {
 void MainWindow::savePanelSettings() {
     QSettings s;
     QList<BasePanel*> panels = {
-        m_modelsPanel, m_trainingPanel, m_ragPanel, m_chatPanel,
+        m_modelsPanel, m_trainingPanel, m_ragPanel, m_chatPanel, m_modelHubPanel,
     };
     for (auto *p : panels) {
         if (p)
@@ -498,7 +514,7 @@ void MainWindow::savePanelSettings() {
 void MainWindow::loadPanelSettings() {
     QSettings s;
     QList<BasePanel*> panels = {
-        m_modelsPanel, m_trainingPanel, m_ragPanel, m_chatPanel,
+        m_modelsPanel, m_trainingPanel, m_ragPanel, m_chatPanel, m_modelHubPanel,
     };
     for (auto *p : panels) {
         if (p)
@@ -514,6 +530,7 @@ void MainWindow::onBackendStarted() {
     m_backendClient->setAuthToken(m_backend->apiToken());
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
+    m_modelHubPanel->setBackendClient(m_backendClient);
     m_trainingPanel->setBackendClient(m_backendClient);
     m_runPanel->setBackendClient(m_backendClient);
     m_ragPanel->setBackendClient(m_backendClient);
@@ -654,8 +671,8 @@ void MainWindow::runSelfTest() {
             switchPanel(i);
         }
 
-        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelDocs, "settings opens as a window above the current workspace");
-        checkC(m_stack->count() == PanelCount-1, "six workspaces plus a settings window");
+        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelHub, "settings opens as a window above the current workspace");
+        checkC(m_stack->count() == PanelCount-1, "seven workspaces plus a settings window");
         switchPanel(PanelDocs);
         checkC(m_docsPanel->openArticle("model-learning"), "Docs opens a bundled reference in the real workspace");
         const bool sidebarCollapsed=m_sidebar->isCollapsed();

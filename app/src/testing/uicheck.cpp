@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "testing/modelhub_tests.h"
 #include "testing/docs_tests.h"
 #include "testing/settings_tests.h"
 #include "testing/windowchrome_tests.h"
@@ -380,6 +381,16 @@ struct Fixture : QTcpServer {
 }
 
 int runUiCheck(const QString &captures) {
+    if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
+        int hubFailures = 0;
+        const bool original = Theme::isDark();
+        for (const bool dark : {false, true}) {
+            Theme::setDark(dark);
+            hubFailures += runModelHubChecks(captures);
+        }
+        Theme::setDark(original);
+        return hubFailures ? 1 : 0;
+    }
     int failures=0;
     auto check = [&failures](bool pass,const QString &message) {
         if (!pass) ++failures;
@@ -3289,6 +3300,7 @@ int runUiCheck(const QString &captures) {
     check(done && error.isEmpty() && archive=="test-archive-payload","successful export writes complete archive");
     // Deliver pending callbacks while their panels still exist.
     client.abortAll(); pump();
+    failures += runModelHubChecks(captures);
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

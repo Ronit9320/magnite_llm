@@ -59,6 +59,32 @@ def search_hub(
         raise HTTPException(status_code=502, detail=f"Could not reach the Hugging Face Hub: {exc}") from exc
 
 
+@router.get("/discover", response_model=list[HubSearchResult])
+def discover_hub(
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1000),
+):
+    try:
+        return _get_registry().search_hub(q.strip(), limit=limit, offset=offset, discover=True)
+    except (httpx.HTTPError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach the Hugging Face Hub: {exc}") from exc
+
+
+@router.get("/hub-detail")
+def hub_detail(repo: str = Query(min_length=1, max_length=200)):
+    from huggingface_hub.utils import HFValidationError, validate_repo_id
+    try:
+        validate_repo_id(repo)
+    except HFValidationError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Hub repository ID") from exc
+    registry = _get_registry()
+    try:
+        return registry.hub_details(repo)
+    except (httpx.HTTPError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read model metadata: {exc}") from exc
+
+
 @router.get("/sizes", response_model=dict[str, Optional[int]])
 def hub_sizes(
     repo: list[Annotated[str, StringConstraints(min_length=1, max_length=200)]] = Query(

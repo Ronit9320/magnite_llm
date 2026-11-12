@@ -123,7 +123,9 @@ void ModelsPanel::setupUi() {
     searchRow->addWidget(m_refreshButton);
     layout->addLayout(searchRow);
 
-    auto *discovery = new QHBoxLayout();
+    auto *discoveryHost = new QWidget(this);
+    discoveryHost->setObjectName("libraryDiscoveryLinks");
+    auto *discovery = new QHBoxLayout(discoveryHost);
     auto *discoverLabel = new QLabel("EXPLORE",this);
     discoverLabel->setObjectName("heroKicker");
     discovery->addWidget(discoverLabel);
@@ -137,7 +139,7 @@ void ModelsPanel::setupUi() {
         discovery->addWidget(chip);
     }
     discovery->addStretch();
-    layout->addLayout(discovery);
+    layout->addWidget(discoveryHost);
 
     auto *viewRow = new QHBoxLayout();
     m_viewCombo = new ComboBox(this);
@@ -212,6 +214,21 @@ void ModelsPanel::setupUi() {
 
     switchToLocalView();
     setStatus("Backend not connected yet. The list will populate when ready.");
+}
+
+void ModelsPanel::useLibraryWorkspace() {
+    m_libraryOnly = true;
+    switchToLocalView();
+    m_searchEdit->hide();
+    m_searchButton->hide();
+    m_viewCombo->hide();
+    m_downloadButton->hide();
+    findChild<QWidget *>("libraryDiscoveryLinks")->hide();
+    m_emptyRack->setText("Your library starts here\n\nExplore Model Hub to find and download a model. Downloaded models appear here.");
+    setHeaderSubtitle("Manage downloaded weights and load models into Playground.");
+    auto *browse = new Button("Explore Model Hub", this);
+    connect(browse, &QPushButton::clicked, this, &ModelsPanel::hubRequested);
+    contentLayout()->insertWidget(0, browse, 0, Qt::AlignRight);
 }
 
 void ModelsPanel::setBackendClient(BackendClient *client) {
@@ -290,7 +307,8 @@ void ModelsPanel::addCards(const QJsonArray &items, bool isHub, bool append) {
         m_scrollArea->setVisible(!items.isEmpty());
         m_emptyRack->setVisible(items.isEmpty());
         m_emptyRack->setText(isHub ? "No models found\n\nTry a different repository name or model family."
-                                 : "Your library starts here\n\nSearch a repository above and download a model to get started.");
+                                 : m_libraryOnly ? "Your library starts here\n\nExplore Model Hub to find and download a model. Downloaded models appear here."
+                                                 : "Your library starts here\n\nSearch a repository above and download a model to get started.");
     }
     for (const auto &value : items) {
         auto *card = new ModelCard(value.toObject(), isHub, m_cardHost);
@@ -326,6 +344,7 @@ void ModelsPanel::showLocalModels(const QJsonArray &models) {
 }
 
 void ModelsPanel::onSearch() {
+    if (m_libraryOnly) return;
     if (m_searching) return;
     const QString query = m_searchEdit->text().trimmed();
     if (query.isEmpty()) {

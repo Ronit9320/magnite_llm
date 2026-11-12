@@ -74,7 +74,7 @@ int FlowLayout::doLayout(const QRect &rect, bool testOnly) const {
     const int rowGap = std::max(0, smartSpacing(const_cast<FlowLayout *>(this), m_vSpace));
     const QMargins margins = contentsMargins();
     const QRect area = rect.marginsRemoved(margins);
-    const int columns = area.width() >= 984 ? 2 : 1;
+    const int columns = std::clamp((area.width() + gap) / (m_columnMinimumWidth + gap), 1, m_maxColumns);
     const int width = std::max(1, (area.width() - (columns - 1) * gap) / columns);
     int y = area.top();
     int rowHeight = 0;

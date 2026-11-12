@@ -72,6 +72,8 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Hub search | `GET /models/search?q=...&limit=50&offset=0` (`limit` 1-100, `offset` 0-1000; each result has `downloaded`; 502 if the Hub is unreachable) |
 | Hub download sizes | `GET /models/sizes?repo=owner/name&repo=...` (1-100 repos; exact bytes a download fetches, i.e. every file in the repo, or `null` if the Hub cannot say; never an error because the Hub is down) |
 | Pull model / poll / cancel | `POST /models/pull` with `source`, `ref` (409 if another download of that source is running; asking for the running one returns its job); `GET /models/pull/{job_id}` (`status`: queued, running, done, error, cancelled; `bytes_done`, `bytes_total`, `progress`); `POST /models/pull/{job_id}/cancel` (202 while stopping, 200 if already finished) |
+| Discover Hub models | `GET /models/discover?q=&limit=30&offset=0`; download-sorted results with optional task, architecture, language, format, parameter and context metadata |
+| Hub model details | `GET /models/hub-detail?repo=ORG/NAME`; revision, bounded file inventory, exact repository bytes when all file sizes are known, configuration and publisher evaluation metadata |
 | Delete model | `DELETE /models/{model_id}` |
 | Ingest dataset | `POST /datasets/ingest` with absolute `path`, or `name`, `format`, `content` |
 | List/read/delete datasets | `GET /datasets`, `GET /datasets/{id}`, `DELETE /datasets/{id}` |
@@ -182,3 +184,5 @@ than new backend routes. Export format `magnite-chat-export` version 1 contains
 an `exported_at` timestamp and a `chats` array of complete existing chat records,
 including branch trees. Export writes atomically and fails if a listed chat is
 unreadable. It is a portable export, not an automatic backup/import feature.
+
+The native Model Hub filters and sorts the loaded results. Its download action fetches the complete repository using the existing pull API. Metadata detail requests may cache a bounded `config.json` pinned to the returned revision. Missing metadata stays unknown.

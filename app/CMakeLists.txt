@@ -43,6 +43,10 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/panels/modelhubpanel.cpp
+    src/panels/modelhubpanel.h
+    src/testing/modelhub_tests.cpp
+    src/testing/modelhub_tests.h
     src/testing/docs_tests.cpp
     src/testing/docs_tests.h
     src/panels/docslibrary.cpp

@@ -12,6 +12,8 @@ public:
     explicit FlowLayout(QWidget *parent = nullptr, int hSpacing = -1, int vSpacing = -1);
     ~FlowLayout() override;
 
+    // Other card workspaces keep the original two-column geometry.
+    void setColumnMinimumWidth(int width) { m_columnMinimumWidth = width; m_maxColumns = 3; invalidate(); }
     void addItem(QLayoutItem *item) override;
     int count() const override;
     QLayoutItem *itemAt(int index) const override;
@@ -28,4 +30,6 @@ private:
     QList<QLayoutItem *> m_items;
     int m_hSpace;
     int m_vSpace;
+    int m_columnMinimumWidth = 480;
+    int m_maxColumns = 2;
 };

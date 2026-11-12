@@ -216,19 +216,26 @@ class ModelRegistry:
 
     # ---- HuggingFace Hub ----------------------------------------------
 
-    def search_hub(self, query: str, limit: int = 20, offset: int = 0) -> list[HubSearchResult]:
+    def search_hub(self, query: str, limit: int = 20, offset: int = 0, *,
+                   discover: bool = False) -> list[HubSearchResult]:
         """One page of Hub results, each marked if it is already downloaded.
 
         The Hub client has no offset, only a lazy iterator, so a page is a slice
         of the first ``offset + limit`` results. The order is the Hub's own, which
         is what keeps consecutive pages from overlapping.
         """
-        infos = itertools.islice(
-            self._api.list_models(search=query, limit=offset + limit), offset, offset + limit)
+        options = {"search": query, "limit": offset + limit}
+        if discover:
+            options.update(sort="downloads", expand=[
+                "downloads", "likes", "gated", "cardData", "tags", "config",
+                "safetensors", "gguf", "pipeline_tag", "library_name",
+            ])
+        infos = itertools.islice(self._api.list_models(**options), offset, offset + limit)
         downloaded = self._downloaded_hub_repos()
         results = []
         for info in infos:
-            card = info.cardData or {}
+            from backend.models.hubmetadata import search_metadata
+            metadata = search_metadata(info)
             results.append(
                 HubSearchResult(
                     id=model_id("huggingface", info.id),
@@ -236,12 +243,18 @@ class ModelRegistry:
                     downloads=getattr(info, "downloads", 0) or 0,
                     likes=getattr(info, "likes", 0) or 0,
                     gated=bool(getattr(info, "gated", False)),
-                    license=card.get("license", "") or "",
+                    **metadata,
                     tags=list(getattr(info, "tags", []) or []),
                     downloaded=info.id.lower() in downloaded,
                 )
             )
         return results
+
+    def hub_details(self, repo_id: str) -> dict:
+        from backend.models.hubmetadata import model_details
+        result = model_details(self._api, repo_id, self._hf_cache)
+        result["downloaded"] = repo_id.lower() in self._downloaded_hub_repos()
+        return result
 
     def repo_sizes(self, repo_ids: list[str], timeout: float = 25.0) -> dict[str, Optional[int]]:
         """Exact download size in bytes for each repo, or None where it cannot be found.

@@ -67,6 +67,7 @@ std::vector<Token> tokens() {
         {"@brandText", Theme::brandText()},
         {"@canvasBackground",     Theme::canvasBackground()},
         {"@insetBackground",      Theme::insetBackground()},
+        {"@accentSurface", Theme::accentSurface()},
         {"@accentLabel",        Theme::accentLabel()},
         {"@accentPrimary",      Theme::accentPrimary()},
         {"@accentHover",        Theme::accentHover()},
@@ -257,6 +258,7 @@ int Theme::selfCheck() {
     // 1. Design tokens (design doc §2–§3) are the documented hex values.
     check("canvasBackground", Theme::canvasBackground() == "#F1EFE7");
     check("insetBackground", Theme::insetBackground() == "#E9E6DC");
+    check("accentSurface", QColor(Theme::accentSurface()).isValid() && Theme::accentSurface() != Theme::surfaceFill());
     check("accentLabel", QColor(Theme::accentLabel()).isValid());
     check("accentPrimary", Theme::accentPrimary() == "#FF5C28");
     check("accentHover", Theme::accentHover() == "#FF784E");

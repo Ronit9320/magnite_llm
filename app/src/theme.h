@@ -57,6 +57,14 @@ inline QString comparisonSeries() { return isDark() ? QStringLiteral("#85B9F4") 
 inline QString chartHoverFill() { return brandInk(); }
 inline QString chartHoverText() { return isDark() ? textPrimary() : canvasBackground(); }
 
+// Subtle accent surface for callouts and selected Hub controls.
+inline QString accentSurface() {
+    const QColor base(surfaceFill()), accent(accentPrimary());
+    return QColor::fromRgbF(base.redF() * 0.92 + accent.redF() * 0.08,
+                           base.greenF() * 0.92 + accent.greenF() * 0.08,
+                           base.blueF() * 0.92 + accent.blueF() * 0.08).name();
+}
+
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
 inline QString bodyFont()    { return QStringLiteral("DM Sans"); }

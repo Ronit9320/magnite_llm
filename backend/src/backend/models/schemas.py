@@ -31,6 +31,13 @@ class HubSearchResult(BaseModel):
     tags: list[str] = Field(default_factory=list)
     source: str = "huggingface"
     downloaded: bool = Field(default=False, description="Already available in the local library")
+    pipeline_tag: str = ""
+    library_name: str = ""
+    architecture: str = ""
+    parameters: int | None = None
+    context_length: int | None = None
+    languages: list[str] = Field(default_factory=list)
+    formats: list[str] = Field(default_factory=list)
 
 
 class PullRequest(BaseModel):
