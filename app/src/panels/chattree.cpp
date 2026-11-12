@@ -85,6 +85,7 @@ ChatTree::Compaction ChatTree::compaction(int pathCount) const {
 bool ChatTree::isEmpty() const { return m_nodes.isEmpty(); }
 
 void ChatTree::clear() {
+    m_knowledge = {};
     m_nodes.clear();
     m_rootChildren.clear();
     m_rootActive = kRoot;
@@ -108,9 +109,10 @@ QJsonObject ChatTree::toJson() const {
                                  {"children", ids(n.children)},
                                  {"activeChild", n.activeChild},
                                  {"notes", notes},
+                                 {"citations", n.citations},
                                  {"compaction", QJsonObject{{"summary", n.compaction.summary}, {"covered", n.compaction.covered}}}});
     }
-    return QJsonObject{{"nodes", nodes}, {"rootChildren", ids(m_rootChildren)}, {"rootActive", m_rootActive}};
+    return QJsonObject{{"nodes", nodes}, {"rootChildren", ids(m_rootChildren)}, {"rootActive", m_rootActive}, {"knowledge", m_knowledge}};
 }
 
 namespace {
@@ -138,6 +140,7 @@ std::optional<ChatTree> ChatTree::fromJson(const QJsonObject &json) {
     const QJsonArray nodes = json.value("nodes").toArray();
     const int count = nodes.size();
     ChatTree tree;
+    tree.m_knowledge = json.value("knowledge").toObject();
     tree.m_nodes.resize(count);
     for (int i = 0; i < count; ++i) {
         if (!nodes.at(i).isObject()) return std::nullopt;
@@ -162,6 +165,7 @@ std::optional<ChatTree> ChatTree::fromJson(const QJsonObject &json) {
         n.parent = parent;
         n.role = role;
         n.content = o.value("content").toString();
+        n.citations = o.value("citations").toArray();
         n.activeChild = active;
         n.compaction = Compaction{compaction.toObject().value("summary").toString(), covered};
     }

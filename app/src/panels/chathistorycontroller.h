@@ -23,8 +23,9 @@ public:
     // Default: "Delete chat?" with a destructive Delete button; Cancel is the default.
     std::function<bool(const QString &title)> confirmDelete;
 
-private:
     void refresh();
+
+private:
     QString titleOf(const QString &id) const;
 
     ChatStore *m_store;

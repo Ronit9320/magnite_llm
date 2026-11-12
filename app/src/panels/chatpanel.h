@@ -22,12 +22,14 @@ class QScrollArea;
 class QSpinBox;
 class QDoubleSpinBox;
 class QVBoxLayout;
+class QHBoxLayout;
 class QTimer;
 class BackendClient;
 class ChatBubble;
 class MessageRow;
 class ContextMeter;
 class ChatStore;
+class RagPanel;
 class QNetworkReply;
 
 // Chat / Inference panel: converse with the active model.
@@ -41,6 +43,8 @@ public:
 
     void setBackendClient(BackendClient *client);
     void refreshModels();
+    void setKnowledgePanel(RagPanel *panel);
+    void showKnowledge();
 
     QString settingsJson() const override;
 
@@ -97,6 +101,10 @@ private:
     };
 
     void setupUi();
+    void updateConversationTitle();
+    void updateKnowledgeContext();
+    void restoreKnowledge();
+    void addCitations(MessageRow *row, const QJsonArray &sources);
     // Shows the blank chat's welcome with a fresh greeting (a different wording from the last one).
     void showBlankChat();
     // Stops whatever is streaming or being prepared.
@@ -144,6 +152,13 @@ private:
     QSpinBox *m_maxTokensSpin;
     QDoubleSpinBox *m_tempSpin;
     QCheckBox *m_ragCheck;
+    QPushButton *m_knowledgeToggle = nullptr;
+    QPushButton *m_knowledgeContext = nullptr;
+    QWidget *m_knowledgeDrawer = nullptr;
+    QHBoxLayout *m_workspace = nullptr;
+    QLabel *m_conversationTitle = nullptr;
+    RagPanel *m_knowledge = nullptr;
+    bool m_restoringKnowledge = false;
 
     // Pinned indicator pills (design doc §8).
     QLabel *m_enginePill;
@@ -204,6 +219,7 @@ private:
     ChatBubble *m_streamBubble;
     QPointer<MessageRow> m_streamRow;   // the row holding the streaming reply
     QString m_pendingResponse;
+    QJsonArray m_pendingSources;
     bool m_streaming;
     bool m_streamFailed = false;
     quint64 m_requestId = 0;

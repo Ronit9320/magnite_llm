@@ -311,7 +311,7 @@ void SettingsPanel::setupUi() {
         "Auto chooses a compatible engine for your model and hardware.", m_engineOverride);
     note(runtime, "Applies to the next model you load",
          "Your current model keeps its existing engine. Individual model overrides, including "
-         "torch and Ollama, live in Playground → Model settings.");
+         "torch and Ollama, live in Conversation → Model settings.");
     m_saveButton = button("Save changes", "primaryBtn");
     runtime->addWidget(m_saveButton, 0, Qt::AlignLeft);
     connect(m_saveButton, &QPushButton::clicked, this, &SettingsPanel::onSave);

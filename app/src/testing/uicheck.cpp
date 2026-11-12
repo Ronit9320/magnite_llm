@@ -488,6 +488,38 @@ int runUiCheck(const QString &captures) {
             pump();
             check(clickVisible(tabs->currentWidget(), "Open chat") && openedChat == chatId && store.load(chatId).has_value(),
                   "Project opens the original saved chat after moving it");
+            ChatHistoryList groupedHistory;
+            groupedHistory.useConversationWorkspace();
+            groupedHistory.setProjectLookup([&library](const QString &id) { return library.chatProjects(id); });
+            groupedHistory.setChats(store.list(), chatId);
+            auto *groupedRows = groupedHistory.findChild<QListWidget *>("historyList");
+            check(groupedRows && groupedRows->count() == 2 && groupedRows->item(0)->text() == "Local assistant" &&
+                  groupedRows->item(0)->flags() == Qt::NoItemFlags &&
+                  groupedRows->item(1)->data(Qt::UserRole).toString() == chatId,
+                  "Conversation history groups the saved chat under its Library project");
+            groupedHistory.show();
+            auto *searchToggle = groupedHistory.findChild<QPushButton *>("conversationSearchToggle");
+            auto *searchField = groupedHistory.findChild<QLineEdit *>();
+            check(searchToggle && !searchToggle->icon().isNull() && searchField && searchField->isHidden(),
+                  "Conversation search starts as an icon beside the heading");
+            if (searchToggle && searchField && groupedRows) {
+                searchToggle->click();
+                searchField->setText("unmatched");
+                check(searchField->isVisibleTo(&groupedHistory) && groupedRows->count() == 0,
+                      "Conversation search opens and filters the history");
+                searchToggle->click();
+                check(searchField->isHidden() && searchField->text().isEmpty() && groupedRows->count() == 2,
+                      "Closing conversation search restores all rows");
+            }
+            ChatPanel renamePanel;
+            renamePanel.setChatStore(&store);
+            ChatHistoryController renameController(&store, &renamePanel, &groupedHistory, &library);
+            std::unique_ptr<QMenu> conversationOptions(groupedHistory.contextMenuFor(chatId));
+            check(conversationOptions->testAttribute(Qt::WA_TranslucentBackground) &&
+                  !conversationOptions->actions().first()->icon().isNull(), "Conversation options use the rounded menu with action icons");
+            armDialog("Rename conversation", "Save", "Updated project chat");
+            conversationOptions->actions().first()->trigger();
+            check(store.list().first().title == "Updated project chat", "The rounded rename dialog saves the new title");
             const auto organization = [] {
                 return QJsonDocument::fromJson(QSettings().value("library/organization").toByteArray()).object();
             };
@@ -2928,7 +2960,7 @@ int runUiCheck(const QString &captures) {
         const QString key=SidebarState::kSettingsKey;
         QSettings().remove(key);
         SidebarState s;
-        check(!s.collapsed() && s.width()==195 && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
+        check(!s.collapsed() && s.width()==SidebarState::kExpandedWidth && s.showLabels() && s.showHistory(true) && !s.showHistory(false) && !s.showNewChatButton(true),"sidebar state: expanded by default");
         s.setCollapsed(true);
         check(s.width()==52 && !s.showLabels() && !s.showHistory(true) && s.showNewChatButton(true) && !s.showNewChatButton(false),"sidebar state: collapsed hides labels and list, offers + only on Playground");
         check(s.toggleTooltip()=="Expand sidebar \u00b7 Ctrl+B","sidebar state: the collapsed toggle offers to expand");
@@ -2953,14 +2985,14 @@ int runUiCheck(const QString &captures) {
         QList<int> requested; QObject::connect(&sidebar,&Sidebar::panelRequested,[&](int panel){ requested<<panel; });
         QList<ChatSummary> saved; for (int i=0;i<7;++i) saved.append({QString("00000000-0000-4000-8000-00000000000%1").arg(i),QString("Chat %1").arg(i),false,QDateTime::currentDateTime(),QDateTime::currentDateTime()});
         sidebar.history()->setChats(saved,QString());
-        sidebar.resize(195,680); sidebar.show(); pump();
+        sidebar.resize(SidebarState::kExpandedWidth,680); sidebar.show(); pump();
         auto navButtons=[&]{ QMap<int,QPushButton *> out; for (auto *b : sidebar.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto nav=navButtons();
         QStringList tips;
         const QStringList names={"Library","Training","Knowledge","Adapters","Playground","Settings"};
         for(int i=0;i<names.size();++i)tips<<names[i]+" · "+QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
         bool tipsOk=nav.size()==6; for (int i=0;i<6&&tipsOk;++i) tipsOk=nav.contains(i)&&nav[i]->toolTip()==tips[i]&&nav[i]->isCheckable();
-        check(tipsOk&&sidebar.width()==195,"sidebar: six nav buttons with today's tooltips in a 195px column");
+        check(tipsOk&&sidebar.width()==SidebarState::kExpandedWidth,"sidebar: six nav buttons with today's tooltips in a 220px column");
         nav[1]->click();
         check(requested==QList<int>({1}),"sidebar: clicking a button asks for its panel");
         requested.clear(); bool shortcutsOk=true;
@@ -2988,7 +3020,7 @@ int runUiCheck(const QString &captures) {
             if (i+1<column.size()) fits&=column[i]->geometry().bottom()<column[i+1]->geometry().top();
         }
         fits&=sidebar.rect().contains(nav[5]->geometry())&&sidebar.history()->geometry().bottom()<nav[5]->geometry().top();
-        check(fits,"sidebar: everything fits 195x680 with a populated chat list, nothing overlapping");
+        check(fits,"sidebar: everything fits 220x680 with a populated chat list, nothing overlapping");
         check(sidebar.brandSeal()&&sidebar.brandSeal()->property("brandMark").toBool(),"sidebar: the brand seal is the animated brand mark");
         Theme::setDark(wasDark);
     }
@@ -3007,7 +3039,7 @@ int runUiCheck(const QString &captures) {
         QObject::connect(&strip,&Sidebar::collapsedChanged,[&](bool c){ ++collapsedSignals; lastCollapsed=c; });
         auto nav=[&]{ QMap<int,QPushButton *> out; for (auto *b : strip.findChildren<QPushButton *>("navBtn")) out.insert(b->property("panel").toInt(),b); return out; };
         auto *toggle=strip.findChild<QPushButton *>("sidebarToggle");
-        check(toggle&&!strip.isCollapsed()&&strip.width()==195&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
+        check(toggle&&!strip.isCollapsed()&&strip.width()==SidebarState::kExpandedWidth&&toggle->toolTip()=="Collapse sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Collapse sidebar","sidebar: the expanded toggle offers to collapse");
         strip.setCollapsed(true); pump();
         auto buttons=nav();
         bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
@@ -3024,7 +3056,7 @@ int runUiCheck(const QString &captures) {
         check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
         check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
         strip.setCollapsed(false); pump();
-        buttons=nav(); bool backOk=strip.width()==195&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==35;
+        buttons=nav(); bool backOk=strip.width()==SidebarState::kExpandedWidth&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==35;
         for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];
         check(backOk,"sidebar: expanding brings back the text, the logo, the wordmark and the chat list");
         strip.setCollapsed(true); pump();
@@ -3070,7 +3102,7 @@ int runUiCheck(const QString &captures) {
         check(strip.isCollapsed()&&collapsedSignals==1&&QSettings().value(key).toBool()&&strip.width()==52,"sidebar: clicking the toggle collapses, announces it and stores the choice");
         check(toggle->icon().pixmap(14,14).toImage()!=openChevron,"sidebar: the toggle's arrow flips with the state");
         toggle->click(); pump();
-        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==195,"sidebar: clicking again expands and stores the choice");
+        check(!strip.isCollapsed()&&!QSettings().value(key).toBool()&&strip.width()==SidebarState::kExpandedWidth,"sidebar: clicking again expands and stores the choice");
         QShortcut *ctrlB=nullptr; for (auto *sc : strip.findChildren<QShortcut *>()) if (sc->key().toString()=="Ctrl+B") ctrlB=sc;
         bool ctrlBOk=ctrlB&&ctrlB->context()==Qt::WindowShortcut;
         if (ctrlB) { emit ctrlB->activated(); pump(); ctrlBOk&=strip.isCollapsed(); emit ctrlB->activated(); pump(); ctrlBOk&=!strip.isCollapsed(); }
@@ -3085,7 +3117,7 @@ int runUiCheck(const QString &captures) {
         check(startOk,"sidebar: a stored collapsed choice shows at once, before anything is processed");
         QSettings().setValue(key,"banana");
         Sidebar garbage(items,{"Settings","settings",5},4); garbage.show();
-        check(!garbage.isCollapsed()&&garbage.width()==195,"sidebar: a garbage stored value starts expanded");
+        check(!garbage.isCollapsed()&&garbage.width()==SidebarState::kExpandedWidth,"sidebar: a garbage stored value starts expanded");
         QSettings().remove(key);
     }
     {
@@ -3139,23 +3171,23 @@ int runUiCheck(const QString &captures) {
         bar.setCollapsed(false); pump();
         bar.setAnimationsEnabled(true);
         bar.toggle();
-        check(bar.isCollapsed()&&bar.width()==195,"sidebar: a slide starts from the current width (state flips at once)");
-        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=195; }
+        check(bar.isCollapsed()&&bar.width()==SidebarState::kExpandedWidth,"sidebar: a slide starts from the current width (state flips at once)");
+        bool inRange=true; for (int i=0;i<40&&bar.width()!=52;++i) { pump(10); inRange&=bar.width()>=52&&bar.width()<=SidebarState::kExpandedWidth; }
         check(waitUntil([&]{ return bar.width()==52; },1000)&&inRange&&bar.minimumWidth()==52&&bar.maximumWidth()==52,"sidebar: collapsing slides down to exactly 52px");
         bar.toggle();
         check(!bar.isCollapsed()&&bar.width()==52,"sidebar: expanding starts from the strip width");
-        check(waitUntil([&]{ return bar.width()==195&&bar.maximumWidth()==195; },1000),"sidebar: expanding slides up to exactly 195px");
+        check(waitUntil([&]{ return bar.width()==SidebarState::kExpandedWidth&&bar.maximumWidth()==SidebarState::kExpandedWidth; },1000),"sidebar: expanding slides up to exactly 220px");
         bool textBack=true; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) textBack&=!b->text().isEmpty();
         check(textBack&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar),"sidebar: the text and wordmark are back once the slide ends");
         bar.toggle(); bar.toggle(); pump(300);
-        bool looksExpanded=bar.width()==195&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==35&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
+        bool looksExpanded=bar.width()==SidebarState::kExpandedWidth&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==35&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
         for (auto *b : bar.findChildren<QPushButton *>("navBtn")) looksExpanded&=!b->text().isEmpty();
-        check(looksExpanded,"sidebar: two quick toggles end expanded, 195px, drawn expanded (text, wordmark, full logo), stored as expanded");
+        check(looksExpanded,"sidebar: two quick toggles end expanded, 220px, drawn expanded (text, wordmark, full logo), stored as expanded");
         bar.toggle(); bar.toggle(); bar.toggle();
         check(waitUntil([&]{ return bar.width()==52; },1000)&&bar.isCollapsed()&&QSettings().value(key).toBool(),"sidebar: three quick toggles end collapsed, 52px, stored as collapsed");
         QSettings().setValue(reducedKey,true);
         bar.toggle();
-        check(!bar.isCollapsed()&&bar.width()==195,"sidebar: with reduced motion the change is instant");
+        check(!bar.isCollapsed()&&bar.width()==SidebarState::kExpandedWidth,"sidebar: with reduced motion the change is instant");
         QSettings().remove(reducedKey); QSettings().remove(key);
     }
     {

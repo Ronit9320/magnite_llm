@@ -2,7 +2,7 @@
 #include "widgets/confirmation.h"
 #include <QTimer>
 #include <memory>
-#include <QSplitter>
+
 #include "panels/ragpanel.h"
 
 #include "backend_client.h"
@@ -10,6 +10,8 @@
 #include "panels/ragdoccard.h"
 
 #include <QFileDialog>
+#include <QCheckBox>
+#include <QSignalBlocker>
 #include <QFormLayout>
 #include <QFrame>
 #include <QJsonArray>
@@ -25,7 +27,7 @@
 #include <QVBoxLayout>
 
 RagPanel::RagPanel(QWidget *parent)
-    : BasePanel("Knowledge & retrieval", parent)
+    : BasePanel("Knowledge & retrieval", parent, true)
     , m_client(nullptr)
     , m_addButton(nullptr)
     , m_removeButton(nullptr)
@@ -42,8 +44,7 @@ RagPanel::RagPanel(QWidget *parent)
     , m_statusLabel(nullptr)
     , m_loadingConfig(false)
 {
-    setHeaderSubtitle(
-        "Add documents, find useful passages, and bring them into your conversations.");
+    embedInWorkspace();
     setupUi();
 }
 
@@ -51,31 +52,21 @@ void RagPanel::setupUi() {
     auto *layout = contentLayout();
 
     auto *btnRow = new QHBoxLayout();
-    m_addButton = new Button("Add Documents...", this);
+    m_addButton = new Button("Add files…", this);
     m_addButton->setObjectName("primaryBtn");
-    m_removeButton = new Button("Remove Selected", this);
+    m_removeButton = new Button("Remove", this);
     m_removeButton->setObjectName("secondaryBtn");
     m_removeButton->setEnabled(false);
-    m_clearButton = new Button("Clear All", this);
+    m_clearButton = new Button("Clear all", this);
     m_clearButton->setObjectName("destructiveBtn");
     btnRow->addWidget(m_addButton);
     btnRow->addWidget(m_removeButton);
     btnRow->addWidget(m_clearButton);
-    btnRow->addStretch();
-    layout->addLayout(btnRow);
+    auto *documents = Surface::card(this, "Sources");
+    documents->addLayout(btnRow);
+    documents->parentWidget()->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    layout->addWidget(documents->parentWidget());
 
-    auto *columns = new QSplitter(Qt::Horizontal,this);
-    columns->setChildrenCollapsible(false);
-    columns->setHandleWidth(4);
-    layout->addWidget(columns,1);
-    auto *inspector = new QWidget(this);
-    auto *bench = new QVBoxLayout(inspector);
-    bench->setContentsMargins(0,0,0,0);
-    bench->setSpacing(8);
-    auto *documents = Surface::card(this,"Source collection");
-    columns->addWidget(documents->parentWidget());
-    columns->addWidget(inspector);
-    columns->setSizes({650,450});
     // Document list.
     m_docScroll = new QScrollArea(this);
     m_docScroll->setWidgetResizable(true);
@@ -88,7 +79,8 @@ void RagPanel::setupUi() {
     m_docLayout->setSpacing(8);
     m_docLayout->setAlignment(Qt::AlignTop);
     m_docScroll->setWidget(m_docHost);
-    m_docScroll->setMinimumHeight(200);
+    m_docScroll->setMinimumHeight(90);
+    m_docScroll->setMaximumHeight(210);
     documents->addWidget(m_docScroll, 1);
 
     // Empty state (shown instead of the scroll area when no docs are added).
@@ -102,7 +94,7 @@ void RagPanel::setupUi() {
     hint->setWordWrap(true);
     emptyLayout->addWidget(hint);
     m_emptyState->setLayout(emptyLayout);
-    documents->addWidget(m_emptyState, 1);
+    documents->addWidget(m_emptyState);
 
     // Retrieval config as a surface card (design doc §4/§8).
     auto *configCard = new QFrame(this);
@@ -110,9 +102,6 @@ void RagPanel::setupUi() {
     auto *configLayout = new QVBoxLayout(configCard);
     configLayout->setContentsMargins(16, 14, 16, 14);
     configLayout->setSpacing(10);
-    auto *configTitle = new QLabel("Retrieval Configuration", this);
-    configTitle->setObjectName("cardTitle");
-    configLayout->addWidget(configTitle);
     auto *form = new QFormLayout();
     form->setSpacing(8);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
@@ -136,10 +125,17 @@ void RagPanel::setupUi() {
 
     configLayout->addLayout(form);
 
-    configLayout->addStretch();
-    bench->addWidget(configCard);
-    auto *retrieval = Surface::card(this,"Search your documents");
-    bench->addWidget(retrieval->parentWidget(),1);
+    auto addDisclosure = [this, layout](const QString &title, QWidget *section) {
+        auto *toggle = new Button(title, this);
+        toggle->setCheckable(true);
+        layout->addWidget(toggle);
+        layout->addWidget(section);
+        section->hide();
+        connect(toggle, &QPushButton::toggled, section, &QWidget::setVisible);
+    };
+    addDisclosure("Retrieval settings", configCard);
+    auto *retrieval = Surface::card(this);
+    addDisclosure("Test retrieval", retrieval->parentWidget());
     // Test-retrieval row.
     auto *queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
@@ -172,6 +168,7 @@ void RagPanel::setupUi() {
     m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
+    layout->addStretch();
     setStatus("Add PDF, text, Markdown or HTML files to get started.");
     m_configTimer = new QTimer(this);
     m_configTimer->setSingleShot(true);
@@ -247,7 +244,15 @@ void RagPanel::refresh(bool preserveStatus) {
             connect(card, &RagDocCard::cardClicked, this, &RagPanel::onCardClicked);
             m_docLayout->addWidget(card);
             m_cards.append(card);
+            connect(card->sourceToggle(), &QCheckBox::toggled, this, [this] {
+                QJsonArray selected;
+                for (const auto *source : m_cards) {
+                    if (source->sourceToggle()->isChecked()) selected.append(source->id());
+                }
+                setDocumentScope(selected);
+            });
         }
+        setDocumentScope(m_documentScope);
         m_docLayout->invalidate();
         m_docHost->updateGeometry();
         updateEmptyState();
@@ -380,6 +385,7 @@ void RagPanel::onClearAll() {
             return;
         }
         clearCards();
+        emit sourceScopeChanged();
         m_resultLabel->setText("Add documents to start searching your knowledge.");
         setStatus("Cleared all documents.");
     });
@@ -396,6 +402,7 @@ void RagPanel::onTestQuery() {
     QJsonObject body;
     body["query"] = query;
     body["top_k"] = m_topKSpin->value();
+    if (m_documentScope.isArray()) body["document_ids"] = m_documentScope;
     m_queryBusy = true;
     m_queryButton->setEnabled(false);
     m_queryButton->setText("Searching…");
@@ -454,6 +461,26 @@ void RagPanel::pushConfig() {
     m_client->post("/rag/config", body, [this](int status, const QJsonDocument &doc) {
         if (status != 200) setStatus("Configuration was not saved: " + doc.object()["detail"].toString());
     });
+}
+
+void RagPanel::setDocumentScope(const QJsonValue &scope) {
+    if (scope != m_documentScope) {
+        ++m_collectionRevision;
+        m_resultLabel->setText("Search enabled sources to preview matching passages.");
+    }
+    m_documentScope = scope;
+    const auto ids = scope.toArray();
+    for (auto *card : m_cards) {
+        const QSignalBlocker guard(card->sourceToggle());
+        card->sourceToggle()->setChecked(!scope.isArray() || ids.contains(card->id()));
+    }
+    emit sourceScopeChanged();
+}
+
+int RagPanel::enabledSourceCount() const {
+    int count = 0;
+    for (const auto *card : m_cards) count += card->sourceToggle()->isChecked();
+    return count;
 }
 
 void RagPanel::clearCards() {

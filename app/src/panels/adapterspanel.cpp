@@ -163,10 +163,10 @@ void AdaptersPanel::refresh() {
         if (!hasAdapter) {
             setStatus("No adapters yet. Train one in the Training panel.");
         } else if (m_activeAdapterId.isEmpty()) {
-            setStatus(QString("%1 adapter(s). Activate an adapter to use it in Playground.")
+            setStatus(QString("%1 adapter(s). Activate an adapter to use it in Conversation.")
                           .arg(arr.size()));
         } else {
-            setStatus(QString("%1 adapter(s). The marked adapter is active in Playground.")
+            setStatus(QString("%1 adapter(s). The marked adapter is active in Conversation.")
                           .arg(arr.size()));
         }
         emit registryRefreshed();

@@ -36,7 +36,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
     name->setToolTip(m_id);
     nameRow->addWidget(name, 1);
-    m_activeLabel = new QLabel("Active in Playground",this);
+    m_activeLabel = new QLabel("Active in Conversation",this);
     m_activeLabel->setObjectName("activeBadge");
     m_activeLabel->hide();
     layout->addWidget(m_activeLabel);
@@ -145,7 +145,7 @@ void AdapterCard::setActive(bool active) {
     if (m_active == active) return;
     m_active = active;
     m_activeLabel->setVisible(active);
-    setAccessibleDescription(active ? "Active in Playground" : "Available adapter");
+    setAccessibleDescription(active ? "Active in Conversation" : "Available adapter");
     setProperty("active", active);
     style()->unpolish(this);
     style()->polish(this);

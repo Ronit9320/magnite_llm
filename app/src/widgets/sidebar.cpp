@@ -88,13 +88,30 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
             navigation->addWidget(m_history);
         }
     }
-    navigation->addStretch();
+    if (!m_history) {
+        m_newChat = new QPushButton(this);
+        m_newChat->setObjectName("sidebarNewChat");
+        m_newChat->setFixedSize(26, 26);
+        m_newChat->setToolTip("New conversation");
+        m_newChat->setAccessibleName("New conversation");
+        connect(m_newChat, &QPushButton::clicked, this, &Sidebar::newChatRequested);
+        navigation->addWidget(m_newChat, 0, Qt::AlignHCenter);
+        m_history = new ChatHistoryList(this);
+        m_history->useConversationWorkspace();
+        navigation->addWidget(m_history, 1);
+        auto *open = new QShortcut(Shortcuts::workspace(m_historyPanel), this);
+        connect(open, &QShortcut::activated, this, [this] { emit panelRequested(m_historyPanel); });
+    }
+    if (m_playground) navigation->addStretch();
     auto *local=new QFrame(this); local->setObjectName("sidebarLocalCard");
     auto *localBody=new QVBoxLayout(local); localBody->setContentsMargins(12,12,12,12); localBody->setSpacing(6);
     auto *localName=new QLabel("● Local workspace",local); localName->setObjectName("sidebarLocalName"); localBody->addWidget(localName);
     auto *localDetail=new QLabel("Your machine. Your models.",local); localDetail->setObjectName("sidebarLocalDetail"); localDetail->setWordWrap(true); localBody->addWidget(localDetail);
-    navigation->addWidget(local);
-    navigation->addWidget(makeNavButton(settings));
+    auto *footer = new QVBoxLayout;
+    footer->setSpacing(6);
+    footer->addWidget(local);
+    footer->addWidget(makeNavButton(settings));
+    layout->addLayout(footer);
 
     auto *collapseKey = new QShortcut(Shortcuts::collapseSidebar(), this);
     collapseKey->setContext(Qt::WindowShortcut);
@@ -142,8 +159,8 @@ void Sidebar::setCollapsed(bool collapsed, bool animate) {
     // Focus inside a list that is about to disappear moves to the Playground button.
     // (window()->focusWidget() is where focus really is; this widget's own focusWidget() can be a stale memory.)
     QWidget *focused = window()->focusWidget();
-    if (collapsed && m_history && focused && m_history->isAncestorOf(focused) && m_playground)
-        m_playground->setFocus();
+    if (collapsed && m_history && focused && m_history->isAncestorOf(focused))
+        (m_playground ? m_playground : m_toggle)->setFocus();
     m_state.setCollapsed(collapsed);
     applyToggle();
     if (!animate) {
@@ -191,8 +208,8 @@ void Sidebar::applyToggle() {
 
 void Sidebar::updateExtras() {
     const bool playgroundOpen = m_current == m_historyPanel;
-    if (m_history) m_history->setVisible(m_state.showHistory(playgroundOpen));
-    if (m_newChat) m_newChat->setVisible(m_state.showNewChatButton(playgroundOpen));
+    if (m_history) m_history->setVisible(m_state.showHistory(playgroundOpen || !m_playground));
+    if (m_newChat) m_newChat->setVisible(m_state.showNewChatButton(playgroundOpen || !m_playground));
 }
 
 void Sidebar::applyPresentation() {

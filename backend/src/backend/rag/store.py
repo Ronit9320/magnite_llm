@@ -209,7 +209,7 @@ class RagStore:
     # ---- retrieval ------------------------------------------------------
 
     def search(self, query_vec: np.ndarray, model: str, top_k: int = 4,
-               min_score: float = 0.0) -> list[RagChunk]:
+               min_score: float = 0.0, document_ids: Optional[list[str]] = None) -> list[RagChunk]:
         """Flat cosine search over chunks embedded with ``model``."""
         with self._lock, self._conn() as conn:
             rows = conn.execute(
@@ -223,6 +223,9 @@ class RagStore:
                 """,
                 (model,),
             ).fetchall()
+        if document_ids is not None:
+            selected = set(document_ids)
+            rows = [row for row in rows if row["doc_id"] in selected]
         if not rows:
             return []
 

@@ -179,7 +179,7 @@ def query_documents(body: RagQueryRequest):
     min_score = body.min_score if body.min_score is not None else cfg.min_score
     try:
         query_vec = embeddings.embed_texts([query], cfg.model)[0]
-        results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score)
+        results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=body.document_ids)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RagQueryResponse(query=query, results=results)

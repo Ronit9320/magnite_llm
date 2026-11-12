@@ -557,3 +557,35 @@ QFrame#modelCard[libraryRow="true"][selected="true"], QFrame#adapterCard[library
 QFrame#modelCard[libraryRow="true"][lastRow="true"], QFrame#adapterCard[libraryRow="true"][lastRow="true"], QFrame#libraryListRow[lastRow="true"] {
     border-bottom: none;
 }
+
+QFrame#conversationKnowledge {
+    background: @surfaceFill;
+    border: 1px solid @surfaceBorder;
+    border-radius: 12px;
+}
+QPushButton#historyNew[conversationAction="true"] {
+    background: @accentSurface;
+    color: @accentLabel;
+}
+QPushButton#historyNew[conversationAction="true"]:hover {
+    background: @surfaceFillHover;
+}
+QPushButton#historyNew[conversationAction="true"]:disabled {
+    color: @textMuted;
+}
+
+QPushButton#conversationSearchToggle {
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+    border: 1px solid transparent;
+    background: transparent;
+}
+QPushButton#conversationSearchToggle:hover, QPushButton#conversationSearchToggle:checked {
+    background: @surfaceFillHover;
+    border-color: @surfaceBorder;
+}
+QMenu#conversationOptions::item {
+    padding-left: 30px;
+    min-width: 92px;
+}

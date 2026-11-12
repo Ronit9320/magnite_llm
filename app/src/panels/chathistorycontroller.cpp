@@ -3,9 +3,7 @@
 #include "panels/chatpanel.h"
 #include "panels/chatstore.h"
 #include "widgets/chathistorylist.h"
-#include "widgets/confirmation.h"
-
-#include <QInputDialog>
+#include "widgets/librarydialog.h"
 #include <QLineEdit>
 #include <QMetaObject>
 
@@ -15,13 +13,36 @@ ChatHistoryController::ChatHistoryController(ChatStore *store, ChatPanel *panel,
     , m_panel(panel)
     , m_list(list) {
     askTitle = [dialogParent](const QString &current) {
-        bool ok = false;
-        const QString title = QInputDialog::getText(dialogParent, "Rename chat", "Chat name", QLineEdit::Normal, current, &ok);
-        return ok ? title : QString();
+        Ui::LibraryDialog dialog(dialogParent, "Rename conversation", "Save");
+        auto *name = new QLineEdit(current, &dialog);
+        auto *label = new QLabel("Conversation name", &dialog);
+        label->setObjectName("hubMeta");
+        label->setBuddy(name);
+        name->setAccessibleName("Conversation name");
+        dialog.form()->addWidget(label);
+        dialog.form()->addWidget(name);
+        dialog.addActions();
+        const auto validate = [name, &dialog] {
+            dialog.acceptButton()->setEnabled(!name->text().trimmed().isEmpty());
+        };
+        QObject::connect(name, &QLineEdit::textChanged, &dialog, validate);
+        QObject::connect(name, &QLineEdit::returnPressed, dialog.acceptButton(), &QPushButton::click);
+        validate();
+        name->setFocus();
+        name->selectAll();
+        return dialog.exec() == QDialog::Accepted ? name->text().trimmed() : QString();
     };
     confirmDelete = [dialogParent](const QString &title) {
-        return Ui::confirmRemoval(dialogParent, "Delete chat?",
-                                  "“" + title + "” and all its versions will be removed. This cannot be undone.", "Delete");
+        Ui::LibraryDialog dialog(dialogParent, "Delete conversation", "Delete");
+        dialog.acceptButton()->setProperty("primary", false);
+        dialog.acceptButton()->setObjectName("destructiveBtn");
+        auto *description = new QLabel(QString("Delete “%1” and all its versions?").arg(title), &dialog);
+        description->setObjectName("hubBody");
+        description->setTextFormat(Qt::PlainText);
+        description->setWordWrap(true);
+        dialog.form()->addWidget(description);
+        dialog.addActions();
+        return dialog.exec() == QDialog::Accepted;
     };
 
     connect(store, &ChatStore::changed, this, &ChatHistoryController::refresh);

@@ -1152,7 +1152,7 @@ void ModelHubPanel::renderDetails() {
     m_estimateDetail = label({}, "hubSmallMeta", setup->parentWidget());
     setup->addWidget(m_memoryStatus);
     setup->addWidget(m_estimateDetail);
-    setup->addWidget(label("Estimates are advisory. Download includes all repository files; configure loading in Playground.", "hubSmallMeta", setup->parentWidget()));
+    setup->addWidget(label("Estimates are advisory. Download includes all repository files; configure loading in Conversation.", "hubSmallMeta", setup->parentWidget()));
     connect(m_detailAction, &QPushButton::clicked, this, [this] {
         if (m_detailData.value("downloaded").toBool()) emit loadRequested(localId(m_detailRepo));
         else startDownload();
@@ -1460,7 +1460,7 @@ void ModelHubPanel::updateDownloadUi() {
     m_cancelButton->setText(m_cancelling ? "Cancelling…" : "Cancel download");
     if (m_detailAction) {
         const bool local = m_detailData.value("downloaded").toBool();
-        m_detailAction->setText(local ? "Load in Playground" : "Download repository");
+        m_detailAction->setText(local ? "Load in Conversation" : "Download repository");
         m_detailAction->setEnabled(local || (m_pullRepo.isEmpty() && !m_detailLoading && m_detailError.isEmpty()));
     }
 }

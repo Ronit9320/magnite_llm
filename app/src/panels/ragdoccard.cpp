@@ -3,6 +3,7 @@
 #include "theme.h"
 
 #include <QHBoxLayout>
+#include "widgets/toggleswitch.h"
 #include <QIcon>
 #include <QLabel>
 #include <QMouseEvent>
@@ -43,6 +44,9 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
     row->setSpacing(8);
 
     const QIcon icon = Theme::coloredIcon(QStringLiteral("file-text"), typeColor(kind), 18);
+    m_source = new ToggleSwitch({}, this);
+    m_source->setAccessibleName("Use " + (name.isEmpty() ? m_id : name));
+    row->addWidget(m_source, 0, Qt::AlignVCenter);
     if (!icon.isNull()) {
         auto *iconLabel = new QLabel(this);
         iconLabel->setPixmap(icon.pixmap(18, 18));
@@ -59,12 +63,12 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
     text->addWidget(nameLabel);
     const QString meta = m_path.isEmpty()
         ? QStringLiteral("uploaded · %1 chunk(s)").arg(chunks)
-        : QStringLiteral("%1 · %2 chunk(s)").arg(m_path).arg(chunks);
+        : QStringLiteral("%1 chunk(s)").arg(chunks);
     auto *pathLabel = new QLabel(meta, this);
     pathLabel->setObjectName(QStringLiteral("cardMeta"));
     pathLabel->setWordWrap(true);
     pathLabel->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
-    pathLabel->setToolTip(meta);
+    pathLabel->setToolTip(m_path.isEmpty() ? meta : m_path);
     text->addWidget(pathLabel);
     row->addLayout(text, 1);
 

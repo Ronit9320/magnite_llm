@@ -193,8 +193,6 @@ void MainWindow::setupUi() {
     m_sidebar = new Sidebar({{"Model hub", "search", PanelHub},
                              {"Library", "box", PanelModels},
                              {"Training", "graduation-cap", PanelTraining},
-                             {"Knowledge", "database", PanelRag},
-                             {"Playground", "message-circle", PanelChat},
                              {"Docs", "file-text", PanelDocs}},
                             {"Settings", "settings", PanelSettings}, PanelChat);
     m_history = m_sidebar->history();
@@ -254,6 +252,7 @@ void MainWindow::setupUi() {
     m_adaptersPanel->useLibraryWorkspace();
     m_libraryPanel = new LibraryPanel(m_modelsPanel, m_adaptersPanel);
     m_chatPanel = new ChatPanel();
+    m_chatPanel->setKnowledgePanel(m_ragPanel);
     // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
     m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
     m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
@@ -263,6 +262,13 @@ void MainWindow::setupUi() {
         if (m_chatPanel->openChat(id)) switchPanel(PanelChat);
     });
     m_historyController = new ChatHistoryController(m_chatStore, m_chatPanel, m_history, this, this);
+    m_history->setProjectLookup([this](const QString &id) { return m_libraryPanel->chatProjects(id); });
+    connect(m_libraryPanel, &LibraryPanel::organizationChanged, m_historyController, &ChatHistoryController::refresh);
+    connect(m_history, &ChatHistoryList::newChatRequested, this, [this] { switchPanel(PanelChat); });
+    connect(m_history, &ChatHistoryList::openRequested, this, [this](const QString &id) {
+        if (m_chatPanel->currentChatId() == id) switchPanel(PanelChat);
+    });
+    m_historyController->refresh();
     // The strip's + asks exactly like the list's New chat row, and is busy exactly when the row is.
     connect(m_sidebar, &Sidebar::newChatRequested, m_history, &ChatHistoryList::newChatRequested);
     connect(m_chatPanel, &ChatPanel::busyChanged, m_sidebar, &Sidebar::setBusy);
@@ -280,7 +286,7 @@ void MainWindow::setupUi() {
     });
     m_stack->addWidget(m_libraryPanel);
     m_stack->addWidget(m_trainingPanel);
-    m_stack->addWidget(m_ragPanel);
+    m_stack->addWidget(new QWidget); // Legacy Knowledge index opens the Conversation drawer.
     m_stack->addWidget(new QWidget); // Preserve the existing workspace indices.
     m_stack->addWidget(m_chatPanel);
     m_docsPanel = new DocsPanel;
@@ -406,6 +412,10 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::switchPanel(int index) {
+    if (index == PanelRag) {
+        m_chatPanel->showKnowledge();
+        index = PanelChat;
+    }
     if (index == PanelAdapters) {
         m_libraryPanel->showAdapters();
         index = PanelModels;
@@ -546,7 +556,7 @@ void MainWindow::loadPanelSettings() {
     };
     for (auto *p : panels) {
         if (p)
-            p->applySettingsJson(s.value(QString("panels/%1").arg(p->title())).toString());
+            p->applySettingsJson(s.value(QString("panels/%1").arg(p->title()), p == m_chatPanel ? s.value("panels/Chat") : QVariant()).toString());
     }
 }
 
@@ -664,7 +674,7 @@ void MainWindow::runSelfTest() {
             QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier);
             QApplication::sendEvent(tile, &press);
             QApplication::sendEvent(tile, &release);
-            checkC(m_stack->currentIndex() == (tile->panel() == PanelAdapters ? PanelModels : tile->panel()), "Space activates overview shortcut");
+            checkC(m_stack->currentIndex() == (tile->panel() == PanelAdapters ? PanelModels : tile->panel() == PanelRag ? PanelChat : tile->panel()), "Space activates overview shortcut");
         }
         switchPanel(PanelChat);
         QMetaObject::invokeMethod(m_chatPanel, "onClearChat", Qt::DirectConnection);
@@ -725,7 +735,7 @@ void MainWindow::runSelfTest() {
         switchPanel(PanelSettings);
         checkC(m_workspacePages->currentWidget()==m_runPanel && m_settingsWindow->isVisible(),"settings preserves the contextual run review underneath");
 
-        // Left menu: collapse button, the + under Playground and the busy state.
+        // The collapsed sidebar keeps the new conversation action available.
         {
             const SidebarState storedSidebar = SidebarState::load();
             m_sidebar->setAnimationsEnabled(false);
@@ -738,7 +748,7 @@ void MainWindow::runSelfTest() {
                 toggle->click();
                 checkC(m_sidebar->isCollapsed() && m_sidebar->width() == 52, "sidebar: the toggle collapses the real menu to 52px");
                 switchPanel(PanelChat);
-                checkC(plus->isVisibleTo(m_sidebar) && !m_history->isVisibleTo(m_sidebar), "sidebar: collapsed on Playground shows the + and hides the chat list");
+                checkC(plus->isVisibleTo(m_sidebar) && !m_history->isVisibleTo(m_sidebar), "sidebar: collapsed shows the + and hides the conversation list");
                 emit m_chatPanel->busyChanged(true);
                 checkC(!plus->isEnabled() && !listNew->isEnabled(), "sidebar: a busy chat turns off the + and the New chat row");
                 emit m_chatPanel->busyChanged(false);
@@ -755,6 +765,17 @@ void MainWindow::runSelfTest() {
             storedSidebar.save();   // leave the user's stored choice as it was
             switchPanel(PanelSettings);
         }
+
+        switchPanel(PanelRag);
+        auto *drawer = m_chatPanel->findChild<QWidget *>("conversationKnowledge");
+        auto *knowledgeToggle = m_chatPanel->findChild<QPushButton *>("conversationKnowledgeToggle");
+        checkC(m_stack->currentIndex() == PanelChat && drawer && drawer->isVisibleTo(m_chatPanel),
+               "Knowledge opens inside Conversation");
+        if (knowledgeToggle) knowledgeToggle->click();
+        checkC(drawer && !drawer->isVisibleTo(m_chatPanel), "Knowledge can be closed while keeping Conversation open");
+        checkC(m_chatPanel->findChild<QWidget *>("conversationLogo") && emptyChat && emptyChat->isVisibleTo(m_chatPanel),
+               "New conversation shows the static logo and greeting");
+        switchPanel(PanelSettings);
 
         // Settings round-trips.
         const QList<BasePanel*> panels = {

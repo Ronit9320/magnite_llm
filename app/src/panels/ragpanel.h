@@ -3,6 +3,7 @@
 #include "panels/basepanel.h"
 
 #include <QList>
+#include <QJsonValue>
 class QTimer;
 class QLabel;
 class QLineEdit;
@@ -25,6 +26,14 @@ public:
 
     void setBackendClient(BackendClient *client);
     void refresh(bool preserveStatus = false);
+    QJsonValue documentScope() const { return m_documentScope; }
+    void setDocumentScope(const QJsonValue &scope);
+    int enabledSourceCount() const;
+
+signals:
+    void sourceScopeChanged();
+
+public:
 
     QString settingsJson() const override;
 
@@ -68,5 +77,6 @@ private:
     bool m_queryBusy = false;
     quint64 m_collectionRevision = 0;
     QPushButton *m_queryButton = nullptr;
+    QJsonValue m_documentScope;
     QTimer *m_configTimer = nullptr;
 };

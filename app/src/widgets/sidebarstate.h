@@ -6,7 +6,7 @@
 // and the stored choice. No widgets, so the UI check can test it on its own.
 class SidebarState {
 public:
-    static constexpr int kExpandedWidth = 195;
+    static constexpr int kExpandedWidth = 220;
     static constexpr int kCollapsedWidth = 52;
     static constexpr const char *kSettingsKey = "appearance/sidebarCollapsed";
 

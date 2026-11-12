@@ -37,7 +37,7 @@ def _sse(data: str) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-def _with_rag_context(req: ChatRequest, engine) -> list[ChatMessage]:
+def _with_rag_context(req: ChatRequest, engine, citations=None) -> list[ChatMessage]:
     messages = list(req.messages)
     limit = engine.context_size() - req.max_tokens
     if engine.count_messages(messages) > limit:
@@ -47,7 +47,9 @@ def _with_rag_context(req: ChatRequest, engine) -> list[ChatMessage]:
     last_user = next((m for m in reversed(messages) if m.role == ChatRole.user), None)
     if last_user is None:
         raise ValueError("RAG requires a user message")
-    context = injectable_context(last_user.content, top_k=req.rag.top_k, min_score=req.rag.min_score)
+    sources = []
+    context = injectable_context(last_user.content, top_k=req.rag.top_k, min_score=req.rag.min_score,
+                                 document_ids=req.rag.document_ids, sources=sources)
     low, high = 0, len(context)
     while low < high:
         mid = (low + high + 1) // 2
@@ -58,6 +60,15 @@ def _with_rag_context(req: ChatRequest, engine) -> list[ChatMessage]:
             high = mid - 1
     if low < min(128, len(context)):
         raise ValueError("No room for retrieved context. Start a new chat or reduce max tokens.")
+    if citations is not None:
+        for offset, source in sources:
+            if offset >= low:
+                break
+            citations.append({
+                "document_name": source.document_name,
+                "index": source.index,
+                "text": source.text[:low - offset],
+            })
     return [ChatMessage(role=ChatRole.system, content=context[:low])] + messages
 
 
@@ -243,7 +254,7 @@ async def _first_token(gen, request):
                 await token
 
 
-async def _response(gen, stream, model, chat_response=True, request=None):
+async def _response(gen, stream, model, chat_response=True, request=None, citations=None):
     # Advance once before sending HTTP headers so startup errors get a proper status.
     try:
         first = await _first_token(gen, request) if request is not None else await anext(gen, None)
@@ -284,6 +295,8 @@ async def _response(gen, stream, model, chat_response=True, request=None):
     async def events():
         async with aclosing(gen):
             try:
+                if citations:
+                    yield _sse({"sources": citations})
                 if first:
                     yield _sse({"delta": first})
                 async for delta in gen:
@@ -304,18 +317,19 @@ def _validate_model(requested, sup):
         raise ValueError(f"Requested model '{requested}' is not the loaded model '{sup.model_ref}'")
 
 
-def _prepare_chat(req, sup, engine):
+def _prepare_chat(req, sup, engine, citations):
     _validate_model(req.model, sup)
-    return _with_rag_context(req, engine)
+    return _with_rag_context(req, engine, citations)
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest, request: Request):
     sup = get_supervisor()
+    citations = []
     gen = sup.chat_stream(req.messages, max_tokens=req.max_tokens,
                           temperature=req.temperature, top_p=req.top_p,
-                          prepare=lambda engine: _prepare_chat(req, sup, engine))
-    return await _response(gen, req.stream, sup.model_ref, request=request)
+                          prepare=lambda engine: _prepare_chat(req, sup, engine, citations))
+    return await _response(gen, req.stream, sup.model_ref, request=request, citations=citations)
 
 
 @router.post("/completion")

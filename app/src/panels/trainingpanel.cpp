@@ -1165,7 +1165,7 @@ void TrainingPanel::renderJob(const QJsonObject &job) {
             .arg(std::abs((latestLoss.toDouble()/first["loss"].toDouble()-1)*100),0,'f',1));
     else m_statNotes[0]->setText("Waiting for first sample");
 
-    m_checkpointLabel->setText(status=="done" && !job["adapter_id"].toString().isEmpty() ? "✓ Adapter saved · ready for Playground" :
+    m_checkpointLabel->setText(status=="done" && !job["adapter_id"].toString().isEmpty() ? "✓ Adapter saved · ready for Conversation" :
         status=="cancelled" ? "Run stopped · recorded signals preserved" : history.isEmpty()?"Waiting for measured training steps":"✓ Measured signals saved locally");
     const auto began=QDateTime::fromString(job["started_at"].toString(),Qt::ISODate);
     const auto ended=QDateTime::fromString(job["finished_at"].toString(),Qt::ISODate);

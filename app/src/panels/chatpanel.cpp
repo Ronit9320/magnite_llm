@@ -6,12 +6,18 @@
 #include <QTextCursor>
 #include "panels/chatpanel.h"
 #include "panels/chatstore.h"
+#include "panels/ragpanel.h"
+#include "theme.h"
 #include "panels/greeting.h"
 
 #include "backend_client.h"
 #include "widgets/surface.h"
 #include "widgets/studiocanvas.h"
+#include "widgets/brandmark.h"
+#include <QPainter>
 #include "widgets/contextmeter.h"
+#include "widgets/librarydialog.h"
+#include "widgets/flowlayout.h"
 #include "panels/chatbubble.h"
 #include "panels/messagerow.h"
 
@@ -36,8 +42,21 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+namespace {
+class ConversationLogo : public QWidget {
+public:
+    using QWidget::QWidget;
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        BrandMark::paint(painter, rect(), QColor(Theme::accentPrimary()));
+    }
+};
+}
+
 ChatPanel::ChatPanel(QWidget *parent)
-    : BasePanel("Chat", parent)
+    : BasePanel("Conversation", parent, true)
     , m_client(nullptr)
     , m_modelCombo(nullptr)
     , m_engineCombo(nullptr)
@@ -59,9 +78,9 @@ ChatPanel::ChatPanel(QWidget *parent)
     , m_cursorTimer(nullptr)
     , m_cursorVisible(false)
 {
-    setHeaderSubtitle("Your model, connected to your knowledge.");
     setupUi();
     showBlankChat();
+    connect(this, &ChatPanel::currentChatChanged, this, &ChatPanel::updateConversationTitle);
 }
 
 void ChatPanel::showBlankChat() {
@@ -74,9 +93,21 @@ void ChatPanel::showBlankChat() {
 void ChatPanel::setupUi() {
     auto *layout = contentLayout();
     auto *toolbar = new QHBoxLayout();
+    auto *heading = new QVBoxLayout;
+    heading->setSpacing(2);
+    auto *caption = new QLabel("Conversation", this);
+    caption->setObjectName("hubSmallMeta");
+    heading->addWidget(caption);
+    m_conversationTitle = new QLabel("New conversation", this);
+    m_conversationTitle->setObjectName("hubPageTitle");
+    m_conversationTitle->setTextFormat(Qt::PlainText);
+    m_conversationTitle->setWordWrap(true);
+    m_conversationTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    heading->addWidget(m_conversationTitle);
+    toolbar->addLayout(heading, 2);
     m_modelCombo = new ComboBox(this);
     m_modelCombo->setEditable(true);
-    m_modelCombo->setMinimumContentsLength(22);
+    m_modelCombo->setMinimumContentsLength(16);
     m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_modelCombo->setAccessibleName("Model");
     m_modelCombo->lineEdit()->setPlaceholderText("Choose a model or enter its ID");
@@ -87,6 +118,14 @@ void ChatPanel::setupUi() {
     optionsBtn->setObjectName("chatSettingsToggle");
     optionsBtn->setCheckable(true);
     toolbar->addWidget(optionsBtn);
+    m_knowledgeToggle = new Button("Knowledge", this);
+    m_knowledgeToggle->setObjectName("conversationKnowledgeToggle");
+    m_knowledgeToggle->setCheckable(true);
+    m_knowledgeToggle->setMinimumWidth(128);
+    m_knowledgeToggle->setProperty("themeIcon", "database");
+    m_knowledgeToggle->setIcon(Theme::coloredIcon("database", QColor(Theme::textSecondary()), 16));
+    toolbar->addWidget(m_knowledgeToggle);
+    m_knowledgeToggle->hide();
     layout->addLayout(toolbar);
 
     auto *controls = Surface::card(this);
@@ -134,6 +173,9 @@ void ChatPanel::setupUi() {
     connect(loadBtn, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
 
     // A readable, centered conversation column, without a permanent inspector.
+    m_workspace = new QHBoxLayout;
+    m_workspace->setSpacing(12);
+    layout->addLayout(m_workspace, 1);
     auto *centerRow = new QHBoxLayout();
     auto *column = new QWidget(this);
     column->setMaximumWidth(840);
@@ -143,7 +185,7 @@ void ChatPanel::setupUi() {
     centerRow->addStretch();
     centerRow->addWidget(column, 1);
     centerRow->addStretch();
-    layout->addLayout(centerRow, 1);
+    m_workspace->addLayout(centerRow, 1);
     m_chatScroll = new QScrollArea(this);
     m_chatScroll->setWidgetResizable(true);
     m_chatScroll->setFrameShape(QFrame::NoFrame);
@@ -161,9 +203,10 @@ void ChatPanel::setupUi() {
     welcome->setSpacing(8);
     welcome->setContentsMargins(0,4,0,4);
     welcome->addStretch();
-    auto *seal = new StudioCanvas(m_welcome);
-    seal->setProperty("brandMark", true);
+    auto *seal = new ConversationLogo(m_welcome);
+    seal->setObjectName("conversationLogo");
     seal->setFixedSize(64, 64);
+    seal->setAccessibleName("Magnite logo");
     welcome->addWidget(seal, 0, Qt::AlignHCenter);
     auto *eyebrow = new QLabel("THE MAGNITE WORKSPACE", m_welcome);
     eyebrow->setObjectName("chatEyebrow");
@@ -192,15 +235,19 @@ void ChatPanel::setupUi() {
     for (int i = 0; i < 3; ++i) {
         auto *button = new Button(workspaceActions[i].label, m_welcome);
         button->setObjectName("promptSuggestion");
+        button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         button->setToolTip(workspaceActions[i].description);
-        suggestions->addWidget(button);
+        suggestions->addWidget(button, 1);
         connect(button, &QPushButton::clicked, this, [this, optionsBtn, i]() {
             if (i == 2) {
                 optionsBtn->setChecked(true);
                 m_tempSpin->setFocus();
                 return;
             }
-            if (i == 1) m_ragCheck->setChecked(true);
+            if (i == 1) {
+                m_ragCheck->setChecked(true);
+                showKnowledge();
+            }
             m_input->setPlainText(i == 0
                 ? "Walk me through your reasoning on this problem: "
                 : "Using my documents, help me understand: ");
@@ -231,6 +278,14 @@ void ChatPanel::setupUi() {
     m_ragCheck = new ToggleSwitch("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
+    m_knowledgeContext = new Button("Knowledge off", this);
+    m_knowledgeContext->setMinimumWidth(164);
+    m_knowledgeContext->setProperty("themeIcon", "database");
+    m_knowledgeContext->setIcon(Theme::coloredIcon("database", QColor(Theme::textSecondary()), 16));
+    m_knowledgeContext->hide();
+    actions->addWidget(m_knowledgeContext);
+    connect(m_knowledgeContext, &QPushButton::clicked, this, &ChatPanel::showKnowledge);
+    connect(m_ragCheck, &QCheckBox::toggled, this, &ChatPanel::updateKnowledgeContext);
     m_activity = new StudioCanvas(this);
     m_activity->setProperty("brandMark",true);
     m_activity->setProperty("activityIndicator",true);
@@ -484,6 +539,7 @@ MessageRow *ChatPanel::makeRow(ChatBubble::Role role, ChatTree::NodeId node, con
     connect(row, &MessageRow::editRequested, this, &ChatPanel::onEditRequested);
     connect(row, &MessageRow::editSaved, this, &ChatPanel::onEditSaved);
     connect(row, &MessageRow::editCancelled, this, [this]() { updateActions(); });
+    addCitations(row, m_tree.citations(node));
     return row;
 }
 
@@ -573,7 +629,11 @@ bool ChatPanel::commitReply() {
         for (const QString &note : notes) m_tree.addNote(reply, note);
         if (retryCompaction) m_tree.setCompaction(reply, *retryCompaction);
     }
-    if (row) row->setNode(reply);
+    m_tree.setCitations(reply, m_pendingSources);
+    if (row) {
+        row->setNode(reply);
+        addCitations(row, m_pendingSources);
+    }
     markDirty();
     return true;
 }
@@ -749,6 +809,7 @@ void ChatPanel::startSend(const PendingSend &send) {
     scrollToBottom();
 
     m_pendingResponse.clear();
+    m_pendingSources = {};
     m_streamFailed = false;
     const quint64 requestId = ++m_requestId;
     m_streaming = true;
@@ -767,7 +828,10 @@ void ChatPanel::startSend(const PendingSend &send) {
     body["max_tokens"] = m_maxTokensSpin->value();
     body["temperature"] = m_tempSpin->value();
     body["stream"] = true;
-    body["rag"] = QJsonObject{{"enabled", m_ragCheck->isChecked()}};
+    QJsonObject knowledge{{"enabled", m_ragCheck->isChecked()}};
+    if (m_knowledge && m_knowledge->documentScope().isArray())
+        knowledge["document_ids"] = m_knowledge->documentScope();
+    body["rag"] = knowledge;
 
     setStatus("Generating...");
     m_client->streamPost(
@@ -782,6 +846,7 @@ void ChatPanel::startSend(const PendingSend &send) {
                 updateStreamingBubble(m_pendingResponse, false);
                 return;
             }
+            if (event["sources"].isArray()) m_pendingSources = event["sources"].toArray();
             const QString delta = event.value("delta").toString();
             if (!delta.isEmpty()) {
                 m_pendingResponse += delta;
@@ -865,7 +930,8 @@ void ChatPanel::onClearChat() {
     flushSave();
     m_chatId.clear();
     resetConversation();
-    setStatus("New chat.");
+    restoreKnowledge();
+    setStatus("New conversation.");
     refreshContextUsage();
     emit currentChatChanged(QString());
 }
@@ -888,6 +954,7 @@ void ChatPanel::resetConversation(bool showBlank) {
     m_cursorVisible = false;
     m_streamBubble = nullptr;
     m_pendingResponse.clear();
+    m_pendingSources = {};
     // Remove every bubble and show the welcome panel.
     while (QLayoutItem *item = m_chatLayout->takeAt(0)) {
         if (QWidget *w = item->widget(); w && w != m_welcome) {
@@ -906,14 +973,121 @@ void ChatPanel::resetConversation(bool showBlank) {
     m_stopButton->setEnabled(false);
 }
 
+void ChatPanel::setKnowledgePanel(RagPanel *panel) {
+    m_knowledge = panel;
+    auto *drawer = new QFrame(this);
+    drawer->setObjectName("conversationKnowledge");
+    drawer->setMinimumWidth(300);
+    drawer->setMaximumWidth(340);
+    auto *body = new QVBoxLayout(drawer);
+    body->setContentsMargins(14, 12, 14, 12);
+    auto *header = new QHBoxLayout;
+    auto *title = new QLabel("Knowledge", drawer);
+    title->setObjectName("hubSectionTitle");
+    header->addWidget(title, 1);
+    auto *close = new Button(drawer);
+    close->setObjectName("hubDialogClose");
+    close->setFixedSize(30, 30);
+    close->setProperty("themeIcon", "window-close");
+    close->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textSecondary()), 16));
+    close->setAccessibleName("Close Knowledge");
+    header->addWidget(close);
+    body->addLayout(header);
+    m_ragCheck->setText("Use in this conversation");
+    body->addWidget(m_ragCheck);
+    body->addWidget(panel, 1);
+    m_workspace->addWidget(drawer);
+    m_knowledgeDrawer = drawer;
+    drawer->hide();
+    m_knowledgeToggle->show();
+    m_knowledgeContext->show();
+    connect(panel, &RagPanel::sourceScopeChanged, this, &ChatPanel::updateKnowledgeContext);
+    updateKnowledgeContext();
+    connect(m_knowledgeToggle, &QPushButton::toggled, drawer, &QWidget::setVisible);
+    connect(close, &QPushButton::clicked, this, [this] {
+        m_knowledgeToggle->setChecked(false);
+        m_knowledgeToggle->setFocus();
+    });
+}
+
+void ChatPanel::addCitations(MessageRow *row, const QJsonArray &sources) {
+    if (sources.isEmpty()) return;
+    auto *citations = new FlowLayout;
+    citations->setContentsMargins(0, 0, 0, 0);
+    qobject_cast<QVBoxLayout *>(row->layout())->addLayout(citations);
+    for (const auto &value : sources) {
+        const auto source = value.toObject();
+        const QString title = source["document_name"].toString();
+        auto *chip = new Button(title, row);
+        chip->setProperty("wordWrap", true);
+        chip->setMaximumWidth(250);
+        chip->setToolTip(title);
+        citations->addWidget(chip);
+        connect(chip, &QPushButton::clicked, this, [this, source, title] {
+            Ui::LibraryDialog dialog(this, "Source passage", "Done");
+            dialog.acceptButton()->hide();
+            auto *heading = new QLabel(title, &dialog);
+            heading->setTextFormat(Qt::PlainText);
+            heading->setWordWrap(true);
+            heading->setObjectName("hubSectionTitle");
+            dialog.form()->addWidget(heading);
+            auto *passage = new QPlainTextEdit(source["text"].toString(), &dialog);
+            passage->setReadOnly(true);
+            passage->setAccessibleName("Source passage");
+            dialog.form()->addWidget(passage);
+            dialog.resize(540, 300);
+            dialog.exec();
+        });
+    }
+}
+
+void ChatPanel::updateKnowledgeContext() {
+    const bool enabled = m_ragCheck->isChecked();
+    const int count = m_knowledge ? m_knowledge->enabledSourceCount() : 0;
+    m_knowledgeContext->setText(!enabled ? "Knowledge off" : count == 0 ? "Select sources" :
+                                count == 1 ? "1 source enabled" : QString("%1 sources enabled").arg(count));
+    if (!m_knowledge || m_restoringKnowledge) return;
+    QJsonObject knowledge{{"enabled", enabled}};
+    if (m_knowledge->documentScope().isArray()) knowledge["document_ids"] = m_knowledge->documentScope();
+    if (m_tree.knowledge() == knowledge) return;
+    m_tree.setKnowledge(knowledge);
+    markDirty();
+}
+
+void ChatPanel::restoreKnowledge() {
+    if (!m_knowledge) return;
+    m_restoringKnowledge = true;
+    const auto state = m_tree.knowledge();
+    m_ragCheck->setChecked(state["enabled"].toBool());
+    m_knowledge->setDocumentScope(state["document_ids"]);
+    m_restoringKnowledge = false;
+}
+
+void ChatPanel::showKnowledge() {
+    if (m_knowledgeDrawer) m_knowledgeToggle->setChecked(true);
+}
+
+void ChatPanel::updateConversationTitle() {
+    const auto chats = m_store ? m_store->list() : QList<ChatSummary>();
+    for (const auto &chat : chats) {
+        if (chat.id != m_chatId) continue;
+        m_conversationTitle->setText(chat.title);
+        return;
+    }
+    m_conversationTitle->setText("New conversation");
+}
+
 void ChatPanel::setChatStore(ChatStore *store) {
     if (m_store == store) return;
     flushSave();
+    if (m_store) disconnect(m_store, nullptr, this, nullptr);
     m_store = store;
+    if (store) connect(store, &ChatStore::changed, this, &ChatPanel::updateConversationTitle);
     // Whatever is on screen belongs to the previous store (or to none): it is not saved into the new one.
     m_saveDirty = false;
     m_saveTimer->stop();
     m_chatId.clear();
+    updateConversationTitle();
 }
 
 bool ChatPanel::isBusy() const { return m_streaming || m_preparing || m_loading || anyEditing(); }
@@ -955,6 +1129,7 @@ bool ChatPanel::openChat(const QString &id) {
     resetConversation(false);
     m_tree = *loaded;
     m_chatId = id;
+    restoreKnowledge();
     renderTranscript();
     scrollToBottom();
     updateActions();
@@ -984,7 +1159,8 @@ bool ChatPanel::deleteChat(const QString &id) {
     m_saveTimer->stop();
     m_chatId.clear();
     resetConversation();
-    setStatus("Chat deleted.");
+    restoreKnowledge();
+    setStatus("Conversation deleted.");
     refreshContextUsage();
     emit currentChatChanged(QString());
     return true;
@@ -1108,7 +1284,7 @@ QString ChatPanel::settingsJson() const {
     obj["engine"] = m_engineCombo->currentIndex();
     obj["maxTokens"] = m_maxTokensSpin->value();
     obj["temperature"] = m_tempSpin->value();
-    obj["rag"] = m_ragCheck->isChecked();
+    if (!m_knowledge) obj["rag"] = m_ragCheck->isChecked();
     obj["model"] = m_modelCombo->currentText();
     return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
@@ -1121,7 +1297,7 @@ void ChatPanel::applySettingsJson(const QString &json) {
     if (o.contains("engine")) m_engineCombo->setCurrentIndex(o["engine"].toInt());
     if (o.contains("maxTokens")) m_maxTokensSpin->setValue(o["maxTokens"].toInt());
     if (o.contains("temperature")) m_tempSpin->setValue(o["temperature"].toDouble());
-    if (o.contains("rag")) m_ragCheck->setChecked(o["rag"].toBool());
+    if (!m_knowledge && o.contains("rag")) m_ragCheck->setChecked(o["rag"].toBool());
     if (o.contains("model")) {
         const QString m = o["model"].toString();
         const int idx = m_modelCombo->findText(m);

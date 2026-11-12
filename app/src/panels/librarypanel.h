@@ -21,11 +21,13 @@ class LibraryPanel : public BasePanel {
 public:
     LibraryPanel(ModelsPanel *models, AdaptersPanel *adapters);
     void showAdapters();
+    QStringList chatProjects(const QString &id) const;
     void setChatStore(ChatStore *store);
     void setBackendClient(BackendClient *client);
     void recordActivity(const QString &name, const QString &action, const QString &status,
                         const QString &detail = {});
 signals:
+    void organizationChanged();
     void openChatRequested(const QString &id);
     void retryDownload(const QString &repo);
 private:

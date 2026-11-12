@@ -3,10 +3,12 @@
 #include "panels/chatstore.h"
 
 #include <QList>
+#include <functional>
 #include <QString>
 #include <QWidget>
 
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -21,6 +23,9 @@ public:
     static constexpr int kRowHeight = 30;
 
     explicit ChatHistoryList(QWidget *parent = nullptr);
+
+    void useConversationWorkspace();
+    void setProjectLookup(std::function<QStringList(const QString &)> lookup);
 
     // Replaces the rows. The open chat is highlighted; the scroll position is kept.
     void setChats(const QList<ChatSummary> &chats, const QString &openId);
@@ -50,7 +55,12 @@ private:
     void requestDelete(const QString &id);
     void showMenuAt(const QPoint &viewportPos);
     void updateHeights();
+    void rebuild();
 
+    std::function<QStringList(const QString &)> m_projectLookup;
+    QList<ChatSummary> m_chats;
+    QLineEdit *m_search = nullptr;
+    QPushButton *m_searchToggle = nullptr;
     QPushButton *m_new = nullptr;
     QListWidget *m_list = nullptr;
     QLabel *m_notice = nullptr;

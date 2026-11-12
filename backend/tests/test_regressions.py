@@ -29,6 +29,7 @@ from backend.inference.schemas import ChatMessage, ChatRequest
 from backend.models.registry import ModelRegistry
 from backend.models.schemas import ModelRecord
 from backend.models.store import ModelStore
+from backend.rag import context as rag_context
 from backend.rag.chunking import chunk_text, _strip_markdown
 from backend.training.datasets import DatasetStore, _normalize_jsonl, _normalize_csv
 from backend.training.jobs import TrainingJobManager
@@ -182,6 +183,25 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             doc = response.json()['id']
             response = await self.client.post('/rag/query', json={'query':'Paris'})
             self.assertEqual(response.json()['results'][0]['document_id'],doc)
+            second = await self.client.post('/rag/documents', json={'name':'other.txt','content':'A different document.'})
+            self.assertEqual(second.status_code, 201, second.text)
+            scoped = await self.client.post('/rag/query', json={'query':'Paris','document_ids':[doc]})
+            self.assertEqual([chunk['document_id'] for chunk in scoped.json()['results']], [doc])
+            empty = await self.client.post('/rag/query', json={'query':'Paris','document_ids':[]})
+            self.assertEqual(empty.json()['results'], [])
+            with patch.object(rag_context, 'is_available', return_value=True), \
+                 patch.object(rag_context, 'embed_texts', return_value=np.array([[1., 0.]], dtype=np.float32)):
+                chat = await self.client.post('/inference/chat', json={
+                    'messages': [{'role': 'user', 'content': 'Paris'}],
+                    'rag': {'enabled': True, 'document_ids': [doc]},
+                })
+            self.assertEqual(chat.status_code, 200, chat.text)
+            frames = [json.loads(line[6:]) for line in chat.text.splitlines() if line.startswith('data: ')]
+            self.assertEqual(frames[0]['sources'], [{
+                'document_name': 'facts.txt', 'index': 0, 'text': 'Paris has the Eiffel Tower.',
+            }])
+            self.assertEqual(frames[-1], {'done': True})
+            self.assertEqual((await self.client.delete('/rag/documents/'+second.json()['id'])).status_code,204)
             self.assertEqual((await self.client.post('/rag/config', json={'model':'different'})).status_code,409)
             self.assertEqual((await self.client.delete('/rag/documents/'+doc)).status_code,204)
             self.assertEqual((await self.client.get('/rag/documents')).json(),[])

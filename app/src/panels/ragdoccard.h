@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QString>
 
+class QCheckBox;
+
 // A full-width surface card for one ingested RAG document (design doc §8).
 // Shows a type icon (file-text tinted by kind: pdf/txt/md/html), the document
 // name, its source path and chunk count. Clicking selects the card so the
@@ -19,6 +21,7 @@ public:
     bool isCardSelected() const { return m_selected; }
 
     void setSelected(bool selected);
+    QCheckBox *sourceToggle() const { return m_source; }
 
 signals:
     void cardClicked(RagDocCard *card, bool ctrl);
@@ -28,6 +31,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
 
 private:
+    QCheckBox *m_source = nullptr;
     QString m_id;
     QString m_path;
     bool m_selected = false;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -51,6 +52,11 @@ public:
     void setCompaction(NodeId id, const Compaction &compaction);
     Compaction compaction(int pathCount = -1) const;
 
+    QJsonObject knowledge() const { return m_knowledge; }
+    void setKnowledge(const QJsonObject &knowledge) { m_knowledge = knowledge; }
+    QJsonArray citations(NodeId id) const { return valid(id) ? node(id).citations : QJsonArray(); }
+    void setCitations(NodeId id, const QJsonArray &citations) { if (valid(id)) node(id).citations = citations; }
+
     bool isEmpty() const;
     void clear();
 
@@ -70,11 +76,13 @@ private:
         NodeId activeChild = kRoot;
         QStringList notes;
         Compaction compaction;
+        QJsonArray citations;
     };
     bool valid(NodeId id) const { return id >= 1 && id <= m_nodes.size(); }
     Node &node(NodeId id) { return m_nodes[id - 1]; }
     const Node &node(NodeId id) const { return m_nodes.at(id - 1); }
 
+    QJsonObject m_knowledge;
     QVector<Node> m_nodes;                 // node `id` lives at index id - 1
     QList<NodeId> m_rootChildren;
     NodeId m_rootActive = kRoot;

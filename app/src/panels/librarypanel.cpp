@@ -558,7 +558,7 @@ void LibraryPanel::renderCollectionContents(QVBoxLayout *layout, bool folder) {
     auto *actions = new QHBoxLayout;
     auto *chat = new Button("Move chat here…", header->parentWidget());
     chat->setEnabled(m_chatStore && !m_chatStore->list().isEmpty());
-    if (!chat->isEnabled()) chat->setToolTip("Save a chat in Playground first.");
+    if (!chat->isEnabled()) chat->setToolTip("Save a chat in Conversation first.");
     connect(chat, &QPushButton::clicked, this, [this, folder] { addChat(folder); });
     actions->addWidget(chat);
     actions->addStretch();
@@ -753,7 +753,17 @@ void LibraryPanel::renderHistory() {
     if (!list) m_history->addWidget(text(query.isEmpty() ? "No library activity yet." : "No matching activity.", "hubMeta", m_history->parentWidget()));
 }
 
+QStringList LibraryPanel::chatProjects(const QString &id) const {
+    QStringList projects;
+    const auto assigned = m_memberships.value("chat:" + id).toObject().value("projects").toArray();
+    for (const auto &name : m_projectNames) {
+        if (assigned.contains(name)) projects.append(name.toString());
+    }
+    return projects;
+}
+
 void LibraryPanel::save() {
     QSettings().setValue("library/organization", QJsonDocument(QJsonObject{{"projects", m_projectNames},
                          {"folders", m_folderNames}, {"items", m_memberships}, {"history", m_events}, {"collections", m_collectionInfo}}).toJson(QJsonDocument::Compact));
+    emit organizationChanged();
 }

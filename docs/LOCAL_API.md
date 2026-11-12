@@ -47,6 +47,11 @@ data: {"done": true}
 
 ```
 
+When RAG supplies passages, a `sources` event precedes the reply deltas.
+It contains an array of passages with `document_name`, a zero-based chunk
+`index`, and the `text` included in the model context. Chat `rag.document_ids`
+limits retrieval to the listed sources. Omitting it searches all indexed documents.
+
 The terminal event can instead be `{"error":"message"}`. A stream that ends
 without `done` or `error` is incomplete. Startup errors may return an ordinary
 non-2xx HTTP response before streaming starts. Clients must handle both.
@@ -87,7 +92,7 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Import / delete | `POST /adapters/import` with local ZIP `path`; `DELETE /adapters/{id}` |
 | RAG status/config | `GET /rag/status`, `GET /rag/config`, `POST /rag/config` with partial settings |
 | Ingest/list documents | `POST /rag/documents` with `path` or `name`/`content`; `GET /rag/documents` |
-| Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score` |
+| Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score`, `document_ids` |
 | Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
 | Context usage | `POST /inference/context-usage` with `messages`, `max_tokens`; returns `used`, `reserved`, `limit`, `fill`, `exact` (409 when no model is loaded; works during generation) |
 | Compact a long chat | `POST /inference/compact` with `messages`, optional `previous_summary`, `max_tokens`, `target_fill`, `keep_recent`; returns `summary`, `covered`, `method` (409 while busy) |
