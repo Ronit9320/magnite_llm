@@ -7,7 +7,6 @@
 #include <QWidget>
 
 class ChatHistoryList;
-class StudioCanvas;
 class QBoxLayout;
 class QLabel;
 class QPushButton;
@@ -47,7 +46,7 @@ public:
     void setAnimationsEnabled(bool enabled) { m_animated = enabled; }
 
     ChatHistoryList *history() const { return m_history; }
-    StudioCanvas *brandSeal() const { return m_seal; }
+    QWidget *brandSeal() const { return m_seal; }
 
 signals:
     void panelRequested(int panel);
@@ -67,7 +66,7 @@ private:
     int m_current = -1;
     QList<QPushButton *> m_buttons;
     ChatHistoryList *m_history = nullptr;
-    StudioCanvas *m_seal = nullptr;
+    QWidget *m_seal = nullptr;
     QPushButton *m_toggle = nullptr;
     QWidget *m_wordmark = nullptr;
     QList<QLabel *> m_tags;

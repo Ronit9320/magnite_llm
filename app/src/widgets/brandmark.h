@@ -11,6 +11,13 @@ void paint(QPainter &painter, const QRectF &bounds, const QColor &color, qreal r
 QIcon icon();
 }
 
+class BrandSymbol : public QWidget {
+public:
+    explicit BrandSymbol(QWidget *parent = nullptr);
+protected:
+    void paintEvent(QPaintEvent *) override;
+};
+
 class BrandWordmark : public QWidget {
 public:
     explicit BrandWordmark(QWidget *parent = nullptr);

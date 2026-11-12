@@ -91,7 +91,10 @@ void Button::paintEvent(QPaintEvent *) {
     if (isDown()) fill=QColor(primary?Theme::accentActive():danger?Theme::dangerHover():Theme::surfaceFillActive());
     if (isCheckable() && isChecked()) { fill=QColor(primary?Theme::accentActive():Theme::surfaceFillActive()); }
     if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Theme::surfaceBorder()); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
-    if (hasFocus() && isEnabled() && !isDown() && !isChecked()) fill=hover;
+    if (hasFocus() && isEnabled()) {
+        if (!isDown() && !isChecked()) fill=hover;
+        border=QColor(primary?Theme::accentText():Theme::accentLabel());
+    }
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
     painter.setBrush(fill); painter.setPen(QPen(border,1));
     painter.drawRoundedRect(bounds,Theme::cornerRadiusSmall(),Theme::cornerRadiusSmall());

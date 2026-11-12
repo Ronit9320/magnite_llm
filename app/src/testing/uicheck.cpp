@@ -3021,7 +3021,8 @@ int runUiCheck(const QString &captures) {
         }
         fits&=sidebar.rect().contains(nav[5]->geometry())&&sidebar.history()->geometry().bottom()<nav[5]->geometry().top();
         check(fits,"sidebar: everything fits 220x680 with a populated chat list, nothing overlapping");
-        check(sidebar.brandSeal()&&sidebar.brandSeal()->property("brandMark").toBool(),"sidebar: the brand seal is the animated brand mark");
+        check(dynamic_cast<BrandSymbol *>(sidebar.brandSeal()) != nullptr && sidebar.brandSeal()->focusPolicy() == Qt::NoFocus,
+              "sidebar: the logo uses static artwork and stays out of keyboard navigation");
         Theme::setDark(wasDark);
     }
     {

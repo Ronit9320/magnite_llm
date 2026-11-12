@@ -5,7 +5,6 @@
 #include "widgets/brandmark.h"
 #include "widgets/chathistorylist.h"
 #include "widgets/sidebarstate.h"
-#include "widgets/studiocanvas.h"
 
 #include <QBoxLayout>
 #include <QLabel>
@@ -35,10 +34,8 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_top = new QBoxLayout(QBoxLayout::LeftToRight);
     m_top->setSpacing(6);
     brand->addLayout(m_top);
-    m_seal = new StudioCanvas(this);
-    m_seal->setProperty("brandMark", true);
+    m_seal = new BrandSymbol(this);
     m_seal->setFixedSize(35, 35);
-    m_seal->setAccessibleName("Magnite logo");
     m_seal->setToolTip("Magnite · Intelligence on your own terms");
     m_toggle = new QPushButton(this);
     m_toggle->setObjectName("sidebarToggle");

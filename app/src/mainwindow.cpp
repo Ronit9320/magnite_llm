@@ -197,7 +197,6 @@ void MainWindow::setupUi() {
                             {"Settings", "settings", PanelSettings}, PanelChat);
     m_history = m_sidebar->history();
     connect(m_sidebar, &Sidebar::panelRequested, this, &MainWindow::switchPanel);
-    auto *brandSeal = m_sidebar->brandSeal();
 
     auto *mode = new QPushButton("Dark mode", central);
     m_themeButton=mode;
@@ -391,9 +390,8 @@ void MainWindow::setupUi() {
     canvasLayout->addWidget(m_workspacePages);
     workspaceLayout->addWidget(m_background,1);
     mainLayout->addWidget(workspace, 1);
-    auto applyAppearance = [this, brandSeal]() {
+    auto applyAppearance = [this]() {
         QSettings settings;
-        brandSeal->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         m_background->setGridVisible(settings.value("appearance/studio3Ambient",true).toBool());
         m_background->setMotionEnabled(!settings.value("appearance/studio3ReducedMotion",false).toBool());
         for (auto *widget : m_stack->findChildren<QWidget *>()) {

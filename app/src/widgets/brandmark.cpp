@@ -29,6 +29,15 @@ void BrandMark::paint(QPainter &p, const QRectF &bounds, const QColor &, qreal r
     p.restore();
 }
 
+BrandSymbol::BrandSymbol(QWidget *parent) : QWidget(parent) {
+    setAccessibleName("Magnite logo");
+}
+
+void BrandSymbol::paintEvent(QPaintEvent *) {
+    QPainter painter(this);
+    BrandMark::paint(painter, QRectF(rect()), QColor(Theme::brandOrange()));
+}
+
 BrandWordmark::BrandWordmark(QWidget *parent) : QWidget(parent) {
     setFixedSize(132, 37);
     setAccessibleName("Magnite");
