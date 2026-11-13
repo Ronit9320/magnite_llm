@@ -54,6 +54,8 @@ set(MAGNITE_SOURCES
     src/panels/docspanel.cpp
     src/panels/docspanel.h
     src/widgets/docscontentview.cpp
+    src/widgets/edgescrollbar.cpp
+    src/widgets/edgescrollbar.h
     src/widgets/docscontentview.h
     src/update_manager.cpp
     src/update_manager.h

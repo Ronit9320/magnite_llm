@@ -2,6 +2,7 @@
 #include "widgets/librarydialog.h"
 #include <QFileInfo>
 #include "panels/adapterspanel.h"
+#include "widgets/edgescrollbar.h"
 
 #include "backend_client.h"
 #include "panels/adaptercard.h"
@@ -69,6 +70,7 @@ void AdaptersPanel::setupUi() {
     m_scrollArea->setWidget(makeCardHost());
     m_scrollArea->setVisible(false);
     layout->addWidget(m_scrollArea, 1);
+    EdgeScrollBar::attach(m_scrollArea);
 
     // Empty state: centered hint + Import (import is the only adapter action
     // usable with no cards present).

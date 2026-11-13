@@ -24,6 +24,7 @@
 #include "widgets/chathistorylist.h"
 #include "widgets/sidebarstate.h"
 #include "widgets/sidebar.h"
+#include "widgets/edgescrollbar.h"
 #include "panels/chathistorycontroller.h"
 #include "panels/messagerow.h"
 #include "panels/settingspanel.h"
@@ -71,6 +72,7 @@
 #include <QProgressBar>
 #include <QRegularExpression>
 #include <QPushButton>
+#include <QMouseEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QShortcut>
@@ -3026,6 +3028,54 @@ int runUiCheck(const QString &captures) {
         Theme::setDark(wasDark);
     }
     {
+        // Page scrollbars sit at the window's far right, stay draggable and swell on hover.
+        QWidget window; window.setStyleSheet(Theme::qss()); window.resize(900,500);
+        auto *layout=new QVBoxLayout(&window); layout->setContentsMargins(40,60,120,20);
+        auto *area=new QScrollArea(&window); area->setWidgetResizable(true); area->setFrameShape(QFrame::NoFrame);
+        auto *body=new QWidget; auto *bodyLayout=new QVBoxLayout(body);
+        for (int i=0;i<60;++i) bodyLayout->addWidget(new QLabel(QString("Row %1").arg(i)));
+        area->setWidget(body); layout->addWidget(area);
+        auto *edge=EdgeScrollBar::attach(area);
+        window.show(); pump();
+        auto *bar=edge->bar();
+        check(EdgeScrollBar::attach(area)==edge,"edge scrollbar: attaching twice reuses one bar");
+        check(bar->isVisible()&&bar->parentWidget()==&window&&bar->geometry().right()==window.width()-1&&bar->width()==EdgeScrollBar::kWidth,
+              "edge scrollbar: the bar sits on the window's far right edge, outside the page margins");
+        check(bar->geometry().top()==area->mapTo(&window,QPoint(0,0)).y()&&bar->height()==area->height(),"edge scrollbar: it spans the scroll area's height");
+        check(!area->verticalScrollBar()->isVisible()&&bar->maximum()==area->verticalScrollBar()->maximum()&&bar->maximum()>0,"edge scrollbar: the built-in bar is off and the range matches");
+        bar->setValue(bar->maximum()/2); pump();
+        check(area->verticalScrollBar()->value()==bar->value()&&area->verticalScrollBar()->value()>0,"edge scrollbar: dragging the bar scrolls the area");
+        area->verticalScrollBar()->setValue(0); pump();
+        check(bar->value()==0,"edge scrollbar: scrolling the area (wheel, keys) moves the bar");
+        window.resize(1100,520); pump();
+        check(bar->geometry().right()==window.width()-1,"edge scrollbar: it follows the window's right edge when resized");
+        {
+            const QPoint at(bar->width()-3,bar->height()-6);
+            QMouseEvent press(QEvent::MouseButtonPress,at,bar->mapToGlobal(at),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease,at,bar->mapToGlobal(at),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+            QApplication::sendEvent(bar,&press); QApplication::sendEvent(bar,&release); pump();
+        }
+        check(bar->value()>0,"edge scrollbar: clicking the track pages the content");
+        area->hide(); pump();
+        check(!bar->isVisible(),"edge scrollbar: hiding the page hides its bar");
+        area->show(); area->verticalScrollBar()->setValue(0); pump();
+        {
+            const auto handleWidth=[&]() {
+                const QImage img=bar->grab().toImage();
+                const double ratio=img.devicePixelRatio();
+                const int y=int(24*ratio); int count=0;
+                for (int x=0;x<img.width();++x) if (qAlpha(img.pixel(x,y))>128) ++count;
+                return int(count/ratio+0.5);
+            };
+            const int rest=handleWidth();
+            const QPoint at(bar->width()-4,24);
+            QMouseEvent move(QEvent::MouseMove,at,bar->mapToGlobal(at),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+            QEvent enter(QEvent::Enter); QApplication::sendEvent(bar,&enter); QApplication::sendEvent(bar,&move); pump();
+            const int hover=handleWidth();
+            check(rest>=3&&rest<=5&&hover>=7&&hover<=9,QString("edge scrollbar: the handle is slim at rest and swells on hover (%1px -> %2px)").arg(rest).arg(hover));
+        }
+    }
+    {
         // The sidebar widget, collapsed into a slim icon strip.
         const bool wasDark=Theme::isDark();
         const QString key=SidebarState::kSettingsKey;
@@ -3053,6 +3103,12 @@ int runUiCheck(const QString &captures) {
         bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
         for (auto *tag : strip.findChildren<QLabel *>("studioTag")) hidden&=!tag->isVisibleTo(&strip);
         check(hidden&&strip.brandSeal()->width()<=32&&strip.brandSeal()->isVisibleTo(&strip),"sidebar: the strip hides the wordmark and tags and shrinks the logo to a small mark");
+        {
+            // The collapsed strip stacks logo, toggle and icons at the top instead of spreading them down the column.
+            auto firstNav=nav(); auto *seal=strip.brandSeal();
+            check(toggle->geometry().top()-seal->geometry().bottom()<=16 && firstNav[0]->geometry().top()-toggle->geometry().bottom()<=48,
+                  "sidebar: collapsed, the toggle and the icons stay at the top under the logo");
+        }
         strip.setCurrentPanel(4);
         check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
         check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");

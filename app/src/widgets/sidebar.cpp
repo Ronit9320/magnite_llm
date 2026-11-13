@@ -43,7 +43,9 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_toggle->setCursor(Qt::PointingHandCursor);
     connect(m_toggle, &QPushButton::clicked, this, &Sidebar::toggle);
     m_top->addWidget(m_seal);
-    m_top->addStretch();
+    // Expanded, this pushes the toggle to the right edge; collapsed (stacked) it must not take height.
+    m_topGap = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
+    m_top->addSpacerItem(m_topGap);
     m_top->addWidget(m_toggle, 0, Qt::AlignTop);
     m_wordmark = new BrandWordmark(this);
     m_wordmark->setObjectName("logoLabel");
@@ -96,6 +98,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
         m_history = new ChatHistoryList(this);
         m_history->useConversationWorkspace();
         navigation->addWidget(m_history, 1);
+        navigation->addStretch();   // collapsed, the hidden list leaves its height here so the icons stay at the top
         auto *open = new QShortcut(Shortcuts::workspace(m_historyPanel), this);
         connect(open, &QShortcut::activated, this, [this] { emit panelRequested(m_historyPanel); });
     }
@@ -215,6 +218,8 @@ void Sidebar::applyPresentation() {
     m_layout->setContentsMargins(collapsed ? 8 : 14, collapsed ? 14 : 20, collapsed ? 8 : 14, collapsed ? 12 : 16);
     m_gap->changeSize(0, collapsed ? 10 : 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_top->setDirection(collapsed ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+    if (collapsed) m_topGap->changeSize(0, 6, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    else m_topGap->changeSize(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
     m_top->setAlignment(m_seal, collapsed ? Qt::AlignHCenter : Qt::Alignment());
     m_top->setAlignment(m_toggle, collapsed ? Qt::AlignHCenter : Qt::AlignTop);
     const int side = collapsed ? 30 : 35;

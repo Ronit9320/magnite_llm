@@ -73,6 +73,7 @@ private:
     QVBoxLayout *m_layout = nullptr;
     QBoxLayout *m_top = nullptr;
     QSpacerItem *m_gap = nullptr;
+    QSpacerItem *m_topGap = nullptr;
     QPushButton *m_newChat = nullptr;
     QPushButton *m_playground = nullptr;
     QVariantAnimation *m_slide = nullptr;

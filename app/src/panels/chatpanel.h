@@ -101,7 +101,6 @@ private:
     };
 
     void setupUi();
-    void updateConversationTitle();
     void updateKnowledgeContext();
     void restoreKnowledge();
     void addCitations(MessageRow *row, const QJsonArray &sources);
@@ -156,7 +155,6 @@ private:
     QPushButton *m_knowledgeContext = nullptr;
     QWidget *m_knowledgeDrawer = nullptr;
     QHBoxLayout *m_workspace = nullptr;
-    QLabel *m_conversationTitle = nullptr;
     RagPanel *m_knowledge = nullptr;
     bool m_restoringKnowledge = false;
 

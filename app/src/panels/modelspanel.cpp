@@ -1,6 +1,7 @@
 #include "widgets/librarydialog.h"
 #include "widgets/confirmation.h"
 #include "panels/modelspanel.h"
+#include "widgets/edgescrollbar.h"
 
 #include "backend_client.h"
 #include "panels/modelcard.h"
@@ -172,6 +173,7 @@ void ModelsPanel::setupUi() {
     m_scrollArea->viewport()->setAutoFillBackground(false);
     m_scrollArea->setWidget(makeCardHost());
     layout->addWidget(m_scrollArea, 1);
+    EdgeScrollBar::attach(m_scrollArea);
     m_scrollArea->hide();
     m_loadMoreButton = new Button("Load more results", this);
     m_loadMoreButton->setObjectName("secondaryBtn");

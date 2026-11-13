@@ -98,9 +98,10 @@ QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 6px; font-w
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; border: none; }
 QStackedWidget { background: transparent; border: none; }
-QScrollBar:vertical { background: transparent; width: 3px; margin: 0; }
-QScrollBar::handle:vertical { background: @accentPrimary; min-height: 30px; border-radius: 3px; }
-QScrollBar::handle:vertical:hover { background: @accentHover; }
+/* A 12px grab track with a slim handle on its outer edge; hovering swells the handle without moving layout. */
+QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }
+QScrollBar::handle:vertical { background: @accentPrimary; min-height: 36px; border-radius: 2px; margin: 0 2px 0 6px; }
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed { background: @accentHover; border-radius: 4px; margin: 0 2px 0 2px; }
 QScrollBar::add-line:vertical { height: 0; }
 QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical { background: transparent; }
@@ -157,8 +158,8 @@ QSpinBox:disabled { background: @insetBackground; color: @textMuted; }
 QDoubleSpinBox:disabled { background: @insetBackground; color: @textMuted; }
 QTextEdit:disabled { background: @insetBackground; color: @textMuted; }
 QPlainTextEdit:disabled { background: @insetBackground; color: @textMuted; }
-QScrollBar:horizontal { background: transparent; height: 3px; margin: 0; }
-QScrollBar::handle:horizontal { background: @accentPrimary; min-width: 30px; border-radius: 3px; }
+QScrollBar:horizontal { background: transparent; height: 12px; margin: 0; }
+QScrollBar::handle:horizontal { background: @accentPrimary; min-width: 36px; border-radius: 2px; margin: 6px 0 2px 0; }
 QScrollBar::add-line:horizontal { width: 0; }
 QScrollBar::sub-line:horizontal { width: 0; }
 QScrollBar::add-page:horizontal { background: transparent; }
@@ -229,7 +230,7 @@ QMenu::item:disabled { color: @textMuted; }
 QMenu::separator { height: 1px; background: @surfaceBorder; margin: 4px 6px; }
 QToolTip { border: 1px solid @surfaceBorder; padding: 7px 10px; }
 QDialogButtonBox { spacing: 8px; }
-QScrollBar::handle:horizontal:hover { background: @accentHover; }
+QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed { background: @accentHover; border-radius: 4px; margin: 2px 0 2px 0; }
 
 /* Training studio: live experiment first, next-run recipe underneath. */
 QFrame#trainingSignalBoard, QFrame#trainingRunContext, QFrame#trainingRecipe {
@@ -352,8 +353,8 @@ QWidget#trainingPage QPlainTextEdit#trainingEventLog { font-family: @monoFont; f
 QWidget#trainingPage QLineEdit#trainingLogSearch { font-size: 11px; padding: 6px 9px; }
 
 /* Inner tracks reserve a little space, but their 3px handles appear only while scrolling. */
-QScrollBar[innerScroll="true"]:vertical { width: 9px; margin: 0 0 0 6px; }
-QScrollBar[innerScroll="true"]:horizontal { height: 9px; margin: 6px 0 0 0; }
+QScrollBar[innerScroll="true"]:vertical { width: 12px; margin: 0; }
+QScrollBar[innerScroll="true"]:horizontal { height: 12px; margin: 0; }
 QScrollBar[innerScroll="true"][scrollActive="false"]::handle:vertical,
 QScrollBar[innerScroll="true"][scrollActive="false"]::handle:horizontal { background: transparent; }
 QScrollBar[innerScroll="true"][scrollActive="true"]::handle:vertical,

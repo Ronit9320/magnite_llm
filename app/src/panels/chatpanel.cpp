@@ -8,6 +8,7 @@
 #include "panels/chatstore.h"
 #include "panels/ragpanel.h"
 #include "theme.h"
+#include "widgets/edgescrollbar.h"
 #include "panels/greeting.h"
 
 #include "backend_client.h"
@@ -80,7 +81,6 @@ ChatPanel::ChatPanel(QWidget *parent)
 {
     setupUi();
     showBlankChat();
-    connect(this, &ChatPanel::currentChatChanged, this, &ChatPanel::updateConversationTitle);
 }
 
 void ChatPanel::showBlankChat() {
@@ -93,18 +93,6 @@ void ChatPanel::showBlankChat() {
 void ChatPanel::setupUi() {
     auto *layout = contentLayout();
     auto *toolbar = new QHBoxLayout();
-    auto *heading = new QVBoxLayout;
-    heading->setSpacing(2);
-    auto *caption = new QLabel("Conversation", this);
-    caption->setObjectName("hubSmallMeta");
-    heading->addWidget(caption);
-    m_conversationTitle = new QLabel("New conversation", this);
-    m_conversationTitle->setObjectName("hubPageTitle");
-    m_conversationTitle->setTextFormat(Qt::PlainText);
-    m_conversationTitle->setWordWrap(true);
-    m_conversationTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    heading->addWidget(m_conversationTitle);
-    toolbar->addLayout(heading, 2);
     m_modelCombo = new ComboBox(this);
     m_modelCombo->setEditable(true);
     m_modelCombo->setMinimumContentsLength(16);
@@ -262,6 +250,7 @@ void ChatPanel::setupUi() {
     m_chatLayout->addWidget(m_welcome, 1);
     m_chatScroll->setWidget(m_chatHost);
     conversation->addWidget(m_chatScroll, 1);
+    EdgeScrollBar::attach(m_chatScroll);
 
     auto *composer = Surface::card(this);
     composer->parentWidget()->setObjectName("chatComposer");
@@ -1067,27 +1056,15 @@ void ChatPanel::showKnowledge() {
     if (m_knowledgeDrawer) m_knowledgeToggle->setChecked(true);
 }
 
-void ChatPanel::updateConversationTitle() {
-    const auto chats = m_store ? m_store->list() : QList<ChatSummary>();
-    for (const auto &chat : chats) {
-        if (chat.id != m_chatId) continue;
-        m_conversationTitle->setText(chat.title);
-        return;
-    }
-    m_conversationTitle->setText("New conversation");
-}
-
 void ChatPanel::setChatStore(ChatStore *store) {
     if (m_store == store) return;
     flushSave();
     if (m_store) disconnect(m_store, nullptr, this, nullptr);
     m_store = store;
-    if (store) connect(store, &ChatStore::changed, this, &ChatPanel::updateConversationTitle);
     // Whatever is on screen belongs to the previous store (or to none): it is not saved into the new one.
     m_saveDirty = false;
     m_saveTimer->stop();
     m_chatId.clear();
-    updateConversationTitle();
 }
 
 bool ChatPanel::isBusy() const { return m_streaming || m_preparing || m_loading || anyEditing(); }

@@ -7,6 +7,7 @@
 #include "panels/modelcard.h"
 #include "panels/modelspanel.h"
 #include "theme.h"
+#include "widgets/edgescrollbar.h"
 #include "widgets/button.h"
 #include "widgets/combobox.h"
 #include "widgets/librarydialog.h"
@@ -54,6 +55,7 @@ QVBoxLayout *scrollPage(TabWidget *tabs, const QString &title) {
     layout->setAlignment(Qt::AlignTop);
     layout->setSpacing(10);
     scroll->setWidget(body);
+    EdgeScrollBar::attach(scroll);
     tabs->addTab(scroll, title);
     return layout;
 }

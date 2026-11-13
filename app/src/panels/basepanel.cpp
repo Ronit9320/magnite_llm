@@ -1,6 +1,7 @@
 #include "panels/basepanel.h"
 
 #include "theme.h"
+#include "widgets/edgescrollbar.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -58,6 +59,7 @@ BasePanel::BasePanel(const QString &title, QWidget *parent, bool customHeader)
     scroll->viewport()->setAutoFillBackground(false);
     scroll->setWidget(content);
     root->addWidget(scroll,1);
+    EdgeScrollBar::attach(scroll);
 }
 
 void BasePanel::setHeaderSubtitle(const QString &subtitle) {

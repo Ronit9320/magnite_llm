@@ -32,6 +32,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
+#include "widgets/edgescrollbar.h"
 #include <QShortcut>
 #include <QShowEvent>
 #include <QSignalBlocker>
@@ -305,6 +306,7 @@ QWidget *scrollPage(QWidget *body, QWidget *parent) {
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->viewport()->setAutoFillBackground(false);
     scroll->setWidget(body);
+    EdgeScrollBar::attach(scroll);
     return scroll;
 }
 
