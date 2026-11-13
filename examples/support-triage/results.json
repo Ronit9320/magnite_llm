@@ -1,0 +1,161 @@
+{
+  "model": "HuggingFaceTB/SmolLM2-135M-Instruct",
+  "revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
+  "training": {
+    "rank": 16,
+    "alpha": 32,
+    "target_modules": "all-linear",
+    "quantization": "none",
+    "dropout": 0.05,
+    "validation_split": 0,
+    "epochs": 3,
+    "max_steps": 0,
+    "learning_rate": 0.0005,
+    "batch_size": 2,
+    "warmup_ratio": 0.03,
+    "max_length": 80,
+    "seed": 42
+  },
+  "generation": {
+    "temperature": 0,
+    "max_tokens": 64,
+    "stream": false,
+    "rag": {
+      "enabled": false
+    }
+  },
+  "cases": [
+    {
+      "id": "ledger-01",
+      "prompt": "Triage this Bramble Studio support ticket.\nThe new brochure is exactly what we wanted. Two debits for the same deposit cleared on Tuesday. Can someone reconcile them?",
+      "expected": "Queue: Ledger Desk\nNext: Check the payment record.",
+      "before": "I'm sorry for the misunderstanding, but as a Bramble Studio support ticket AI, I don't have the capability to assist with reconciling debits or clearing deposits. I'm here to help with Bramble Studio support tickets. If you have any Bramble Studio tickets or need help with a Bramble Studio ticket,",
+      "after": "Queue: Ledger Desk\nNext: Check the payment record."
+    },
+    {
+      "id": "ledger-02",
+      "prompt": "Triage this Bramble Studio support ticket.\nCould your team correct the VAT number on the bill for the retail signage?",
+      "expected": "Queue: Ledger Desk\nNext: Check the payment record.",
+      "before": "I'm sorry for any confusion, but as a Bramble Studio support ticket AI, I don't have the capability to correct VAT numbers. I'm here to assist with Bramble Studio support tickets. If you need help with Bramble Studio tickets, please contact our customer service team.",
+      "after": "Queue: Ledger Desk\nNext: Check the payment record."
+    },
+    {
+      "id": "ledger-03",
+      "prompt": "Triage this Bramble Studio support ticket.\nThe workshop got cancelled before it started. Who can check whether our advance can be returned?",
+      "expected": "Queue: Ledger Desk\nNext: Check the payment record.",
+      "before": "I'm sorry for the inconvenience, but as a Bramble Studio support ticket AI, I don't have the ability to access or verify the status of tickets. I recommend checking the official Bramble Studio website or contacting the support team directly for assistance.",
+      "after": "Queue: Ledger Desk\nNext: Check the payment record."
+    },
+    {
+      "id": "ledger-04",
+      "prompt": "Triage this Bramble Studio support ticket.\nOur bookkeeper needs proof that the last installment was received.",
+      "expected": "Queue: Ledger Desk\nNext: Check the payment record.",
+      "before": "We apologize for the inconvenience caused by the Bramble Studio ticket. Please provide the necessary information to the Bramble Studio support ticket, and we will be happy to assist you.",
+      "after": "Queue: Ledger Desk\nNext: Check the payment record."
+    },
+    {
+      "id": "asset-01",
+      "prompt": "Triage this Bramble Studio support ticket.\nThe finished lookbook is approved, but the package that arrived has a broken link to the high-res photos. Can you resend those?",
+      "expected": "Queue: Asset Desk\nNext: Check the approved handoff.",
+      "before": "I'm sorry for the inconvenience, but as a text-based AI, I don't have the capability to access or respond to emails or messages. I'm here to assist you with your Bramble Studio support ticket. Please let me know if you need any further assistance or if there's anything else I can help you",
+      "after": "Queue: Asset Desk\nNext: Check the approved handoff."
+    },
+    {
+      "id": "asset-02",
+      "prompt": "Triage this Bramble Studio support ticket.\nI can get into the portal. The signed-off animation I pulled from it freezes at the six-second mark. Could you check the delivered copy?",
+      "expected": "Queue: Asset Desk\nNext: Check the approved handoff.",
+      "before": "I'm sorry for the inconvenience, but as a Bramble Studio ticket AI, I don't have the ability to access or access the \"Draft\" or \"Draft-2\" status of a ticket. I'm designed to handle tickets from the Bramble Studio website. If you need help with Bramble Studio",
+      "after": "Queue: Asset Desk\nNext: Check the approved handoff."
+    },
+    {
+      "id": "asset-03",
+      "prompt": "Triage this Bramble Studio support ticket.\nBoth PDFs are marked approved, but one is for an older product. Which file was actually sent to the printer?",
+      "expected": "Queue: Asset Desk\nNext: Check the approved handoff.",
+      "before": "The PDFs are marked approved, but the one for the older Bramble Studio support ticket is marked for an older product.",
+      "after": "Queue: Asset Desk\nNext: Check the approved handoff."
+    },
+    {
+      "id": "asset-04",
+      "prompt": "Triage this Bramble Studio support ticket.\nThe approval email lists eight files. The transfer includes just seven, with the final icon sheet missing.",
+      "expected": "Queue: Asset Desk\nNext: Check the approved handoff.",
+      "before": "I'm sorry for the confusion, but as a Bramble Studio support ticket AI, I don't have the capability to assist with ticket requests. However, I can help you with the following:\n\n1. **Check the status of the ticket**: If you're not sure if the ticket is approved, you can check",
+      "after": "Queue: Asset Desk\nNext: Check the approved handoff."
+    },
+    {
+      "id": "key-01",
+      "prompt": "Triage this Bramble Studio support ticket.\nI can open the campaign files myself. Our new producer accepted the invite, but the workspace still says she's a guest. Can you give her editor access?",
+      "expected": "Queue: Key Desk\nNext: Check workspace permissions.",
+      "before": "I'm sorry for the misunderstanding, but as a Bramble Studio support ticket AI, I don't have the ability to access or edit the campaign files. I recommend using a trusted source for Bramble Studio support tickets, such as the official Bramble Studio website or a trusted online platform.",
+      "after": "Queue: Key Desk\nNext: Check workspace permissions."
+    },
+    {
+      "id": "key-02",
+      "prompt": "Triage this Bramble Studio support ticket.\nI still have the original email address, but my authenticator was wiped when my phone died. How do I get back into the portal?",
+      "expected": "Queue: Key Desk\nNext: Check workspace permissions.",
+      "before": "I'm sorry for the inconvenience, but as a Bramble Studio support ticket AI, I don't have the ability to access or retrieve your email address. I recommend contacting the Bramble Studio support team directly for assistance.",
+      "after": "Queue: Key Desk\nNext: Check workspace permissions."
+    },
+    {
+      "id": "key-03",
+      "prompt": "Triage this Bramble Studio support ticket.\nThe freelancer is off the project. Please take them off the client portal before the next review.",
+      "expected": "Queue: Key Desk\nNext: Check workspace permissions.",
+      "before": "I'm sorry for the inconvenience, but as a Bramble Studio support ticket AI, I don't have the ability to access or manage the client portal. I recommend contacting the client directly for assistance.",
+      "after": "Queue: Scope Desk\nNext: Review scope and timing."
+    },
+    {
+      "id": "key-04",
+      "prompt": "Triage this Bramble Studio support ticket.\nOur agency moved to a different email domain. Can you help move my sign-in over without losing my existing workspace?",
+      "expected": "Queue: Key Desk\nNext: Check workspace permissions.",
+      "before": "I'm sorry for any inconvenience, but as a Bramble Studio support ticket AI, I don't have the ability to access or manage your account. I recommend contacting the Bramble Studio support team directly for assistance.",
+      "after": "Queue: Key Desk\nNext: Check workspace permissions."
+    },
+    {
+      "id": "scope-01",
+      "prompt": "Triage this Bramble Studio support ticket.\nOur founder can't make Thursday's review. Could we shift it to next Tuesday and still keep the print date?",
+      "expected": "Queue: Scope Desk\nNext: Review scope and timing.",
+      "before": "We apologize for the inconvenience, but as a Bramble Studio support ticket, we cannot provide a refund or replacement. We recommend contacting the Bramble Studio support team for assistance.",
+      "after": "Queue: Scope Desk\nNext: Review scope and timing."
+    },
+    {
+      "id": "scope-02",
+      "prompt": "Triage this Bramble Studio support ticket.\nWe got the finished launch graphic. Can we also get a new version sized for the lobby display?",
+      "expected": "Queue: Scope Desk\nNext: Review scope and timing.",
+      "before": "We're sorry for the inconvenience, but as a Bramble Studio support ticket, we cannot assist with the installation or update of the Bramble Studio support ticket. We recommend contacting the Bramble Studio support team for the installation and update of the ticket.",
+      "after": "Queue: Scope Desk\nNext: Review scope and timing."
+    },
+    {
+      "id": "scope-03",
+      "prompt": "Triage this Bramble Studio support ticket.\nCould the next draft emphasize the community program instead of the product launch?",
+      "expected": "Queue: Scope Desk\nNext: Review scope and timing.",
+      "before": "Here's a revised version of the Bramble Studio support ticket:\n\n\"Could the next Bramble Studio support ticket be made more impactful by emphasizing the community program instead of the product launch?\n\nI made a few changes to enhance the tone and clarity of the text. I replaced \"could the next draft emphasize",
+      "after": "Queue: Scope Desk\nNext: Review scope and timing."
+    },
+    {
+      "id": "scope-04",
+      "prompt": "Triage this Bramble Studio support ticket.\nWe're cutting the in-person event. Can the remaining project time go toward two extra interview edits?",
+      "expected": "Queue: Scope Desk\nNext: Review scope and timing.",
+      "before": "We're cutting the in-person event. Can the remaining project time go toward two extra interview edits?",
+      "after": "Queue: Scope Desk\nNext: Review scope and timing."
+    }
+  ],
+  "training_run": {
+    "steps": 180,
+    "seconds": 113,
+    "final_logged_loss": 0.9131321630544132
+  },
+  "environment": {
+    "platform": "Linux x86_64",
+    "device": "Intel Core i5-12450HX CPU",
+    "torch": "2.14.0+cu130",
+    "transformers": "5.16.1",
+    "peft": "0.20.0",
+    "training_dtype": "float32",
+    "padding_token_id": 0,
+    "end_of_reply_token_id": 2
+  },
+  "exact_matches": {
+    "before": 0,
+    "after": 15,
+    "total": 16
+  }
+}

@@ -12,6 +12,8 @@ material or real personal data. They use the repository's MIT license.
 The rows demonstrate accepted formats only; they are too few to establish useful
 fine-tuning quality. Keep any real training/evaluation datasets separate.
 
+For a before-and-after LoRA demo, use the [Bramble Studio support triage dataset](support-triage/README.md).
+
 Try asking: “When is the observatory library open?” Expected source fact:
 Tuesday and Thursday, 18:00–21:00. The maintenance contact is the front desk;
 the equipment cabinet is in Room Cedar. Model answers must be checked against
