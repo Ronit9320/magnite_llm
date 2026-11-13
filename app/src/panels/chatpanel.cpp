@@ -223,7 +223,9 @@ void ChatPanel::setupUi() {
     for (int i = 0; i < 3; ++i) {
         auto *button = new Button(workspaceActions[i].label, m_welcome);
         button->setObjectName("promptSuggestion");
-        button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        QSizePolicy cardPolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        cardPolicy.setHeightForWidth(true);   // Button wraps its text, so its height depends on the card width
+        button->setSizePolicy(cardPolicy);
         button->setToolTip(workspaceActions[i].description);
         suggestions->addWidget(button, 1);
         connect(button, &QPushButton::clicked, this, [this, optionsBtn, i]() {

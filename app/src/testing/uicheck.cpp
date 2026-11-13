@@ -1465,6 +1465,13 @@ int runUiCheck(const QString &captures) {
         check(roomy,"experiment table: names and dates keep their full line height, nothing is clipped"+squeezed);
         const int lastBottom=table->rowCount()>0?table->visualRect(table->model()->index(table->rowCount()-1,0)).bottom():0;
         check(table->rowCount()>0 && (lastBottom<table->viewport()->height() || table->height()>=350),"experiment table: the last row is fully inside the table, not cut off at the bottom");
+        bool switchesFit=true; QString switchDetail;
+        for (auto *toggle : training.findChildren<ToggleSwitch *>()) {
+            if (!toggle->isVisible() || toggle->text().isEmpty()) continue;
+            const int needed=toggle->labelLeft()+toggle->fontMetrics().horizontalAdvance(toggle->text());
+            if (toggle->width()<needed) { switchesFit=false; switchDetail+=QString(" %1:%2<%3").arg(toggle->text()).arg(toggle->width()).arg(needed); }
+        }
+        check(switchesFit,"training switches: every label fits inside its switch, none is cut at the edge"+switchDetail);
         capture(table,"training-experiments-dark");
         Theme::setDark(false); pump(); capture(table,"training-experiments-light"); Theme::setDark(true); pump();
     }
@@ -1644,6 +1651,21 @@ int runUiCheck(const QString &captures) {
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     chat.show(); pump();
+    {
+        // The welcome suggestion cards must be as tall as their wrapped text needs, at any panel width.
+        const QSize before=chat.size(); bool tall=true; int seen=0; QString detail;
+        for (int width : {420,560,760,1104}) {
+            chat.resize(width,700); pump(80);
+            for (auto *card : chat.findChildren<Button *>("promptSuggestion")) {
+                if (!card->isVisible()) continue;
+                ++seen;
+                const int need=card->heightForWidth(card->width());
+                if (card->height()<need) { tall=false; detail+=QString(" w%1:%2<%3").arg(width).arg(card->height()).arg(need); }
+            }
+        }
+        chat.resize(before); pump(80);
+        check(tall&&seen>0,"chat welcome: suggestion cards are tall enough for their wrapped text at every width"+detail);
+    }
     auto *input=chat.findChild<QPlainTextEdit *>("chatInput"); auto *send=chat.findChild<QPushButton *>("primaryBtn");
     check(!send->isEnabled(),"empty chat cannot be sent");
     input->setPlainText("How can I use my documents?"); send->click(); pump();

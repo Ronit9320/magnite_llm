@@ -12,6 +12,8 @@ public:
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override { return sizeHint(); }
     bool isAnimating() const;
+    // Where the label starts (left to right layout), so layout and tests agree with what is painted.
+    int labelLeft() const;
 protected:
     void paintEvent(QPaintEvent *) override;
     bool hitButton(const QPoint &position) const override;

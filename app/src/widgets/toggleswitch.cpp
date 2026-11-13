@@ -40,8 +40,13 @@ ToggleSwitch::ToggleSwitch(const QString &text, QWidget *parent)
     });
 }
 
+int ToggleSwitch::labelLeft() const {
+    const int track=property("compact").toBool()?24:qCeil(kTrackWidth);
+    return kPadding+track+kGap;
+}
+
 QSize ToggleSwitch::sizeHint() const {
-    if (property("compact").toBool()) return {30+(text().isEmpty()?0:6+fontMetrics().horizontalAdvance(text())),28};
+    if (property("compact").toBool()) return {text().isEmpty()?2*kPadding+24:labelLeft()+fontMetrics().horizontalAdvance(text())+kPadding,28};
     const auto label=fontMetrics().size(Qt::TextShowMnemonic,text());
     return {qCeil(kTrackWidth)+2*kPadding+(text().isEmpty()?0:kGap+label.width()),
             qMax(qCeil(kTrackHeight),label.height())+2*kPadding};
@@ -92,7 +97,7 @@ void ToggleSwitch::paintEvent(QPaintEvent *) {
     painter.drawEllipse(thumb);
     QRect labelRect=rect();
     if (rtl) labelRect.setRight(qFloor(track.left())-kGap);
-    else labelRect.setLeft(qCeil(track.right())+kGap);
+    else labelRect.setLeft(labelLeft());
     const int mnemonic=style()->styleHint(QStyle::SH_UnderlineShortcut,nullptr,this)?Qt::TextShowMnemonic:Qt::TextHideMnemonic;
     painter.setPen(QColor(isEnabled()?Theme::textPrimary():Theme::textMuted()));
     painter.drawText(labelRect,Qt::AlignVCenter|(rtl?Qt::AlignRight:Qt::AlignLeft)|mnemonic,text());
