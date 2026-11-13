@@ -1,4 +1,5 @@
 #include "widgets/edgescrollbar.h"
+#include "widgets/smoothscrollbar.h"
 
 #include <QAbstractScrollArea>
 #include <QEvent>
@@ -16,7 +17,7 @@ EdgeScrollBar *EdgeScrollBar::attach(QAbstractScrollArea *area) {
 
 EdgeScrollBar::EdgeScrollBar(QAbstractScrollArea *area) : QObject(area), m_area(area) {
     area->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_bar = new QScrollBar(Qt::Vertical, area);   // re-parented to the window once the area is in one
+    m_bar = new SmoothScrollBar(Qt::Vertical, area);   // re-parented to the window once the area is in one
     m_bar->setObjectName("edgeScrollBar");
     m_bar->setCursor(Qt::ArrowCursor);
     m_bar->hide();

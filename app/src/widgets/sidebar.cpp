@@ -66,6 +66,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_tags = {workspaceLabel};
     auto *navigation = new QVBoxLayout();
     m_navigation = navigation;
+    navigation->setSpacing(kExpandedNavSpacing);
     layout->addLayout(navigation, 1);
 
     for (const NavItem &item : workspaces) {
@@ -76,7 +77,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
             // Collapsed, a small + stands in for the chat list's New chat row.
             m_newChat = new Button(this);
             m_newChat->setObjectName("sidebarNewChat");
-            m_newChat->setFixedSize(30, 30);
+            m_newChat->setFixedSize(kExpandedNewChat, kExpandedNewChat);
             m_newChat->setToolTip("New chat");
             m_newChat->setAccessibleName("New chat");
             m_newChat->setCursor(Qt::PointingHandCursor);
@@ -91,9 +92,16 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
         }
     }
     if (!m_history) {
+        // A hairline between the workspace items and the conversations, kept in the collapsed strip too.
+        auto *divider = new QFrame(this);
+        divider->setObjectName("sidebarDivider");
+        divider->setFixedHeight(1);
+        navigation->addSpacing(kDividerGap);
+        navigation->addWidget(divider);
+        navigation->addSpacing(kDividerGap);
         m_newChat = new Button(this);
         m_newChat->setObjectName("sidebarNewChat");
-        m_newChat->setFixedSize(30, 30);
+        m_newChat->setFixedSize(kExpandedNewChat, kExpandedNewChat);
         m_newChat->setToolTip("New conversation");
         m_newChat->setAccessibleName("New conversation");
         m_newChat->setCursor(Qt::PointingHandCursor);
@@ -142,7 +150,7 @@ QPushButton *Sidebar::makeNavButton(const NavItem &item) {
     button->setProperty("panel", item.panel);
     button->setProperty("label", item.label);
     connect(button, &QPushButton::clicked, this, [this, item]() { emit panelRequested(item.panel); });
-    button->setMinimumHeight(40);
+    button->setMinimumHeight(kExpandedNavHeight);
     auto *shortcut = new QShortcut(Shortcuts::workspace(item.panel), this);
     connect(shortcut, &QShortcut::activated, button, &QPushButton::click);
     m_buttons.append(button);
@@ -218,9 +226,10 @@ void Sidebar::updateExtras() {
 void Sidebar::applyPresentation() {
     const bool collapsed = m_state.collapsed();
     setProperty("collapsed", collapsed);
-    m_layout->setContentsMargins(collapsed ? 8 : 14, collapsed ? 14 : 20, collapsed ? 8 : 14, collapsed ? 12 : 16);
-    m_navigation->setSpacing(collapsed ? 11 : 5);
-    m_gap->changeSize(0, collapsed ? 14 : 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    m_layout->setContentsMargins(collapsed ? 8 : 14, collapsed ? 16 : 20, collapsed ? 8 : 14, collapsed ? 16 : 16);
+    m_navigation->setSpacing(collapsed ? kCollapsedNavSpacing : kExpandedNavSpacing);
+    m_top->setSpacing(collapsed ? 14 : 6);
+    m_gap->changeSize(0, collapsed ? 20 : 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_top->setDirection(collapsed ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
     if (collapsed) m_topGap->changeSize(0, 6, QSizePolicy::Minimum, QSizePolicy::Fixed);
     else m_topGap->changeSize(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
@@ -236,7 +245,11 @@ void Sidebar::applyPresentation() {
         button->setAccessibleName(label);
         button->setToolTip(collapsed ? label : label + " · " +
             Shortcuts::label(Shortcuts::workspace(button->property("panel").toInt())));
-        button->setMinimumHeight(40);
+        button->setMinimumHeight(collapsed ? kCollapsedNavHeight : kExpandedNavHeight);
+    }
+    if (m_newChat) {
+        const int side = collapsed ? kCollapsedNewChat : kExpandedNewChat;
+        m_newChat->setFixedSize(side, side);
     }
     updateExtras();
     // Dynamic-property rules (QWidget#sidebar[collapsed="true"] ...) apply to the children too.
@@ -255,13 +268,15 @@ void Sidebar::refreshIcons() {
     for (auto *button : m_buttons) {
         const QString name = button->property("navicon").toString();
         const QColor color = button->isChecked() ? QColor(Theme::accentPrimary()) : QColor(Theme::textSecondary());
-        button->setIcon(Theme::coloredIcon(name, color, 18));
-        button->setIconSize(QSize(18, 18));
+        const int icon = m_state.collapsed() ? kCollapsedIcon : kExpandedIcon;
+        button->setIcon(Theme::coloredIcon(name, color, icon));
+        button->setIconSize(QSize(icon, icon));
     }
     applyToggle();
     if (m_newChat) {
-        m_newChat->setIcon(Theme::coloredIcon("plus", QColor(m_newChat->isEnabled() ? Theme::accentLabel() : Theme::textMuted()), 14));
-        m_newChat->setIconSize(QSize(14, 14));
+        const int plus = m_state.collapsed() ? kCollapsedPlus : kExpandedPlus;
+        m_newChat->setIcon(Theme::coloredIcon("plus", QColor(m_newChat->isEnabled() ? Theme::accentLabel() : Theme::textMuted()), plus));
+        m_newChat->setIconSize(QSize(plus, plus));
     }
     if (m_history) m_history->refreshIcons();
 }

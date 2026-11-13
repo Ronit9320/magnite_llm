@@ -298,7 +298,7 @@ struct Fixture : QTcpServer {
                     else if (path == "/training/telemetry") body=R"({"device":"NVIDIA RTX 3060","kind":"VRAM","accelerator":"CUDA","used_bytes":7838315315,"total_bytes":12884901888,"utilization_percent":94,"temperature_c":68,"power_w":142,"detail":"Synthetic UI fixture only; device-wide readings in production."})";
                     else if (path == "/training/estimate") { trainingEstimateRequest=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object(); body=R"({"memory":{"kind":"VRAM","available_bytes":25769803776},"memory_low_bytes":17179869184,"memory_high_bytes":22548578304,"adapter_bytes":167772160,"steps":1800,"duration_low_seconds":7200,"duration_high_seconds":8400,"assumptions":"Fixture advisory budget"})"; if (designPreview) body=R"({"memory":{"kind":"VRAM","available_bytes":12884901888},"memory_low_bytes":7838315315,"memory_high_bytes":7838315315,"steps":900,"assumptions":"Synthetic screenshot fixture only"})"; }
                     else if (path == "/training/jobs") {
-                        auto past=trainingJob(); past["id"]="past-job"; past["name"]="support-tone-v1"; past["status"]="done";
+                        auto past=trainingJob(); past["id"]="past-job"; past["name"]="support-tone-v1"; past["status"]="done"; past["created_at"]="2026-11-13T19:02:42Z";
                         auto older=past; older["id"]="older-job"; older["name"]="support-tone-baseline";
                         auto config=older["config"].toObject(); config["rank"]=16; older["config"]=config;
                         older["history"]=QJsonArray{QJsonObject{{"step",4},{"loss",2.4},{"learning_rate",0.0001},{"grad_norm",1.1}}};
@@ -1452,6 +1452,22 @@ int runUiCheck(const QString &captures) {
     Theme::setDark(true);
     settingsToggle->setChecked(false); workspace->setCurrentIndex(1); archiveToggle->setChecked(true); pump(250);
     check(training.findChild<QTableWidget *>("trainingExperimentTable")->isVisible() && lossChart->isVisible(),"experiment table stays alongside the live canvas");
+    {
+        // Each experiment row must give its name and date their full line height, or the glyphs are cut in half.
+        auto *table=training.findChild<QTableWidget *>("trainingExperimentTable");
+        bool roomy=table->rowCount()>0; QString squeezed;
+        for (int r=0;r<table->rowCount();++r) {
+            auto *cell=table->cellWidget(r,0);
+            if (!cell) { roomy=false; continue; }
+            for (auto *label : cell->findChildren<QLabel *>())
+                if (label->height()<label->sizeHint().height()) { roomy=false; squeezed+=QString(" row%1:%2<%3").arg(r).arg(label->height()).arg(label->sizeHint().height()); }
+        }
+        check(roomy,"experiment table: names and dates keep their full line height, nothing is clipped"+squeezed);
+        const int lastBottom=table->rowCount()>0?table->visualRect(table->model()->index(table->rowCount()-1,0)).bottom():0;
+        check(table->rowCount()>0 && (lastBottom<table->viewport()->height() || table->height()>=350),"experiment table: the last row is fully inside the table, not cut off at the bottom");
+        capture(table,"training-experiments-dark");
+        Theme::setDark(false); pump(); capture(table,"training-experiments-light"); Theme::setDark(true); pump();
+    }
     auto *compareA=training.findChild<QComboBox *>("compareRunA");
     auto *compareB=training.findChild<QComboBox *>("compareRunB");
     compareA->setCurrentIndex(1); compareB->setCurrentIndex(2); pump(650);
@@ -3084,12 +3100,20 @@ int runUiCheck(const QString &captures) {
                 for (int x=0;x<img.width();++x) if (qAlpha(img.pixel(x,y))>128) ++count;
                 return int(count/ratio+0.5);
             };
+            const bool reducedBefore=QSettings().value("appearance/studio3ReducedMotion",false).toBool();
+            QSettings().setValue("appearance/studio3ReducedMotion",false);   // the glide is skipped under reduced motion
             const int rest=handleWidth();
             const QPoint at(bar->width()-4,24);
-            QMouseEvent move(QEvent::MouseMove,at,bar->mapToGlobal(at),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
-            QEvent enter(QEvent::Enter); QApplication::sendEvent(bar,&enter); QApplication::sendEvent(bar,&move); pump();
+            QEnterEvent enter(QPointF(at),QPointF(at),QPointF(bar->mapToGlobal(at)));
+            QApplication::sendEvent(bar,&enter);
+            int mid=rest; bool sawBetween=false;
+            const bool glides=waitUntil([&]{ const int w=handleWidth(); if (w>rest&&w<8) { sawBetween=true; mid=w; } return w>=8; },800);
             const int hover=handleWidth();
             check(rest>=3&&rest<=5&&hover>=7&&hover<=9,QString("edge scrollbar: the handle is slim at rest and swells on hover (%1px -> %2px)").arg(rest).arg(hover));
+            check(glides&&sawBetween,QString("edge scrollbar: the swell glides through in-between widths (saw %1px)").arg(mid));
+            QEvent leave(QEvent::Leave); QApplication::sendEvent(bar,&leave);
+            check(waitUntil([&]{ return handleWidth()<=rest; },800),"edge scrollbar: the handle glides back to slim when the pointer leaves");
+            QSettings().setValue("appearance/studio3ReducedMotion",reducedBefore);
         }
     }
     {
@@ -3122,7 +3146,7 @@ int runUiCheck(const QString &captures) {
         {
             // The collapsed strip stacks logo, toggle and icons at the top instead of spreading them down the column.
             auto firstNav=nav(); auto *seal=strip.brandSeal();
-            check(toggle->geometry().top()-seal->geometry().bottom()<=16 && firstNav[0]->geometry().top()-toggle->geometry().bottom()<=48,
+            check(toggle->geometry().top()-seal->geometry().bottom()<=40 && firstNav[0]->geometry().top()-toggle->geometry().bottom()<=64,
                   "sidebar: collapsed, the toggle and the icons stay at the top under the logo");
         }
         strip.setCurrentPanel(4);

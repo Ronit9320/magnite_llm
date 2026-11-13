@@ -32,6 +32,7 @@ QPushButton#sidebarToggle { padding: 0; border: 1px solid @surfaceBorder; border
 QPushButton#sidebarToggle:hover { background: @surfaceFillHover; }
 QPushButton#sidebarToggle:pressed { background: @surfaceFillActive; }
 QPushButton#sidebarNewChat { padding: 0; min-height: 0; }
+QFrame#sidebarDivider { background: @surfaceBorder; border: none; min-height: 1px; max-height: 1px; }
 QPushButton#primaryBtn { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#cardPrimary { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#primaryBtn:hover { background: @accentHover; border-color: @accentHover; }
@@ -359,6 +360,13 @@ QWidget#trainingPage QPlainTextEdit#trainingEventLog { font-family: @monoFont; f
 QWidget#trainingPage QLineEdit#trainingLogSearch { font-size: 11px; padding: 6px 9px; }
 
 /* Inner tracks reserve a little space, but their 3px handles appear only while scrolling. */
+/* Smooth bars paint their own handle (animated in SmoothScrollBar), so the native one is invisible. */
+QScrollBar[smooth="true"]:vertical { background: transparent; width: 12px; margin: 0; }
+QScrollBar[smooth="true"]:horizontal { background: transparent; height: 12px; margin: 0; }
+QScrollBar[smooth="true"]::handle:vertical, QScrollBar[smooth="true"]::handle:vertical:hover, QScrollBar[smooth="true"]::handle:vertical:pressed {
+    background: transparent; margin: 0; min-height: 36px; border-radius: 0; }
+QScrollBar[smooth="true"]::handle:horizontal, QScrollBar[smooth="true"]::handle:horizontal:hover, QScrollBar[smooth="true"]::handle:horizontal:pressed {
+    background: transparent; margin: 0; min-width: 36px; border-radius: 0; }
 QScrollBar[innerScroll="true"]:vertical { width: 12px; margin: 0; }
 QScrollBar[innerScroll="true"]:horizontal { height: 12px; margin: 0; }
 QScrollBar[innerScroll="true"][scrollActive="false"]::handle:vertical,

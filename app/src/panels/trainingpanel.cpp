@@ -1581,7 +1581,7 @@ void TrainingPanel::refreshExperimentViews() {
             if (col==0) {
                 cell->setData(Qt::AccessibleTextRole,cells[col]);
                 auto *nameCell=new QWidget(this); nameCell->setAttribute(Qt::WA_TransparentForMouseEvents);
-                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,8,12,8); nameBody->setSpacing(3);
+                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,12,0); nameBody->setSpacing(2);   // the table item's own 9px padding already supplies the vertical room
                 auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingIndexName"); nameLabel->setTextFormat(Qt::PlainText);
                 auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
                 nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); m_experiments->setCellWidget(i,col,nameCell);
@@ -1592,7 +1592,7 @@ void TrainingPanel::refreshExperimentViews() {
         if (id==m_selectedRunId) { m_runs->setCurrentItem(item); m_experiments->selectRow(i); }
     }
     m_runs->verticalScrollBar()->setValue(scroll); m_experiments->verticalScrollBar()->setValue(tableScroll);
-    m_experiments->setFixedHeight(qBound(100,34+m_jobs.size()*52,350)); filterRuns();
+    m_experiments->setFixedHeight(qBound(100,m_experiments->horizontalHeader()->sizeHint().height()+2*m_experiments->frameWidth()+m_jobs.size()*52,350)); filterRuns();
 }
 
 void TrainingPanel::selectRun(const QString &id) {

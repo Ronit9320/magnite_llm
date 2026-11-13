@@ -60,6 +60,19 @@ private:
     void updateExtras();
     void slideTo(int width, bool animate);
 
+    // Sizes: the full menu stays as designed; the collapsed strip gets larger icons and more air.
+    static constexpr int kExpandedNavSpacing = 8;
+    static constexpr int kCollapsedNavSpacing = 18;
+    static constexpr int kExpandedNavHeight = 42;
+    static constexpr int kCollapsedNavHeight = 46;
+    static constexpr int kExpandedIcon = 18;
+    static constexpr int kCollapsedIcon = 24;
+    static constexpr int kExpandedNewChat = 30;
+    static constexpr int kCollapsedNewChat = 36;
+    static constexpr int kExpandedPlus = 14;
+    static constexpr int kCollapsedPlus = 20;
+    static constexpr int kDividerGap = 4;
+
     SidebarState m_state;
 
     int m_historyPanel;
