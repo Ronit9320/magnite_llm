@@ -12,7 +12,7 @@
 #include <QTimer>
 #include <QFileInfo>
 #include <QFile>
-#include <QMessageBox>
+#include "widgets/confirmation.h"
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
 #include <sys/file.h>
@@ -37,7 +37,8 @@ int main(int argc, char *argv[]) {
         installationLock = open(lockPath.constData(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
         if (installationLock >= 0 && flock(installationLock, LOCK_EX | LOCK_NB) != 0) {
             close(installationLock);
-            QMessageBox::information(nullptr, "Magnite", "This AppImage is already running or being updated.");
+            Theme::setupApplicationTheme();
+            Ui::showNotice(nullptr, "Magnite", "This AppImage is already running or being updated.");
             return 1;
         }
         // A read-only location can still run; its in-app installer is disabled.

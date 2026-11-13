@@ -3,6 +3,7 @@
 
 #include "theme.h"
 #include "widgets/brandmark.h"
+#include "widgets/button.h"
 #include "widgets/chathistorylist.h"
 #include "widgets/sidebarstate.h"
 
@@ -62,7 +63,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     layout->addWidget(workspaceLabel);
     m_tags = {workspaceLabel};
     auto *navigation = new QVBoxLayout();
-    navigation->setSpacing(5);
+    m_navigation = navigation;
     layout->addLayout(navigation, 1);
 
     for (const NavItem &item : workspaces) {
@@ -71,9 +72,9 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
         if (item.panel == m_historyPanel) {
             m_playground = button;
             // Collapsed, a small + stands in for the chat list's New chat row.
-            m_newChat = new QPushButton(this);
+            m_newChat = new Button(this);
             m_newChat->setObjectName("sidebarNewChat");
-            m_newChat->setFixedSize(26, 26);
+            m_newChat->setFixedSize(30, 30);
             m_newChat->setToolTip("New chat");
             m_newChat->setAccessibleName("New chat");
             m_newChat->setCursor(Qt::PointingHandCursor);
@@ -88,11 +89,12 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
         }
     }
     if (!m_history) {
-        m_newChat = new QPushButton(this);
+        m_newChat = new Button(this);
         m_newChat->setObjectName("sidebarNewChat");
-        m_newChat->setFixedSize(26, 26);
+        m_newChat->setFixedSize(30, 30);
         m_newChat->setToolTip("New conversation");
         m_newChat->setAccessibleName("New conversation");
+        m_newChat->setCursor(Qt::PointingHandCursor);
         connect(m_newChat, &QPushButton::clicked, this, &Sidebar::newChatRequested);
         navigation->addWidget(m_newChat, 0, Qt::AlignHCenter);
         m_history = new ChatHistoryList(this);
@@ -138,7 +140,6 @@ QPushButton *Sidebar::makeNavButton(const NavItem &item) {
     button->setProperty("panel", item.panel);
     button->setProperty("label", item.label);
     connect(button, &QPushButton::clicked, this, [this, item]() { emit panelRequested(item.panel); });
-    button->setToolTip(item.label + " · " + Shortcuts::label(Shortcuts::workspace(item.panel)));
     button->setMinimumHeight(40);
     auto *shortcut = new QShortcut(Shortcuts::workspace(item.panel), this);
     connect(shortcut, &QShortcut::activated, button, &QPushButton::click);
@@ -200,7 +201,7 @@ void Sidebar::slideTo(int width, bool animate) {
 }
 
 void Sidebar::applyToggle() {
-    m_toggle->setToolTip(m_state.toggleTooltip());
+    m_toggle->setToolTip(m_state.collapsed() ? tr("Expand sidebar") : m_state.toggleTooltip());
     m_toggle->setAccessibleName(m_state.collapsed() ? "Expand sidebar" : "Collapse sidebar");
     m_toggle->setIcon(Theme::coloredIcon(m_state.collapsed() ? "chevron-right" : "chevron-left", QColor(Theme::textSecondary()), 14));
     m_toggle->setIconSize(QSize(14, 14));
@@ -216,7 +217,8 @@ void Sidebar::applyPresentation() {
     const bool collapsed = m_state.collapsed();
     setProperty("collapsed", collapsed);
     m_layout->setContentsMargins(collapsed ? 8 : 14, collapsed ? 14 : 20, collapsed ? 8 : 14, collapsed ? 12 : 16);
-    m_gap->changeSize(0, collapsed ? 10 : 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    m_navigation->setSpacing(collapsed ? 11 : 5);
+    m_gap->changeSize(0, collapsed ? 14 : 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_top->setDirection(collapsed ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
     if (collapsed) m_topGap->changeSize(0, 6, QSizePolicy::Minimum, QSizePolicy::Fixed);
     else m_topGap->changeSize(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
@@ -231,6 +233,8 @@ void Sidebar::applyPresentation() {
         const QString label = button->property("label").toString();
         button->setText(m_state.showLabels() ? label : QString());
         button->setAccessibleName(label);
+        button->setToolTip(collapsed ? label : label + " · " +
+            Shortcuts::label(Shortcuts::workspace(button->property("panel").toInt())));
         button->setMinimumHeight(40);
     }
     updateExtras();

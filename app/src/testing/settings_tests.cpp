@@ -49,8 +49,8 @@ void key(QWidget* target, int code, Qt::KeyboardModifiers modifiers = Qt::NoModi
 }
 void answer(const QString& text) {
     QTimer::singleShot(0, qApp, [text] {
-        if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
-            for (auto* button : box->buttons())
+        if (auto* box = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+            for (auto* button : box->findChildren<QPushButton *>())
                 if (button->text() == text)
                     button->click();
     });

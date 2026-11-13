@@ -1,3 +1,4 @@
+#include "widgets/confirmation.h"
 #include "panels/modelhubpanel.h"
 
 #include "backend_client.h"
@@ -175,17 +176,7 @@ void dialogHeading(QVBoxLayout *layout, const QString &title, QDialog *dialog) {
     auto *row = new QHBoxLayout(header);
     row->setContentsMargins(0, 0, 0, 0);
     row->addWidget(label(title, "hubDialogTitle", header), 1);
-    auto *close = new Button(header);
-    close->setObjectName("hubDialogClose");
-    close->setFlat(true);
-    close->setFixedSize(30, 30);
-    close->setIconSize(QSize(16, 16));
-    close->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textSecondary()), 16));
-    close->setAccessibleName("Close " + title);
-    close->setToolTip("Close");
-    close->setAutoDefault(false);
-    QObject::connect(close, &QPushButton::clicked, dialog, &QDialog::reject);
-    row->addWidget(close);
+    row->addWidget(Ui::dialogCloseButton(dialog, header));
     layout->addWidget(header);
 }
 
@@ -1345,30 +1336,7 @@ void ModelHubPanel::startDownload() {
     if (m_detailRepo.isEmpty() || !m_client || !m_client->isReady()) return;
     const QString message = QString("Download the complete repository %1?\n\nRepository size: %2\nAll repository files will be downloaded to the shared Hugging Face cache.\nReview the publisher’s license and access terms before downloading.")
         .arg(m_detailRepo, bytes(m_detailData.value("total_bytes")));
-    SettingsDetailDialog confirmation(this);
-    confirmation.setObjectName("hubDownloadDialog");
-    confirmation.setWindowTitle("Download repository");
-    confirmation.resize(520, 300);
-    auto *layout = new QVBoxLayout(&confirmation);
-    layout->setContentsMargins(24, 22, 24, 20);
-    layout->setSpacing(18);
-    dialogHeading(layout, "Download repository", &confirmation);
-    layout->addWidget(label(message, "hubBody", &confirmation), 1);
-    auto *actions = new QHBoxLayout;
-    actions->addStretch();
-    auto *cancel = new Button("Cancel", &confirmation);
-    cancel->setDefault(true);
-    auto *download = new Button("Download repository", &confirmation);
-    download->setObjectName("hubConfirmDownload");
-    download->setProperty("primary", true);
-    download->setAutoDefault(false);
-    actions->addWidget(cancel);
-    actions->addWidget(download);
-    layout->addLayout(actions);
-    connect(cancel, &QPushButton::clicked, &confirmation, &QDialog::reject);
-    connect(download, &QPushButton::clicked, &confirmation, &QDialog::accept);
-    cancel->setFocus();
-    if (confirmation.exec() != QDialog::Accepted) return;
+    if (!Ui::confirmAction(this, "Download repository", message, "Download repository")) return;
     m_pullRepo = m_detailRepo;
     m_pullJob.clear();
     m_cancelling = false;

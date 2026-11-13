@@ -1204,11 +1204,7 @@ void DocsPanel::showSources() {
     root->setSpacing(18);
     auto *header = new QHBoxLayout;
     header->addWidget(text("BUILT FOR LOCAL WORK", "docsEyebrow"), 1);
-    auto *close = new Button("×");
-    close->setAccessibleName("Close sources");
-    close->setFixedWidth(32);
-    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
-    header->addWidget(close);
+    header->addWidget(Ui::dialogCloseButton(&dialog));
     root->addLayout(header);
     root->addWidget(text("A small library. Always with you.", "docsSectionTitle"));
     root->addWidget(text("Core articles are available locally. External "
@@ -1255,11 +1251,7 @@ void DocsPanel::openSource(const QString &id) {
     layout->setContentsMargins(24, 24, 24, 24);
     auto *header = new QHBoxLayout;
     header->addWidget(text(source->label, "docsSectionTitle"), 1);
-    auto *close = new Button("×");
-    close->setAccessibleName("Close reference");
-    close->setFixedWidth(32);
-    header->addWidget(close);
-    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+    header->addWidget(Ui::dialogCloseButton(&dialog));
     layout->addLayout(header);
     auto *view = new DocsTextView(nullptr, false);
     view->setReferenceMarkdown(QString::fromUtf8(file.readAll()));

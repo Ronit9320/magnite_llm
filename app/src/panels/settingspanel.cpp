@@ -815,11 +815,7 @@ void SettingsPanel::showText(const QString& title, const QString& text, bool exp
     auto *dragTitle = label(title, "settingsTitle");
     dragTitle->setProperty("windowDragRegion", true);
     heading->addWidget(dragTitle, 1);
-    auto* dismiss = button("×", "settingsClose");
-    dismiss->setFixedSize(30, 30);
-    dismiss->setAccessibleName("Close " + title);
-    heading->addWidget(dismiss);
-    connect(dismiss, &QPushButton::clicked, &dialog, &QDialog::reject);
+    heading->addWidget(Ui::dialogCloseButton(&dialog));
     body->addLayout(heading);
     auto* filter = new QLineEdit;
     filter->setPlaceholderText("Filter lines…");
@@ -932,11 +928,7 @@ void SettingsPanel::showShortcuts() {
     dragTitle->setProperty("windowDragRegion", true);
     copy->addWidget(dragTitle);
     heading->addLayout(copy, 1);
-    auto* dismiss = button("×", "settingsClose");
-    dismiss->setFixedSize(30, 30);
-    dismiss->setAccessibleName("Close keyboard shortcuts");
-    heading->addWidget(dismiss, 0, Qt::AlignTop);
-    connect(dismiss, &QPushButton::clicked, &dialog, &QDialog::reject);
+    heading->addWidget(Ui::dialogCloseButton(&dialog), 0, Qt::AlignTop);
     body->addLayout(heading);
     const QList<QPair<QString, QString>> shortcuts = {
         {"Open settings", Shortcuts::label(Shortcuts::settings())},

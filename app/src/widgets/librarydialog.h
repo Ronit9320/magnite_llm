@@ -28,16 +28,7 @@ public:
         auto *label = new QLabel(title, header);
         label->setObjectName("hubDialogTitle");
         heading->addWidget(label, 1);
-        auto *close = new Button(header);
-        close->setObjectName("hubDialogClose");
-        close->setFlat(true);
-        close->setFixedSize(30, 30);
-        close->setIconSize(QSize(16, 16));
-        close->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textSecondary()), 16));
-        close->setAccessibleName("Close dialog");
-        close->setAutoDefault(false);
-        connect(close, &QPushButton::clicked, this, &QDialog::reject);
-        heading->addWidget(close);
+        heading->addWidget(dialogCloseButton(this, header));
         m_layout->addWidget(header);
         m_accept->setProperty("primary", true);
         m_accept->setAutoDefault(false);
@@ -45,13 +36,22 @@ public:
     }
     QVBoxLayout *form() const { return m_layout; }
     Button *acceptButton() const { return m_accept; }
-    void addActions() {
+    void addActions(bool withCancel = true, bool focusCancel = false) {
         auto *row = new QHBoxLayout;
-        auto *cancel = new Button("Cancel", this);
-        cancel->setAutoDefault(false);
-        connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
         row->addStretch();
-        row->addWidget(cancel);
+        if (withCancel) {
+            auto *cancel = new Button(tr("Cancel"), this);
+            cancel->setAutoDefault(false);
+            connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+            row->addWidget(cancel);
+            if (focusCancel) {
+                cancel->setDefault(true);
+                cancel->setFocus();
+            }
+        } else {
+            m_accept->setDefault(true);
+            m_accept->setFocus();
+        }
         row->addWidget(m_accept);
         m_layout->addLayout(row);
     }

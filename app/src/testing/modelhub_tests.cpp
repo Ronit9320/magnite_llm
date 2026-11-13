@@ -258,10 +258,11 @@ int runModelHubChecks(const QString &directory) {
     tabs->setCurrentIndex(0);
     QTimer::singleShot(80, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-        check(dialog && dialog->objectName() == "hubDownloadDialog", "download confirmation uses the rounded Hub dialog");
+        check(dialog && dialog->objectName() == "appMessageDialog", "download confirmation uses the rounded Hub dialog");
         if (!dialog) return;
         if (!directory.isEmpty()) dialog->grab().save(QDir(directory).filePath(QString("modelhub-download-") + (Theme::isDark() ? "dark" : "light") + ".png"));
-        dialog->findChild<QPushButton *>("hubConfirmDownload")->click();
+        for (auto *button : dialog->findChildren<QPushButton *>())
+            if (button->text() == "Download repository") button->click();
     });
     hub.findChild<QPushButton *>("hubDownloadModel")->click();
     auto *cancel = hub.findChild<QPushButton *>("hubCancelDownload");

@@ -39,11 +39,14 @@
 #endif
 #include "theme.h"
 #include "widgets/studiocanvas.h"
-#include "widgets/progressbar.h"
 
 #include <QApplication>
 #include <QCursor>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QHideEvent>
+#include <QPainter>
+#include <QShowEvent>
 #include <QEasingCurve>
 #include <QFile>
 #include <QFrame>
@@ -57,7 +60,7 @@
 #include <QPlainTextEdit>
 #include "panels/chatbubble.h"
 #include "widgets/overviewtile.h"
-#include <QMessageBox>
+#include "widgets/confirmation.h"
 #include <QPropertyAnimation>
 #include <QPixmap>
 #include <QPushButton>
@@ -75,6 +78,46 @@
 #include <memory>
 
 namespace {
+class ConnectingDots : public QWidget {
+public:
+    explicit ConnectingDots(QWidget *parent) : QWidget(parent) {
+        setFixedSize(20, 20);
+        connect(&m_timer, &QTimer::timeout, this, [this] { update(); });
+    }
+
+protected:
+    void showEvent(QShowEvent *event) override {
+        QWidget::showEvent(event);
+        if (!QSettings().value("appearance/studio3ReducedMotion", false).toBool()) {
+            m_elapsed.start();
+            m_timer.start(33);
+        }
+    }
+
+    void hideEvent(QHideEvent *event) override {
+        m_timer.stop();
+        QWidget::hideEvent(event);
+    }
+
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.translate(width() / 2.0, height() / 2.0);
+        if (m_timer.isActive()) painter.rotate(360.0 * (m_elapsed.elapsed() % 1200) / 1200.0);
+        painter.setPen(Qt::NoPen);
+        for (qreal opacity : {1.0, 0.75, 0.5}) {
+            painter.setOpacity(opacity);
+            painter.setBrush(QColor(Theme::accentPrimary()));
+            painter.drawEllipse(QPointF(0, -6), 2.2, 2.2);
+            painter.rotate(120);
+        }
+    }
+
+private:
+    QTimer m_timer;
+    QElapsedTimer m_elapsed;
+};
+
 // Runs that must never touch the user's real chats or ask questions.
 bool verificationRun() {
     const auto args = QCoreApplication::arguments();
@@ -121,22 +164,22 @@ MainWindow::MainWindow(QWidget *parent)
     m_settingsPanel->setUpdateManager(m_updater);
     connect(m_updater, &UpdateManager::installRequested, this, [this]() {
         if (!m_backendClient->isReady()) {
-            QMessageBox::information(this, "Update", "Wait for the local service to become ready before installing."); return;
+            Ui::showNotice(this, "Update", "Wait for the local service to become ready before installing."); return;
         }
-        if (QMessageBox::question(this, "Install preview update",
-            "Restart Magnite to install the update? Finish your work and export anything you need from this conversation first.") != QMessageBox::Yes) return;
+        if (!Ui::confirmAction(this, "Install preview update",
+            "Restart Magnite to install the update? Finish your work and export anything you need from this conversation first.", "Install and restart")) return;
         setEnabled(false);
         m_backendClient->post("/updates/quiesce", {}, [this](int status, const QJsonDocument &doc) {
             if (status != 200) {
                 setEnabled(true);
-                QMessageBox::information(this, "Update postponed", doc.object().value("detail").toString("Could not confirm that the local service is idle. Retry when all work is finished."));
+                Ui::showNotice(this, "Update postponed", doc.object().value("detail").toString("Could not confirm that the local service is idle. Retry when all work is finished."));
                 return;
             }
             m_backendClient->abortAll();
             if (!m_backend->stopForUpdate()) {
                 setEnabled(true);
                 m_backendClient->post("/updates/resume", {}, [](int, const QJsonDocument &) {});
-                QMessageBox::information(this, "Update postponed", "The local service has not finished shutting down. Close and reopen Magnite before retrying.");
+                Ui::showNotice(this, "Update postponed", "The local service has not finished shutting down. Close and reopen Magnite before retrying.");
                 return;
             }
             m_updater->install();
@@ -146,7 +189,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_updater, &UpdateManager::installFailed, this, [this](const QString &reason) {
         setEnabled(true);
         if (!m_backend->isRunning()) startBackend();
-        QMessageBox::information(this, "Update", reason);
+        Ui::showNotice(this, "Update", reason);
     });
     connect(m_backend, &BackendManager::started, this, []() {
         QSettings().setValue("updates/highestSequence", qMax(MAGNITE_UPDATE_SEQUENCE,
@@ -447,16 +490,11 @@ void MainWindow::setupUi() {
         auto *footer = new QWidget(m_startupPage);
         auto *footerLayout = new QHBoxLayout(footer);
         footerLayout->setContentsMargins(0, 0, 0, 28);
-        footerLayout->setSpacing(12);
-        auto *progress = new ProgressBar(footer);
-        progress->setRange(0, 0);
-        progress->setTextVisible(false);
-        progress->setFixedSize(44, 8);
+        footerLayout->setSpacing(8);
+        auto *progress = new ConnectingDots(footer);
         auto *status = new QLabel(tr("Connecting…"), footer);
         status->setObjectName("startupStatus");
         status->setAccessibleName(tr("Connecting to the local backend"));
-        if (QSettings().value("appearance/studio3ReducedMotion", false).toBool())
-            progress->hide();
         footerLayout->addWidget(progress);
         footerLayout->addWidget(status);
         layout->addWidget(footer, 0, Qt::AlignHCenter);
@@ -660,7 +698,7 @@ void MainWindow::onBackendStarted() {
         const QStringList fresh = m_notices.unseen(all);
         if (fresh.isEmpty()) return;
         if (verificationRun()) fprintf(stderr, "[notice] %s\n", qUtf8Printable(fresh.join(" | ")));
-        else QMessageBox::information(this, "Magnite repaired its data files", fresh.join("\n\n"));
+        else Ui::showNotice(this, "Magnite repaired its data files", fresh.join("\n\n"));
     });
     // onBackendStarted runs again after every automatic restart: connect each pair once only.
     connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels,
@@ -685,7 +723,7 @@ void MainWindow::onBackendDataDirInUse() {
     showWorkspace();
     setPillState("error", "Already running");
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
-    else QMessageBox::information(this, "Magnite is already running", msg);
+    else Ui::showNotice(this, "Magnite is already running", msg);
 }
 
 void MainWindow::onBackendError(QProcess::ProcessError error) {
@@ -707,7 +745,7 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
     setPillState("error", msg);
     m_settingsPanel->refreshDetails();
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
-    else QMessageBox::warning(this, "Backend Error", msg);
+    else Ui::showNotice(this, "Backend Error", msg);
 }
 
 void MainWindow::runSelfTest() {
@@ -1545,13 +1583,13 @@ void MainWindow::notifyCompletion(const QString &kind,bool success,bool preview)
         auto *watcher=new QDBusPendingCallWatcher(service.asyncCallWithArgumentList("Notify",args),this);
         connect(watcher,&QDBusPendingCallWatcher::finished,this,[this,preview](QDBusPendingCallWatcher *pending){
             QDBusPendingReply<uint> reply=*pending;
-            if(reply.isError()&&preview)QMessageBox::information(m_settingsWindow,"Notifications unavailable","The desktop notification service rejected the request. Check your system notification settings.");
+            if(reply.isError()&&preview)Ui::showNotice(m_settingsWindow,"Notifications unavailable","The desktop notification service rejected the request. Check your system notification settings.");
             pending->deleteLater();
         });return;
     }
 #endif
     if(!QSystemTrayIcon::isSystemTrayAvailable() || !QSystemTrayIcon::supportsMessages()) {
-        if(preview)QMessageBox::information(m_settingsWindow,"Notifications unavailable","This desktop session does not provide notifications. Completion status remains available in the relevant panel.");
+        if(preview)Ui::showNotice(m_settingsWindow,"Notifications unavailable","This desktop session does not provide notifications. Completion status remains available in the relevant panel.");
         return;
     }
     m_notificationTray->show();

@@ -1343,9 +1343,9 @@ int runUiCheck(const QString &captures) {
             auto *timer = new QTimer; timer->setInterval(20);
             QObject::connect(timer,&QTimer::timeout,[=]() {
                 for (auto *w : QApplication::topLevelWidgets())
-                    if (auto *d = qobject_cast<QMessageBox *>(w); d && d->isVisible()) {
-                        if (text) *text = d->text() + "\n" + d->informativeText();
-                        if (accept) { for (auto *b : d->buttons()) if (b->text()=="Delete") { b->click(); break; } }
+                    if (auto *d = qobject_cast<QDialog *>(w); d && d->objectName()=="appMessageDialog" && d->isVisible()) {
+                        if (text) *text = d->findChild<QLabel *>("appMessageBody")->text();
+                        if (accept) { for (auto *b : d->findChildren<QPushButton *>()) if (b->text()=="Delete") { b->click(); break; } }
                         else d->reject();
                         timer->stop(); timer->deleteLater(); return;
                     }
@@ -1413,7 +1413,7 @@ int runUiCheck(const QString &captures) {
         bool literal=false; for (auto *label:docs[1]->findChildren<QLabel *>()) if(label->text().startsWith("<b>")) literal=label->textFormat()==Qt::PlainText;
         check(literal,"filenames display literally");
     }
-    QTimer::singleShot(0,[](){ for(auto *widget:QApplication::topLevelWidgets()) if(auto *dialog=qobject_cast<QMessageBox *>(widget)) dialog->reject(); });
+    QTimer::singleShot(0,[](){ for(auto *widget:QApplication::topLevelWidgets()) if(auto *dialog=qobject_cast<QDialog *>(widget); dialog && dialog->objectName()=="appMessageDialog") dialog->reject(); });
     QMetaObject::invokeMethod(&knowledge,"onClearAll"); pump();
     check(fixture.clears==0,"Cancel preserves Knowledge contents");
     auto *query=knowledge.findChild<QLineEdit *>("documentQuery"); query->setText("What is Magnite?");
@@ -3095,9 +3095,8 @@ int runUiCheck(const QString &captures) {
         auto buttons=nav();
         bool strippedOk=strip.width()==52&&strip.minimumWidth()==52&&strip.maximumWidth()==52&&buttons.size()==6;
         for (int i=0;i<6&&strippedOk;++i) {
-            const QString shortcut=QKeySequence(Qt::CTRL | (Qt::Key_1+i)).toString(QKeySequence::NativeText);
             strippedOk=buttons[i]->text().isEmpty()&&buttons[i]->accessibleName()==labels[i]&&
-                       buttons[i]->toolTip()==labels[i]+" \u00b7 "+shortcut;
+                       buttons[i]->toolTip()==labels[i];
         }
         check(strippedOk,"sidebar: collapsing makes a 52px icon strip; the labels stay as tooltips and accessible names");
         bool hidden=!strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip);
@@ -3111,7 +3110,7 @@ int runUiCheck(const QString &captures) {
         }
         strip.setCurrentPanel(4);
         check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
-        check(toggle->toolTip()=="Expand sidebar \u00b7 Ctrl+B"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
+        check(toggle->toolTip()=="Expand sidebar"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
         strip.setCollapsed(false); pump();
         buttons=nav(); bool backOk=strip.width()==SidebarState::kExpandedWidth&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==35;
         for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];

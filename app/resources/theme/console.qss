@@ -31,10 +31,8 @@ QPushButton#navBtn:pressed { background: @surfaceFillActive; }
 QWidget#sidebar[collapsed="true"] QPushButton#navBtn { padding: 0; text-align: center; }
 QPushButton#sidebarToggle { padding: 0; border: 1px solid @surfaceBorder; border-radius: 8px; background: @surfaceFill; }
 QPushButton#sidebarToggle:hover { background: @surfaceFillHover; }
-QPushButton#sidebarToggle:pressed, QPushButton#sidebarNewChat:pressed { background: @surfaceFillActive; }
-QPushButton#sidebarNewChat { padding: 0; border: 1px solid @surfaceBorder; border-radius: 13px; background: @surfaceFill; }
-QPushButton#sidebarNewChat:hover { background: @surfaceFillHover; }
-QPushButton#sidebarNewChat:disabled { background: transparent; }
+QPushButton#sidebarToggle:pressed { background: @surfaceFillActive; }
+QPushButton#sidebarNewChat { padding: 0; min-height: 0; }
 QPushButton#primaryBtn { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#cardPrimary { background: @accentPrimary; color: @accentText; border-color: @accentPrimary; }
 QPushButton#primaryBtn:hover { background: @accentHover; border-color: @accentHover; }
@@ -120,7 +118,15 @@ QPushButton#editSave { background: @accentPrimary; color: @accentText; border-co
 QPushButton#editSave:hover { background: @accentHover; border-color: @accentHover; }
 QLabel#versionLabel { color: @textMuted; font-size: 12px; }
 QStatusBar { background: @insetBackground; color: @textSecondary; font-size: 12px; border-top: 1px solid @surfaceBorder; }
-QToolTip { background: @textPrimary; color: @surfaceFill; padding: 6px 8px; border: none; border-radius: 6px; }
+QToolTip {
+    background: @surfaceFill;
+    color: @textPrimary;
+    border: 1px solid @surfaceBorder;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-family: @bodyFont;
+    font-size: 11px;
+}
 QFrame#workspaceBar { border-bottom: 1px solid @surfaceBorder; background: @canvasBackground; }
 QLabel#tileKicker { font-family: @bodyFont; font-size: 10px; color: @textSecondary; }
 QLabel#tileValue { font-family: @headingFont; font-size: 15px; color: @textPrimary; }
@@ -230,7 +236,6 @@ QMenu::item { padding: 7px 14px; margin: 1px 2px; border-radius: 5px; }
 QMenu::item:selected { background: @surfaceFillHover; color: @textPrimary; }
 QMenu::item:disabled { color: @textMuted; }
 QMenu::separator { height: 1px; background: @surfaceBorder; margin: 4px 6px; }
-QToolTip { border: 1px solid @surfaceBorder; padding: 7px 10px; }
 QDialogButtonBox { spacing: 8px; }
 QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed { background: @accentHover; border-radius: 4px; margin: 2px 0 2px 0; }
 
@@ -366,7 +371,7 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
 QTextEdit:focus, QPlainTextEdit:focus { background: @insetBackground; }
 QWidget:focus { outline: 0; }
 QPushButton#themeToggle:focus, QPushButton#navBtn:focus, QPushButton#navBtn:checked:focus,
-QPushButton#sidebarToggle:focus, QPushButton#sidebarNewChat:focus, QPushButton#historyNew:focus { border-color: @accentLabel; }
+QPushButton#sidebarToggle:focus, QPushButton#historyNew:focus { border-color: @accentLabel; }
 
 /* Settings utility window; the workspace remains underneath. */
 QDialog#settingsWindow { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
@@ -510,7 +515,7 @@ QFrame#hubRule { background: @surfaceBorder; border: none; }
 QLabel#hubDetailTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; color: @textPrimary; }
 QFrame#hubStatCell { background: transparent; border: none; border-left: 1px solid @surfaceBorder; }
 QFrame#hubStatCell[first="true"] { border-left: none; }
-QLabel#hubBody { color: @textSecondary; font-size: 13px; }
+QLabel#hubBody, QLabel#appMessageBody { color: @textSecondary; font-size: 13px; }
 QLabel#hubSmallTitle { color: @textPrimary; font-size: 12px; font-weight: 500; }
 QFrame#hubUseCase { background: @canvasBackground; border: none; border-radius: 6px; }
 QLabel#hubCallout { background: @accentSurface; border: none; border-left: 2px solid @accentPrimary; border-radius: 0; padding: 12px 14px; font-size: 12px; color: @textSecondary; }

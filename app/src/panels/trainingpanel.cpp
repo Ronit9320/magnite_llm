@@ -1,3 +1,4 @@
+#include "widgets/settingswindow.h"
 #include "widgets/spinbox.h"
 #include "widgets/tabwidget.h"
 #include <QTableWidget>
@@ -540,7 +541,7 @@ void TrainingPanel::setupUi() {
     configure->setMinimumWidth(146);
     auto *summaryRow=new QHBoxLayout(); summaryRow->addWidget(m_recipeSummary,1); summaryRow->addWidget(configure); recipe->insertLayout(2,summaryRow);
     recipeActions->addStretch(); recipeActions->addWidget(m_startButton); recipe->addLayout(recipeActions); m_startButton->hide();
-    m_runDialog=new QDialog(this); m_runDialog->setObjectName("trainingRunDialog"); m_runDialog->setWindowTitle("Configure your next run");
+    m_runDialog=new SettingsDetailDialog(this); m_runDialog->setObjectName("trainingRunDialog"); m_runDialog->setWindowTitle("Configure your next run");
     m_runDialog->setModal(true); m_runDialog->resize(700,700); m_dialogLayout=new QVBoxLayout(m_runDialog); m_dialogLayout->setContentsMargins(12,12,12,12);
     connect(m_runDialog,&QDialog::finished,this,&TrainingPanel::closeRunDialog);
     m_archive=new QWidget(this); m_archive->setObjectName("trainingArchive"); auto *archive=new QVBoxLayout(m_archive);
@@ -1663,10 +1664,12 @@ void TrainingPanel::openRunDialog() {
         auto *label=new QLabel(value,body); label->setObjectName(name); label->setWordWrap(true); label->setTextFormat(Qt::PlainText); return label;
     };
     auto *dialogHeading=new QHBoxLayout(); auto *dialogTitles=new QVBoxLayout(); dialogTitles->setSpacing(6);
-    dialogTitles->addWidget(text("RUN CONFIGURATION","trainingEyebrow")); dialogTitles->addWidget(text("Configure your next run","trainingDialogTitle"));
-    dialogHeading->addLayout(dialogTitles,1); auto *close=new Button("×",container); close->setFixedWidth(32); close->setFlat(true);
-    close->setAccessibleName("Close run configuration"); close->setToolTip("Close · Esc"); dialogHeading->addWidget(close,0,Qt::AlignTop);
-    connect(close,&QPushButton::clicked,m_runDialog,&QDialog::reject); shell->addLayout(dialogHeading);
+    dialogTitles->addWidget(text("RUN CONFIGURATION","trainingEyebrow")); auto *dialogTitle = text("Configure your next run", "trainingDialogTitle");
+    dialogTitle->setProperty("windowDragRegion", true);
+    dialogTitles->addWidget(dialogTitle);
+    dialogHeading->addLayout(dialogTitles,1);
+    dialogHeading->addWidget(Ui::dialogCloseButton(m_runDialog, container), 0, Qt::AlignTop);
+    shell->addLayout(dialogHeading);
     if (!shortScreen) shell->addWidget(text("Choose your inputs and training settings in one place.","trainingMicro"));
     auto *name=new QLineEdit(m_adapterNameEdit->text(),body); name->setObjectName("trainingDraft_adapterName"); name->setAccessibleName("Adapter name");
     name->setPlaceholderText("Auto-named when empty"); name->setMaxLength(160); m_dialogEditors["adapterName"]=name;

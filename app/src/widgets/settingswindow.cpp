@@ -1,3 +1,4 @@
+#include "widgets/button.h"
 #include "widgets/settingswindow.h"
 #include "panels/settingspanel.h"
 #include "theme.h"
@@ -33,6 +34,20 @@ class Scrim : public QWidget {
     }
 };
 } // namespace
+Button *Ui::dialogCloseButton(QDialog *dialog, QWidget *parent) {
+    auto *close = new Button(parent ? parent : dialog);
+    close->setObjectName("hubDialogClose");
+    close->setFlat(true);
+    close->setFixedSize(30, 30);
+    close->setIconSize(QSize(16, 16));
+    close->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textSecondary()), 16));
+    close->setAccessibleName(QObject::tr("Close dialog"));
+    close->setToolTip(QObject::tr("Close"));
+    close->setAutoDefault(false);
+    QObject::connect(close, &QPushButton::clicked, dialog, &QDialog::reject);
+    return close;
+}
+
 SettingsDetailDialog::SettingsDetailDialog(QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint) {
     setObjectName("settingsDetailDialog");

@@ -1,11 +1,11 @@
 #pragma once
 
-#include <QDialog>
+#include "widgets/settingswindow.h"
 
 class QLineEdit;
 
 // The one-time "What should I call you?" question. Save accepts, Skip (or Esc) rejects.
-class NameDialog : public QDialog {
+class NameDialog : public SettingsDetailDialog {
     Q_OBJECT
 
 public:

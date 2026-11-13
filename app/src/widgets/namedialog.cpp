@@ -10,7 +10,7 @@
 #include <QVBoxLayout>
 
 NameDialog::NameDialog(const QString &suggestion, QWidget *parent)
-    : QDialog(parent) {
+    : SettingsDetailDialog(parent) {
     setWindowTitle("Welcome to Magnite");
     setModal(true);
     setMinimumWidth(380);
@@ -18,8 +18,12 @@ NameDialog::NameDialog(const QString &suggestion, QWidget *parent)
     layout->setContentsMargins(24, 22, 24, 20);
     layout->setSpacing(10);
     auto *title = new QLabel("What should I call you?", this);
-    title->setObjectName("panelTitle");
-    layout->addWidget(title);
+    title->setObjectName("hubDialogTitle");
+    title->setProperty("windowDragRegion", true);
+    auto *heading = new QHBoxLayout;
+    heading->addWidget(title, 1);
+    heading->addWidget(Ui::dialogCloseButton(this));
+    layout->addLayout(heading);
     auto *hint = new QLabel("Used only for the greeting on a new chat. It stays on this computer, and you can change it any time in Settings.", this);
     hint->setObjectName("cardMeta");
     hint->setWordWrap(true);

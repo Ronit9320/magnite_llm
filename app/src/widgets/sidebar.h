@@ -70,6 +70,7 @@ private:
     QPushButton *m_toggle = nullptr;
     QWidget *m_wordmark = nullptr;
     QList<QLabel *> m_tags;
+    QVBoxLayout *m_navigation = nullptr;
     QVBoxLayout *m_layout = nullptr;
     QBoxLayout *m_top = nullptr;
     QSpacerItem *m_gap = nullptr;

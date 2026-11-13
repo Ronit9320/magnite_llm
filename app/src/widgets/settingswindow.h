@@ -1,6 +1,11 @@
 #pragma once
 #include <QDialog>
 class SettingsPanel;
+class Button;
+
+namespace Ui {
+Button *dialogCloseButton(QDialog *dialog, QWidget *parent = nullptr);
+}
 class QPropertyAnimation;
 
 // A modal utility window keeps the workspace and its current selection underneath.

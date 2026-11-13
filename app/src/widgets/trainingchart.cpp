@@ -1,3 +1,4 @@
+#include "widgets/settingswindow.h"
 #include "trainingchart.h"
 #include "theme.h"
 #include "widgets/button.h"
@@ -102,12 +103,20 @@ void TrainingChart::expand() {
         m_expandedDialog->activateWindow();
         return;
     }
-    auto *dialog = new QDialog(this);
+    auto *dialog = new SettingsDetailDialog(this);
     dialog->setObjectName("trainingChartExpanded");
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowTitle(accessibleName());
     dialog->resize(900, 520);
     auto *layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(24, 22, 24, 20);
+    auto *heading = new QHBoxLayout;
+    auto *title = new QLabel(dialog->windowTitle(), dialog);
+    title->setObjectName("hubDialogTitle");
+    title->setProperty("windowDragRegion", true);
+    heading->addWidget(title, 1);
+    heading->addWidget(Ui::dialogCloseButton(dialog));
+    layout->addLayout(heading);
     m_expandedDialog = dialog;
     m_expandedChart = new TrainingChart(m_metric, dialog);
     m_expandedChart->m_expandButton->hide();
