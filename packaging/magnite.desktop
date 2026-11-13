@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Magnite (Testing)
+Name=Magnite Space (Testing)
 Comment=Local model inference, training and document chat
 Exec=magnite-app
 Icon=magnite

@@ -6,7 +6,7 @@
 class QPainter;
 
 namespace BrandMark {
-// Supplied Magnite artwork, shared by the app icon and animated activity marks.
+// Brand symbol shared by the app icon and activity marks.
 void paint(QPainter &painter, const QRectF &bounds, const QColor &color, qreal rotation = 0);
 QIcon icon();
 }
@@ -18,9 +18,9 @@ protected:
     void paintEvent(QPaintEvent *) override;
 };
 
-class BrandWordmark : public QWidget {
+class BrandLockup : public QWidget {
 public:
-    explicit BrandWordmark(QWidget *parent = nullptr);
+    explicit BrandLockup(int width, QWidget *parent = nullptr);
 protected:
     void paintEvent(QPaintEvent *) override;
 };

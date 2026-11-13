@@ -158,7 +158,7 @@ def import_adapter(body: AdapterImportRequest):
 
 
 def _import_adapter(body: AdapterImportRequest):
-    """Ingest a Magnite adapter export zip and register the adapter."""
+    """Ingest a Magnite Space adapter export zip and register the adapter."""
     src = (body.path or "").strip()
     if not src or not os.path.isfile(src):
         raise HTTPException(
@@ -170,7 +170,7 @@ def _import_adapter(body: AdapterImportRequest):
             if "record.json" not in zf.namelist():
                 raise HTTPException(
                     status_code=400,
-                    detail="Not a Magnite adapter export (missing record.json)",
+                    detail="Not a Magnite Space adapter export (missing record.json)",
                 )
             if zf.getinfo("record.json").file_size > 1024 * 1024:
                 raise ValueError("Adapter metadata exceeds 1 MiB")

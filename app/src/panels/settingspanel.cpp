@@ -33,7 +33,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -97,37 +96,14 @@ void note(QVBoxLayout* layout, const QString& title, const QString& text) {
     body->addWidget(label(text, "settingsHint"));
     layout->addWidget(host);
 }
-class StaticSettingsLogo : public QWidget {
-  public:
-    explicit StaticSettingsLogo(int size, QWidget* parent = nullptr) : QWidget(parent) {
-        setFixedSize(size, size);
-        setAccessibleName("Magnite static logo");
-        setObjectName("settingsStaticLogo");
-    }
-
-  protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        BrandMark::paint(painter, QRectF(rect()), QColor(Theme::brandOrange()));
-    }
-};
 QWidget* signature(bool large) {
     auto* host = new QWidget;
     host->setObjectName(large ? "settingsUpdateBrand" : "settingsSidebarBrand");
-    auto* body = new QHBoxLayout(host);
+    auto* body = new QVBoxLayout(host);
     body->setContentsMargins(0, 0, 0, 0);
-    body->setSpacing(large ? 16 : 10);
-    body->addWidget(new StaticSettingsLogo(large ? 64 : 34));
-    auto* copy = new QVBoxLayout;
-    copy->setContentsMargins(0, 0, 0, 0);
-    copy->setSpacing(3);
-    auto* name = new BrandWordmark;
-    if (!large)
-        name->setFixedSize(110, 30);
-    copy->addWidget(name);
-    copy->addWidget(label(QCoreApplication::applicationVersion(), "settingsHint"));
-    body->addLayout(copy);
-    body->addStretch();
+    body->setSpacing(6);
+    body->addWidget(new BrandLockup(large ? 232 : 150, host));
+    body->addWidget(label(QCoreApplication::applicationVersion(), "settingsHint"));
     return host;
 }
 } // namespace
@@ -227,7 +203,7 @@ void SettingsPanel::setupUi() {
          "Your name stays on this computer. Leave it empty for a greeting without a name.");
     auto* shortcuts = button("View shortcuts");
     shortcuts->setObjectName("settingsShortcuts");
-    row(general, "Keyboard shortcuts", "Review the shortcuts available throughout Magnite.",
+    row(general, "Keyboard shortcuts", "Review the shortcuts available throughout Magnite Space.",
         shortcuts);
     connect(shortcuts, &QPushButton::clicked, this, &SettingsPanel::showShortcuts);
     auto* reset = button("Reset…");
@@ -260,7 +236,7 @@ void SettingsPanel::setupUi() {
     }
     appearance->addLayout(choices);
     appearance->addWidget(
-        label("Choose a theme, or let Magnite follow your system.", "settingsHint"));
+        label("Choose a theme, or let Magnite Space follow your system.", "settingsHint"));
     connect(m_theme, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [themeGroup](int index) {
                 if (auto* choice = themeGroup->button(index))
@@ -278,7 +254,7 @@ void SettingsPanel::setupUi() {
     m_scale = new ComboBox;
     m_scale->setObjectName("settingsInterfaceSize");
     m_scale->addItems({"Compact", "Default", "Large"});
-    row(appearance, "Interface size", "Adjust text size across Magnite.", m_scale);
+    row(appearance, "Interface size", "Adjust text size across Magnite Space.", m_scale);
     auto* chat = columns[2];
     m_sendKey = new ComboBox;
     m_sendKey->setObjectName("sendKeyCombo");
@@ -383,8 +359,8 @@ void SettingsPanel::setupUi() {
          "Hub search, downloads and update checks use the internet. Inference and training run "
          "locally. The shared model cache can also be used by other applications.");
     auto* notifications = columns[5];
-    note(notifications, "Keep working while Magnite runs",
-         "Desktop notifications appear when Magnite is in the background and your system supports "
+    note(notifications, "Keep working while Magnite Space runs",
+         "Desktop notifications appear when Magnite Space is in the background and your system supports "
          "them. Your system controls notification permissions.");
     m_trainingNotice = new ToggleSwitch("", this);
     m_trainingNotice->setAccessibleName("Training notifications");
@@ -446,7 +422,7 @@ void SettingsPanel::setupUi() {
     });
     m_automatic = new ToggleSwitch("", this);
     m_automatic->setAccessibleName("Check for updates on startup");
-    row(updates, "Check on startup", "Look for new preview releases when Magnite opens.",
+    row(updates, "Check on startup", "Look for new preview releases when Magnite Space opens.",
         m_automatic);
     note(updates, "Restart when your work is finished",
          "Updates replace the app and bundled runtime. Your models and application data stay in "
@@ -652,7 +628,7 @@ void SettingsPanel::refreshDetails() {
         const auto o = doc.object();
         m_cacheDirectory = o["model_cache"].toString();
         m_cachePath->setText(m_cacheDirectory +
-                             "\nShared with other apps; may be outside Magnite's data directory.");
+                             "\nShared with other apps; may be outside Magnite Space's data directory.");
         m_activeDataPath = o["data_directory"].toString();
         m_effectivePath->setText(m_activeDataPath);
         m_storageInfo->setMeasurements(o);
@@ -680,7 +656,7 @@ void SettingsPanel::installPackage(const QJsonObject& package) {
     if (!Ui::confirmAction(this, "Install " + label + "?",
                            label + " will be downloaded from the network (" +
                                package["size_hint"].toString().toLower() +
-                               ") and added to Magnite's own packages folder. Your models, chats and "
+                               ") and added to Magnite Space's own packages folder. Your models, chats and "
                                "the app itself are not changed.",
                            "Install"))
         return;

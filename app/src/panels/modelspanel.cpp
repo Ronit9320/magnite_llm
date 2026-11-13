@@ -252,7 +252,7 @@ void ModelsPanel::importModel() {
         setStatus("Connect to the local service before importing a model.", "error");
         return;
     }
-    const auto path = Ui::chooseLibraryImport(this, "Import model", "Choose a GGUF file to add to Library. Magnite uses the file in its current location.", "GGUF weights (*.gguf)", "gguf");
+    const auto path = Ui::chooseLibraryImport(this, "Import model", "Choose a GGUF file to add to Library. Magnite Space uses the file in its current location.", "GGUF weights (*.gguf)", "gguf");
     if (path.isEmpty()) return;
     m_client->post("/models/import", QJsonObject{{"path", path}}, [this](int status, const QJsonDocument &doc) {
         if (status != 201) {

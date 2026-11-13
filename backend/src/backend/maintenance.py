@@ -41,7 +41,7 @@ class UpdateGate:
         if path == "/health":
             return await self.app(scope, receive, send)
         if self.quiesced:
-            return await self.respond(send, 503, "Magnite is preparing to update.")
+            return await self.respond(send, 503, "Magnite Space is preparing to update.")
         self.active += 1
         try:
             await self.app(scope, receive, send)

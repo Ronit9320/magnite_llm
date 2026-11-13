@@ -1,4 +1,4 @@
-# Contributing to Magnite
+# Contributing to Magnite Space
 
 Work within the local desktop scope: model management, LoRA/QLoRA training,
 local inference, adapters, and RAG. Hosted/cloud features are outside this release.

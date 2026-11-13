@@ -143,7 +143,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_selfTest(QCoreApplication::arguments().contains("--selftest"))
 {
     setupUi();
-    setWindowTitle("Magnite");
+    setWindowTitle(QApplication::applicationDisplayName());
     setWindowIcon(BrandMark::icon());
     resize(1280, 820);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
@@ -189,7 +189,7 @@ MainWindow::MainWindow(QWidget *parent)
             Ui::showNotice(this, "Update", "Wait for the local service to become ready before installing."); return;
         }
         if (!Ui::confirmAction(this, "Install preview update",
-            "Restart Magnite to install the update? Finish your work and export anything you need from this conversation first.", "Install and restart")) return;
+            "Restart Magnite Space to install the update? Finish your work and export anything you need from this conversation first.", "Install and restart")) return;
         setEnabled(false);
         m_backendClient->post("/updates/quiesce", {}, [this](int status, const QJsonDocument &doc) {
             if (status != 200) {
@@ -201,7 +201,7 @@ MainWindow::MainWindow(QWidget *parent)
             if (!m_backend->stopForUpdate()) {
                 setEnabled(true);
                 m_backendClient->post("/updates/resume", {}, [](int, const QJsonDocument &) {});
-                Ui::showNotice(this, "Update postponed", "The local service has not finished shutting down. Close and reopen Magnite before retrying.");
+                Ui::showNotice(this, "Update postponed", "The local service has not finished shutting down. Close and reopen Magnite Space before retrying.");
                 return;
             }
             m_updater->install();
@@ -395,7 +395,7 @@ void MainWindow::setupUi() {
     auto *newChatKey=new QShortcut(Shortcuts::newChat(),this);
     connect(newChatKey,&QShortcut::activated,this,[this]{if(!m_startupPage && !m_chatPanel->isBusy()){switchPanel(PanelChat);QMetaObject::invokeMethod(m_chatPanel,"onClearChat");}});
     m_notificationTray=new QSystemTrayIcon(BrandMark::icon(),this);
-    m_notificationTray->setToolTip("Magnite");
+    m_notificationTray->setToolTip(QApplication::applicationDisplayName());
     connect(m_notificationTray,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason){showNormal();raise();activateWindow();});
     connect(m_modelsPanel,&ModelsPanel::downloadFinished,this,[this](bool success){notifyCompletion("downloads",success);});
     connect(m_trainingPanel,&TrainingPanel::runFinished,this,[this](bool success){notifyCompletion("training",success);});
@@ -495,16 +495,7 @@ void MainWindow::setupUi() {
         m_workspaceHeader = bar;
         layout->addWidget(header);
 
-        auto *brand = new QWidget(m_startupPage);
-        auto *brandLayout = new QVBoxLayout(brand);
-        brandLayout->setContentsMargins(0, 0, 0, 0);
-        brandLayout->setSpacing(16);
-        auto *symbol = new BrandSymbol(brand);
-        symbol->setFixedSize(100, 100);
-        brandLayout->addWidget(symbol, 0, Qt::AlignHCenter);
-        auto *name = new BrandWordmark(brand);
-        name->setFixedSize(184, 51);
-        brandLayout->addWidget(name, 0, Qt::AlignHCenter);
+        auto *brand = new BrandLockup(380, m_startupPage);
         layout->addStretch(1);
         layout->addWidget(brand, 0, Qt::AlignHCenter);
         layout->addStretch(1);
@@ -601,12 +592,12 @@ void MainWindow::startPanelFade() {
 void MainWindow::setPillState(const char *state, const QString &text) {
     m_statusPill->setText(text);
     const QString detail = QString::fromLatin1(state) == "ok"
-        ? "Magnite’s local service is connected.\n" + m_backend->baseUrl()
+        ? "Magnite Space’s local service is connected.\n" + m_backend->baseUrl()
         : QString::fromLatin1(state) == "err"
-            ? "Magnite’s local service is unavailable. Check the backend error for details."
+            ? "Magnite Space’s local service is unavailable. Check the backend error for details."
             : text == "Reconnecting"
-                ? "Magnite’s local service stopped unexpectedly. Reconnecting…"
-                : "Starting Magnite’s local service…";
+                ? "Magnite Space’s local service stopped unexpectedly. Reconnecting…"
+                : "Starting Magnite Space’s local service…";
     m_statusPill->parentWidget()->setToolTip(detail);
     m_statusPill->setAccessibleName("Local service: " + text);
     m_connectionDot->setProperty("state", state);
@@ -719,7 +710,7 @@ void MainWindow::onBackendStarted() {
         const QStringList fresh = m_notices.unseen(all);
         if (fresh.isEmpty()) return;
         if (verificationRun()) fprintf(stderr, "[notice] %s\n", qUtf8Printable(fresh.join(" | ")));
-        else Ui::showNotice(this, "Magnite repaired its data files", fresh.join("\n\n"));
+        else Ui::showNotice(this, "Magnite Space repaired its data files", fresh.join("\n\n"));
     });
     // onBackendStarted runs again after every automatic restart: connect each pair once only.
     connect(m_modelsPanel, &ModelsPanel::modelsChanged, m_chatPanel, &ChatPanel::refreshModels,
@@ -733,15 +724,15 @@ void MainWindow::onBackendStarted() {
 }
 
 void MainWindow::onBackendDataDirInUse() {
-    const QString msg = "Magnite is already running. Another Magnite window is using your data folder; "
-                        "switch to it, or quit it and open Magnite again.";
+    const QString msg = "Magnite Space is already running. Another Magnite Space window is using your data folder; "
+                        "switch to it, or quit it and open Magnite Space again.";
     m_backendClient->abortAll();
     m_backendClient->setBaseUrl(QString());
     m_backendClient->setAuthToken(QString());
     showWorkspace();
     setPillState("error", "Already running");
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
-    else Ui::showNotice(this, "Magnite is already running", msg);
+    else Ui::showNotice(this, "Magnite Space is already running", msg);
 }
 
 void MainWindow::onBackendError(QProcess::ProcessError error) {
@@ -1191,7 +1182,7 @@ void MainWindow::trainingSelfTest(std::shared_ptr<int> failCount,
     }
     const char *const lines[] = {
         R"({"text":"The quick brown fox jumps over the lazy dog."})",
-        R"({"text":"Magnite trains local language models efficiently."})",
+        R"({"text":"Magnite Space trains local language models efficiently."})",
         R"({"text":"LoRA adapters are small and composable."})",
         R"({"text":"Quantum entanglement links distant particles."})",
         R"({"text":"The train station is north of the river."})",
@@ -1329,7 +1320,7 @@ void MainWindow::adapterSelfTest(std::shared_ptr<int> failCount,
         return;
     }
     const char *const lines[] = {
-        R"({"instruction":"Introduce Magnite","output":"Magnite is a local LLM workstation."})",
+        R"({"instruction":"Introduce Magnite Space","output":"Magnite Space is a local LLM workstation."})",
         R"({"instruction":"What is QLoRA?","output":"A memory-efficient way to fine-tune large models."})",
         R"({"instruction":"Define an adapter","output":"A small trainable module layered on a frozen base."})",
         R"({"instruction":"Name a reptile","output":"A crocodile basks beside the river."})",
@@ -1518,7 +1509,7 @@ void MainWindow::ragSelfTest(std::shared_ptr<int> failCount,
         finish();
         return;
     }
-    f.write("Magnite RAG knowledge base.\n");
+    f.write("Magnite Space RAG knowledge base.\n");
     f.write("The Eiffel Tower is a wrought-iron lattice tower in Paris.\n");
     f.write("Retrieval-augmented generation injects matching passages into chat context.\n");
     f.close();
@@ -1597,7 +1588,8 @@ void MainWindow::notifyCompletion(const QString &kind,bool success,bool preview)
     QDBusInterface service("org.freedesktop.Notifications","/org/freedesktop/Notifications","org.freedesktop.Notifications",QDBusConnection::sessionBus());
     if(service.isValid()) {
         QVariantMap hints;hints.insert("suppress-sound",!sound);if(sound)hints.insert("sound-name","complete");
-        const QList<QVariant> args={QString("Magnite"),uint(0),QString(),QString("Magnite"),message,QStringList(),hints,int(8000)};
+        const auto name = QApplication::applicationDisplayName();
+        const QList<QVariant> args={name,uint(0),QString(),name,message,QStringList(),hints,int(8000)};
         auto *watcher=new QDBusPendingCallWatcher(service.asyncCallWithArgumentList("Notify",args),this);
         connect(watcher,&QDBusPendingCallWatcher::finished,this,[this,preview](QDBusPendingCallWatcher *pending){
             QDBusPendingReply<uint> reply=*pending;
@@ -1611,7 +1603,7 @@ void MainWindow::notifyCompletion(const QString &kind,bool success,bool preview)
         return;
     }
     m_notificationTray->show();
-    m_notificationTray->showMessage("Magnite",message,success?QSystemTrayIcon::Information:QSystemTrayIcon::Warning,8000);
+    m_notificationTray->showMessage(QApplication::applicationDisplayName(),message,success?QSystemTrayIcon::Information:QSystemTrayIcon::Warning,8000);
     if(sound)QApplication::beep();
 }
 

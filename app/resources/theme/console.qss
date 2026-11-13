@@ -1,4 +1,4 @@
-/* Magnite · release UI. Colors resolve from the shared Theme tokens. */
+/* Magnite Space · release UI. Colors resolve from the shared Theme tokens. */
 QWidget { font-family: @bodyFont; font-size: 13px; color: @textPrimary; }
 QMainWindow { background: @canvasBackground; }
 QDialog { background: @canvasBackground; }
@@ -16,7 +16,6 @@ QPushButton#themeToggle { background: transparent; border: 1px solid transparent
 QPushButton#themeToggle:hover { background: @surfaceFillHover; color: @textPrimary; }
 QPushButton#themeToggle:focus { color: @textPrimary; }
 QLabel#statusPill[state="err"] { color: @statusError; }
-QLabel#logoLabel { font-family: @headingFont; font-weight: 600; color: @textPrimary; font-size: 25px; padding: 2px 0; }
 QLabel#studioTag { font-size: 10px; font-weight: 600; letter-spacing: 1px; font-family: @bodyFont; color: @textMuted; }
 QLabel#heroKicker { font-size: 12px; font-weight: 600; letter-spacing: 1px; }
 QPushButton { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 7px 12px; min-height: 20px; font-weight: 500; }

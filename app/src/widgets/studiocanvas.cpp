@@ -17,7 +17,7 @@ StudioCanvas::StudioCanvas(QWidget *parent) : QWidget(parent) {
 void StudioCanvas::setActivity(Activity activity) {
     m_activity = activity;
     m_clock.restart();
-    setAccessibleName(activity == Training ? "Training in progress" : activity == Chat ? "Model responding" : "Magnite seal");
+    setAccessibleName(activity == Training ? "Training in progress" : activity == Chat ? "Model responding" : "Magnite Space seal");
     updateTimer();
     update();
 }

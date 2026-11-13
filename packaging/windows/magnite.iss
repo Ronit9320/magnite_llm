@@ -4,9 +4,9 @@
 #endif
 [Setup]
 AppId={{CEF8DB34-17D5-4280-BE44-C543EA69C427}
-AppName=Magnite
+AppName=Magnite Space
 AppVersion={#ReleaseVersion}
-AppVerName=Magnite {#ReleaseVersion}
+AppVerName=Magnite Space {#ReleaseVersion}
 VersionInfoVersion={#NumericVersion}
 VersionInfoTextVersion={#ReleaseVersion}
 DefaultDirName={localappdata}\Programs\Magnite
@@ -30,7 +30,7 @@ LicenseFile={#StageDir}\licenses\LICENSE
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Magnite"; Filename: "{app}\magnite-app.exe"
+Name: "{group}\Magnite Space"; Filename: "{app}\magnite-app.exe"
 
 [Run]
-Filename: "{app}\magnite-app.exe"; Description: "Launch Magnite"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\magnite-app.exe"; Description: "Launch Magnite Space"; Flags: nowait postinstall skipifsilent

@@ -15,7 +15,7 @@ from backend.routes.training import (
     _training_setup,
 )
 
-app = FastAPI(title="Magnite LLM Backend", version=RELEASE_VERSION)
+app = FastAPI(title="Magnite Space Backend", version=RELEASE_VERSION)
 app.add_middleware(UpdateGate)
 app.add_middleware(BodyLimitMiddleware)
 

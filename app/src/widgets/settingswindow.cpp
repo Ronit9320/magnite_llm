@@ -65,7 +65,7 @@ SettingsWindow::SettingsWindow(SettingsPanel* panel, QWidget* parent)
       m_fade(new QPropertyAnimation(this, "windowOpacity", this)) {
     setObjectName("settingsWindow");
     setAttribute(Qt::WA_TranslucentBackground);
-    setWindowTitle("Settings — Magnite");
+    setWindowTitle("Settings — Magnite Space");
     setWindowModality(Qt::WindowModal);
     setMinimumSize(760, 560);
     resize(960, 662);

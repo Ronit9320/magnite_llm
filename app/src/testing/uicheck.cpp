@@ -3009,10 +3009,27 @@ int runUiCheck(const QString &captures) {
         sidebar.setCurrentPanel(1);
         bool onlyTraining=true; for (auto it=nav.begin();it!=nav.end();++it) onlyTraining&=it.value()->isChecked()==(it.key()==1);
         check(onlyTraining&&!sidebar.history()->isVisibleTo(&sidebar),"sidebar: other workspaces hide the chat list");
+        auto *lockup=sidebar.findChild<QWidget *>("logoLabel");
+        auto *toggle=sidebar.findChild<QWidget *>("sidebarToggle");
+        check(lockup && toggle && lockup->isVisibleTo(&sidebar) && !sidebar.brandSeal()->isVisibleTo(&sidebar) &&
+              lockup->accessibleName()=="Magnite Space" && lockup->focusPolicy()==Qt::NoFocus &&
+              sidebar.rect().contains(lockup->geometry()) && lockup->geometry().right()<toggle->geometry().left(),
+              "sidebar: the horizontal lockup fits beside the collapse button and stays out of keyboard navigation");
         bool iconsOk=true;
         for (bool dark : {true,false}) {
             Theme::setDark(dark); sidebar.refreshIcons();
             iconsOk&=nav[1]->icon().pixmap(18,18).toImage()!=nav[0]->icon().pixmap(18,18).toImage();
+            if (lockup) {
+                pump();
+                const auto image=lockup->grab().toImage();
+                const QColor text(Theme::brandText());
+                bool hasWordmark=false;
+                for (int y=0; y<image.height() && !hasWordmark; ++y)
+                    for (int x=image.width()*2/3; x<image.width(); ++x)
+                        if (image.pixelColor(x,y)==text) { hasWordmark=true; break; }
+                check(hasWordmark, QString("sidebar: the Space wordmark uses the %1 theme color").arg(dark?"dark":"light"));
+                capture(&sidebar, dark?"brand-sidebar-dark":"brand-sidebar-light");
+            }
         }
         check(iconsOk,"sidebar: the open workspace's icon is tinted differently in both themes");
         sidebar.setCurrentPanel(4); pump();
@@ -3112,7 +3129,7 @@ int runUiCheck(const QString &captures) {
         check(!strip.history()->isVisibleTo(&strip),"sidebar: the chat list stays hidden while collapsed even on Playground");
         check(toggle->toolTip()=="Expand sidebar"&&toggle->accessibleName()=="Expand sidebar"&&collapsedSignals==1&&lastCollapsed,"sidebar: the collapsed toggle offers to expand and the change is announced once");
         strip.setCollapsed(false); pump();
-        buttons=nav(); bool backOk=strip.width()==SidebarState::kExpandedWidth&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&strip.brandSeal()->width()==35;
+        buttons=nav(); bool backOk=strip.width()==SidebarState::kExpandedWidth&&strip.history()->isVisibleTo(&strip)&&strip.findChild<QWidget *>("logoLabel")->isVisibleTo(&strip)&&!strip.brandSeal()->isVisibleTo(&strip);
         for (int i=0;i<6&&backOk;++i) backOk=buttons[i]->text()==labels[i];
         check(backOk,"sidebar: expanding brings back the text, the logo, the wordmark and the chat list");
         strip.setCollapsed(true); pump();
@@ -3236,7 +3253,7 @@ int runUiCheck(const QString &captures) {
         bool textBack=true; for (auto *b : bar.findChildren<QPushButton *>("navBtn")) textBack&=!b->text().isEmpty();
         check(textBack&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar),"sidebar: the text and wordmark are back once the slide ends");
         bar.toggle(); bar.toggle(); pump(300);
-        bool looksExpanded=bar.width()==SidebarState::kExpandedWidth&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&bar.brandSeal()->width()==35&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
+        bool looksExpanded=bar.width()==SidebarState::kExpandedWidth&&!bar.isCollapsed()&&!QSettings().value(key).toBool()&&bar.property("collapsed")==false&&!bar.brandSeal()->isVisibleTo(&bar)&&bar.findChild<QWidget *>("logoLabel")->isVisibleTo(&bar);
         for (auto *b : bar.findChildren<QPushButton *>("navBtn")) looksExpanded&=!b->text().isEmpty();
         check(looksExpanded,"sidebar: two quick toggles end expanded, 220px, drawn expanded (text, wordmark, full logo), stored as expanded");
         bar.toggle(); bar.toggle(); bar.toggle();

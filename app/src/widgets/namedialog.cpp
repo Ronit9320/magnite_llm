@@ -11,7 +11,7 @@
 
 NameDialog::NameDialog(const QString &suggestion, QWidget *parent)
     : SettingsDetailDialog(parent) {
-    setWindowTitle("Welcome to Magnite");
+    setWindowTitle("Welcome to Magnite Space");
     setModal(true);
     setMinimumWidth(380);
     auto *layout = new QVBoxLayout(this);

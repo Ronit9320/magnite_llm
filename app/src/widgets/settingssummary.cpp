@@ -220,7 +220,7 @@ DiagnosticsSummary::DiagnosticsSummary(QWidget* parent) : QFrame(parent) {
     m_packages->setSpacing(8);
     body->addWidget(packages);
     body->addWidget(text("Installed packages do not guarantee hardware or model compatibility. "
-                         "Installs go to Magnite's own packages folder; the app itself is never modified.",
+                         "Installs go to Magnite Space's own packages folder; the app itself is never modified.",
                          "settingsHint"));
     setPackages({});
     m_application->setText(QCoreApplication::applicationVersion());

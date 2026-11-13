@@ -18,7 +18,7 @@
 | No usable PDF text | Scanned/image-only PDF OCR is not implemented; supply extracted text. |
 | No retrieved matches | Confirm documents are indexed; test the query in Knowledge; review similarity threshold and embedding model. |
 | Context exceeds limit | Start a shorter conversation, reduce requested output tokens, or reduce retrieved context. |
-| Adapter import rejected | Use a complete Magnite export ZIP; duplicate IDs and invalid archives are rejected. |
+| Adapter import rejected | Use a complete Magnite Space export ZIP; duplicate IDs and invalid archives are rejected. |
 | Adapter chat fails | Ensure the matching transformer base model and PEFT/torch dependencies are accessible. GGUF-only base weights do not satisfy this path. |
 | Cancel appears delayed | Native loading, embedding, or generation may need to return before cooperative cancellation completes. |
 | Data directory change has no effect | Restart the app; check MAGNITE_HOME precedence. Existing data is not moved automatically. |

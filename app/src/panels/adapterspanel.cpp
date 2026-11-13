@@ -264,8 +264,8 @@ void AdaptersPanel::onImportAdapter() {
         return;
     }
     const auto path = Ui::chooseLibraryImport(this, "Import adapter",
-        "Choose a Magnite adapter export. The archive includes the weights and the base model information.",
-        "Magnite adapter (*.zip)", "zip");
+        "Choose a Magnite Space adapter export. The archive includes the weights and the base model information.",
+        "Magnite Space adapter (*.zip)", "zip");
     if (path.isEmpty()) return;
     QJsonObject body;
     body["path"] = path;

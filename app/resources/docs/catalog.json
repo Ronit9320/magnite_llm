@@ -1,32 +1,32 @@
 {
   "sources": {
     "workflow": {
-      "label": "Magnite · Local workflows",
+      "label": "Magnite Space · Local workflows",
       "url": "reference/WORKFLOWS.md",
       "kind": "Bundled reference"
     },
     "api": {
-      "label": "Magnite · Training contract",
+      "label": "Magnite Space · Training contract",
       "url": "reference/LOCAL_API.md",
       "kind": "Bundled reference"
     },
     "limits": {
-      "label": "Magnite · Current limitations",
+      "label": "Magnite Space · Current limitations",
       "url": "reference/LIMITATIONS.md",
       "kind": "Bundled reference"
     },
     "install": {
-      "label": "Magnite · Installation",
+      "label": "Magnite Space · Installation",
       "url": "reference/INSTALL.md",
       "kind": "Bundled reference"
     },
     "troubleshoot": {
-      "label": "Magnite · Troubleshooting",
+      "label": "Magnite Space · Troubleshooting",
       "url": "reference/TROUBLESHOOTING.md",
       "kind": "Bundled reference"
     },
     "privacy": {
-      "label": "Magnite · Storage & privacy",
+      "label": "Magnite Space · Storage & privacy",
       "url": "reference/STORAGE_AND_PRIVACY.md",
       "kind": "Bundled reference"
     },
@@ -104,7 +104,7 @@
         [
           "updates",
           "Gradients connect loss to trainable parameters",
-          "<p>A gradient describes how a small change to a parameter would change the loss locally. Gradient-based optimization uses this information to adjust trainable parameters over repeated batches. The learning rate influences the scale of the update; actual optimizers may also maintain state from previous updates.</p><div class=\"article-callout\"><strong>Pretraining and adaptation</strong>Fine-tuning begins with pretrained parameters. In Magnite’s LoRA flow, the base weights stay frozen and the adapter parameters are trained.</div>"
+          "<p>A gradient describes how a small change to a parameter would change the loss locally. Gradient-based optimization uses this information to adjust trainable parameters over repeated batches. The learning rate influences the scale of the update; actual optimizers may also maintain state from previous updates.</p><div class=\"article-callout\"><strong>Pretraining and adaptation</strong>Fine-tuning begins with pretrained parameters. In Magnite Space’s LoRA flow, the base weights stay frozen and the adapter parameters are trained.</div>"
         ],
         [
           "behavior",
@@ -136,12 +136,12 @@
         [
           "format",
           "Formatting becomes part of the input",
-          "<p>Conversation records contain roles and content. Magnite uses the tokenizer’s chat template when available to serialize those messages; otherwise it falls back to readable role/content text. The resulting sequence is what training receives.</p><p>The current trainer applies its objective to the full formatted sequence. Message roles alone do not turn on assistant-only loss masking.</p>"
+          "<p>Conversation records contain roles and content. Magnite Space uses the tokenizer’s chat template when available to serialize those messages; otherwise it falls back to readable role/content text. The resulting sequence is what training receives.</p><p>The current trainer applies its objective to the full formatted sequence. Message roles alone do not turn on assistant-only loss masking.</p>"
         ],
         [
           "limits",
           "Length limits change the examples you train on",
-          "<p>Magnite’s training sequence-length setting limits the tokenized input. If an example is truncated, some of the original text is excluded. Inspect long examples with particular care when the useful answer is near the end.</p><p>A chat context window is a separate runtime limit. Magnite’s context calculation also reserves room for the requested output. Changing a training sequence-length setting does not increase that inference limit.</p>"
+          "<p>Magnite Space’s training sequence-length setting limits the tokenized input. If an example is truncated, some of the original text is excluded. Inspect long examples with particular care when the useful answer is near the end.</p><p>A chat context window is a separate runtime limit. Magnite Space’s context calculation also reserves room for the requested output. Changing a training sequence-length setting does not increase that inference limit.</p>"
         ],
         [
           "interpretation",
@@ -166,7 +166,7 @@
         [
           "three-artifacts",
           "Three artifacts, three jobs",
-          "<table><thead><tr><th>Artifact</th><th>What it is for</th></tr></thead><tbody><tr><td>Transformers base weights</td><td>The pretrained model used by Magnite’s LoRA training flow.</td></tr><tr><td>GGUF model</td><td>A model for local inference with a compatible llama.cpp engine.</td></tr><tr><td>LoRA adapter</td><td>A small learned addition that needs its matching base weights.</td></tr></tbody></table>"
+          "<table><thead><tr><th>Artifact</th><th>What it is for</th></tr></thead><tbody><tr><td>Transformers base weights</td><td>The pretrained model used by Magnite Space’s LoRA training flow.</td></tr><tr><td>GGUF model</td><td>A model for local inference with a compatible llama.cpp engine.</td></tr><tr><td>LoRA adapter</td><td>A small learned addition that needs its matching base weights.</td></tr></tbody></table>"
         ],
         [
           "choose-a-base",
@@ -176,7 +176,7 @@
         [
           "local-engine",
           "Match the local engine",
-          "<p>Magnite separates inference from training. Auto selects a compatible inference engine; individual overrides live in Playground model settings. Training uses the Python training runtime and supported transformer weights.</p><p>An installed package does not guarantee that every architecture or device will work. Read the capability message and resource estimate for the configuration you select.</p>"
+          "<p>Magnite Space separates inference from training. Auto selects a compatible inference engine; individual overrides live in Playground model settings. Training uses the Python training runtime and supported transformer weights.</p><p>An installed package does not guarantee that every architecture or device will work. Read the capability message and resource estimate for the configuration you select.</p>"
         ]
       ]
     },
@@ -211,12 +211,12 @@
         [
           "holdout",
           "Keep evaluation data separate",
-          "<p>A held-out set should represent the same task without duplicating the training examples. Magnite can reserve a seeded validation split when enabled. It needs enough rows to keep both training and evaluation nonempty.</p><p>Also keep a fixed set of real prompts for manual comparisons. Similar losses do not guarantee equally useful responses.</p>"
+          "<p>A held-out set should represent the same task without duplicating the training examples. Magnite Space can reserve a seeded validation split when enabled. It needs enough rows to keep both training and evaluation nonempty.</p><p>Also keep a fixed set of real prompts for manual comparisons. Similar losses do not guarantee equally useful responses.</p>"
         ],
         [
           "sequence-training",
           "Understand what is optimized",
-          "<div class=\"article-callout\"><strong>Current Magnite behavior</strong>Conversation records use the tokenizer’s chat template when available, with a readable fallback. The trainer learns from the full formatted sequence; importing messages does not enable assistant-only loss masking.</div>"
+          "<div class=\"article-callout\"><strong>Current Magnite Space behavior</strong>Conversation records use the tokenizer’s chat template when available, with a readable fallback. The trainer learns from the full formatted sequence; importing messages does not enable assistant-only loss masking.</div>"
         ]
       ]
     },
@@ -247,7 +247,7 @@
         [
           "split",
           "The boundary should match the question",
-          "<p>If you want to evaluate new users, documents or conversations, separate those groups across the split. If the intended use concerns future data, consider the time boundary. Row-level randomness alone does not enforce these distinctions.</p><div class=\"article-callout\"><strong>Magnite’s current split</strong>The validation split is a seeded row-level split. It does not automatically deduplicate, stratify, or isolate users, documents and time periods. Prepare those boundaries in your source datasets when needed.</div>"
+          "<p>If you want to evaluate new users, documents or conversations, separate those groups across the split. If the intended use concerns future data, consider the time boundary. Row-level randomness alone does not enforce these distinctions.</p><div class=\"article-callout\"><strong>Magnite Space’s current split</strong>The validation split is a seeded row-level split. It does not automatically deduplicate, stratify, or isolate users, documents and time periods. Prepare those boundaries in your source datasets when needed.</div>"
         ],
         [
           "leakage",
@@ -272,7 +272,7 @@
         [
           "formats",
           "Pick a supported format",
-          "<p>Magnite accepts UTF-8 JSONL, CSV and plain text. JSONL stores one complete JSON object per line. Message records preserve roles; a prompt/response pair is normalized into a user message and an assistant message.</p><div id=\"dataset-example\"></div><div class=\"article-callout\"><strong>These are format examples</strong>The sample contains only two rows. It is meant to test ingestion, not train a useful assistant.</div>"
+          "<p>Magnite Space accepts UTF-8 JSONL, CSV and plain text. JSONL stores one complete JSON object per line. Message records preserve roles; a prompt/response pair is normalized into a user message and an assistant message.</p><div id=\"dataset-example\"></div><div class=\"article-callout\"><strong>These are format examples</strong>The sample contains only two rows. It is meant to test ingestion, not train a useful assistant.</div>"
         ],
         [
           "other-fields",
@@ -282,7 +282,7 @@
         [
           "import-checks",
           "Check the imported result",
-          "<p>Open Training, import the file, and verify the row count and dataset selection. Dataset files referenced by queued or running jobs cannot be deleted. Magnite’s current CSV field limit is 131,072 characters.</p><p>For conversational examples, inspect how the selected model’s tokenizer formats messages. The training sequence length is a separate setting from the number of dataset rows.</p>"
+          "<p>Open Training, import the file, and verify the row count and dataset selection. Dataset files referenced by queued or running jobs cannot be deleted. Magnite Space’s current CSV field limit is 131,072 characters.</p><p>For conversational examples, inspect how the selected model’s tokenizer formats messages. The training sequence length is a separate setting from the number of dataset rows.</p>"
         ]
       ]
     },
@@ -313,7 +313,7 @@
         [
           "capability",
           "Read capability messages",
-          "<p>Magnite probes supported quantization and estimates memory for the selected recipe. Treat the estimate as advisory. If a target-module name is not present on an architecture, the current fallback may use all-linear; inspect the saved run and log.</p>"
+          "<p>Magnite Space probes supported quantization and estimates memory for the selected recipe. Treat the estimate as advisory. If a target-module name is not present on an architecture, the current fallback may use all-linear; inspect the saved run and log.</p>"
         ]
       ]
     },
@@ -350,8 +350,8 @@
         ],
         [
           "magnite",
-          "What Magnite records",
-          "<p>Magnite records held-out evaluation loss when a validation split is enabled, at epoch boundaries. A split of zero does not produce that evidence. It does not automatically run a separate final test suite or certify the quality of a completed adapter.</p>"
+          "What Magnite Space records",
+          "<p>Magnite Space records held-out evaluation loss when a validation split is enabled, at epoch boundaries. A split of zero does not produce that evidence. It does not automatically run a separate final test suite or certify the quality of a completed adapter.</p>"
         ]
       ]
     },
@@ -376,7 +376,7 @@
         [
           "validation",
           "Look for held-out evidence",
-          "<p>Enable a validation split before starting if you want held-out validation loss. With the split enabled, Magnite records evaluation loss at epoch boundaries. Runs without that measurement should show it as unavailable.</p><p>Compare runs using the same data split and prompts. If training loss improves while validation worsens, inspect possible overfitting or a mismatch between training and evaluation data before extending the run.</p>"
+          "<p>Enable a validation split before starting if you want held-out validation loss. With the split enabled, Magnite Space records evaluation loss at epoch boundaries. Runs without that measurement should show it as unavailable.</p><p>Compare runs using the same data split and prompts. If training loss improves while validation worsens, inspect possible overfitting or a mismatch between training and evaluation data before extending the run.</p>"
         ],
         [
           "telemetry",
@@ -418,7 +418,7 @@
         [
           "platform",
           "Check the platform",
-          "<p>Supported devices and optional packages vary by build. Magnite’s Diagnostics view shows package availability and device measurements. Missing measurements remain unknown. The current app does not support QLoRA on macOS.</p>"
+          "<p>Supported devices and optional packages vary by build. Magnite Space’s Diagnostics view shows package availability and device measurements. Missing measurements remain unknown. The current app does not support QLoRA on macOS.</p>"
         ]
       ]
     },
@@ -450,7 +450,7 @@
         [
           "quantization",
           "Where QLoRA fits",
-          "<p>Quantization stores base weights at lower precision. Training adapters on a quantized base can reduce memory needs, but still requires memory for activations and training state. Supported quantization methods depend on the backend and hardware.</p><div class=\"article-callout\"><strong>In Magnite</strong>Use the capability probe for the selected environment. QLoRA is not supported on macOS in the current app. A GGUF inference model is not a substitute for the transformer base used by this training flow.</div>"
+          "<p>Quantization stores base weights at lower precision. Training adapters on a quantized base can reduce memory needs, but still requires memory for activations and training state. Supported quantization methods depend on the backend and hardware.</p><div class=\"article-callout\"><strong>In Magnite Space</strong>Use the capability probe for the selected environment. QLoRA is not supported on macOS in the current app. A GGUF inference model is not a substitute for the transformer base used by this training flow.</div>"
         ]
       ]
     },
@@ -470,7 +470,7 @@
       "sections": [
         [
           "retrieval",
-          "How retrieval works in Magnite",
+          "How retrieval works in Magnite Space",
           "<p>Knowledge imports documents, divides their text into chunks and stores searchable embeddings locally. A query retrieves relevant passages that can be added to the chat context. This does not update the chat model’s weights.</p>"
         ],
         [
@@ -481,7 +481,7 @@
         [
           "local",
           "What to check locally",
-          "<p>The first embedding-model use can require a download. Current chunk size and overlap controls are measured in words. Scanned PDFs need OCR that Magnite does not currently provide.</p><p>A retrieved passage does not guarantee a faithful response from the model. Read the source passage and verify important details. Removing a document from the index does not remove the original source file.</p>"
+          "<p>The first embedding-model use can require a download. Current chunk size and overlap controls are measured in words. Scanned PDFs need OCR that Magnite Space does not currently provide.</p><p>A retrieved passage does not guarantee a faithful response from the model. Read the source passage and verify important details. Removing a document from the index does not remove the original source file.</p>"
         ]
       ]
     },
@@ -501,7 +501,7 @@
         [
           "activate",
           "Activate with the matching base",
-          "<p>Open Adapters after a successful run and activate the new adapter. Magnite uses its recorded base model with the PEFT/torch inference flow. Activation restarts the inference model; it is not a zero-restart multi-adapter switch.</p><p>Make sure the resolved base snapshot remains accessible. An adapter is not a standalone set of full model weights.</p>"
+          "<p>Open Adapters after a successful run and activate the new adapter. Magnite Space uses its recorded base model with the PEFT/torch inference flow. Activation restarts the inference model; it is not a zero-restart multi-adapter switch.</p><p>Make sure the resolved base snapshot remains accessible. An adapter is not a standalone set of full model weights.</p>"
         ],
         [
           "compare",
@@ -511,7 +511,7 @@
         [
           "export",
           "Export a portable copy",
-          "<p>Magnite exports an adapter archive with metadata and safetensors weights. It does not include the base model. Import expects a valid Magnite adapter export and rejects a duplicate registered ID.</p><p>Keep a known-good export before deleting an adapter. Record the dataset and run configuration alongside your result.</p>"
+          "<p>Magnite Space exports an adapter archive with metadata and safetensors weights. It does not include the base model. Import expects a valid Magnite Space adapter export and rejects a duplicate registered ID.</p><p>Keep a known-good export before deleting an adapter. Record the dataset and run configuration alongside your result.</p>"
         ]
       ]
     },
@@ -519,10 +519,10 @@
       "id": "first-run",
       "title": "Anatomy of a training run",
       "short": "Anatomy of a run",
-      "group": "Magnite reference",
+      "group": "Magnite Space reference",
       "type": "WORKFLOW",
       "icon": "graduation-cap",
-      "description": "How data, a base model, optimization and evaluation fit together inside Magnite.",
+      "description": "How data, a base model, optimization and evaluation fit together inside Magnite Space.",
       "sources": [
         "workflow",
         "api",
@@ -560,7 +560,7 @@
       "id": "troubleshooting",
       "title": "Investigating a training problem",
       "short": "Troubleshooting",
-      "group": "Magnite reference",
+      "group": "Magnite Space reference",
       "type": "TROUBLESHOOTING",
       "icon": "file-text",
       "description": "Interpret errors and unexpected behavior using your inputs, configuration and runtime.",
@@ -601,7 +601,7 @@
       "id": "glossary",
       "title": "Machine learning vocabulary",
       "short": "Glossary",
-      "group": "Magnite reference",
+      "group": "Magnite Space reference",
       "type": "REFERENCE",
       "icon": "file-text",
       "description": "Definitions of the terms used across model training, data preparation and inference.",
@@ -619,7 +619,7 @@
         [
           "read-controls",
           "Read controls in context",
-          "<p>A token count is not a word count. Training sequence length and a chat context window are related to input length but belong to different workflows. In Magnite’s retrieval controls, chunk size and overlap are currently measured in words.</p>"
+          "<p>A token count is not a word count. Training sequence length and a chat context window are related to input length but belong to different workflows. In Magnite Space’s retrieval controls, chunk size and overlap are currently measured in words.</p>"
         ]
       ]
     }

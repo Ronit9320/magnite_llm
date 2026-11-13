@@ -981,7 +981,7 @@ void DocsPanel::renderReader(QVBoxLayout *body) {
     }
     rule(body);
     body->addWidget(text("SOURCES & FURTHER READING", "docsEyebrow"));
-    body->addWidget(text("Concepts are linked to primary references. Magnite-specific "
+    body->addWidget(text("Concepts are linked to primary references. Magnite Space-specific "
                          "behavior is checked against the local app documentation.",
                          "docsCardDescription"));
     for (const auto &id : article->sources)
@@ -1211,7 +1211,7 @@ void DocsPanel::showSources() {
                          "references open only when you choose them."));
     auto *view = new DocsTextView(nullptr, false);
     QString html = "<h3>Local articles</h3><p>Original explanations of ML concepts and "
-                   "Magnite behavior, with examples and small diagrams. Reviewed alongside "
+                   "Magnite Space behavior, with examples and small diagrams. Reviewed alongside "
                    "the app.</p><h3>Primary references</h3><p>Links to official ML, data "
                    "and model documentation. Internet is needed only to open these external "
                    "pages.</p><h3>What already exists locally</h3>";

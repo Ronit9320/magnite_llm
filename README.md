@@ -1,7 +1,7 @@
-# Magnite LLM
+# Magnite Space
 
 Train adapters, run models, and chat with your documents on your own machine.
-Magnite is a native C++20/Qt 6 desktop app backed by a local Python service.
+Magnite Space is a native C++20/Qt 6 desktop app backed by a local Python service.
 The release scope is local training, inference, and RAG; hosted inference and
 cloud training are excluded.
 
@@ -26,7 +26,7 @@ Capture the current interface using the [screenshot instructions](docs/release/S
 - Run local streaming inference with llama.cpp, torch, or an optional vLLM installation.
 - Ingest PDF, text, Markdown, and HTML documents, test retrieval, and use RAG in chat.
 - Explore the offline Docs reference: ML concepts, dataset quality, training results, examples and primary sources. Save useful articles and return to your reading position.
-- Watch how full the model's context is (ring, bar or banner, set in Settings) and let Magnite compact older messages automatically when a chat gets long.
+- Watch how full the model's context is (ring, bar or banner, set in Settings) and let Magnite Space compact older messages automatically when a chat gets long.
 - Use the Studio 03 interface with light/dark themes and reduced motion.
 
 ## Compatibility
@@ -116,7 +116,7 @@ promise that every engine or hardware configuration has been tested.
 
 ## License
 
-Magnite's original code, documentation, and example inputs are under the
+Magnite Space's original code, documentation, and example inputs are under the
 [MIT license](LICENSE). Third-party assets and dependencies retain their own
 terms; see [third-party notices](THIRD_PARTY_NOTICES.md). Model and dataset licenses
 are separate from the app's license.

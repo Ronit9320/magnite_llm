@@ -194,7 +194,7 @@ void ChatPanel::setupUi() {
     auto *seal = new ConversationLogo(m_welcome);
     seal->setObjectName("conversationLogo");
     seal->setFixedSize(64, 64);
-    seal->setAccessibleName("Magnite logo");
+    seal->setAccessibleName("Magnite Space logo");
     welcome->addWidget(seal, 0, Qt::AlignHCenter);
     auto *eyebrow = new QLabel("THE MAGNITE WORKSPACE", m_welcome);
     eyebrow->setObjectName("chatEyebrow");

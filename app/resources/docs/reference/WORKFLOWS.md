@@ -49,7 +49,7 @@ QLoRA requires a working quantization backend and compatible hardware. The
 2. Chat and confirm the active adapter is shown.
 3. Clear/deactivate the adapter when finished. This unloads inference; load a
    base model again to continue without the adapter.
-4. Export an adapter archive and save it. Import expects a Magnite export ZIP
+4. Export an adapter archive and save it. Import expects a Magnite Space export ZIP
    with metadata and weights. Importing an already registered ID is rejected.
 
 Exported adapters do not include the full base model. The matching model must

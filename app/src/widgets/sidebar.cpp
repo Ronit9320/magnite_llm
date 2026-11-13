@@ -36,8 +36,9 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_top->setSpacing(6);
     brand->addLayout(m_top);
     m_seal = new BrandSymbol(this);
-    m_seal->setFixedSize(35, 35);
-    m_seal->setToolTip("Magnite · Intelligence on your own terms");
+    m_seal->setFixedSize(30, 30);
+    const QString brandTooltip = "Magnite Space · Intelligence on your own terms";
+    m_seal->setToolTip(brandTooltip);
     m_toggle = new QPushButton(this);
     m_toggle->setObjectName("sidebarToggle");
     m_toggle->setFixedSize(18, 24);
@@ -48,9 +49,10 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_topGap = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
     m_top->addSpacerItem(m_topGap);
     m_top->addWidget(m_toggle, 0, Qt::AlignTop);
-    m_wordmark = new BrandWordmark(this);
+    m_wordmark = new BrandLockup(158, this);
     m_wordmark->setObjectName("logoLabel");
-    m_wordmark->setFixedSize(86,24);
+    m_wordmark->setFixedHeight(35);
+    m_wordmark->setToolTip(brandTooltip);
     m_top->insertWidget(1,m_wordmark);
     auto *edition = new QLabel("LOCAL STUDIO", this);
     edition->setObjectName("studioTag");
@@ -224,8 +226,7 @@ void Sidebar::applyPresentation() {
     else m_topGap->changeSize(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
     m_top->setAlignment(m_seal, collapsed ? Qt::AlignHCenter : Qt::Alignment());
     m_top->setAlignment(m_toggle, collapsed ? Qt::AlignHCenter : Qt::AlignTop);
-    const int side = collapsed ? 30 : 35;
-    m_seal->setFixedSize(side, side);
+    m_seal->setVisible(collapsed);
     m_wordmark->setVisible(m_state.showLabels());
     findChild<QWidget *>("sidebarLocalCard")->setVisible(m_state.showLabels());
     for (auto *tag : m_tags) tag->setVisible(m_state.showLabels());

@@ -185,7 +185,7 @@ if(APPLE AND MAGNITE_MACOS_BUNDLE)
         OUTPUT_NAME Magnite   # bundle directory and executable become Magnite.app / Magnite
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/macos/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "Magnite"
+        MACOSX_BUNDLE_BUNDLE_NAME "Magnite Space"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.magnite.magnite-llm"
         MACOSX_BUNDLE_ICON_FILE "${MAGNITE_MACOS_ICON_NAME}"
         # CFBundleShortVersionString must be numeric; the full label goes in MagniteBuildLabel.

@@ -25,7 +25,9 @@ int main(int argc, char *argv[]) {
     WindowChrome::install(app);
     QCoreApplication::setOrganizationName("Magnite");
     QCoreApplication::setOrganizationDomain("magnite.local");
+    // Keep the QSettings identity used by existing installs.
     QCoreApplication::setApplicationName("Magnite LLM");
+    QApplication::setApplicationDisplayName("Magnite Space");
     QCoreApplication::setApplicationVersion(QStringLiteral(MAGNITE_BUILD_LABEL));
 
 #ifdef Q_OS_LINUX
@@ -38,7 +40,7 @@ int main(int argc, char *argv[]) {
         if (installationLock >= 0 && flock(installationLock, LOCK_EX | LOCK_NB) != 0) {
             close(installationLock);
             Theme::setupApplicationTheme();
-            Ui::showNotice(nullptr, "Magnite", "This AppImage is already running or being updated.");
+            Ui::showNotice(nullptr, QApplication::applicationDisplayName(), "This AppImage is already running or being updated.");
             return 1;
         }
         // A read-only location can still run; its in-app installer is disabled.

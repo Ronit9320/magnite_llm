@@ -60,8 +60,8 @@ documents, model weights or authentication tokens are sent by the updater.
 Deleting a Hugging Face registry model uses cache-aware revision deletion; shared
 blobs may remain because another revision references them. This also applies to
 models automatically discovered from other applications' downloads: deletion
-removes the selected shared-cache revision, not just the Magnite listing. Deleting an Ollama
-model requests deletion from Ollama, not merely hiding it in Magnite. Active
+removes the selected shared-cache revision, not just the Magnite Space listing. Deleting an Ollama
+model requests deletion from Ollama, not merely hiding it in Magnite Space. Active
 inference/training references can block model deletion.
 
 Deleting an indexed RAG document removes its indexed content; the original source

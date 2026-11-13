@@ -70,7 +70,7 @@ def find_free_port() -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Magnite LLM Backend")
+    parser = argparse.ArgumentParser(description="Magnite Space Backend")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0 = random)")
     parser.add_argument(
         "--home",
@@ -92,7 +92,7 @@ def main():
         sys.exit(local_access.EXIT_DATA_DIR_IN_USE)
 
     port = args.port if args.port else find_free_port()
-    print(f"Magnite backend starting on http://127.0.0.1:{port}", file=sys.stderr)
+    print(f"Magnite Space backend starting on http://127.0.0.1:{port}", file=sys.stderr)
     def request_shutdown():
         server.request_exit()
 
