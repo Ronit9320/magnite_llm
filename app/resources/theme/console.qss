@@ -2,6 +2,8 @@
 QWidget { font-family: @bodyFont; font-size: 13px; color: @textPrimary; }
 QMainWindow { background: @canvasBackground; }
 QDialog { background: @canvasBackground; }
+QWidget#startupPage { background: @canvasBackground; }
+QLabel#startupStatus { color: @textSecondary; }
 QLabel { background: transparent; border: none; }
 QWidget#sidebar { background: @insetBackground; border: none; border-right: 1px solid @surfaceBorder; }
 QFrame#connectionStatus { background: transparent; border: none; }

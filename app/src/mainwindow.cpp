@@ -39,6 +39,7 @@
 #endif
 #include "theme.h"
 #include "widgets/studiocanvas.h"
+#include "widgets/progressbar.h"
 
 #include <QApplication>
 #include <QCursor>
@@ -164,7 +165,6 @@ MainWindow::MainWindow(QWidget *parent)
     const bool verification = m_selfTest || args.contains("--ui-check") || args.contains("--screenshot");
     if (!verification && QSettings().value("updates/checkOnStartup", true).toBool())
         QTimer::singleShot(5000, m_updater, &UpdateManager::check);
-    if (!verificationRun()) QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
 }
 
 void MainWindow::setSelfTestMode(bool enabled) {
@@ -328,7 +328,7 @@ void MainWindow::setupUi() {
     auto *settingsKey=new QShortcut(Shortcuts::settings(),this);
     connect(settingsKey,&QShortcut::activated,this,[this]{switchPanel(PanelSettings);});
     auto *newChatKey=new QShortcut(Shortcuts::newChat(),this);
-    connect(newChatKey,&QShortcut::activated,this,[this]{if(!m_chatPanel->isBusy()){switchPanel(PanelChat);QMetaObject::invokeMethod(m_chatPanel,"onClearChat");}});
+    connect(newChatKey,&QShortcut::activated,this,[this]{if(!m_startupPage && !m_chatPanel->isBusy()){switchPanel(PanelChat);QMetaObject::invokeMethod(m_chatPanel,"onClearChat");}});
     m_notificationTray=new QSystemTrayIcon(BrandMark::icon(),this);
     m_notificationTray->setToolTip("Magnite");
     connect(m_notificationTray,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason){showNormal();raise();activateWindow();});
@@ -402,7 +402,68 @@ void MainWindow::setupUi() {
     connect(m_settingsPanel, &SettingsPanel::settingsChanged,this,applyAppearance);
     applyAppearance();
 
-    setCentralWidget(central);
+    m_startupPages = new QStackedWidget(this);
+    m_startupPages->addWidget(central);
+    setCentralWidget(m_startupPages);
+    if (!m_selfTest) {
+        m_startupPage = new QWidget(m_startupPages);
+        m_startupPage->setObjectName("startupPage");
+        auto *layout = new QVBoxLayout(m_startupPage);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+
+        // Move the existing window controls so the loading screen can be moved,
+        // minimized, maximized and closed like the workspace.
+        auto *header = new QWidget(m_startupPage);
+        header->setProperty("windowDragRegion", true);
+        header->setFixedHeight(bar->height());
+        auto *headerLayout = new QHBoxLayout(header);
+        headerLayout->setContentsMargins(16, 0, 16, 0);
+        headerLayout->setSpacing(barLayout->spacing());
+        headerLayout->addStretch();
+        for (const auto *name : {"windowMinimize", "windowMaximize", "windowClose"}) {
+            if (auto *button = bar->findChild<QPushButton *>(name)) {
+                m_startupWindowControls.append(button);
+                headerLayout->addWidget(button);
+            }
+        }
+        m_workspaceHeader = bar;
+        layout->addWidget(header);
+
+        auto *brand = new QWidget(m_startupPage);
+        auto *brandLayout = new QVBoxLayout(brand);
+        brandLayout->setContentsMargins(0, 0, 0, 0);
+        brandLayout->setSpacing(16);
+        auto *symbol = new BrandSymbol(brand);
+        symbol->setFixedSize(100, 100);
+        brandLayout->addWidget(symbol, 0, Qt::AlignHCenter);
+        auto *name = new BrandWordmark(brand);
+        name->setFixedSize(184, 51);
+        brandLayout->addWidget(name, 0, Qt::AlignHCenter);
+        layout->addStretch(1);
+        layout->addWidget(brand, 0, Qt::AlignHCenter);
+        layout->addStretch(1);
+
+        auto *footer = new QWidget(m_startupPage);
+        auto *footerLayout = new QHBoxLayout(footer);
+        footerLayout->setContentsMargins(0, 0, 0, 28);
+        footerLayout->setSpacing(12);
+        auto *progress = new ProgressBar(footer);
+        progress->setRange(0, 0);
+        progress->setTextVisible(false);
+        progress->setFixedSize(44, 8);
+        auto *status = new QLabel(tr("Connecting…"), footer);
+        status->setObjectName("startupStatus");
+        status->setAccessibleName(tr("Connecting to the local backend"));
+        if (QSettings().value("appearance/studio3ReducedMotion", false).toBool())
+            progress->hide();
+        footerLayout->addWidget(progress);
+        footerLayout->addWidget(status);
+        layout->addWidget(footer, 0, Qt::AlignHCenter);
+
+        m_startupPages->addWidget(m_startupPage);
+        m_startupPages->setCurrentWidget(m_startupPage);
+    }
     new ClickFeedback(this);
 
     m_stack->setCurrentIndex(PanelHub);
@@ -410,6 +471,7 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::switchPanel(int index) {
+    if (m_startupPage) return;
     if (index == PanelRag) {
         m_chatPanel->showKnowledge();
         index = PanelChat;
@@ -501,6 +563,10 @@ void MainWindow::captureScreenshots(const QString &dir) {
     // <dir>/panel-<index>.png using an in-process widget grab, which works
     // on Wayland where the X root grab comes back black.
     QDir().mkpath(dir);
+    if (m_startupPage) {
+        grab().save(QDir(dir).filePath("startup.png"));
+        showWorkspace();
+    }
     m_shotDir = dir;
     // MAGNITE_SCREENSHOT_SIDEBAR=collapsed shows the strip (not stored in Settings).
     if (qEnvironmentVariable("MAGNITE_SCREENSHOT_SIDEBAR") == "collapsed") m_sidebar->setCollapsed(true);
@@ -562,7 +628,19 @@ void MainWindow::startBackend() {
     m_backend->start();
 }
 
+void MainWindow::showWorkspace() {
+    if (!m_startupPage) return;
+    for (auto *button : m_startupWindowControls)
+        m_workspaceHeader->layout()->addWidget(button);
+    m_startupWindowControls.clear();
+    m_startupPages->setCurrentIndex(0);
+    m_startupPages->removeWidget(m_startupPage);
+    m_startupPage->deleteLater();
+    m_startupPage = nullptr;
+}
+
 void MainWindow::onBackendStarted() {
+    const bool firstConnection = m_startupPage != nullptr;
     m_backendClient->setAuthToken(m_backend->apiToken());
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
@@ -593,7 +671,9 @@ void MainWindow::onBackendStarted() {
             m_adaptersPanel, &AdaptersPanel::refresh, Qt::UniqueConnection);
     connect(m_adaptersPanel, &AdaptersPanel::adapterActivated,
             m_chatPanel, &ChatPanel::refreshEngineStatus, Qt::UniqueConnection);
-    // Connection details live in the header; do not create a second status bar.
+    showWorkspace();
+    if (firstConnection && !verificationRun())
+        QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
 }
 
 void MainWindow::onBackendDataDirInUse() {
@@ -602,6 +682,7 @@ void MainWindow::onBackendDataDirInUse() {
     m_backendClient->abortAll();
     m_backendClient->setBaseUrl(QString());
     m_backendClient->setAuthToken(QString());
+    showWorkspace();
     setPillState("error", "Already running");
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
     else QMessageBox::information(this, "Magnite is already running", msg);
@@ -622,6 +703,7 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
     m_backendClient->abortAll();
     m_backendClient->setBaseUrl(QString());
     m_backendClient->setAuthToken(QString());
+    showWorkspace();
     setPillState("error", msg);
     m_settingsPanel->refreshDetails();
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));

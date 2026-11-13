@@ -63,6 +63,7 @@ private slots:
 private:
     void chatErrorSelfTest(std::shared_ptr<int> failures, std::function<void()> finish, int scenario = 0);
     void setupUi();
+    void showWorkspace();
     void startBackend();
     void notifyCompletion(const QString &kind, bool success, bool preview=false);
     // First launch only: asks what to call the user (for the greeting). Never during verification runs.
@@ -90,6 +91,10 @@ private:
 
     StudioCanvas *m_background = nullptr;
     QStackedWidget *m_stack;
+    QStackedWidget *m_startupPages = nullptr;
+    QWidget *m_startupPage = nullptr;
+    QWidget *m_workspaceHeader = nullptr;
+    QList<QPushButton *> m_startupWindowControls;
     QStackedWidget *m_workspacePages = nullptr;
     TrainingRunPanel *m_runPanel = nullptr;
     int m_runReturnPanel = 1;
