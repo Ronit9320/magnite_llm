@@ -148,10 +148,32 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1280, 820);
     setMinimumSize(Theme::minWindowWidth(), Theme::minWindowHeight());
 
-    connect(m_backend, &BackendManager::started, this, &MainWindow::onBackendStarted);
+    auto finishStartup = [this] {
+        if (!m_startupPage || !m_backendClient->isReady()) return;
+        showWorkspace();
+        if (!verificationRun()) QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
+    };
+    auto *startupTimeout = new QTimer(this);
+    startupTimeout->setSingleShot(true);
+    startupTimeout->setInterval(4000);
+    connect(startupTimeout, &QTimer::timeout, this, finishStartup);
+    connect(m_modelHubPanel, &ModelHubPanel::searchFinished, this, [startupTimeout, finishStartup] {
+        if (!startupTimeout->isActive()) return;
+        startupTimeout->stop();
+        finishStartup();
+    });
+    connect(m_backend, &BackendManager::started, this, [this, startupTimeout] {
+        if (m_startupPage) {
+            m_startupPage->findChild<QLabel *>("startupStatus")->setText(tr("Loading Model Hub…"));
+            startupTimeout->start();
+        }
+        onBackendStarted();
+    });
     connect(m_backend, &BackendManager::errorOccurred, this, &MainWindow::onBackendError);
     connect(m_backend, &BackendManager::dataDirInUse, this, &MainWindow::onBackendDataDirInUse);
-    connect(m_backend, &BackendManager::restarting, this, [this](int, int) {
+    connect(m_backend, &BackendManager::restarting, this, [this, startupTimeout](int, int) {
+        startupTimeout->stop();
+        if (m_startupPage) m_startupPage->findChild<QLabel *>("startupStatus")->setText(tr("Reconnecting…"));
         // The old process and its per-launch token are gone: drop in-flight requests, show it, no dialog.
         m_backendClient->abortAll();
         m_backendClient->setBaseUrl(QString());
@@ -678,7 +700,6 @@ void MainWindow::showWorkspace() {
 }
 
 void MainWindow::onBackendStarted() {
-    const bool firstConnection = m_startupPage != nullptr;
     m_backendClient->setAuthToken(m_backend->apiToken());
     m_backendClient->setBaseUrl(m_backend->baseUrl());
     m_modelsPanel->setBackendClient(m_backendClient);
@@ -709,9 +730,6 @@ void MainWindow::onBackendStarted() {
             m_adaptersPanel, &AdaptersPanel::refresh, Qt::UniqueConnection);
     connect(m_adaptersPanel, &AdaptersPanel::adapterActivated,
             m_chatPanel, &ChatPanel::refreshEngineStatus, Qt::UniqueConnection);
-    showWorkspace();
-    if (firstConnection && !verificationRun())
-        QTimer::singleShot(0, this, &MainWindow::askForNameIfNeeded);
 }
 
 void MainWindow::onBackendDataDirInUse() {

@@ -569,6 +569,7 @@ void ModelHubPanel::search(bool append) {
     query.addQueryItem("offset", QString::number(offset));
     m_searchButton->setText("Searching…");
     m_loadMore->setEnabled(false);
+    if (m_models.isEmpty()) m_empty->hide();
     status("Searching Hugging Face…");
     request("/models/discover?" + query.toString(QUrl::FullyEncoded), [this, generation, append, offset](int code, const QJsonDocument &document) {
         if (generation != m_searchGeneration) return;
@@ -576,7 +577,9 @@ void ModelHubPanel::search(bool append) {
         m_searchButton->setText("Search");
         m_loadMore->setEnabled(true);
         if (code != 200 || !document.isArray()) {
+            renderCards();
             status("Could not search the Hub. " + document.object().value("detail").toString(), "error");
+            emit searchFinished();
             return;
         }
         if (!append) m_models.clear();
@@ -592,6 +595,7 @@ void ModelHubPanel::search(bool append) {
         updateFilterChoices();
         renderCards();
         status(QString("%1 models loaded from Hugging Face. Filters apply to loaded results.").arg(m_models.size()));
+        emit searchFinished();
         QUrlQuery sizes;
         for (const auto &value : document.array()) sizes.addQueryItem("repo", repoId(value.toObject()));
         if (document.array().isEmpty()) return;
@@ -752,7 +756,7 @@ void ModelHubPanel::renderCards() {
     const int active = int(m_task->currentIndex() > 0) + int(m_publisher->currentIndex() > 0) + int(m_format->currentIndex() > 0) + int(m_localOnly->isChecked());
     m_filterButton->setText(active ? QString("Filters · %1").arg(active) : "Filters");
     m_resultCount->setText(QString("%1 of %2 loaded models").arg(shown).arg(m_models.size()));
-    m_empty->setVisible(shown == 0);
+    m_empty->setVisible(shown == 0 && !m_searching);
     m_empty->setText(m_models.isEmpty() ? "No models loaded. Search or refresh to try again." : "No loaded models match these filters. Reset filters or load more results.");
     m_loadMore->setVisible(m_hasMore);
     m_compareTray->setVisible(!m_compared.isEmpty());

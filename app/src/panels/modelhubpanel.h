@@ -36,6 +36,7 @@ public:
 signals:
     void loadRequested(const QString &id);
     void modelsChanged();
+    void searchFinished();
     void deviceUpdated();
     void downloadFinished(bool success);
     void downloadActivity(const QString &repo, const QString &status, const QString &detail);
