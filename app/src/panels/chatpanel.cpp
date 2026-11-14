@@ -27,6 +27,7 @@
 #include <QStyle>
 #include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
+#include "widgets/utilizationmeter.h"
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -40,6 +41,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QShowEvent>
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -122,13 +124,22 @@ void ChatPanel::setupUi() {
     });
     m_modelCombo->setToolTip("Choose a model or enter its ID");
     toolbar->addWidget(m_modelCombo);
-    m_loadButton = new Button("Load model", this);
-    m_loadButton->setObjectName("conversationLoadModel");
-    toolbar->addWidget(m_loadButton);
-    m_unloadButton = new Button("Unload model", this);
-    m_unloadButton->setObjectName("conversationUnloadModel");
-    toolbar->addWidget(m_unloadButton);
+    m_modelButton = new QPushButton("Load model", this);
+    m_modelButton->setObjectName("conversationModelAction");
+    m_modelButton->setMinimumWidth(105);
+    m_modelButton->setCursor(Qt::PointingHandCursor);
+    toolbar->addWidget(m_modelButton);
     toolbar->addStretch();
+    m_utilization = new UtilizationMeter(12, 2, this);
+    m_utilization->setFixedWidth(106);
+    m_utilizationLabel = new QLabel(this);
+    m_utilizationLabel->setObjectName("conversationUtilization");
+    m_utilizationLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_utilizationLabel->setMinimumWidth(75);
+    applyUtilization({});
+    toolbar->addWidget(m_utilizationLabel);
+    toolbar->addWidget(m_utilization);
+    toolbar->addSpacing(6);
     m_settingsToggle = toolbarIcon(this, "Model settings", "settings");
     m_settingsToggle->setObjectName("chatSettingsToggle");
     m_settingsToggle->setCheckable(true);
@@ -179,8 +190,13 @@ void ChatPanel::setupUi() {
     controls->addWidget(refreshBtn, 0, Qt::AlignLeft);
     controls->addStretch();
     connect(refreshBtn, &QPushButton::clicked, this, [this]() { refreshModels(); refreshEngineStatus(); });
-    connect(m_loadButton, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
-    connect(m_unloadButton, &QPushButton::clicked, this, &ChatPanel::onUnloadModel);
+    connect(m_modelButton, &QPushButton::clicked, this, [this] {
+        if (m_modelLoaded) onUnloadModel();
+        else onLoadModel();
+    });
+    auto *telemetryTimer = new QTimer(this);
+    connect(telemetryTimer, &QTimer::timeout, this, &ChatPanel::refreshUtilization);
+    telemetryTimer->start(3000);
 
     // A readable, centered conversation column, without a permanent inspector.
     auto *centerRow = new QHBoxLayout();
@@ -382,6 +398,7 @@ bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
 
 void ChatPanel::setBackendClient(BackendClient *client) {
     m_client = client;
+    refreshUtilization();
     applyEngineStatus({});
     setStatus(client && client->isReady()
                   ? "Backend connected. Loading model list..."
@@ -414,7 +431,38 @@ void ChatPanel::refreshModels() {
 }
 
 void ChatPanel::refreshEngineStatus() {
+    if (!m_client || !m_client->isReady()) applyUtilization({});
     requestEngineStatus();
+}
+
+void ChatPanel::showEvent(QShowEvent *event) {
+    BasePanel::showEvent(event);
+    refreshUtilization();
+}
+
+void ChatPanel::refreshUtilization() {
+    if (!isVisible() || m_utilizationPending) return;
+    if (!m_client || !m_client->isReady()) {
+        applyUtilization({});
+        return;
+    }
+    m_utilizationPending = true;
+    m_client->get("/training/telemetry", [panel = QPointer<ChatPanel>(this)](int status, const QJsonDocument &doc) {
+        if (!panel) return;
+        panel->m_utilizationPending = false;
+        panel->applyUtilization(status == 200 ? doc.object() : QJsonObject{});
+    });
+}
+
+void ChatPanel::applyUtilization(const QJsonObject &data) {
+    m_utilization->applyTelemetry(data);
+    const QString title = m_utilization->label();
+    const QString reading = m_utilization->reading();
+    m_utilizationLabel->setText(title.section(' ', 0, 0) + " " + reading);
+    const QString description = title + (reading == "—" ? " unavailable" : " " + reading);
+    m_utilizationLabel->setAccessibleName(description);
+    m_utilizationLabel->setToolTip(description);
+    m_utilization->setToolTip(description);
 }
 
 void ChatPanel::requestEngineStatus(const QString &error) {
@@ -1283,10 +1331,12 @@ void ChatPanel::updateActions() {
     const bool busy = isBusy();
     const bool ready = m_client && m_client->isReady();
     m_sendButton->setEnabled(m_modelLoaded && !busy && !m_input->toPlainText().trimmed().isEmpty());
-    m_loadButton->setEnabled(ready && !busy);
-    m_unloadButton->setEnabled(ready && !busy && m_modelLoaded);
-    m_loadButton->setText(m_modelOperation == ModelOperation::Loading ? "Loading…" : "Load model");
-    m_unloadButton->setText(m_modelOperation == ModelOperation::Unloading ? "Unloading…" : "Unload model");
+    m_modelButton->setEnabled(ready && !busy);
+    switch (m_modelOperation) {
+    case ModelOperation::Loading: m_modelButton->setText("Loading…"); break;
+    case ModelOperation::Unloading: m_modelButton->setText("Unloading…"); break;
+    case ModelOperation::Idle: m_modelButton->setText(m_modelLoaded ? "Unload model" : "Load model"); break;
+    }
     m_modelCombo->setEnabled(!busy);
     m_engineCombo->setEnabled(!busy);
     m_input->setReadOnly(m_preparing);

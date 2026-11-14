@@ -31,6 +31,8 @@ class ContextMeter;
 class ChatStore;
 class RagPanel;
 class QNetworkReply;
+class QShowEvent;
+class UtilizationMeter;
 
 // Chat / Inference panel: converse with the active model.
 // Presentation: real chat bubbles (Variant B) in a scroll area, with a pinned
@@ -66,6 +68,7 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void applySettingsJson(const QString &json) override;
 
 public slots:
@@ -105,6 +108,8 @@ private:
     QVBoxLayout *addDrawer(const QString &title, const QString &name, QPushButton *toggle);
     void requestEngineStatus(const QString &error = {});
     void applyEngineStatus(const QJsonObject &status);
+    void refreshUtilization();
+    void applyUtilization(const QJsonObject &data);
     void updateKnowledgeContext();
     void restoreKnowledge();
     void addCitations(MessageRow *row, const QJsonArray &sources);
@@ -178,8 +183,10 @@ private:
     // Input row.
     QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
-    QPushButton *m_loadButton = nullptr;
-    QPushButton *m_unloadButton = nullptr;
+    QPushButton *m_modelButton = nullptr;
+    UtilizationMeter *m_utilization = nullptr;
+    QLabel *m_utilizationLabel = nullptr;
+    bool m_utilizationPending = false;
     enum class ModelOperation { Idle, Loading, Unloading };
     ModelOperation m_modelOperation = ModelOperation::Idle;
     quint64 m_engineStatusRequest = 0;

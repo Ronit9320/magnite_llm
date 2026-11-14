@@ -28,6 +28,7 @@ class QGridLayout;
 class QVBoxLayout;
 class QDialog;
 class QFrame;
+class UtilizationMeter;
 
 // Training panel: configure and monitor LoRA/QLoRA fine-tuning jobs.
 // Talks to the backend training/datasets API and polls live job status.
@@ -128,7 +129,7 @@ private:
     QTableWidget *m_experiments = nullptr;
     QHash<QString,QLabel *> m_configValues;
     QHash<QString,QLabel *> m_computeValues;
-    QList<QFrame *> m_utilSegments;
+    UtilizationMeter *m_utilization = nullptr;
     QList<QLabel *> m_statNotes;
     QLabel *m_badge = nullptr;
     QLabel *m_stepLabel = nullptr;

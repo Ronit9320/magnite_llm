@@ -1646,9 +1646,9 @@ int runUiCheck(const QString &captures) {
     check(chat.findChild<QWidget *>("chatActivity")->isHidden() && chat.findChildren<ChatBubble *>().size()==2,"chat success ends animation and displays response");
     capture(&chat,"chat-conversation");
     fixture.holdChat=true; input->setPlainText("Continue"); send->click(); pump();
-    auto *load = chat.findChild<QPushButton *>("conversationLoadModel");
-    auto *unload = chat.findChild<QPushButton *>("conversationUnloadModel");
-    check(!chat.findChild<QWidget *>("chatActivity")->isHidden() && !load->isEnabled() && !unload->isEnabled(),
+    auto *modelAction = chat.findChild<QPushButton *>("conversationModelAction");
+    check(!chat.findChild<QWidget *>("chatActivity")->isHidden() && !modelAction->isEnabled()
+          && modelAction->text() == "Unload model",
           "streaming prevents model loads and unloads");
     QMetaObject::invokeMethod(&chat,"onClearChat"); pump();
     check(chat.findChild<QWidget *>("chatActivity")->isHidden() && chat.findChild<QLabel *>("emptyConversation")->isVisible(),"new chat stops a live stream and restores welcome");
@@ -1657,21 +1657,25 @@ int runUiCheck(const QString &captures) {
         auto *status = chat.findChild<QLabel *>("statusLabel");
         input->setPlainText("Draft to keep");
         fixture.unloadStatus = 409;
-        unload->click();
-        check(chat.isBusy() && !load->isEnabled() && !send->isEnabled(), "unloading blocks concurrent model and chat actions");
-        check(waitUntil([&] { return unload->isEnabled() && status->text().contains("Unload failed: Model is busy"); }),
+        modelAction->click();
+        check(chat.isBusy() && !modelAction->isEnabled() && !send->isEnabled(), "unloading blocks concurrent model and chat actions");
+        check(waitUntil([&] { return modelAction->isEnabled() && modelAction->text() == "Unload model"
+                                      && status->text().contains("Unload failed: Model is busy"); }),
               "a refused unload reports the error and keeps the loaded model available");
         fixture.unloadStatus = 200;
-        unload->click();
-        check(waitUntil([&] { return !chat.isBusy() && !unload->isEnabled() && status->text().startsWith("Model unloaded."); })
+        modelAction->click();
+        check(waitUntil([&] { return !chat.isBusy() && modelAction->isEnabled() && modelAction->text() == "Load model"; })
               && !fixture.inferenceLoaded && !send->isEnabled() && input->toPlainText() == "Draft to keep",
               "unload clears the loaded model and preserves the draft");
         picker->setEditText("studio/sample-model");
-        load->click();
-        check(waitUntil([&] { return unload->isEnabled(); }) && fixture.inferenceLoaded,
-              "loading again enables Unload model");
+        modelAction->click();
+        check(waitUntil([&] { return modelAction->isEnabled() && modelAction->text() == "Unload model"; })
+              && fixture.inferenceLoaded, "the same button offers Unload model after loading");
         input->clear();
     }
+    auto *utilization = chat.findChild<QLabel *>("conversationUtilization");
+    check(utilization && waitUntil([&] { return utilization->text() == "GPU 94%"; }),
+          "Conversation shows the same device telemetry as Training");
     QWidget host; host.resize(350,700);
     ChatBubble token(ChatBubble::Assistant,QString(600,'x'),&host); host.show(); pump();
     check(token.width()<=350 && token.height()>150,"long unbroken responses wrap without clipping height");

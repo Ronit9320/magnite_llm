@@ -185,6 +185,11 @@ QPushButton[conversationIcon="true"]:hover, QPushButton[conversationIcon="true"]
     background: @surfaceFillHover;
 }
 QPushButton[conversationIcon="true"]:checked { background: @surfaceFillActive; }
+QPushButton#conversationModelAction { border: none; background: @surfaceFill; }
+QPushButton#conversationModelAction:hover, QPushButton#conversationModelAction:focus { background: @surfaceFillHover; }
+QPushButton#conversationModelAction:pressed { background: @surfaceFillActive; }
+QPushButton#conversationModelAction:disabled { background: @insetBackground; }
+QLabel#conversationUtilization { color: @textSecondary; font-family: @monoFont; font-size: 11px; }
 QFrame[conversationDrawer="true"] { background: @surfaceFill; border: none; border-radius: 10px; }
 QFrame#chatComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
 QPlainTextEdit#chatInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
@@ -289,8 +294,8 @@ QWidget#trainingPage QFrame#trainingMiniCard, QWidget#trainingPage QFrame#traini
 QWidget#trainingPage QFrame#trainingMonitorFooter, QWidget#trainingPage QFrame#trainingThermal { border: none; border-top: 1px solid @surfaceBorder; }
 QWidget#trainingPage QLabel#trainingDeviceName { font-size: 12px; font-weight: 500; }
 QWidget#trainingPage QLabel#trainingChip { color: @accentLabel; font-size: 28px; }
-QWidget#trainingPage QFrame#trainingUtilBar { background: @insetBackground; border: none; border-radius: 1px; }
-QWidget#trainingPage QFrame#trainingUtilBar[lit="true"] { background: @accentPrimary; }
+QFrame#utilizationSegment { background: @insetBackground; border: none; border-radius: 1px; }
+QFrame#utilizationSegment[lit="true"] { background: @accentPrimary; }
 QWidget#trainingPage QLabel#trainingTimeline { font-size: 10px; color: @textSecondary; }
 QWidget#trainingPage QWidget#trainingExperimentIndex { border-right: 1px solid @surfaceBorder; }
 QWidget#trainingPage QListWidget#trainingRuns { background: transparent; border: none; outline: none; }

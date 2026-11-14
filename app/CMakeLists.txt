@@ -84,6 +84,8 @@ set(MAGNITE_SOURCES
     src/widgets/componentfocus.h
     src/widgets/progressbar.cpp
     src/widgets/progressbar.h
+    src/widgets/utilizationmeter.cpp
+    src/widgets/utilizationmeter.h
     src/widgets/spinbox.h
     src/widgets/motion.h
     src/widgets/button.cpp
