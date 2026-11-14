@@ -144,6 +144,8 @@ QPushButton *button(QWidget *widget,const QString &text) {
 }
 struct Fixture : QTcpServer {
     bool failTraining = false, failQuery = false, holdChat = false;
+    bool inferenceLoaded = true;
+    int unloadStatus = 200;
     // Hub search: hubTotal > 0 serves paged results ("studio/hub-model-NNN");
     // otherwise the original single-result reply is used.
     int hubTotal = 0, searchStatus = 200;
@@ -367,7 +369,17 @@ struct Fixture : QTcpServer {
                             }
                         }
                     }
-                    else if (path == "/inference/status" || path == "/inference/load") body=R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})";
+                    else if (path == "/inference/status" || path == "/inference/load") {
+                        if (path == "/inference/load") inferenceLoaded = true;
+                        body = inferenceLoaded
+                            ? R"({"engine":{"name":"torch","description":"Local · torch"},"loaded_model":"studio/sample-model","active_adapter_id":"fixture-adapter","active_adapter":"Support assistant"})"
+                            : R"({"engine":null,"loaded_model":null})";
+                    }
+                    else if (path == "/inference/unload") {
+                        status = unloadStatus;
+                        if (status == 200) inferenceLoaded = false;
+                        body = status == 200 ? R"({"status":"unloaded"})" : R"({"detail":"Model is busy"})";
+                    }
                     else if (path == "/inference/chat") {
                         chatRequests << QString::fromUtf8(bytes->mid(headerEnd+4));
                         if (chatStatus != 200) { status=chatStatus; body=R"({"detail":"fixture chat failure"})"; }
@@ -1745,13 +1757,64 @@ int runUiCheck(const QString &captures) {
     check(chat.findChild<QWidget *>("chatActivity")->isHidden() && chat.findChildren<ChatBubble *>().size()==2,"chat success ends animation and displays response");
     capture(&chat,"chat-conversation");
     fixture.holdChat=true; input->setPlainText("Continue"); send->click(); pump();
-    check(!chat.findChild<QWidget *>("chatActivity")->isHidden() && !button(&chat,"Load model")->isEnabled(),"streaming prevents overlapping model loads");
+    auto *modelAction = chat.findChild<QPushButton *>("conversationModelAction");
+    check(!chat.findChild<QWidget *>("chatActivity")->isHidden() && !modelAction->isEnabled()
+          && modelAction->text() == "Unload model",
+          "streaming prevents model loads and unloads");
     QMetaObject::invokeMethod(&chat,"onClearChat"); pump();
     check(chat.findChild<QWidget *>("chatActivity")->isHidden() && chat.findChild<QLabel *>("emptyConversation")->isVisible(),"new chat stops a live stream and restores welcome");
+    {
+        auto *picker = chat.findChild<QComboBox *>("conversationModelPicker");
+        auto *status = chat.findChild<QLabel *>("statusLabel");
+        input->setPlainText("Draft to keep");
+        fixture.unloadStatus = 409;
+        modelAction->click();
+        check(chat.isBusy() && !modelAction->isEnabled() && !send->isEnabled(), "unloading blocks concurrent model and chat actions");
+        check(waitUntil([&] { return modelAction->isEnabled() && modelAction->text() == "Unload model"
+                                      && status->text().contains("Unload failed: Model is busy"); }),
+              "a refused unload reports the error and keeps the loaded model available");
+        fixture.unloadStatus = 200;
+        modelAction->click();
+        check(waitUntil([&] { return !chat.isBusy() && modelAction->isEnabled() && modelAction->text() == "Load model"; })
+              && !fixture.inferenceLoaded && !send->isEnabled() && input->toPlainText() == "Draft to keep",
+              "unload clears the loaded model and preserves the draft");
+        picker->setEditText("studio/sample-model");
+        modelAction->click();
+        check(waitUntil([&] { return modelAction->isEnabled() && modelAction->text() == "Unload model"; })
+              && fixture.inferenceLoaded, "the same button offers Unload model after loading");
+        input->clear();
+    }
+    auto *utilization = chat.findChild<QLabel *>("conversationUtilization");
+    check(utilization && waitUntil([&] { return utilization->text() == "GPU 94%"; }),
+          "Conversation shows the same device telemetry as Training");
     QWidget host; host.resize(350,700);
     ChatBubble token(ChatBubble::Assistant,QString(600,'x'),&host); host.show(); pump();
     check(token.width()<=350 && token.height()>150,"long unbroken responses wrap without clipping height");
     host.hide(); chat.hide();
+
+    if (!captures.isEmpty()) {
+        ChatPanel header;
+        header.setKnowledgePanel(new RagPanel);
+        header.setBackendClient(&client);
+        header.resize(800, 628);
+        header.show();
+        auto *picker = header.findChild<QComboBox *>("conversationModelPicker");
+        picker->setCurrentText("studio/sample-model");
+        auto *settingsIcon = header.findChild<QPushButton *>("chatSettingsToggle");
+        auto *knowledgeIcon = header.findChild<QPushButton *>("conversationKnowledgeToggle");
+        const bool wasDark = Theme::isDark();
+        for (bool dark : {false, true}) {
+            Theme::setDark(dark);
+            const QString tone = dark ? "dark" : "light";
+            settingsIcon->click();
+            pump();
+            capture(&header, "conversation-model-settings-" + tone);
+            knowledgeIcon->click();
+            pump();
+            capture(&header, "conversation-knowledge-" + tone);
+        }
+        Theme::setDark(wasDark);
+    }
 
     {
         // Earlier streaming/clear-chat callbacks must not enter the debounce

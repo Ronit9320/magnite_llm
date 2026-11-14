@@ -39,6 +39,7 @@
 #include "trainingduration.h"
 #include <QProgressBar>
 #include "widgets/progressbar.h"
+#include "widgets/utilizationmeter.h"
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QScrollArea>
@@ -313,9 +314,9 @@ void TrainingPanel::setupUi() {
         auto *value=label("—","trainingMono"); m_computeValues[key]=value; row->addWidget(value); compute->addLayout(row);
     };
     metricRow("GPU utilization","utilization");
-    auto *util=new QHBoxLayout(); util->setSpacing(3); util->setContentsMargins(0,0,0,3);
-    for (int i=0;i<32;++i) { auto *bar=new QFrame(this); bar->setObjectName("trainingUtilBar"); bar->setFixedHeight(22); util->addWidget(bar,1); m_utilSegments.append(bar); }
-    compute->addLayout(util); metricRow("Memory allocation","memory");
+    m_utilization = new UtilizationMeter(22, 3, this);
+    compute->addWidget(m_utilization);
+    metricRow("Memory allocation","memory");
     auto *deviceMemory=new ProgressBar(this); deviceMemory->setObjectName("trainingDeviceMemory"); deviceMemory->setRange(0,100);
     deviceMemory->setTextVisible(false); deviceMemory->setFixedHeight(6); compute->addWidget(deviceMemory);
     m_computeValues["memoryDetail"]=label("Device-wide usage                     Free —","trainingTiny"); compute->addWidget(m_computeValues["memoryDetail"]);
@@ -1616,7 +1617,7 @@ void TrainingPanel::refreshTelemetry() {
 }
 
 QString TrainingPanel::computeText(const QString &key) const { auto *value=m_computeValues.value(key); return value?value->text():QString(); }
-int TrainingPanel::litUtilizationSegments() const { int lit=0; for (auto *bar:m_utilSegments) lit+=bar->property("lit").toBool()?1:0; return lit; }
+int TrainingPanel::litUtilizationSegments() const { return m_utilization->litSegments(); }
 
 void TrainingPanel::applyTelemetry(const QJsonObject &data) {
     auto number=[](QJsonValue value,int places=0) {
@@ -1626,11 +1627,9 @@ void TrainingPanel::applyTelemetry(const QJsonObject &data) {
     m_computeValues["accelerator"]->setText(data["accelerator"].toString("LOCAL"));
     m_computeValues["device"]->setText(data["device"].toString("Device telemetry unavailable"));
     m_computeValues["capacity"]->setText(gb(data["total_bytes"])+" "+data["kind"].toString("memory"));
-    // GPU utilization when the device reports it; otherwise system CPU, never a guess.
-    const bool gpuShown=data["utilization_percent"].isDouble();
-    const QJsonValue shown=gpuShown?data["utilization_percent"]:data["cpu_percent"];
-    m_computeValues["utilizationTitle"]->setText(!gpuShown && shown.isDouble()?"CPU utilization":"GPU utilization");
-    m_computeValues["utilization"]->setText(shown.isDouble()?number(shown)+"%":"—");
+    m_utilization->applyTelemetry(data);
+    m_computeValues["utilizationTitle"]->setText(m_utilization->label());
+    m_computeValues["utilization"]->setText(m_utilization->reading());
     m_computeValues["memory"]->setText(gb(data["used_bytes"])+" / "+gb(data["total_bytes"]));
     const double used=data["used_bytes"].toDouble(),total=data["total_bytes"].toDouble();
     auto *memory=findChild<QProgressBar *>("trainingDeviceMemory");
@@ -1639,13 +1638,6 @@ void TrainingPanel::applyTelemetry(const QJsonObject &data) {
     m_computeValues["temperature"]->setText("Temperature   "+(data["temperature_c"].isDouble()?number(data["temperature_c"])+"°C":"—"));
     m_computeValues["power"]->setText("Power   "+(data["power_w"].isDouble()?number(data["power_w"])+" W":"—"));
     m_computeCard->setToolTip(data["detail"].toString("This backend does not expose device telemetry."));
-    // Any measured load above zero lights at least one segment so light activity stays visible.
-    const double level=shown.isDouble()?qBound(0.0,shown.toDouble(),100.0):0.0;
-    const int active=level>0?qMax(1,qRound(level/100*32)):0;
-    for (int i=0;i<m_utilSegments.size();++i) {
-        auto *bar=m_utilSegments[i]; const bool lit=i<active;
-        if (bar->property("lit").toBool()!=lit) { bar->setProperty("lit",lit); bar->style()->unpolish(bar); bar->style()->polish(bar); }
-    }
 }
 
 void TrainingPanel::openRunDialog() {

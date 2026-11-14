@@ -139,7 +139,7 @@ void DocsDiagram::paintEvent(QPaintEvent *) {
     body.setPixelSize(11);
     p.setFont(body);
     if (m_kind == Distribution) {
-        p.setPen(QColor(Theme::surfaceBorder()));
+        p.setPen(Qt::NoPen);
         p.setBrush(QColor(Theme::surfaceFill()));
         p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8);
         p.setPen(QColor(Theme::textMuted()));
@@ -187,10 +187,8 @@ void DocsDiagram::paintEvent(QPaintEvent *) {
     for (int i = 0; i < 3; ++i) {
         const QRectF box(vertical ? 1 : 1 + i * (boxWidth + gap), vertical ? 1 + i * (boxHeight + gap) : 7, boxWidth,
                          boxHeight);
-        p.setPen(QPen(QColor(Theme::surfaceBorder()), 1));
+        p.setPen(Qt::NoPen);
         p.setBrush(QColor(m_kind == Data && i < 2 ? Theme::canvasBackground() : Theme::surfaceFill()));
-        if (m_kind == Data && i == 2)
-            p.setPen(QPen(QColor(Theme::surfaceBorder()), 1, Qt::DashLine));
         p.drawRoundedRect(box, 7, 7);
         p.setPen(QColor(Theme::textPrimary()));
         QRectF text = box.adjusted(8, 8, -8, -8);

@@ -31,6 +31,8 @@ class ContextMeter;
 class ChatStore;
 class RagPanel;
 class QNetworkReply;
+class QShowEvent;
+class UtilizationMeter;
 
 // Chat / Inference panel: converse with the active model.
 // Presentation: real chat bubbles (Variant B) in a scroll area, with a pinned
@@ -51,7 +53,7 @@ public:
     // Saved chats. Without a store (the default) nothing is saved and nothing can be opened.
     void setChatStore(ChatStore *store);
     QString currentChatId() const { return m_chatId; }   // empty for a blank, unsaved chat
-    // Streaming, preparing a send, loading a model, or a message editor open.
+    // Streaming, preparing a send, changing the loaded model, or a message editor open.
     bool isBusy() const;
     // Writes any pending change now.
     bool flushSave();
@@ -66,6 +68,7 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void applySettingsJson(const QString &json) override;
 
 public slots:
@@ -82,6 +85,7 @@ signals:
 
 private slots:
     void onLoadModel();
+    void onUnloadModel();
     void onSend();
     void onStop();
     void onClearChat();
@@ -101,6 +105,11 @@ private:
     };
 
     void setupUi();
+    QVBoxLayout *addDrawer(const QString &title, const QString &name, QPushButton *toggle);
+    void requestEngineStatus(const QString &error = {});
+    void applyEngineStatus(const QJsonObject &status);
+    void refreshUtilization();
+    void applyUtilization(const QJsonObject &data);
     void updateKnowledgeContext();
     void restoreKnowledge();
     void addCitations(MessageRow *row, const QJsonArray &sources);
@@ -151,6 +160,7 @@ private:
     QSpinBox *m_maxTokensSpin;
     QDoubleSpinBox *m_tempSpin;
     QCheckBox *m_ragCheck;
+    QPushButton *m_settingsToggle = nullptr;
     QPushButton *m_knowledgeToggle = nullptr;
     QPushButton *m_knowledgeContext = nullptr;
     QWidget *m_knowledgeDrawer = nullptr;
@@ -173,8 +183,13 @@ private:
     // Input row.
     QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
-    QPushButton *m_loadButton = nullptr;
-    bool m_loading = false;
+    QPushButton *m_modelButton = nullptr;
+    UtilizationMeter *m_utilization = nullptr;
+    QLabel *m_utilizationLabel = nullptr;
+    bool m_utilizationPending = false;
+    enum class ModelOperation { Idle, Loading, Unloading };
+    ModelOperation m_modelOperation = ModelOperation::Idle;
+    quint64 m_engineStatusRequest = 0;
     bool m_followOutput = true;
     QPushButton *m_stopButton;
     QLabel *m_statusLabel;
