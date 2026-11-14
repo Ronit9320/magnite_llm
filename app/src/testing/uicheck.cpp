@@ -44,6 +44,7 @@
 #include <QAccessible>
 #include "widgets/toggleswitch.h"
 #include "widgets/button.h"
+#include "testing/textfit.h"
 #include "widgets/tabwidget.h"
 #include "widgets/combobox.h"
 #include "widgets/progressbar.h"
@@ -106,29 +107,6 @@ void pump(int ms = 80) {
     QEventLoop loop;
     QTimer::singleShot(ms,&loop,&QEventLoop::quit);
     loop.exec();
-}
-// Text that is elided ("Organi…"), cut at an edge or squeezed too short on the visible widgets under root.
-QStringList clippedText(QWidget *root) {
-    QStringList found;
-    for (auto *w : root->findChildren<QWidget *>()) {
-        if (!w->isVisible() || w->width()<4 || w->height()<4) continue;
-        if (auto *button=qobject_cast<Button *>(w)) {
-            if (!button->textFits()) found<<QString("button \"%1\" %2px").arg(button->text()).arg(button->width());
-        } else if (auto *toggle=qobject_cast<ToggleSwitch *>(w)) {
-            if (!toggle->text().isEmpty() && toggle->width()<toggle->labelLeft()+toggle->fontMetrics().horizontalAdvance(toggle->text()))
-                found<<QString("switch \"%1\"").arg(toggle->text());
-        } else if (auto *label=qobject_cast<QLabel *>(w)) {
-            if (label->text().isEmpty() || label->textFormat()==Qt::RichText || label->pixmap().isNull()==false) continue;
-            const int need=label->wordWrap()?label->heightForWidth(label->width()):label->sizeHint().height();
-            if (label->height()+1<need) found<<QString("label \"%1\" %2<%3px high").arg(label->text().left(30).replace('\n',' ')).arg(label->height()).arg(need);
-            // Single-line labels that may not shrink must show all their text (Ignored-width labels clip on purpose).
-            if (!label->wordWrap() && label->sizePolicy().horizontalPolicy()!=QSizePolicy::Ignored && !label->text().contains('\n')
-                && label->width()+1<label->fontMetrics().horizontalAdvance(label->text()))
-                found<<QString("label \"%1\" %2<%3px wide").arg(label->text().left(30)).arg(label->width()).arg(label->fontMetrics().horizontalAdvance(label->text()));
-        }
-    }
-    found.removeDuplicates();
-    return found;
 }
 bool waitUntil(const std::function<bool()> &done,int timeoutMs = 4000) {
     for (int waited = 0; !done() && waited < timeoutMs; waited += 20) pump(20);
@@ -481,7 +459,7 @@ int runUiCheck(const QString &captures) {
                 const QString sizeName=size==0?"Compact":size==2?"Large":"Default";
                 for (int tab=0;tab<tabs->count();++tab) {
                     tabs->setCurrentIndex(tab); pump(100);
-                    const auto found=clippedText(&library);
+                    const auto found=TextFit::clippedText(&library);
                     check(found.isEmpty(),QString("text fit [%1] library %2 tab: nothing elided or cut").arg(sizeName,tabs->tabText(tab))+(found.isEmpty()?QString():" — "+found.join("; ")));
                 }
             }
@@ -1720,20 +1698,46 @@ int runUiCheck(const QString &captures) {
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     {
-        // Text-fit guard: at every interface size, nothing on the main pages may be elided or cut.
+        // Text-fit guard: at every interface size, in both themes and at a wide and a small window, nothing may be elided or cut.
         const int storedSize=QSettings().value("appearance/interfaceSize",1).toInt();
-        const QList<QPair<QString,QWidget *>> pages={{"library",&models},{"training",&training},{"adapters",&adapters},{"knowledge",&knowledge}};
+        const bool wasDark=Theme::isDark();
+        auto *settingsToggle=training.findChild<QPushButton *>("trainingSettingsToggle");
+        auto *archiveToggle=training.findChild<QPushButton *>("trainingArchiveToggle");
+        auto *workspaceTabs=training.findChild<SegmentedTabBar *>("trainingWorkspaceTabs");
+        const QList<QPair<QString,QWidget *>> pages={{"library",&models},{"training",&training},{"adapters",&adapters},{"knowledge",&knowledge},{"chat",&chat}};
+        ChatPanel drawerChat; drawerChat.setKnowledgePanel(new RagPanel);   // the real chat page with its Knowledge drawer
+        auto *drawerToggle=drawerChat.findChild<QPushButton *>("conversationKnowledgeToggle");
         for (int size : {1,0,2}) {
-            QSettings().setValue("appearance/interfaceSize",size); Theme::applyPreferences(); pump(60);
-            const QString sizeName=size==0?"Compact":size==2?"Large":"Default";
-            for (const auto &page : pages) {
-                page.second->resize(1104,760); page.second->show(); pump(120);
-                const auto found=clippedText(page.second);
-                check(found.isEmpty(),QString("text fit [%1] %2 page: nothing elided or cut").arg(sizeName,page.first)+(found.isEmpty()?QString():" — "+found.join("; ")));
-                page.second->hide();
+            for (bool dark : {true,false}) {
+                QSettings().setValue("appearance/interfaceSize",size); Theme::applyPreferences(); Theme::setDark(dark); pump(60);
+                const QString sizeName=QString("%1 %2").arg(TextFit::sizeName(size),dark?"dark":"light");
+                for (int width : {1104,800}) {
+                    for (const auto &page : pages) {
+                        page.second->resize(width,760); page.second->show(); pump(120);
+                        const auto found=TextFit::clippedText(page.second);
+                        check(found.isEmpty(),TextFit::describe(sizeName,QString("%1 page, %2px wide").arg(page.first).arg(width),found));
+                        if (page.second==&training && settingsToggle && workspaceTabs && archiveToggle) {
+                            settingsToggle->setChecked(true); pump(150);
+                            auto setup=TextFit::clippedText(&training);
+                            check(setup.isEmpty(),TextFit::describe(sizeName,QString("training setup, %1px wide").arg(width),setup));
+                            settingsToggle->setChecked(false);
+                            workspaceTabs->setCurrentIndex(1); archiveToggle->setChecked(true); pump(150);
+                            auto observatory=TextFit::clippedText(&training);
+                            check(observatory.isEmpty(),TextFit::describe(sizeName,QString("training observatory, %1px wide").arg(width),observatory));
+                            archiveToggle->setChecked(false); workspaceTabs->setCurrentIndex(0); pump(100);
+                        }
+                        page.second->hide();
+                    }
+                    if (drawerToggle) {
+                        drawerChat.resize(width,760); drawerChat.show(); drawerToggle->setChecked(true); pump(150);
+                        const auto found=TextFit::clippedText(&drawerChat);
+                        check(found.isEmpty(),TextFit::describe(sizeName,QString("chat with Knowledge drawer open, %1px wide").arg(width),found));
+                        drawerToggle->setChecked(false); drawerChat.hide();
+                    }
+                }
             }
         }
-        QSettings().setValue("appearance/interfaceSize",storedSize); Theme::applyPreferences(); pump(60);
+        QSettings().setValue("appearance/interfaceSize",storedSize); Theme::applyPreferences(); Theme::setDark(wasDark); pump(60);
     }
     chat.show(); pump();
     {

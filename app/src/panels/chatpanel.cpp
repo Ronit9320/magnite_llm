@@ -1084,12 +1084,38 @@ void ChatPanel::setKnowledgePanel(RagPanel *panel) {
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
     scroll->setWidget(panel);
+    EdgeScrollBar::attachInside(scroll);   // the bar floats over the edge and takes no width from the drawer
     panel->setAutoFillBackground(false);
     body->addWidget(scroll, 1);
     m_knowledgeToggle->show();
     m_knowledgeContext->show();
     connect(panel, &RagPanel::sourceScopeChanged, this, &ChatPanel::updateKnowledgeContext);
+    connect(m_knowledgeToggle, &QPushButton::toggled, this, [this](bool open) { if (open) fitKnowledgeDrawer(); });
     updateKnowledgeContext();
+    fitKnowledgeDrawer();
+}
+
+void ChatPanel::fitKnowledgeDrawer() {
+    if (!m_knowledgeDrawer || !m_knowledge) return;
+    constexpr int kDrawerWidth = 316;   // the designed width at the default interface size
+    const QMargins margins = m_knowledgeDrawer->layout()->contentsMargins();
+    // The panel scrolls its own content, so its minimum hides what that content needs: ask the content.
+    int panelNeeds = m_knowledge->minimumSizeHint().width();
+    if (auto *inner = m_knowledge->findChild<QScrollArea *>("cardScroll"); inner && inner->widget()) {
+        const QMargins panelMargins = m_knowledge->layout() ? m_knowledge->layout()->contentsMargins() : QMargins();
+        panelNeeds = qMax(panelNeeds, inner->widget()->minimumSizeHint().width() + panelMargins.left() + panelMargins.right());
+    }
+    const int needed = panelNeeds + margins.left() + margins.right();
+    m_knowledgeDrawer->setFixedWidth(qMax(kDrawerWidth, needed));
+}
+
+void ChatPanel::changeEvent(QEvent *event) {
+    BasePanel::changeEvent(event);
+    // A new interface size changes how much room the drawer's buttons need; measure once the new style has settled.
+    if ((event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) && m_knowledgeDrawer && !m_drawerFitPending) {
+        m_drawerFitPending = true;
+        QTimer::singleShot(0, this, [this] { m_drawerFitPending = false; fitKnowledgeDrawer(); });
+    }
 }
 
 void ChatPanel::addCitations(MessageRow *row, const QJsonArray &sources) {

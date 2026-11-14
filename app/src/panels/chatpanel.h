@@ -67,6 +67,7 @@ public:
     bool deleteChat(const QString &id);
 
 protected:
+    void changeEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void applySettingsJson(const QString &json) override;
@@ -164,6 +165,8 @@ private:
     QPushButton *m_knowledgeToggle = nullptr;
     QPushButton *m_knowledgeContext = nullptr;
     QWidget *m_knowledgeDrawer = nullptr;
+    void fitKnowledgeDrawer();   // wide enough for its content at the current interface size
+    bool m_drawerFitPending = false;
     QHBoxLayout *m_workspace = nullptr;
     RagPanel *m_knowledge = nullptr;
     bool m_restoringKnowledge = false;

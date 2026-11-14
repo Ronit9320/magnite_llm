@@ -1,4 +1,5 @@
 #include "testing/settings_tests.h"
+#include "testing/textfit.h"
 #include "backend_client.h"
 #include "panels/chatpanel.h"
 #include "panels/chatstore.h"
@@ -180,6 +181,32 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
           "settings opens as a modal native utility window");
     auto* pages = panel.findChild<QStackedWidget*>("settingsPages");
     check(pages && pages->count() == 8, "all eight reviewed categories exist");
+    {
+        // Text-fit guard: every Settings category at every interface size, in both themes.
+        QSettings guardSettings;
+        const QVariant storedSize = guardSettings.value("appearance/interfaceSize");
+        const bool wasDark = Theme::isDark();
+        for (int size : {1, 0, 2})
+            for (bool dark : {true, false}) {
+                guardSettings.setValue("appearance/interfaceSize", size);
+                Theme::applyPreferences();
+                Theme::setDark(dark);
+                pump(80);
+                for (int category = 0; category < pages->count(); ++category) {
+                    panel.selectCategory(category);
+                    pump(80);
+                    const auto found = TextFit::clippedText(&panel);
+                    check(found.isEmpty(), qPrintable(TextFit::describe(QString("%1 %2").arg(TextFit::sizeName(size), dark ? "dark" : "light"),
+                                                                       QString("settings category %1").arg(category), found)));
+                }
+            }
+        if (storedSize.isValid()) guardSettings.setValue("appearance/interfaceSize", storedSize);
+        else guardSettings.remove("appearance/interfaceSize");
+        Theme::applyPreferences();
+        Theme::setDark(wasDark);
+        panel.selectCategory(0);
+        pump(80);
+    }
     for (int waited = 0; client && !client->isReady() && waited < 4000; waited += 100)
         pump(100);
     check(client && client->isReady(), "fixture backend is connected for the runtime-package flow");

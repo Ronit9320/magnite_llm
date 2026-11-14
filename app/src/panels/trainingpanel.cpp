@@ -117,6 +117,11 @@ TrainingPanel::TrainingPanel(QWidget *parent)
     setupUi();
 }
 
+namespace {
+// The run list item's 1px borders and 7px bottom margin (console.qss) sit around the row widget.
+constexpr int kRunItemChrome=9;
+}
+
 void TrainingPanel::setupUi() {
     setObjectName("trainingPage");
     contentLayout()->setSpacing(20);
@@ -1574,7 +1579,7 @@ void TrainingPanel::refreshExperimentViews() {
         model->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred); body->addWidget(model);
         auto *resultRow=new QHBoxLayout(); auto *loss=new QLabel(number(job["loss"]),row); loss->setObjectName("trainingIndexLoss");
         resultRow->addWidget(loss); resultRow->addStretch(); auto *state=new QLabel(result,row); state->setObjectName("trainingTiny"); resultRow->addWidget(state); body->addLayout(resultRow);
-        row->setAttribute(Qt::WA_TransparentForMouseEvents); item->setSizeHint(QSize(0,93)); m_runs->setItemWidget(item,row);
+        row->setAttribute(Qt::WA_TransparentForMouseEvents); item->setSizeHint(QSize(0,qMax(93,row->sizeHint().height()+kRunItemChrome))); m_runs->setItemWidget(item,row);
         const QStringList cells{job["name"].toString()+"\n"+job["created_at"].toString(),job["base_model"].toString(),number(job["loss"]),number(validation),result,"↗"};
         for (int col=0;col<cells.size();++col) {
             auto *cell=new QTableWidgetItem(col==0?QString():cells[col]); cell->setData(Qt::UserRole,id); cell->setToolTip(col==5?"Use this experiment as the next recipe":cells[col]);
@@ -1582,7 +1587,7 @@ void TrainingPanel::refreshExperimentViews() {
             if (col==0) {
                 cell->setData(Qt::AccessibleTextRole,cells[col]);
                 auto *nameCell=new QWidget(this); nameCell->setAttribute(Qt::WA_TransparentForMouseEvents);
-                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,12,0); nameBody->setSpacing(2);   // the table item's own 9px padding already supplies the vertical room
+                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,0,0); nameBody->setSpacing(2);   // the table item's own 9px padding already supplies the vertical room
                 auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingIndexName"); nameLabel->setTextFormat(Qt::PlainText);
                 auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
                 nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); m_experiments->setCellWidget(i,col,nameCell);
@@ -1866,6 +1871,9 @@ void TrainingPanel::changeEvent(QEvent *event) {
 
 void TrainingPanel::refreshRunAppearance() {
     if (!m_legend) return;
+    // A new interface size changes how tall each run row needs to be.
+    if (m_runs) for (int i=0;i<m_runs->count();++i)
+        if (auto *rowWidget=m_runs->itemWidget(m_runs->item(i))) m_runs->item(i)->setSizeHint(QSize(0,qMax(93,rowWidget->sizeHint().height()+kRunItemChrome)));
     if (m_log) for (auto *highlighter : m_log->document()->findChildren<QSyntaxHighlighter *>()) highlighter->rehighlight();
     const bool loss=m_metricTabs->currentIndex()==0;
     m_legend->setText(loss?QString("<span style='color:%1'>━</span> Training &nbsp; <span style='color:%2'>┄</span> Validation").arg(Theme::accentPrimary(),Theme::statusSuccess()):QString("<span style='color:%1'>━</span> Measured values").arg(Theme::accentPrimary()));

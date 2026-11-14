@@ -1,4 +1,5 @@
 #include "testing/modelhub_tests.h"
+#include "testing/textfit.h"
 #include "panels/modelhubpanel.h"
 #include "backend_client.h"
 #include "theme.h"
@@ -26,6 +27,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QSettings>
 #include <QUrl>
 #include <QUrlQuery>
 #include <cstdio>
@@ -145,6 +147,26 @@ int runModelHubChecks(const QString &directory) {
         return count;
     };
     check(waitFor([&] { return cards() == 3; }), "Hub loads models from the backend");
+    {
+        // Text-fit guard: the discovery page at every interface size, wide and small window.
+        QSettings guardSettings;
+        const QVariant storedSize = guardSettings.value("appearance/interfaceSize");
+        const QSize before = hub.size();
+        for (int size : {1, 0, 2})
+            for (int width : {1180, 800}) {
+                guardSettings.setValue("appearance/interfaceSize", size);
+                Theme::applyPreferences();
+                hub.resize(width, 850);
+                pump(150);
+                const auto found = TextFit::clippedText(&hub);
+                const QByteArray message = TextFit::describe(TextFit::sizeName(size), QString("model hub, %1px wide").arg(width), found).toUtf8();
+                check(found.isEmpty(), message.constData());
+            }
+        if (storedSize.isValid()) guardSettings.setValue("appearance/interfaceSize", storedSize);
+        else guardSettings.remove("appearance/interfaceSize");
+        Theme::applyPreferences();
+        hub.resize(before);
+    }
     check(options->isHidden(), "desktop filters start collapsed");
     filter->click();
     check(!options->isHidden(), "desktop filter button expands options");

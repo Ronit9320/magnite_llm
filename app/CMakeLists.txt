@@ -67,6 +67,7 @@ set(MAGNITE_SOURCES
     src/testing/settings_tests.h
     src/testing/uicheck.cpp
     src/testing/uicheck.h
+    src/testing/textfit.h
     src/testing/restart_tests.cpp
     src/testing/restart_tests.h
     src/main.cpp
