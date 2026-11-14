@@ -11,6 +11,10 @@ public:
     bool isAnimating() const;
     QRect labelRect() const;
     int heightForWidth(int width) const override;
+    // Wide enough for the label exactly as it is painted (icon, 6px gap, text, style padding).
+    QSize sizeHint() const override;
+    // True when the full label fits on one line (or the button wraps it), so nothing is shown as "Organi…".
+    bool textFits() const;
 protected:
     void paintEvent(QPaintEvent *) override;
     bool event(QEvent *event) override;

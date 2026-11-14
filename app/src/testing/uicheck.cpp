@@ -107,6 +107,29 @@ void pump(int ms = 80) {
     QTimer::singleShot(ms,&loop,&QEventLoop::quit);
     loop.exec();
 }
+// Text that is elided ("Organi…"), cut at an edge or squeezed too short on the visible widgets under root.
+QStringList clippedText(QWidget *root) {
+    QStringList found;
+    for (auto *w : root->findChildren<QWidget *>()) {
+        if (!w->isVisible() || w->width()<4 || w->height()<4) continue;
+        if (auto *button=qobject_cast<Button *>(w)) {
+            if (!button->textFits()) found<<QString("button \"%1\" %2px").arg(button->text()).arg(button->width());
+        } else if (auto *toggle=qobject_cast<ToggleSwitch *>(w)) {
+            if (!toggle->text().isEmpty() && toggle->width()<toggle->labelLeft()+toggle->fontMetrics().horizontalAdvance(toggle->text()))
+                found<<QString("switch \"%1\"").arg(toggle->text());
+        } else if (auto *label=qobject_cast<QLabel *>(w)) {
+            if (label->text().isEmpty() || label->textFormat()==Qt::RichText || label->pixmap().isNull()==false) continue;
+            const int need=label->wordWrap()?label->heightForWidth(label->width()):label->sizeHint().height();
+            if (label->height()+1<need) found<<QString("label \"%1\" %2<%3px high").arg(label->text().left(30).replace('\n',' ')).arg(label->height()).arg(need);
+            // Single-line labels that may not shrink must show all their text (Ignored-width labels clip on purpose).
+            if (!label->wordWrap() && label->sizePolicy().horizontalPolicy()!=QSizePolicy::Ignored && !label->text().contains('\n')
+                && label->width()+1<label->fontMetrics().horizontalAdvance(label->text()))
+                found<<QString("label \"%1\" %2<%3px wide").arg(label->text().left(30)).arg(label->width()).arg(label->fontMetrics().horizontalAdvance(label->text()));
+        }
+    }
+    found.removeDuplicates();
+    return found;
+}
 bool waitUntil(const std::function<bool()> &done,int timeoutMs = 4000) {
     for (int waited = 0; !done() && waited < timeoutMs; waited += 20) pump(20);
     return done();
@@ -437,6 +460,22 @@ int runUiCheck(const QString &captures) {
         auto *tabs = library.findChild<QTabWidget *>("libraryTabs");
         check(tabs && tabs->count() == 5, "Library exposes five native views");
         check(!models->findChildren<ModelCard *>().isEmpty(), "Library displays real registry records");
+        {
+            // Text-fit guard for the Library rows at a realistic small-window width.
+            const int storedSize=QSettings().value("appearance/interfaceSize",1).toInt();
+            library.resize(820,700); pump(120);
+            for (int size : {1,0,2}) {
+                QSettings().setValue("appearance/interfaceSize",size); Theme::applyPreferences(); pump(120);
+                const QString sizeName=size==0?"Compact":size==2?"Large":"Default";
+                for (int tab=0;tab<tabs->count();++tab) {
+                    tabs->setCurrentIndex(tab); pump(100);
+                    const auto found=clippedText(&library);
+                    check(found.isEmpty(),QString("text fit [%1] library %2 tab: nothing elided or cut").arg(sizeName,tabs->tabText(tab))+(found.isEmpty()?QString():" — "+found.join("; ")));
+                }
+            }
+            QSettings().setValue("appearance/interfaceSize",storedSize); Theme::applyPreferences();
+            tabs->setCurrentIndex(0); library.resize(980,700); pump(120);
+        }
         library.recordActivity("example/model", "Download", "Failed", "Connection interrupted");
         library.recordActivity("Local weights", "Import", "Completed");
         if (tabs) {
@@ -901,6 +940,24 @@ int runUiCheck(const QString &captures) {
         narrow.hide();
         Button multiline("A descriptive action\nthat wraps on a narrow card"); multiline.setObjectName("promptSuggestion");
         check(multiline.heightForWidth(160)>multiline.heightForWidth(400),"button: multiline actions request enough height when constrained");
+        {
+            // Wrapping buttons must show "&&" as one "&", exactly like single-line ones do.
+            QWidget host; host.setStyleSheet("QWidget { background: #000000; }"); host.resize(360,80);
+            auto *plain=new Button("Models && learning",&host), *wrapped=new Button("Models && learning",&host);
+            for (auto *b : {plain,wrapped}) { b->setFlat(true); b->setProperty("leftAligned",true); b->setAttribute(Qt::WA_StyledBackground,false); }
+            wrapped->setProperty("wordWrap",true);
+            plain->setGeometry(0,0,360,36); wrapped->setGeometry(0,40,360,36);
+            host.show(); pump(80);
+            const auto inkWidth=[&](QWidget *w) {
+                const QImage image=w->grab().toImage(); const double ratio=image.devicePixelRatio();
+                int left=image.width(), right=-1;
+                for (int y=0;y<image.height();++y) for (int x=0;x<image.width();++x)
+                    if (qGray(image.pixel(x,y))>90) { left=qMin(left,x); right=qMax(right,x); }
+                return right<left?0:int((right-left)/ratio);
+            };
+            const int a=inkWidth(plain), b=inkWidth(wrapped);
+            check(a>40 && qAbs(a-b)<=2,QString("button: a wrapping button shows && as one & (ink %1px vs %2px)").arg(b).arg(a));
+        }
         TabWidget tabs; tabs.addTab(new QWidget(),"Runtime"); tabs.addTab(new QWidget(),"Storage & privacy"); tabs.addTab(new QWidget(),"Appearance");
         tabs.resize(520,120); tabs.show(); tabs.setCurrentIndex(2); tabs.clearFocus(); pump(40);
         auto *bar=tabs.tabBar(); const auto image=bar->grab().toImage();
@@ -1650,6 +1707,22 @@ int runUiCheck(const QString &captures) {
     }
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
+    {
+        // Text-fit guard: at every interface size, nothing on the main pages may be elided or cut.
+        const int storedSize=QSettings().value("appearance/interfaceSize",1).toInt();
+        const QList<QPair<QString,QWidget *>> pages={{"library",&models},{"training",&training},{"adapters",&adapters},{"knowledge",&knowledge}};
+        for (int size : {1,0,2}) {
+            QSettings().setValue("appearance/interfaceSize",size); Theme::applyPreferences(); pump(60);
+            const QString sizeName=size==0?"Compact":size==2?"Large":"Default";
+            for (const auto &page : pages) {
+                page.second->resize(1104,760); page.second->show(); pump(120);
+                const auto found=clippedText(page.second);
+                check(found.isEmpty(),QString("text fit [%1] %2 page: nothing elided or cut").arg(sizeName,page.first)+(found.isEmpty()?QString():" — "+found.join("; ")));
+                page.second->hide();
+            }
+        }
+        QSettings().setValue("appearance/interfaceSize",storedSize); Theme::applyPreferences(); pump(60);
+    }
     chat.show(); pump();
     {
         // The welcome suggestion cards must be as tall as their wrapped text needs, at any panel width.

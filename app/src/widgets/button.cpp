@@ -11,6 +11,16 @@
 #include <QTextOption>
 
 namespace {
+constexpr int kWrapSlack=2;
+// What Qt shows for a label with mnemonics: "&&" is one "&", a lone "&" only marks a shortcut.
+QString withoutMnemonics(const QString &text) {
+    QString out;
+    for (int i=0;i<text.size();++i) {
+        if (text[i]!=QLatin1Char('&')) { out+=text[i]; continue; }
+        if (i+1<text.size() && text[i+1]==QLatin1Char('&')) { out+=QLatin1Char('&'); ++i; }
+    }
+    return out;
+}
 QTextOption wrappedTextOption() {
     QTextOption option;
     option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
@@ -51,6 +61,8 @@ void Button::hideEvent(QHideEvent *event) { m_hover->snap(0); QPushButton::hideE
 void Button::changeEvent(QEvent *event) {
     QPushButton::changeEvent(event);
     if (event->type()==QEvent::EnabledChange) m_hover->snap(0);
+    // A new font or style changes how much room the label needs, so layouts must measure again.
+    if (event->type()==QEvent::FontChange || event->type()==QEvent::StyleChange) updateGeometry();
     update();
 }
 QRect Button::labelRect() const {
@@ -64,8 +76,26 @@ int Button::heightForWidth(int width) const {
     const auto content=labelRect();
     const int chrome=qMax(12,this->width()-content.width());
     const int textWidth=qMax(1,width-chrome-(icon().isNull()?0:iconSize().width()+6));
-    const int height=property("wordWrap").toBool() ? wrappedTextHeight(text(), font(), textWidth) : fontMetrics().boundingRect(QRect(0,0,textWidth,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,text()).height();
+    const int height=property("wordWrap").toBool() ? wrappedTextHeight(withoutMnemonics(text()), font(), textWidth+kWrapSlack) : fontMetrics().boundingRect(QRect(0,0,textWidth,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,text()).height();
     return qMax(sizeHint().height(),height+qMax(8,this->height()-content.height()));
+}
+QSize Button::sizeHint() const {
+    const QSize base=QPushButton::sizeHint();
+    if (text().isEmpty() || text().contains('\n') || property("wordWrap").toBool()) return base;
+    const int iconWidth=icon().isNull()?0:iconSize().width();
+    const int gap=icon().isNull()?0:6;
+    // What the style and the label inset leave around the content box.
+    const int chrome=qMax(12,width()-labelRect().width());
+    const int needed=chrome+iconWidth+gap+fontMetrics().size(Qt::TextShowMnemonic,text()).width();
+    return {qMax(base.width(),needed),base.height()};
+}
+
+bool Button::textFits() const {
+    if (text().isEmpty() || text().contains('\n') || property("wordWrap").toBool()) return true;
+    const int iconWidth=icon().isNull()?0:iconSize().width();
+    const int gap=icon().isNull()?0:6;
+    const int available=labelRect().width()-iconWidth-gap;
+    return fontMetrics().size(Qt::TextShowMnemonic,text()).width()<=available;
 }
 bool Button::event(QEvent *event) {
     if (event->type()==QEvent::ToolTip && m_truncated && toolTip().isEmpty()) {
@@ -111,7 +141,7 @@ void Button::paintEvent(QPaintEvent *) {
     const int iconWidth=icon().isNull()?0:qMin(option.iconSize.width(),content.width());
     const int available=qMax(0,content.width()-iconWidth-gap);
     const QString display=multiline?text():fontMetrics().elidedText(text(),Qt::ElideRight,available,Qt::TextShowMnemonic);
-    m_truncated=property("wordWrap").toBool() ? wrappedTextHeight(display, font(), available)>content.height() : multiline ? fontMetrics().boundingRect(QRect(0,0,available,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,display).height()>content.height() : display!=text();
+    m_truncated=property("wordWrap").toBool() ? wrappedTextHeight(withoutMnemonics(display), font(), available+kWrapSlack)>content.height() : multiline ? fontMetrics().boundingRect(QRect(0,0,available,16777215),Qt::TextWordWrap|Qt::TextWrapAnywhere|Qt::TextShowMnemonic,display).height()>content.height() : display!=text();
     const int textWidth=qMin(available,fontMetrics().size(Qt::TextShowMnemonic,display).width());
     const int groupWidth=iconWidth+gap+textWidth;
     int start=leftAligned?(rtl?content.right()-groupWidth+1:content.left()):content.left()+(content.width()-groupWidth)/2;
@@ -127,7 +157,10 @@ void Button::paintEvent(QPaintEvent *) {
     if (property("wordWrap").toBool()) {
         auto textOption = wrappedTextOption();
         textOption.setAlignment(Qt::Alignment::fromInt(Qt::AlignVCenter | align));
-        painter.drawText(QRectF(textRect), display, textOption);
+        // A line that fits to within a pixel stays on one line (the slack is inside the button's own padding).
+        QRectF wrapRect(textRect);
+        if (rtl) wrapRect.adjust(-kWrapSlack,0,0,0); else wrapRect.adjust(0,0,kWrapSlack,0);
+        painter.drawText(wrapRect, withoutMnemonics(display), textOption);
     } else {
         painter.drawText(textRect,Qt::AlignVCenter|align|mnemonic|(multiline?(Qt::TextWordWrap|Qt::TextWrapAnywhere):Qt::TextSingleLine),display);
     }

@@ -1,6 +1,7 @@
 #include "testing/docs_tests.h"
 #include "panels/docspanel.h"
 #include "theme.h"
+#include "widgets/button.h"
 #include "widgets/docscontentview.h"
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
@@ -60,6 +61,39 @@ int runDocsChecks(const QString &captures) {
         check(docs.library().error().isEmpty() && docs.library().articles().size() == 16 &&
                   docs.library().groups().size() == 5,
               "sixteen complete offline articles in five subjects");
+        {
+            // Topic titles in the left menu must stay fully visible at every interface size.
+            const QVariant storedSize = settings.value("appearance/interfaceSize");
+            for (int size : {1, 0, 2}) {
+                settings.setValue("appearance/interfaceSize", size);
+                Theme::applyPreferences();
+                pump(120);
+                auto *navigation = docs.findChild<QWidget *>("docsNavigation");
+                auto *topicScroll = navigation ? navigation->findChild<QScrollArea *>() : nullptr;
+                bool visible = topicScroll != nullptr;
+                QString detail;
+                if (topicScroll) {
+                    for (const char *name : {"docsArticleNav", "docsSubject"})
+                        for (auto *topic : docs.findChildren<QPushButton *>(name)) {
+                            if (!topic->isVisible()) continue;
+                            auto *styled = qobject_cast<Button *>(topic);
+                            // The painted text area (inside the button's padding) must be inside the visible list.
+                            const int right = topic->mapTo(topicScroll->viewport(), QPoint(styled ? styled->labelRect().right() : topic->width() - 1, 0)).x();
+                            const bool tallEnough = !styled || topic->height() >= styled->heightForWidth(topic->width());
+                            if (right >= topicScroll->viewport()->width() || !tallEnough || (styled && !styled->textFits())) {
+                                visible = false;
+                                detail += " \"" + topic->text().left(28) + "\"";
+                            }
+                        }
+                }
+                const char *label = size == 0 ? "Compact" : size == 2 ? "Large" : "Default";
+                check(visible, qPrintable(QString("topic titles stay fully visible at %1 interface size%2").arg(label, detail)));
+            }
+            if (storedSize.isValid()) settings.setValue("appearance/interfaceSize", storedSize);
+            else settings.remove("appearance/interfaceSize");
+            Theme::applyPreferences();
+            pump(120);
+        }
         for (const auto &article : docs.library().articles()) {
             check(docs.openArticle(article.id), qPrintable("open article " + article.id));
             pump();

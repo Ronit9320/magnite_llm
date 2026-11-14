@@ -20,6 +20,8 @@ public:
 
     // Attaches once per area; calling it again returns the existing helper.
     static EdgeScrollBar *attach(QAbstractScrollArea *area);
+    // For lists inside a column: the bar overlays the area's own right edge and takes no layout width.
+    static EdgeScrollBar *attachInside(QAbstractScrollArea *area);
     static EdgeScrollBar *of(const QAbstractScrollArea *area);
     QScrollBar *bar() const { return m_bar; }
 
@@ -27,13 +29,14 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    explicit EdgeScrollBar(QAbstractScrollArea *area);
+    EdgeScrollBar(QAbstractScrollArea *area, bool inside);
     ~EdgeScrollBar() override;
     void rewire();
     void syncRange();
     void place();
 
     QAbstractScrollArea *m_area;
+    bool m_inside;
     QPointer<QScrollBar> m_bar;
     QVector<QPointer<QObject>> m_watched;
 };

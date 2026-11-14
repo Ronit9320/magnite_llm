@@ -8,6 +8,7 @@
 #include <QStyle>
 #include <QVBoxLayout>
 #include <QDateTime>
+#include <QResizeEvent>
 
 AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     : QFrame(parent)
@@ -23,6 +24,8 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     row->setContentsMargins(16,14,16,14);
     row->setSpacing(16);
     auto *layout = new QVBoxLayout();
+    m_row = row;
+    m_info = layout;
     row->addLayout(layout,1);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
@@ -119,6 +122,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
         layout->setSpacing(4);
         row->setContentsMargins(14, 10, 14, 10);
         auto *actions = new QVBoxLayout;
+        m_actions = actions;
         actions->addLayout(btnRow);
         row->addLayout(actions);
     } else {
@@ -139,6 +143,16 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     m_activateButton->setAccessibleName("Activate adapter "+m_id);
     exportButton->setAccessibleName("Export adapter "+m_id);
     deleteButton->setAccessibleName("Delete adapter "+m_id);
+}
+
+void AdapterCard::resizeEvent(QResizeEvent *event) {
+    QFrame::resizeEvent(event);
+    if (!m_row || !m_actions) return;
+    // Beside the info while both columns fit; below it when they would have to be squeezed (large text, small window).
+    const QMargins margins = m_row->contentsMargins();
+    const int needed = margins.left() + margins.right() + m_info->minimumSize().width() + m_row->spacing() + m_actions->sizeHint().width();
+    const QBoxLayout::Direction direction = width() < needed ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight;
+    if (m_row->direction() != direction) m_row->setDirection(direction);
 }
 
 void AdapterCard::setActive(bool active) {

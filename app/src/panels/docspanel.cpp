@@ -3,6 +3,7 @@
 #include "widgets/button.h"
 #include "widgets/combobox.h"
 #include "widgets/docscontentview.h"
+#include "widgets/edgescrollbar.h"
 #include "widgets/motion.h"
 #include "widgets/settingswindow.h"
 #include <QApplication>
@@ -37,6 +38,14 @@
 #include <QVBoxLayout>
 
 namespace {
+// Topic titles take the list's width and wrap onto a second line instead of running past its edge.
+void topicTitleWraps(QPushButton *button) {
+    button->setProperty("wordWrap", true);
+    QSizePolicy policy = button->sizePolicy();
+    policy.setHorizontalPolicy(QSizePolicy::Ignored);
+    policy.setVerticalPolicy(QSizePolicy::Minimum);   // Fixed would cap the height at one line
+    button->setSizePolicy(policy);
+}
 QLabel *text(const QString &value, const char *name = "docsBody") {
     auto *label = new QLabel(value);
     label->setObjectName(name);
@@ -413,6 +422,7 @@ void DocsPanel::renderNavigation() {
     m_topicScroll->setFrameShape(QFrame::NoFrame);
     m_topicScroll->setWidgetResizable(true);
     m_topicScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    EdgeScrollBar::attachInside(m_topicScroll);   // the bar floats over the list's edge instead of narrowing it
     auto *topics = new QWidget;
     auto *list = new QVBoxLayout(topics);
     list->setContentsMargins(0, 7, 0, 0);
@@ -430,6 +440,7 @@ void DocsPanel::renderNavigation() {
                              },
                              "docsSubject");
         title->setProperty("leftAligned", true);
+        topicTitleWraps(title);
         title->setFlat(true);
         title->setToolTip(group);
         title->setAccessibleName("Toggle " + group);
@@ -442,6 +453,7 @@ void DocsPanel::renderNavigation() {
                 auto *b = action(article.shortTitle, [this, id = article.id] { openArticle(id); }, "docsArticleNav");
                 b->setProperty("articleId", article.id);
                 b->setProperty("leftAligned", true);
+                topicTitleWraps(b);
                 b->setFlat(true);
                 b->setCheckable(true);
                 b->setChecked(m_route.kind == "article" && m_route.id == article.id);

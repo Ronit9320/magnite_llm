@@ -12,10 +12,16 @@ EdgeScrollBar *EdgeScrollBar::of(const QAbstractScrollArea *area) {
 EdgeScrollBar *EdgeScrollBar::attach(QAbstractScrollArea *area) {
     if (!area) return nullptr;
     if (auto *existing = of(area)) return existing;
-    return new EdgeScrollBar(area);
+    return new EdgeScrollBar(area, false);
 }
 
-EdgeScrollBar::EdgeScrollBar(QAbstractScrollArea *area) : QObject(area), m_area(area) {
+EdgeScrollBar *EdgeScrollBar::attachInside(QAbstractScrollArea *area) {
+    if (!area) return nullptr;
+    if (auto *existing = of(area)) return existing;
+    return new EdgeScrollBar(area, true);
+}
+
+EdgeScrollBar::EdgeScrollBar(QAbstractScrollArea *area, bool inside) : QObject(area), m_area(area), m_inside(inside) {
     area->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_bar = new SmoothScrollBar(Qt::Vertical, area);   // re-parented to the window once the area is in one
     m_bar->setObjectName("edgeScrollBar");
@@ -58,10 +64,17 @@ void EdgeScrollBar::syncRange() {
 
 void EdgeScrollBar::place() {
     if (!m_bar) return;
-    QWidget *window = m_area->window();
-    const bool show = window && window != m_area && m_area->isVisible() && m_bar->maximum() > m_bar->minimum();
+    QWidget *window = m_inside ? static_cast<QWidget *>(m_area) : m_area->window();
+    const bool show = window && (m_inside || window != m_area) && m_area->isVisible() && m_bar->maximum() > m_bar->minimum();
     if (!show) {
         m_bar->hide();
+        return;
+    }
+    if (m_inside) {
+        if (m_bar->parentWidget() != window) m_bar->setParent(window);
+        m_bar->setGeometry(m_area->width() - kWidth, 0, kWidth, m_area->height());
+        m_bar->show();
+        m_bar->raise();
         return;
     }
     if (m_bar->parentWidget() != window) m_bar->setParent(window);

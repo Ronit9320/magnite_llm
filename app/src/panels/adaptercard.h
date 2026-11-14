@@ -7,6 +7,8 @@
 
 class QPushButton;
 class QLabel;
+class QBoxLayout;
+class QVBoxLayout;
 
 // Adapter registry row with activation, export and deletion actions.
 class AdapterCard : public QFrame {
@@ -27,7 +29,13 @@ signals:
     void exportRequested(AdapterCard *card);
     void deleteRequested(AdapterCard *card);
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
+    QBoxLayout *m_row = nullptr;      // info column + actions column
+    QVBoxLayout *m_info = nullptr;
+    QVBoxLayout *m_actions = nullptr; // set for library rows, which put the actions beside the info
     QPushButton *m_activateButton;
     QLabel *m_activeLabel = nullptr;
     QString m_id;
