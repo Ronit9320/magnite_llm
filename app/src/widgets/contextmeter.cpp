@@ -117,10 +117,9 @@ protected:
     void paintEvent(QPaintEvent *) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        QColor border(Theme::statusError());
-        QColor fill = border;
+        QColor fill(Theme::statusError());
         fill.setAlpha(36);
-        p.setPen(border);
+        p.setPen(Qt::NoPen);
         p.setBrush(fill);
         p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), Theme::cornerRadiusSmall(), Theme::cornerRadiusSmall());
     }

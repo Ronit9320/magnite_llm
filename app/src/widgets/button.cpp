@@ -82,6 +82,7 @@ void Button::paintEvent(QPaintEvent *) {
     const bool primary=property("primary").toBool() || name=="primaryBtn" || name=="cardPrimary" || name=="editSave";
     const bool danger=name=="destructiveBtn" || name=="cardDanger" || name=="cancelDownload" || name=="deleteAllChats";
     const bool ghost=isFlat() || name=="historyNew";
+    const bool card = name == "docsCard" || name == "overviewTile" || name == "promptSuggestion";
     QColor base(primary?Theme::accentPrimary():Theme::surfaceFill());
     QColor hover(primary?Theme::accentHover():danger?Theme::dangerHover():Theme::surfaceFillHover());
     QColor border(primary?Theme::accentPrimary():Theme::surfaceBorder());
@@ -96,7 +97,8 @@ void Button::paintEvent(QPaintEvent *) {
         border=QColor(primary?Theme::accentText():Theme::accentLabel());
     }
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
-    painter.setBrush(fill); painter.setPen(QPen(border,1));
+    painter.setBrush(fill);
+    painter.setPen(card ? QPen(Qt::NoPen) : QPen(border, 1));
     painter.drawRoundedRect(bounds,Theme::cornerRadiusSmall(),Theme::cornerRadiusSmall());
     // Apply the native stylesheet content box before laying out the label.
     // Calling CE_PushButtonLabel with the full widget rect bypasses QSS padding.

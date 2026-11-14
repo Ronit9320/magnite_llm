@@ -15,8 +15,8 @@ void ThemeChoice::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     const QRectF outer = QRectF(rect()).adjusted(2, 2, -2, -2);
-    painter.setPen(QPen(QColor(Theme::surfaceBorder()), 1));
-    painter.setBrush(QColor(underMouse() ? Theme::surfaceFillHover() : Theme::surfaceFill()));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(underMouse() || hasFocus() ? Theme::surfaceFillHover() : Theme::surfaceFill()));
     painter.drawRoundedRect(outer, 8, 8);
     const QRectF preview = outer.adjusted(9, 9, -9, -39);
     painter.save();
@@ -60,10 +60,4 @@ void ThemeChoice::paintEvent(QPaintEvent*) {
     painter.setBrush(isChecked() ? QColor(Theme::accentPrimary()) : QColor(Theme::surfaceFill()));
     painter.setPen(QPen(QColor(isChecked() ? Theme::accentPrimary() : Theme::surfaceBorder()), 1));
     painter.drawEllipse(QPointF(outer.right() - 17, outer.bottom() - 19), 5, 5);
-    if (isChecked() || hasFocus()) {
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(
-            QPen(QColor(isChecked() ? Theme::accentPrimary() : Theme::surfaceBorder()), 2));
-        painter.drawRoundedRect(outer, 8, 8);
-    }
 }
