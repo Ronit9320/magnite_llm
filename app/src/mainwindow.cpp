@@ -178,6 +178,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_backendClient->abortAll();
         m_backendClient->setBaseUrl(QString());
         m_backendClient->setAuthToken(QString());
+        m_chatPanel->refreshEngineStatus();
         setPillState("starting", "Reconnecting");
     });
 
@@ -751,6 +752,7 @@ void MainWindow::onBackendError(QProcess::ProcessError error) {
     m_backendClient->setBaseUrl(QString());
     m_backendClient->setAuthToken(QString());
     showWorkspace();
+    m_chatPanel->refreshEngineStatus();
     setPillState("error", msg);
     m_settingsPanel->refreshDetails();
     if (m_selfTest) fprintf(stderr, "[selftest] backend error: %s\n", qUtf8Printable(msg));
@@ -898,6 +900,12 @@ void MainWindow::runSelfTest() {
         auto *knowledgeToggle = m_chatPanel->findChild<QPushButton *>("conversationKnowledgeToggle");
         checkC(m_stack->currentIndex() == PanelChat && drawer && drawer->isVisibleTo(m_chatPanel),
                "Knowledge opens inside Conversation");
+        settingsToggle->click();
+        checkC(chatSettings->isVisibleTo(m_chatPanel) && drawer && !drawer->isVisibleTo(m_chatPanel),
+               "Model settings replaces the Knowledge drawer");
+        if (knowledgeToggle) knowledgeToggle->click();
+        checkC(drawer && drawer->isVisibleTo(m_chatPanel) && !chatSettings->isVisibleTo(m_chatPanel),
+               "Knowledge replaces the Model settings drawer");
         if (knowledgeToggle) knowledgeToggle->click();
         checkC(drawer && !drawer->isVisibleTo(m_chatPanel), "Knowledge can be closed while keeping Conversation open");
         checkC(m_chatPanel->findChild<QWidget *>("conversationLogo") && emptyChat && emptyChat->isVisibleTo(m_chatPanel),
@@ -986,6 +994,8 @@ void MainWindow::chatErrorSelfTest(std::shared_ptr<int> failures,
                 const bool chat = data->startsWith("POST /inference/chat ");
                 if (chat && scenario == 2) { socket->abort(); return; }
                 QByteArray body = data->startsWith("GET /models ") ? "[]" : "{}";
+                if (data->startsWith("GET /inference/status "))
+                    body = R"({"engine":{"description":"Fixture"},"loaded_model":"fixture"})";
                 QByteArray status = "200 OK";
                 QByteArray type = "application/json";
                 if (chat) {

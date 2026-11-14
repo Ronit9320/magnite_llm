@@ -88,7 +88,7 @@ void RagPanel::setupUi() {
     auto *emptyLayout = new QVBoxLayout(m_emptyState);
     emptyLayout->setContentsMargins(12, 12, 12, 12);
     emptyLayout->setAlignment(Qt::AlignCenter);
-    auto *hint = new QLabel("No documents ingested yet.\nAdd PDFs, text, markdown or HTML above.", m_emptyState);
+    auto *hint = new QLabel("No documents yet.", m_emptyState);
     hint->setObjectName("mutedLabel");
     hint->setAlignment(Qt::AlignCenter);
     hint->setWordWrap(true);

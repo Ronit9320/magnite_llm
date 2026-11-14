@@ -39,6 +39,7 @@
 #include "widgets/button.h"
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -54,6 +55,19 @@ protected:
         BrandMark::paint(painter, rect(), QColor(Theme::accentPrimary()));
     }
 };
+
+QPushButton *toolbarIcon(QWidget *parent, const QString &label, const QString &icon) {
+    auto *button = new QPushButton(parent);
+    button->setProperty("conversationIcon", true);
+    button->setProperty("themeIcon", icon);
+    button->setIcon(Theme::coloredIcon(icon, QColor(Theme::textSecondary()), 18));
+    button->setIconSize(QSize(18, 18));
+    button->setFixedSize(34, 34);
+    button->setAccessibleName(label);
+    button->setToolTip(label);
+    button->setCursor(Qt::PointingHandCursor);
+    return button;
+}
 }
 
 ChatPanel::ChatPanel(QWidget *parent)
@@ -93,53 +107,64 @@ void ChatPanel::showBlankChat() {
 void ChatPanel::setupUi() {
     auto *layout = contentLayout();
     auto *toolbar = new QHBoxLayout();
+    toolbar->setSpacing(6);
     m_modelCombo = new ComboBox(this);
+    m_modelCombo->setObjectName("conversationModelPicker");
     m_modelCombo->setEditable(true);
-    m_modelCombo->setMinimumContentsLength(16);
+    m_modelCombo->setInsertPolicy(QComboBox::NoInsert);
     m_modelCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_modelCombo->setFixedWidth(205);
     m_modelCombo->setAccessibleName("Model");
-    m_modelCombo->lineEdit()->setPlaceholderText("Choose a model or enter its ID");
-    toolbar->addWidget(m_modelCombo, 1);
-    auto *loadBtn = m_loadButton = new Button("Load model", this);
-    toolbar->addWidget(loadBtn);
-    auto *optionsBtn = new Button("Model settings", this);
-    optionsBtn->setObjectName("chatSettingsToggle");
-    optionsBtn->setCheckable(true);
-    toolbar->addWidget(optionsBtn);
-    m_knowledgeToggle = new Button("Knowledge", this);
+    m_modelCombo->lineEdit()->setAccessibleName("Model ID");
+    m_modelCombo->lineEdit()->setPlaceholderText("Select model");
+    connect(m_modelCombo, &QComboBox::currentTextChanged, this, [this](const QString &text) {
+        m_modelCombo->setToolTip(text.isEmpty() ? "Choose a model or enter its ID" : text);
+    });
+    m_modelCombo->setToolTip("Choose a model or enter its ID");
+    toolbar->addWidget(m_modelCombo);
+    m_loadButton = new Button("Load model", this);
+    m_loadButton->setObjectName("conversationLoadModel");
+    toolbar->addWidget(m_loadButton);
+    m_unloadButton = new Button("Unload model", this);
+    m_unloadButton->setObjectName("conversationUnloadModel");
+    toolbar->addWidget(m_unloadButton);
+    toolbar->addStretch();
+    m_settingsToggle = toolbarIcon(this, "Model settings", "settings");
+    m_settingsToggle->setObjectName("chatSettingsToggle");
+    m_settingsToggle->setCheckable(true);
+    toolbar->addWidget(m_settingsToggle);
+    m_knowledgeToggle = toolbarIcon(this, "Knowledge", "database");
     m_knowledgeToggle->setObjectName("conversationKnowledgeToggle");
     m_knowledgeToggle->setCheckable(true);
-    m_knowledgeToggle->setMinimumWidth(128);
-    m_knowledgeToggle->setProperty("themeIcon", "database");
-    m_knowledgeToggle->setIcon(Theme::coloredIcon("database", QColor(Theme::textSecondary()), 16));
     toolbar->addWidget(m_knowledgeToggle);
     m_knowledgeToggle->hide();
     layout->addLayout(toolbar);
 
-    auto *controls = Surface::card(this);
-    controls->parentWidget()->setObjectName("chatSettings");
-    auto *fields = new QHBoxLayout();
-    auto *engineField = new QVBoxLayout();
+    connect(m_settingsToggle, &QPushButton::toggled, this, [this](bool open) {
+        if (open) m_knowledgeToggle->setChecked(false);
+    });
+    connect(m_knowledgeToggle, &QPushButton::toggled, this, [this](bool open) {
+        if (open) m_settingsToggle->setChecked(false);
+    });
+
+    m_workspace = new QHBoxLayout;
+    m_workspace->setSpacing(12);
+    layout->addLayout(m_workspace, 1);
+    auto *controls = addDrawer("Model settings", "chatSettings", m_settingsToggle);
     m_engineCombo = new ComboBox(this);
     m_engineCombo->addItems({"Auto (global setting)", "Local (vLLM)", "Local (llama.cpp)", "Local (torch)", "Local (Ollama)"});
-    Surface::field(engineField, "Engine", m_engineCombo);
-    fields->addLayout(engineField, 2);
+    Surface::field(controls, "Engine", m_engineCombo);
     m_maxTokensSpin = new SpinBox(this);
     m_maxTokensSpin->setRange(1, 8192);
     m_maxTokensSpin->setValue(256);
-    auto *tokens = new QVBoxLayout();
-    Surface::field(tokens, "Response tokens", m_maxTokensSpin);
-    fields->addLayout(tokens, 1);
+    Surface::field(controls, "Response tokens", m_maxTokensSpin);
     m_tempSpin = new DoubleSpinBox(this);
     m_tempSpin->setRange(0.0, 2.0);
     m_tempSpin->setValue(0.7);
     m_tempSpin->setSingleStep(0.05);
     m_tempSpin->setDecimals(2);
-    auto *temperature = new QVBoxLayout();
-    Surface::field(temperature, "Temperature", m_tempSpin);
-    fields->addLayout(temperature, 1);
-    controls->addLayout(fields);
-    auto *pills = new QHBoxLayout();
+    Surface::field(controls, "Temperature", m_tempSpin);
+    controls->addSpacing(8);
     m_enginePill = new QLabel("engine: —", this);
     m_modelPill = new QLabel("model: —", this);
     m_adapterPill = new QLabel("adapter: —", this);
@@ -147,23 +172,17 @@ void ChatPanel::setupUi() {
         pill->setObjectName("chatPill");
         pill->setTextFormat(Qt::PlainText);
         pill->setWordWrap(true);
-        pill->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
-        pills->addWidget(pill);
+        controls->addWidget(pill);
     }
     m_adapterPill->hide();
     auto *refreshBtn = new Button("Refresh", this);
-    pills->addWidget(refreshBtn);
-    controls->addLayout(pills);
-    layout->addWidget(controls->parentWidget());
-    controls->parentWidget()->hide();
-    connect(optionsBtn, &QPushButton::toggled, controls->parentWidget(), &QWidget::setVisible);
+    controls->addWidget(refreshBtn, 0, Qt::AlignLeft);
+    controls->addStretch();
     connect(refreshBtn, &QPushButton::clicked, this, [this]() { refreshModels(); refreshEngineStatus(); });
-    connect(loadBtn, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
+    connect(m_loadButton, &QPushButton::clicked, this, &ChatPanel::onLoadModel);
+    connect(m_unloadButton, &QPushButton::clicked, this, &ChatPanel::onUnloadModel);
 
     // A readable, centered conversation column, without a permanent inspector.
-    m_workspace = new QHBoxLayout;
-    m_workspace->setSpacing(12);
-    layout->addLayout(m_workspace, 1);
     auto *centerRow = new QHBoxLayout();
     auto *column = new QWidget(this);
     column->setMaximumWidth(840);
@@ -173,7 +192,7 @@ void ChatPanel::setupUi() {
     centerRow->addStretch();
     centerRow->addWidget(column, 1);
     centerRow->addStretch();
-    m_workspace->addLayout(centerRow, 1);
+    m_workspace->insertLayout(0, centerRow, 1);
     m_chatScroll = new QScrollArea(this);
     m_chatScroll->setWidgetResizable(true);
     m_chatScroll->setFrameShape(QFrame::NoFrame);
@@ -216,19 +235,20 @@ void ChatPanel::setupUi() {
         QString description;
     };
     const WorkspaceAction workspaceActions[] = {
-        {"01 / YOUR MODEL\nPut it to the test", "Draft a reasoning prompt for your selected model."},
-        {"02 / YOUR KNOWLEDGE\nAsk your documents", "Enable Knowledge and draft a question about your ingested documents."},
-        {"03 / YOUR CONTROL\nShape the response", "Open engine, response length and temperature settings."}
+        {"Try a prompt", "Draft a reasoning prompt for your selected model."},
+        {"Ask docs", "Enable Knowledge and draft a question about your ingested documents."},
+        {"Tune response", "Open engine, response length and temperature settings."}
     };
     for (int i = 0; i < 3; ++i) {
         auto *button = new Button(workspaceActions[i].label, m_welcome);
         button->setObjectName("promptSuggestion");
+        button->setProperty("wordWrap", true);
         button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         button->setToolTip(workspaceActions[i].description);
         suggestions->addWidget(button, 1);
-        connect(button, &QPushButton::clicked, this, [this, optionsBtn, i]() {
+        connect(button, &QPushButton::clicked, this, [this, i]() {
             if (i == 2) {
-                optionsBtn->setChecked(true);
+                m_settingsToggle->setChecked(true);
                 m_tempSpin->setFocus();
                 return;
             }
@@ -268,7 +288,8 @@ void ChatPanel::setupUi() {
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
     m_knowledgeContext = new Button("Knowledge off", this);
-    m_knowledgeContext->setMinimumWidth(164);
+    m_knowledgeContext->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    m_knowledgeContext->setMinimumWidth(145);
     m_knowledgeContext->setProperty("themeIcon", "database");
     m_knowledgeContext->setIcon(Theme::coloredIcon("database", QColor(Theme::textSecondary()), 16));
     m_knowledgeContext->hide();
@@ -361,6 +382,7 @@ bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
 
 void ChatPanel::setBackendClient(BackendClient *client) {
     m_client = client;
+    applyEngineStatus({});
     setStatus(client && client->isReady()
                   ? "Backend connected. Loading model list..."
                   : "Backend not connected.");
@@ -370,67 +392,59 @@ void ChatPanel::setBackendClient(BackendClient *client) {
 
 void ChatPanel::refreshModels() {
     if (!m_client || !m_client->isReady()) return;
-    m_client->get("/models", [this](int status, const QJsonDocument &doc) {
-        if (status != 200) return;
+    m_client->get("/models", [panel = QPointer<ChatPanel>(this)](int status, const QJsonDocument &doc) {
+        if (!panel || status != 200) return;
+        auto *picker = panel->m_modelCombo;
         const QJsonArray models = doc.array();
-        m_modelCombo->blockSignals(true);
-        const QString prev = m_modelCombo->currentText();
-        m_modelCombo->clear();
+        const QSignalBlocker blockModelSignals(picker);
+        const QString prev = picker->currentText();
+        picker->clear();
         for (const QJsonValue &v : models) {
             const QJsonObject m = v.toObject();
             const QString id = m["id"].toString();
-            if (!id.isEmpty()) m_modelCombo->addItem(id);
+            if (id.isEmpty()) continue;
+            picker->addItem(id);
+            picker->setItemData(picker->count() - 1, id, Qt::ToolTipRole);
         }
         // Restore previous text if still present
-        const int idx = m_modelCombo->findText(prev);
-        if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
-        else m_modelCombo->setEditText(prev);
-        m_modelCombo->blockSignals(false);
+        const int idx = picker->findText(prev);
+        if (idx >= 0) picker->setCurrentIndex(idx);
+        else picker->setEditText(prev);
     });
 }
 
 void ChatPanel::refreshEngineStatus() {
+    requestEngineStatus();
+}
+
+void ChatPanel::requestEngineStatus(const QString &error) {
+    if (m_modelOperation != ModelOperation::Idle) return;
+    const quint64 request = ++m_engineStatusRequest;
     if (!m_client || !m_client->isReady()) {
+        applyEngineStatus({});
         setStatus("Backend not connected.");
         return;
     }
-    m_client->get("/inference/status", [this](int status, const QJsonDocument &doc) {
-        if (status != 200) {
-            m_enginePill->setText("engine: —");
-            m_modelPill->setText("model: —");
-            m_adapterPill->setVisible(false);
-            setStatus("Inference status unavailable.");
-            m_modelLoaded = false;
-            refreshContextUsage();
-            return;
-        }
-        const QJsonObject obj = doc.object();
-        const QJsonObject engine = obj["engine"].toObject();
-        if (engine.isEmpty()) {
-            m_enginePill->setText("engine: none");
-            m_modelPill->setText("model: —");
-            m_adapterPill->setVisible(false);
-            setStatus("No inference engine loaded. Load a model to begin.");
-            m_modelLoaded = false;
-            refreshContextUsage();
-            return;
-        }
-        m_enginePill->setText(QString("engine: %1")
-                                  .arg(engine["description"].toString()));
-        m_modelPill->setText(QString("model: %1")
-                                 .arg(obj["loaded_model"].toString()));
-
-        const QString adapter = obj["active_adapter"].toString();
-        if (adapter.isEmpty()) {
-            m_adapterPill->setVisible(false);
-        } else {
-            m_adapterPill->setText(QString("adapter: %1").arg(adapter));
-            m_adapterPill->setVisible(true);
-        }
-        setStatus("Engine ready.");
-        m_modelLoaded = true;
-        refreshContextUsage();
+    m_client->get("/inference/status", [panel = QPointer<ChatPanel>(this), request, error](int status, const QJsonDocument &doc) {
+        if (!panel || request != panel->m_engineStatusRequest) return;
+        panel->applyEngineStatus(status == 200 ? doc.object() : QJsonObject{});
+        if (!error.isEmpty()) panel->setStatus(error, "error");
+        else if (status != 200) panel->setStatus("Inference status unavailable.");
+        else if (panel->m_modelLoaded) panel->setStatus("Engine ready.");
+        else panel->setStatus("No inference engine loaded. Load a model to begin.");
     });
+}
+
+void ChatPanel::applyEngineStatus(const QJsonObject &status) {
+    const auto engine = status["engine"].toObject();
+    m_modelLoaded = !engine.isEmpty();
+    m_enginePill->setText("engine: " + (m_modelLoaded ? engine["description"].toString() : QStringLiteral("none")));
+    m_modelPill->setText("model: " + (m_modelLoaded ? status["loaded_model"].toString() : QStringLiteral("—")));
+    const QString adapter = status["active_adapter"].toString();
+    m_adapterPill->setText("adapter: " + adapter);
+    m_adapterPill->setVisible(m_modelLoaded && !adapter.isEmpty());
+    refreshContextUsage();
+    updateActions();
 }
 
 QString ChatPanel::currentEngineName() const {
@@ -444,7 +458,7 @@ QString ChatPanel::currentEngineName() const {
 }
 
 void ChatPanel::onLoadModel() {
-    if (m_loading || m_streaming) return;
+    if (isBusy()) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -455,30 +469,50 @@ void ChatPanel::onLoadModel() {
         return;
     }
     const QString engineName = currentEngineName();
-    QJsonObject body;
-    body["model"] = modelRef;
+    QJsonObject body{{"model", modelRef}};
     if (!engineName.isEmpty()) body["engine"] = engineName;
 
-    m_loading = true;
+    ++m_engineStatusRequest;
+    m_modelOperation = ModelOperation::Loading;
     updateActions();
     setStatus("Loading model… First use may download model files.");
 
-    m_client->post("/inference/load", body, [this](int status, const QJsonDocument &doc) {
-        m_loading = false;
-        updateActions();
+    m_client->post("/inference/load", body, [panel = QPointer<ChatPanel>(this)](int status, const QJsonDocument &doc) {
+        if (!panel) return;
+        panel->m_modelOperation = ModelOperation::Idle;
         if (status == 200) {
-            const QJsonObject obj = doc.object();
-            const QJsonObject engine = obj["engine"].toObject();
-            setStatus(QString("Loaded: %1 | %2")
-                          .arg(engine["description"].toString(),
-                               obj["loaded_model"].toString()));
-            refreshEngineStatus();
-            m_input->setFocus();
+            const auto model = doc.object();
+            panel->applyEngineStatus(model);
+            panel->setStatus("Loaded " + model["loaded_model"].toString() + ".");
+            panel->m_input->setFocus();
         } else {
-            const QString err = doc.object().contains("detail")
-                                    ? doc.object()["detail"].toString()
-                                    : QString("HTTP %1").arg(status);
-            setStatus("Load failed: " + err, "error");
+            panel->updateActions();
+            const auto error = "Load failed: " + doc.object()["detail"].toString(QString("HTTP %1").arg(status));
+            panel->setStatus(error, "error");
+            panel->requestEngineStatus(error);
+        }
+    });
+}
+
+void ChatPanel::onUnloadModel() {
+    if (isBusy() || !m_modelLoaded || !m_client || !m_client->isReady()) return;
+
+    ++m_engineStatusRequest;
+    m_modelOperation = ModelOperation::Unloading;
+    updateActions();
+    setStatus("Unloading model…");
+
+    m_client->post("/inference/unload", {}, [panel = QPointer<ChatPanel>(this)](int status, const QJsonDocument &doc) {
+        if (!panel) return;
+        panel->m_modelOperation = ModelOperation::Idle;
+        if (status == 200) {
+            panel->applyEngineStatus({});
+            panel->setStatus("Model unloaded. Load a model to continue.");
+        } else {
+            panel->updateActions();
+            const auto error = "Unload failed: " + doc.object()["detail"].toString(QString("HTTP %1").arg(status));
+            panel->setStatus(error, "error");
+            panel->requestEngineStatus(error);
         }
     });
 }
@@ -494,7 +528,7 @@ void ChatPanel::ensureTrailingStretch() {
 }
 
 void ChatPanel::onSend() {
-    if (m_loading || m_preparing) return;
+    if (m_modelOperation != ModelOperation::Idle || m_preparing) return;
     const QString text = m_input->toPlainText().trimmed();
     if (text.isEmpty() || m_streaming) return;
     if (anyEditing()) {
@@ -505,9 +539,13 @@ void ChatPanel::onSend() {
 }
 
 bool ChatPanel::beginSend(const PendingSend &send) {
-    if (m_loading || m_preparing || m_streaming) return false;
+    if (m_modelOperation != ModelOperation::Idle || m_preparing || m_streaming) return false;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
+        return false;
+    }
+    if (!m_modelLoaded) {
+        setStatus("Load a model to continue.", "warn");
         return false;
     }
     m_activeSend = send;
@@ -548,7 +586,7 @@ bool ChatPanel::anyEditing() const {
 
 void ChatPanel::refreshRows() {
     if (!m_chatHost) return;
-    const bool busy = m_streaming || m_preparing || m_loading;
+    const bool busy = m_streaming || m_preparing || m_modelOperation != ModelOperation::Idle;
     const bool editing = anyEditing();
     const ChatTree::NodeId last = m_tree.lastOnPath();
     const bool canRetry = !busy && !editing && last != ChatTree::kRoot && m_tree.role(last) == "assistant";
@@ -562,7 +600,7 @@ void ChatPanel::refreshRows() {
 }
 
 void ChatPanel::onVersionStep(ChatTree::NodeId node, int delta) {
-    if (m_streaming || m_preparing || m_loading || anyEditing()) return;
+    if (m_streaming || m_preparing || m_modelOperation != ModelOperation::Idle || anyEditing()) return;
     const QList<ChatTree::NodeId> versions = m_tree.versionsOf(node);
     const int target = m_tree.versionIndex(node) + delta;
     if (target < 0 || target >= versions.size()) return;
@@ -577,7 +615,7 @@ void ChatPanel::onVersionStep(ChatTree::NodeId node, int delta) {
 }
 
 void ChatPanel::onEditRequested(ChatTree::NodeId node) {
-    if (m_streaming || m_preparing || m_loading) return;
+    if (m_streaming || m_preparing || m_modelOperation != ModelOperation::Idle) return;
     for (MessageRow *row : m_chatHost->findChildren<MessageRow *>())
         if (row->isEditing() && row->node() != node) row->cancelEdit();
     if (MessageRow *row = rowForNode(node)) row->beginEdit(row->bubble()->text());
@@ -628,7 +666,7 @@ bool ChatPanel::commitReply() {
 }
 
 void ChatPanel::onRetry(ChatTree::NodeId reply) {
-    if (m_streaming || m_preparing || m_loading || anyEditing()) return;
+    if (m_streaming || m_preparing || m_modelOperation != ModelOperation::Idle || anyEditing()) return;
     if (reply == ChatTree::kRoot || reply != m_tree.lastOnPath() || m_tree.role(reply) != "assistant") return;
     beginSend(PendingSend{PendingSend::Retry, reply, m_tree.content(m_tree.parentOf(reply))});
 }
@@ -962,41 +1000,46 @@ void ChatPanel::resetConversation(bool showBlank) {
     m_stopButton->setEnabled(false);
 }
 
-void ChatPanel::setKnowledgePanel(RagPanel *panel) {
-    m_knowledge = panel;
+QVBoxLayout *ChatPanel::addDrawer(const QString &title, const QString &name, QPushButton *toggle) {
     auto *drawer = new QFrame(this);
-    drawer->setObjectName("conversationKnowledge");
-    drawer->setMinimumWidth(300);
-    drawer->setMaximumWidth(340);
+    drawer->setObjectName(name);
+    drawer->setProperty("conversationDrawer", true);
+    drawer->setFixedWidth(316);
     auto *body = new QVBoxLayout(drawer);
     body->setContentsMargins(14, 12, 14, 12);
     auto *header = new QHBoxLayout;
-    auto *title = new QLabel("Knowledge", drawer);
-    title->setObjectName("hubSectionTitle");
-    header->addWidget(title, 1);
-    auto *close = new Button(drawer);
-    close->setObjectName("hubDialogClose");
-    close->setFixedSize(30, 30);
-    close->setProperty("themeIcon", "window-close");
-    close->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textSecondary()), 16));
-    close->setAccessibleName("Close Knowledge");
+    auto *label = new QLabel(title, drawer);
+    label->setObjectName("hubSectionTitle");
+    header->addWidget(label, 1);
+    auto *close = toolbarIcon(drawer, "Close " + title, "window-close");
     header->addWidget(close);
     body->addLayout(header);
+    m_workspace->addWidget(drawer);
+    drawer->hide();
+    connect(toggle, &QPushButton::toggled, drawer, &QWidget::setVisible);
+    connect(close, &QPushButton::clicked, this, [toggle] {
+        toggle->setChecked(false);
+        toggle->setFocus();
+    });
+    return body;
+}
+
+void ChatPanel::setKnowledgePanel(RagPanel *panel) {
+    m_knowledge = panel;
+    auto *body = addDrawer("Knowledge", "conversationKnowledge", m_knowledgeToggle);
+    m_knowledgeDrawer = body->parentWidget();
     m_ragCheck->setText("Use in this conversation");
     body->addWidget(m_ragCheck);
-    body->addWidget(panel, 1);
-    m_workspace->addWidget(drawer);
-    m_knowledgeDrawer = drawer;
-    drawer->hide();
+    auto *scroll = new QScrollArea(body->parentWidget());
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(panel);
+    panel->setAutoFillBackground(false);
+    body->addWidget(scroll, 1);
     m_knowledgeToggle->show();
     m_knowledgeContext->show();
     connect(panel, &RagPanel::sourceScopeChanged, this, &ChatPanel::updateKnowledgeContext);
     updateKnowledgeContext();
-    connect(m_knowledgeToggle, &QPushButton::toggled, drawer, &QWidget::setVisible);
-    connect(close, &QPushButton::clicked, this, [this] {
-        m_knowledgeToggle->setChecked(false);
-        m_knowledgeToggle->setFocus();
-    });
 }
 
 void ChatPanel::addCitations(MessageRow *row, const QJsonArray &sources) {
@@ -1067,7 +1110,7 @@ void ChatPanel::setChatStore(ChatStore *store) {
     m_chatId.clear();
 }
 
-bool ChatPanel::isBusy() const { return m_streaming || m_preparing || m_loading || anyEditing(); }
+bool ChatPanel::isBusy() const { return m_streaming || m_preparing || m_modelOperation != ModelOperation::Idle || anyEditing(); }
 
 void ChatPanel::markDirty() {
     if (!m_store || m_tree.isEmpty()) return;
@@ -1211,7 +1254,7 @@ void ChatPanel::applyMeterWarning() {
         m_shownWarning.clear();
         return;
     }
-    if (m_streaming || m_loading) return;
+    if (m_streaming || m_modelOperation != ModelOperation::Idle) return;
     if (!ours && m_statusLabel->property("state").toString() == "error") return;
     setStatus(warning, "warn");
     m_shownWarning = warning;
@@ -1237,14 +1280,17 @@ void ChatPanel::scrollToBottom() {
 }
 
 void ChatPanel::updateActions() {
-    m_sendButton->setEnabled(!m_streaming && !m_loading && !m_preparing && !anyEditing() && !m_input->toPlainText().trimmed().isEmpty());
-    m_loadButton->setEnabled(!m_streaming && !m_loading && !m_preparing);
-    m_loadButton->setText(m_loading ? "Loading…" : "Load model");
-    m_modelCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
-    m_engineCombo->setEnabled(!m_streaming && !m_loading && !m_preparing);
+    const bool busy = isBusy();
+    const bool ready = m_client && m_client->isReady();
+    m_sendButton->setEnabled(m_modelLoaded && !busy && !m_input->toPlainText().trimmed().isEmpty());
+    m_loadButton->setEnabled(ready && !busy);
+    m_unloadButton->setEnabled(ready && !busy && m_modelLoaded);
+    m_loadButton->setText(m_modelOperation == ModelOperation::Loading ? "Loading…" : "Load model");
+    m_unloadButton->setText(m_modelOperation == ModelOperation::Unloading ? "Unloading…" : "Unload model");
+    m_modelCombo->setEnabled(!busy);
+    m_engineCombo->setEnabled(!busy);
     m_input->setReadOnly(m_preparing);
     refreshRows();
-    const bool busy = isBusy();
     if (busy != m_busyReported) {
         m_busyReported = busy;
         emit busyChanged(busy);
@@ -1283,6 +1329,7 @@ void ChatPanel::applySettingsJson(const QString &json) {
     }
 }
 void ChatPanel::loadModel(const QString &id) {
+    if (isBusy()) return;
     m_modelCombo->setCurrentText(id);
     onLoadModel();
 }

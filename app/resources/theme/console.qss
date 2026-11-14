@@ -170,7 +170,22 @@ QScrollBar::add-page:horizontal { background: transparent; }
 QScrollBar::sub-page:horizontal { background: transparent; }
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: none; }
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: none; }
-QFrame#chatSettings { background: @surfaceFill; border: 1px solid transparent; border-radius: 8px; }
+QComboBox#conversationModelPicker {
+    background: transparent; border: none; padding: 5px 26px 5px 3px; min-height: 24px;
+}
+QComboBox#conversationModelPicker:focus, QComboBox#conversationModelPicker:hover {
+    background: @surfaceFillHover;
+}
+QComboBox#conversationModelPicker QLineEdit { background: transparent; }
+QComboBox#conversationModelPicker::drop-down { width: 24px; }
+QPushButton[conversationIcon="true"] {
+    background: transparent; border: none; padding: 0;
+}
+QPushButton[conversationIcon="true"]:hover, QPushButton[conversationIcon="true"]:focus {
+    background: @surfaceFillHover;
+}
+QPushButton[conversationIcon="true"]:checked { background: @surfaceFillActive; }
+QFrame[conversationDrawer="true"] { background: @surfaceFill; border: none; border-radius: 10px; }
 QFrame#chatComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
 QPlainTextEdit#chatInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
 QPlainTextEdit#chatInput:focus { border: none; }
@@ -549,11 +564,6 @@ QFrame#modelCard[libraryRow="true"][lastRow="true"], QFrame#adapterCard[libraryR
     border-bottom: none;
 }
 
-QFrame#conversationKnowledge {
-    background: @surfaceFill;
-    border: 1px solid transparent;
-    border-radius: 10px;
-}
 QPushButton#historyNew[conversationAction="true"] {
     background: @accentSurface;
     color: @accentLabel;
