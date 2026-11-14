@@ -4,6 +4,8 @@
 #include "widgets/toggleswitch.h"
 
 #include <QLabel>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QStringList>
 #include <QWidget>
 
@@ -23,6 +25,21 @@ inline bool cutSideways(QWidget *w, int *overhang = nullptr) {
 
 inline QStringList clippedText(QWidget *root) {
     QStringList found;
+    // Scroll areas that cannot scroll sideways must show their content at full width. A vertical bar that takes
+    // layout width (not the floating kind) used to cost 3px and now costs 12px, so also name areas that only fit
+    // with the old width.
+    QList<QScrollArea *> scrollAreas = root->findChildren<QScrollArea *>();
+    if (auto *self = qobject_cast<QScrollArea *>(root)) scrollAreas.prepend(self);
+    for (auto *area : scrollAreas) {
+        if (!area->isVisible() || !area->widget() || !area->widgetResizable()) continue;
+        if (area->horizontalScrollBarPolicy() != Qt::ScrollBarAlwaysOff) continue;
+        const int needs = area->widget()->minimumSizeHint().width();
+        const int shown = area->viewport()->width();
+        const bool barTakesWidth = area->verticalScrollBar()->isVisible();
+        if (needs > shown + 1)
+            found << QString("scroll area %1: content needs %2px, %3px visible%4").arg(area->objectName().isEmpty() ? "(unnamed)" : area->objectName()).arg(needs).arg(shown)
+                         .arg(barTakesWidth && needs <= shown + 9 ? " (fits without the scrollbar's extra width)" : "");
+    }
     for (auto *w : root->findChildren<QWidget *>()) {
         if (!w->isVisible() || w->width()<4 || w->height()<4) continue;
         if (qobject_cast<Button *>(w) || qobject_cast<ToggleSwitch *>(w)) {

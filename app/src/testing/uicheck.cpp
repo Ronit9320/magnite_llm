@@ -693,9 +693,9 @@ int runUiCheck(const QString &captures) {
         QApplication::sendEvent(log->viewport(),&wheel);
         check(scroll->verticalScrollBar()->value()==outerBefore,"wheel at nested log boundary leaves the page still");
         check(log->verticalScrollBar()->property("scrollActive").toBool(),"inner scrollbar appears during scrolling");
-        check(scroll->verticalScrollBar()->width()==3,"page scrollbar uses the finer 3px track");
-        auto *pageBar=scroll->verticalScrollBar();
-        check(training.width()-pageBar->mapTo(&training,pageBar->rect().topRight()).x()<=8,"page scrollbar sits at the outer edge");
+        auto *pageEdge=EdgeScrollBar::of(scroll);
+        check(pageEdge && pageEdge->bar()->width()==EdgeScrollBar::kWidth && !scroll->verticalScrollBar()->isVisible(),"page scrollbar is the 12px draggable floating bar");
+        check(pageEdge && training.width()-pageEdge->bar()->mapTo(&training,pageEdge->bar()->rect().topRight()).x()<=2,"page scrollbar sits at the outer edge");
         check(scroll->widget()->layout()->contentsMargins().right()>=24,"content is separated from the page scrollbar");
         check(training.findChild<QWidget *>("trainingLogCard")->grab().save(captures+"/event-log-compact.png"),"capture readable event log and thin scrollbars");
         pump(1000);
@@ -756,6 +756,17 @@ int runUiCheck(const QString &captures) {
         check(dialog->findChild<QPushButton *>("trainingDraftSave")->isVisible(),"save action stays visible when advanced content scrolls");
         advanced->setChecked(false); Theme::setDark(false); pump(350);
         check(dialog->grab().save(captures+"/new-run-light.png"),"capture polished new run dialog");
+        {
+            // The same dialog at every interface size: nothing may be cut, and Large is saved for review.
+            const int storedSize=QSettings().value("appearance/interfaceSize",1).toInt(); const bool wasDark=Theme::isDark();
+            for (int size : {0,2,1}) {
+                QSettings().setValue("appearance/interfaceSize",size); Theme::applyPreferences(); Theme::setDark(wasDark); pump(300);
+                const auto found=TextFit::clippedText(dialog);
+                check(found.isEmpty(),TextFit::describe(TextFit::sizeName(size),"new run dialog",found));
+                if (size==2) check(dialog->grab().save(captures+"/large-new-run-dialog.png"),"capture new run dialog at Large");
+            }
+            QSettings().setValue("appearance/interfaceSize",storedSize); Theme::applyPreferences(); Theme::setDark(wasDark); pump(200);
+        }
         auto *draftRank=dialog->findChild<QSpinBox *>("trainingDraft_rank"); draftRank->setValue(32);
         auto *precision=dialog->findChild<QComboBox *>("trainingDraft_quantization"); precision->setCurrentIndex(2); pump(450);
         check(fixture.trainingEstimateRequest["rank"].toInt()==32 && fixture.trainingEstimateRequest["quantization"]=="8bit", "dialog estimates follow the current draft, including precision");
@@ -1012,6 +1023,8 @@ int runUiCheck(const QString &captures) {
                         combo->showPopup(); pump();
                         key(combo->view(), Qt::Key_Down);
                         key(combo->view(), Qt::Key_Return);
+                        // macOS flashes the chosen row and fades the popup out, so closing takes a few hundred milliseconds.
+                        waitUntil([&] { return !combo->view()->isVisible(); }, 1500);
                         check(combo->currentIndex() == 1 && !combo->view()->isVisible(),
                               name + " dropdown supports keyboard selection");
                         combo->setCurrentIndex(previous);
@@ -1698,6 +1711,44 @@ int runUiCheck(const QString &captures) {
     QSettings().setValue("appearance/studio3ReducedMotion",false); animated.hide();
 
     {
+        // Every vertical scrollbar floats over its area's edge, so none takes layout width; popups and Training's own bars are left alone.
+        QWidget host; auto *hostLayout=new QVBoxLayout(&host);
+        auto *text=new QPlainTextEdit(&host); text->setPlainText(QString("line\n").repeated(200)); text->setFixedHeight(120);
+        auto *list=new QListWidget(&host); for (int i=0;i<60;++i) list->addItem(QString("Conversation %1").arg(i)); list->setFixedHeight(160);
+        auto *table=new QTableWidget(40,2,&host); table->setFixedHeight(160);
+        auto *combo=new ComboBox(&host); for (int i=0;i<30;++i) combo->addItem(QString("Choice %1").arg(i));
+        for (QWidget *w : {static_cast<QWidget *>(text),static_cast<QWidget *>(list),static_cast<QWidget *>(table),static_cast<QWidget *>(combo)}) hostLayout->addWidget(w);
+        host.resize(420,620); host.show(); pump(150);
+        bool floating=true, noFootprint=true, barOnEdge=true;
+        for (auto *area : std::initializer_list<QAbstractScrollArea *>{text,list,table}) {
+            auto *edge=EdgeScrollBar::of(area);
+            floating&=edge!=nullptr&&!area->verticalScrollBar()->isVisible();
+            // With a native bar the gap right of the viewport is the frame plus the 12px bar; floating leaves just the frame.
+            noFootprint&=area->width()-1-area->viewport()->geometry().right()<=area->frameWidth()+1;
+            barOnEdge&=edge&&edge->bar()->isVisible()&&edge->bar()->parentWidget()==area&&edge->bar()->geometry().right()==area->width()-1;
+        }
+        check(floating,"scrollbars: text, list and table areas get the floating bar automatically");
+        check(noFootprint,"scrollbars: a floating bar takes no width from its area's content");
+        check(barOnEdge,"scrollbars: the floating bar sits on the area's right edge");
+        combo->showPopup(); pump(100);
+        check(combo->view()->isVisible() && EdgeScrollBar::of(qobject_cast<QAbstractScrollArea *>(combo->view()))==nullptr,"scrollbars: dropdown popups keep their own scrolling");
+        combo->hidePopup(); waitUntil([&] { return !combo->view()->isVisible(); },1500);
+        auto *eventLog=training.findChild<QPlainTextEdit *>("trainingEventLog");
+        check(eventLog && EdgeScrollBar::of(eventLog)==nullptr,"scrollbars: the Training event log keeps its own show-while-scrolling bar");
+    }
+    {
+        // Negative control: the guard must notice a scroll area whose content is wider than what is visible.
+        QScrollArea area; area.setWidgetResizable(true); area.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        auto *content=new QWidget; auto *contentLayout=new QVBoxLayout(content);
+        auto *wide=new QPushButton("A button that needs a lot of room",content); wide->setMinimumWidth(320); contentLayout->addWidget(wide);
+        for (int i=0;i<40;++i) contentLayout->addWidget(new QLabel("row",content));
+        area.setWidget(content); area.resize(240,200); area.show(); pump(80);
+        const auto squeezed=TextFit::clippedText(&area);
+        check(!squeezed.isEmpty(),"text-fit guard: it reports a scroll area whose content is wider than its viewport");
+        area.resize(420,200); pump(80);
+        check(TextFit::clippedText(&area).isEmpty(),"text-fit guard: it stays quiet once the scroll area is wide enough");
+    }
+    {
         // Text-fit guard: at every interface size, in both themes and at a wide and a small window, nothing may be elided or cut.
         const int storedSize=QSettings().value("appearance/interfaceSize",1).toInt();
         const bool wasDark=Theme::isDark();
@@ -1716,22 +1767,42 @@ int runUiCheck(const QString &captures) {
                         page.second->resize(width,760); page.second->show(); pump(120);
                         const auto found=TextFit::clippedText(page.second);
                         check(found.isEmpty(),TextFit::describe(sizeName,QString("%1 page, %2px wide").arg(page.first).arg(width),found));
+                        const bool shoot=size==2 && width==1104 && !captures.isEmpty();   // Large-size review images
+                        const QString shotName=QString("large-%1-").arg(dark?"dark":"light");
+                        if (shoot) capture(page.second,shotName+page.first);
                         if (page.second==&training && settingsToggle && workspaceTabs && archiveToggle) {
                             settingsToggle->setChecked(true); pump(150);
                             auto setup=TextFit::clippedText(&training);
                             check(setup.isEmpty(),TextFit::describe(sizeName,QString("training setup, %1px wide").arg(width),setup));
+                            if (shoot) capture(&training,shotName+"training-setup");
                             settingsToggle->setChecked(false);
                             workspaceTabs->setCurrentIndex(1); archiveToggle->setChecked(true); pump(150);
                             auto observatory=TextFit::clippedText(&training);
                             check(observatory.isEmpty(),TextFit::describe(sizeName,QString("training observatory, %1px wide").arg(width),observatory));
+                            if (shoot) capture(&training,shotName+"training-observatory");
                             archiveToggle->setChecked(false); workspaceTabs->setCurrentIndex(0); pump(100);
                         }
                         page.second->hide();
+                    }
+                    if (size==1 && dark && width==1104 && qEnvironmentVariableIsSet("MAGNITE_SCROLLBAR_INVENTORY")) {
+                        // Inventory (informational): every scroll area per page and whether its bar takes layout width.
+                        auto list=[&](const QString &pageName,QWidget *root) {
+                            for (auto *area : root->findChildren<QAbstractScrollArea *>()) {
+                                if (!area->isVisible()) continue;
+                                auto *bar=area->verticalScrollBar();
+                                const bool shown=bar->isVisible(), floating=EdgeScrollBar::of(area)!=nullptr;
+                                fprintf(stderr,"[scrollbars] %-10s %-22s %-18s vbar=%s viewport=%dpx\n",qUtf8Printable(pageName),area->metaObject()->className(),
+                                        qUtf8Printable(area->objectName().isEmpty()?QString("-"):area->objectName()),floating?"floating(0px)":shown?"inline(12px)":"none",area->viewport()->width());
+                            }
+                        };
+                        for (const auto &page : pages) { page.second->resize(width,760); page.second->show(); pump(150); list(page.first,page.second); page.second->hide(); }
+                        drawerChat.resize(width,760); drawerChat.show(); drawerToggle->setChecked(true); pump(150); list("drawer",&drawerChat); drawerToggle->setChecked(false); drawerChat.hide();
                     }
                     if (drawerToggle) {
                         drawerChat.resize(width,760); drawerChat.show(); drawerToggle->setChecked(true); pump(150);
                         const auto found=TextFit::clippedText(&drawerChat);
                         check(found.isEmpty(),TextFit::describe(sizeName,QString("chat with Knowledge drawer open, %1px wide").arg(width),found));
+                        if (size==2 && width==1104 && !captures.isEmpty()) capture(&drawerChat,QString("large-%1-chat-drawer").arg(dark?"dark":"light"));
                         drawerToggle->setChecked(false); drawerChat.hide();
                     }
                 }
@@ -2023,8 +2094,12 @@ int runUiCheck(const QString &captures) {
             input->setPlainText("stop me"); pump(20); sendButton->click();
             check(waitUntil([&]{ return fixture.compactRequests.size()==compactsBeforeStop+1 && fixture.heldCompactSocket; }) && status().contains("Compacting") && stopButton->isEnabled() && !sendButton->isEnabled(),
                   "while compacting, status says so, Stop is available and Send is not");
-            stopButton->click(); pump(300);
-            check(input->toPlainText()=="stop me" && sendButton->isEnabled() && status().contains("Compaction stopped") && fixture.chatRequests.size()==chatsBeforeStop,
+            stopButton->click();
+            // The stop notice is set the moment Stop is pressed; a debounced context-usage refresh may replace it a little later,
+            // so it is read straight away rather than after a wait that a busy machine can overrun.
+            const bool stopNoticeShown=status().contains("Compaction stopped");
+            pump(300);
+            check(input->toPlainText()=="stop me" && sendButton->isEnabled() && stopNoticeShown && fixture.chatRequests.size()==chatsBeforeStop,
                   "Stop during compaction keeps the typed text, re-enables Send and sends nothing");
             fixture.holdCompact=false; fixture.heldCompactSocket.clear();
             check(sendAndWait("stop me") && fixture.compactRequests.size()==compactsBeforeStop+2 && json(fixture.chatRequests).value("messages").toArray().last().toObject().value("content").toString()=="stop me",
@@ -3619,6 +3694,10 @@ int runUiCheck(const QString &captures) {
             check(replyRow->focusPolicy()==Qt::TabFocus,"row: a reply that can be retried becomes a tab stop");
             auto *outside=new QPushButton("Outside message rows",&host); hostLayout->addWidget(outside);
             host.activateWindow(); pump(40);
+            // A test run in the background is not the frontmost macOS app, so the OS never activates the window;
+            // marking it active inside Qt lets real focus (hasFocus) behave as it does for a user at the keyboard.
+            if (!host.isActiveWindow()) QApplication::setActiveWindow(&host);
+            pump(20);
             // Move Qt's real focus, rather than sending synthetic focus events
             // that leave QApplication::focusWidget() pointing at the old row.
             QEvent leave(QEvent::Leave); QApplication::sendEvent(messageRow,&leave); QApplication::sendEvent(replyRow,&leave);

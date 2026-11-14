@@ -1,6 +1,7 @@
 #include "testing/docs_tests.h"
 #include "panels/docspanel.h"
 #include "theme.h"
+#include "testing/textfit.h"
 #include "widgets/button.h"
 #include "widgets/docscontentview.h"
 #include <QAbstractTextDocumentLayout>
@@ -88,6 +89,8 @@ int runDocsChecks(const QString &captures) {
                 }
                 const char *label = size == 0 ? "Compact" : size == 2 ? "Large" : "Default";
                 check(visible, qPrintable(QString("topic titles stay fully visible at %1 interface size%2").arg(label, detail)));
+                const auto overall = TextFit::clippedText(&docs);
+                check(overall.isEmpty(), qPrintable(TextFit::describe(label, "docs page", overall)));
             }
             if (storedSize.isValid()) settings.setValue("appearance/interfaceSize", storedSize);
             else settings.remove("appearance/interfaceSize");

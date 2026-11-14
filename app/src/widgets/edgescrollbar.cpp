@@ -2,6 +2,8 @@
 #include "widgets/smoothscrollbar.h"
 
 #include <QAbstractScrollArea>
+#include <QApplication>
+#include <QComboBox>
 #include <QEvent>
 #include <QScrollBar>
 
@@ -104,4 +106,32 @@ bool EdgeScrollBar::eventFilter(QObject *watched, QEvent *event) {
         break;
     }
     return QObject::eventFilter(watched, event);
+}
+
+namespace {
+class ScrollAreaAdopter : public QObject {
+public:
+    using QObject::QObject;
+    bool eventFilter(QObject *watched, QEvent *event) override {
+        if (event->type() != QEvent::Polish) return false;
+        auto *area = qobject_cast<QAbstractScrollArea *>(watched);
+        if (!area || EdgeScrollBar::of(area)) return false;
+        if (area->verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) return false;       // no vertical bar by design
+        if (area->property("transientScroll").toBool() || area->verticalScrollBar()->property("innerScroll").toBool()) return false;
+        // Dropdown popups keep their own scrolling. A combo's list is polished briefly before Qt moves it into its popup,
+        // so look for the combo box (or a popup window) anywhere above it, not only at its final parent.
+        for (QWidget *above = area->parentWidget(); above; above = above->parentWidget())
+            if (qobject_cast<QComboBox *>(above) || (above->windowFlags() & Qt::Popup) == Qt::Popup) return false;
+        if ((area->windowFlags() & Qt::Popup) == Qt::Popup) return false;
+        EdgeScrollBar::attachInside(area);
+        return false;
+    }
+};
+}
+
+void EdgeScrollBar::adoptAllScrollAreas() {
+    static ScrollAreaAdopter *adopter = nullptr;
+    if (adopter || !qApp) return;
+    adopter = new ScrollAreaAdopter(qApp);
+    qApp->installEventFilter(adopter);
 }

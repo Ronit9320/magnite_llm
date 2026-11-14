@@ -22,6 +22,9 @@ public:
     static EdgeScrollBar *attach(QAbstractScrollArea *area);
     // For lists inside a column: the bar overlays the area's own right edge and takes no layout width.
     static EdgeScrollBar *attachInside(QAbstractScrollArea *area);
+    // Gives every scroll area the app shows the floating bar when it first appears, so no vertical bar takes layout width.
+    // Left alone: dropdown popups, areas that deliberately have no vertical bar, and the Training panel's own transient bars.
+    static void adoptAllScrollAreas();
     static EdgeScrollBar *of(const QAbstractScrollArea *area);
     QScrollBar *bar() const { return m_bar; }
 

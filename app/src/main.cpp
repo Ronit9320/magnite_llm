@@ -1,6 +1,7 @@
 #include <QApplication>
 #include "mainwindow.h"
 #include "theme.h"
+#include "widgets/edgescrollbar.h"
 #include "testing/restart_tests.h"
 #include "widgets/windowchrome.h"
 #include "testing/uicheck.h"
@@ -67,6 +68,7 @@ int main(int argc, char *argv[]) {
     // Phase 5.5.1: bundled fonts + global stylesheet active, default typeface
     // set to DM Sans (falls back to the system font if DM Sans can't load).
     Theme::setupApplicationTheme();
+    EdgeScrollBar::adoptAllScrollAreas();
     QFont appFont = app.font();
     appFont.setFamily(Theme::bodyFont());
     app.setFont(appFont);

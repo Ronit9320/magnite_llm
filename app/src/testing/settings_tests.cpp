@@ -198,6 +198,8 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                     const auto found = TextFit::clippedText(&panel);
                     check(found.isEmpty(), qPrintable(TextFit::describe(QString("%1 %2").arg(TextFit::sizeName(size), dark ? "dark" : "light"),
                                                                        QString("settings category %1").arg(category), found)));
+                    if (size == 2 && !captures.isEmpty())
+                        check(panel.grab().save(captures + QString("/large-settings-%1-%2.png").arg(dark ? "dark" : "light").arg(category)), "capture settings category at Large");
                 }
             }
         if (storedSize.isValid()) guardSettings.setValue("appearance/interfaceSize", storedSize);
