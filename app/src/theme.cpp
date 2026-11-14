@@ -78,7 +78,6 @@ std::vector<Token> tokens() {
         {"@surfaceFillHover",     Theme::surfaceFillHover()},
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
-        {"@surfaceBorderHover",   Theme::surfaceBorderHover()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},

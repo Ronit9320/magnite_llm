@@ -94,7 +94,7 @@ void Button::paintEvent(QPaintEvent *) {
     if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Theme::surfaceBorder()); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
     if (hasFocus() && isEnabled()) {
         if (!isDown() && !isChecked()) fill=hover;
-        border=QColor(primary?Theme::accentText():Theme::accentLabel());
+        border=QColor(primary?Theme::accentText():Theme::textMuted());
     }
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
     painter.setBrush(fill);

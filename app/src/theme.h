@@ -39,7 +39,6 @@ inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113
 inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#2B2B30") : QStringLiteral("#CFD2C5"); }
-inline QString surfaceBorderHover()  { return QStringLiteral("#FF784E"); }
 
 // Unfilled part of the context meter ring and bar.
 inline QString meterTrack()          { return surfaceBorder(); }

@@ -129,7 +129,7 @@ QLabel#tileKicker { font-family: @bodyFont; font-size: 10px; color: @textSeconda
 QLabel#tileValue { font-family: @headingFont; font-size: 15px; color: @textPrimary; }
 QLabel#tileCaption { color: @textSecondary; font-size: 12px; }
 QSplitter::handle { background: transparent; border-radius: 2px; }
-QSplitter::handle:hover { background: @surfaceBorderHover; }
+QSplitter::handle:hover { background: @textMuted; }
 QLabel#rackEmpty { font-family: @bodyFont; color: @textSecondary; border: 1px solid transparent; padding: 30px; font-size: 12px; background: @surfaceFill; border-radius: 6px; }
 QTabWidget::pane { background: transparent; border: none; top: 8px; }
 QTabBar::tab { color: @textSecondary; border: none; padding: 6px 14px; min-width: 48px; }
@@ -363,7 +363,7 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
 QTextEdit:focus, QPlainTextEdit:focus { background: @insetBackground; }
 QWidget:focus { outline: 0; }
 QPushButton#themeToggle:focus, QPushButton#navBtn:focus, QPushButton#navBtn:checked:focus,
-QPushButton#sidebarToggle:focus, QPushButton#historyNew:focus { border-color: @accentLabel; }
+QPushButton#sidebarToggle:focus, QPushButton#historyNew:focus { border-color: @textMuted; }
 
 /* Settings utility window; the workspace remains underneath. */
 QDialog#settingsWindow { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 14px; }
@@ -418,7 +418,7 @@ QWidget#docsNavigation { background: @surfaceFill; border-right: 1px solid @surf
 QWidget#docsContents { border-left: 1px solid @surfaceBorder; }
 QLabel#docsToolbarTitle { font-family: @headingFont; font-weight: 600; font-size: 16px; }
 QLineEdit#docsSearch { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 9px 12px; font-size: 12px; }
-QLineEdit#docsSearch:focus { border-color: @accentPrimary; }
+QLineEdit#docsSearch:focus { border-color: @textMuted; }
 QLabel#docsHero { font-family: @headingFont; font-size: 36px; font-weight: 500; color: @textPrimary; }
 QLabel#docsHeading { font-family: @headingFont; font-size: 34px; font-weight: 500; color: @textPrimary; }
 QLabel#docsIntro { font-size: 14px; color: @textSecondary; line-height: 160%; }
@@ -476,13 +476,13 @@ QWidget#modelHubPanel QCheckBox::indicator {
     border-radius: 3px;
     background: @canvasBackground;
 }
-QWidget#modelHubPanel QCheckBox:focus::indicator { border-color: @accentLabel; }
 QWidget#modelHubPanel QCheckBox:focus { color: @accentLabel; }
 QWidget#modelHubPanel QCheckBox::indicator:checked {
     background: @accentPrimary;
     border-color: @accentPrimary;
     image: url(:/icons/check.svg);
 }
+QWidget#modelHubPanel QCheckBox:focus::indicator { border-color: @textMuted; }
 
 /* Model Hub reference layout: native desktop cards, model page and utility dialogs. */
 QFrame#hubDeviceCard, QFrame#hubSurface, QFrame#hubStats {
