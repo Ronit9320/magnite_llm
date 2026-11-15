@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "trainingduration.h"
 #include <QPushButton>
+#include <QSettings>
 
 #include <QFontMetrics>
 #include <QEvent>
@@ -80,7 +81,13 @@ ChatBubble::ChatBubble(Role role, const QString &text, QWidget *parent)
         m_thinkToggle->setFlat(true);
         m_thinkToggle->setCursor(Qt::PointingHandCursor);
         m_thinkToggle->hide();
-        connect(m_thinkToggle, &QPushButton::clicked, this, [this]() { setThinkingExpanded(!m_thinkExpanded); });
+        // Thinking is hidden unless the user last chose to show it; clicking the header makes that choice
+        // for the replies that follow (and for the next launch).
+        m_thinkExpanded = QSettings().value(QStringLiteral("chat/showThinking"), false).toBool();
+        connect(m_thinkToggle, &QPushButton::clicked, this, [this]() {
+            setThinkingExpanded(!m_thinkExpanded);
+            QSettings().setValue(QStringLiteral("chat/showThinking"), m_thinkExpanded);
+        });
 
         m_thinkText = new QLabel(this);
         m_thinkText->setObjectName(QStringLiteral("chatThinkingText"));
@@ -117,7 +124,6 @@ void ChatBubble::refresh() {
 
     const bool live = m_streaming && m_parsed.open;
     m_showHeader = m_thinkToggle && (m_parsed.hasThinking || live);
-    if (!m_thinkChosen) m_thinkExpanded = live;   // open while it thinks, closed once the answer starts
 
     const QString cursor = m_cursor ? QStringLiteral("▍") : QString();
     m_content->setText(m_parsed.answer + (m_parsed.open ? QString() : cursor));
@@ -219,7 +225,6 @@ void ChatBubble::setStreaming(bool streaming) {
 }
 
 void ChatBubble::setThinkingExpanded(bool expanded) {
-    m_thinkChosen = true;
     m_thinkExpanded = expanded;
     refresh();
 }

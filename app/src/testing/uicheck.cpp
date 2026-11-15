@@ -2539,6 +2539,22 @@ int runUiCheck(const QString &captures) {
                 const QJsonArray sent=messagesOf(fixture.chatRequests.last());
                 check(sent.size()==3 && sent.at(1).toObject().value("content").toString()=="Hello there!","the thinking is not sent back to the model");
             }
+            // The user's show/hide choice carries over to later replies; hidden until they show it.
+            fixture.chatReply="<think>\nsecond thought\n</think>\n\nSecond answer";
+            check(sendAndWait("again"),"another reply with thinking is received");
+            {
+                auto *bubble=rows().last()->bubble(); auto *thought=bubble->findChild<QLabel *>("chatThinkingText");
+                check(bubble->hasThinking() && !bubble->thinkingExpanded() && thought && !thought->isVisibleTo(bubble),"after the user hid it, the next reply keeps its thinking hidden");
+                if (auto *toggle=bubble->findChild<QPushButton *>("thinkToggle")) toggle->click(); pump(50);
+                fixture.chatReply="<think>\nthird thought\n</think>\n\nThird answer";
+                check(sendAndWait("once more"),"a third reply with thinking is received");
+                auto *next=rows().last()->bubble(); auto *nextThought=next->findChild<QLabel *>("chatThinkingText");
+                check(next->thinkingExpanded() && nextThought && nextThought->isVisibleTo(next) && nextThought->text()=="third thought","after the user showed it, the next reply shows its thinking");
+                if (auto *toggle=next->findChild<QPushButton *>("thinkToggle")) toggle->click(); pump(50);   // back to the default
+                fixture.chatReply="<think>\nfourth\n</think>\n\nFourth answer";
+                check(sendAndWait("last"),"a fourth reply with thinking is received");
+                check(!rows().last()->bubble()->thinkingExpanded(),"hiding it again hides it for the replies after");
+            }
             QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
             input->clear();
 

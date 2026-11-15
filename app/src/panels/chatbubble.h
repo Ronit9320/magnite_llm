@@ -37,10 +37,10 @@ public:
     // the bubble would otherwise make it narrower than the chat area it belongs to).
     void setWidthReference(QWidget *reference);
     void setCursorVisible(bool show);
-    // True while the reply is still being generated: an unclosed <think> then reads "Thinking…"
-    // and is shown open; once false it is a finished (or stopped) thought.
+    // True while the reply is still being generated: an unclosed <think> then reads "Thinking…";
+    // once false it is a finished (or stopped) thought.
     void setStreaming(bool streaming);
-    // Opens or closes the thinking, as clicking its header does.
+    // Opens or closes this bubble's thinking. Clicking the header also remembers the choice for later replies.
     void setThinkingExpanded(bool expanded);
 
 protected:
@@ -61,7 +61,6 @@ private:
     bool m_cursor = false;
     bool m_streaming = false;
     bool m_thinkExpanded = false;
-    bool m_thinkChosen = false;             // the user clicked the header: stop opening/closing it automatically
     QElapsedTimer m_clock;                  // started for a bubble that is created empty (a reply about to stream)
     qint64 m_thinkMs = -1;
 
