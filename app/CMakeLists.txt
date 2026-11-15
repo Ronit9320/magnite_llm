@@ -70,6 +70,9 @@ set(MAGNITE_SOURCES
     src/testing/textfit.h
     src/testing/restart_tests.cpp
     src/testing/restart_tests.h
+    src/testing/reasoning_tests.cpp
+    src/testing/reasoning_tests.h
+    src/reasoning.h
     src/main.cpp
     src/mainwindow.cpp
     src/trainingduration.h

@@ -2,6 +2,7 @@
 #include "mainwindow.h"
 #include "theme.h"
 #include "widgets/edgescrollbar.h"
+#include "testing/reasoning_tests.h"
 #include "testing/restart_tests.h"
 #include "widgets/windowchrome.h"
 #include "testing/uicheck.h"
@@ -64,6 +65,8 @@ int main(int argc, char *argv[]) {
         return Theme::selfCheck();
     if (argc > 1 && QString(argv[1]) == "--restart-policy-check")
         return runRestartPolicyCheck();
+    if (argc > 1 && QString(argv[1]) == "--reasoning-check")
+        return runReasoningCheck();
 
     // Phase 5.5.1: bundled fonts + global stylesheet active, default typeface
     // set to DM Sans (falls back to the system font if DM Sans can't load).

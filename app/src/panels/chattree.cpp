@@ -1,5 +1,7 @@
 #include "panels/chattree.h"
 
+#include "reasoning.h"
+
 #include <algorithm>
 
 #include <QJsonArray>
@@ -60,7 +62,10 @@ QList<QJsonObject> ChatTree::messages(int pathCount) const {
     const QList<NodeId> path = activePath();
     const int count = pathCount < 0 ? path.size() : std::min<int>(pathCount, path.size());
     for (int i = 0; i < count; ++i)
-        out.append(QJsonObject{{"role", node(path.at(i)).role}, {"content", node(path.at(i)).content}});
+        // A model's thinking is shown on screen but not sent back: it only costs context.
+        out.append(QJsonObject{{"role", node(path.at(i)).role},
+                               {"content", node(path.at(i)).role == "assistant" ? Reasoning::answerOnly(node(path.at(i)).content)
+                                                                                : node(path.at(i)).content}});
     return out;
 }
 

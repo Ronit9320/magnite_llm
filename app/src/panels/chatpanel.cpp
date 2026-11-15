@@ -1338,6 +1338,7 @@ void ChatPanel::applyMeterWarning() {
 
 void ChatPanel::updateStreamingBubble(const QString &text, bool showCursor) {
     if (!m_streamBubble) return;
+    m_streamBubble->setStreaming(showCursor);   // before the text, so an unclosed <think> reads "Thinking…" only while it streams
     m_streamBubble->setText(text);
     m_streamBubble->setCursorVisible(showCursor && !QSettings().value("appearance/studio3ReducedMotion",false).toBool());
     const bool follow = m_followOutput;

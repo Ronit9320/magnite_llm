@@ -2513,6 +2513,35 @@ int runUiCheck(const QString &captures) {
             check(grownF && rows().size()==10,"a five-turn chat exists for the failed-retry checks");
             fixture.usageUsed=3600; fixture.chatEmpty=true;
             const int beforeFailedRetry=fixture.chatRequests.size();
+            // Thinking: a reply with <think>…</think> keeps its thinking behind a collapsible header, and
+            // only the answer goes back to the model as history.
+            fixture.usageUsed=1000; fixture.chatReply="<think>\nThe user greets me.\n</think>\n\nHello there!";
+            check(sendAndWait("think greeting") && rows().size()==2,"a reply with thinking is received");
+            {
+                auto *row=rows().last(); auto *bubble=row->bubble();
+                auto *toggle=bubble->findChild<QPushButton *>("thinkToggle"); auto *thought=bubble->findChild<QLabel *>("chatThinkingText");
+                check(bubble->hasThinking() && toggle && toggle->isVisibleTo(bubble) && toggle->text().startsWith("Thought") && bubble->answerText()=="Hello there!",
+                      "the reply shows a Thought header and the answer without the tags");
+                check(bubble->text().contains("<think>") && thought && !thought->isVisibleTo(bubble) && !bubble->thinkingExpanded(),"the thinking starts collapsed and the stored reply keeps it");
+                const int closedHeight=bubble->height();
+                if (!captures.isEmpty()) { QDir().mkpath(captures); chat.grab().save(QDir(captures).filePath("chat-thinking-collapsed.png")); }
+                if (toggle) toggle->click(); pump(50);
+                if (!captures.isEmpty()) chat.grab().save(QDir(captures).filePath("chat-thinking-expanded.png"));
+                check(bubble->thinkingExpanded() && thought && thought->isVisibleTo(bubble) && thought->text()=="The user greets me." && bubble->height()>closedHeight,
+                      "clicking the header expands the thinking and grows the bubble");
+                if (toggle) toggle->click(); pump(50);
+                check(!bubble->thinkingExpanded() && thought && !thought->isVisibleTo(bubble) && bubble->height()==closedHeight,"clicking again collapses it back to the same size");
+                check(!rows().first()->bubble()->hasThinking(),"a message without thinking has no header");
+            }
+            fixture.chatReply="second reply";
+            check(sendAndWait("after thinking"),"a message is sent after a reply with thinking");
+            {
+                const QJsonArray sent=messagesOf(fixture.chatRequests.last());
+                check(sent.size()==3 && sent.at(1).toObject().value("content").toString()=="Hello there!","the thinking is not sent back to the model");
+            }
+            QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
+            input->clear();
+
             clickRetry(rows().last());
             waitUntil([&]{ return fixture.compactRequests.size()==1 && fixture.chatRequests.size()>beforeFailedRetry && sendButton->text()=="Send  ↑"; }); pump(250);
             check(fixture.compactRequests.size()==1 && rows().size()==10 && dividers().isEmpty() && versionOf(rows().last()).isEmpty(),"a retry that compacts and then returns nothing leaves the conversation as it was");
