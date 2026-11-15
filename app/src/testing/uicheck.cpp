@@ -2397,11 +2397,20 @@ int runUiCheck(const QString &captures) {
             check(sendAndWait("t1") && sendAndWait("t2") && rows().size()==4,"a two-turn chat exists for the retry checks");
             check(retryOn().size()==1 && retryOn().first()==rows().last() && !retryOf(rows().at(0)),"only the latest reply has a retry button");
             {
-                auto *row=rows().last(); auto *b=retryOf(row);
-                QEnterEvent enter(QPointF(5,5),QPointF(5,5),QPointF(5,5)); QApplication::sendEvent(row,&enter); pump(20);
-                const bool shown=b && b->isVisibleTo(row);
-                QEvent leave(QEvent::Leave); QApplication::sendEvent(row,&leave); pump(20);
-                check(shown && b && !b->isVisibleTo(row),"hovering the latest reply shows its retry button, leaving hides it");
+                // The action row under a reply is always visible: no hovering needed.
+                auto *row=rows().last(); auto *b=retryOf(row); auto *copy=row->findChild<QPushButton *>("copyButton");
+                check(b && copy && b->isVisibleTo(row) && copy->isVisibleTo(row) && b->isEnabled(),"the latest reply shows copy and retry without hovering");
+                const QPoint copyAt=copy->mapTo(row,QPoint(0,0)), retryAt=b->mapTo(row,QPoint(0,0));
+                check(copyAt.x()<=row->bubble()->x()+24 && copyAt.y()>=row->bubble()->geometry().bottom()-12 && retryAt.y()==copyAt.y() && copyAt.x()<retryAt.x(),
+                      "copy and retry sit under the reply at its left, copy first");
+                auto *older=rows().at(1); auto *olderCopy=older->findChild<QPushButton *>("copyButton"); auto *olderRetry=retryOf(older);
+                check(olderCopy && olderCopy->isVisibleTo(older) && olderRetry && !olderRetry->isVisibleTo(older),"an older reply shows copy but no retry");
+                check(!rows().at(0)->findChild<QPushButton *>("copyButton"),"a message of the user's has no copy button");
+                check(copy->size()==QSize(24,24) && b->size()==QSize(24,24),"the copy and retry buttons keep their 24px box, so their icons are not clipped");
+                QApplication::clipboard()->setText("before");
+                copy->click(); pump(20);
+                check(QApplication::clipboard()->text()==row->bubble()->text() && copy->toolTip()=="Copied","copy puts the reply on the clipboard and confirms");
+                if (!captures.isEmpty()) { QDir().mkpath(captures); chat.grab().save(QDir(captures).filePath("chat-reply-actions.png")); }
             }
             input->setPlainText("retry draft"); pump(20);
             fixture.chatReply="new reply"; const int beforeRetry=fixture.chatRequests.size();
@@ -2504,15 +2513,6 @@ int runUiCheck(const QString &captures) {
             QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
             input->clear();
 
-            // Review fix 1: a retry that fails after compacting must leave the conversation exactly as it was,
-            // and a successful one must keep its summary with its own reply.
-            fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
-            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
-            bool grownF=true; for (int i=1;i<=5;++i) grownF&=sendAndWait(QString("f%1").arg(i));
-            pump(700); fixture.compactRequests.clear();
-            check(grownF && rows().size()==10,"a five-turn chat exists for the failed-retry checks");
-            fixture.usageUsed=3600; fixture.chatEmpty=true;
-            const int beforeFailedRetry=fixture.chatRequests.size();
             // Thinking: a reply with <think>…</think> keeps its thinking behind a collapsible header, and
             // only the answer goes back to the model as history.
             fixture.usageUsed=1000; fixture.chatReply="<think>\nThe user greets me.\n</think>\n\nHello there!";
@@ -2542,6 +2542,15 @@ int runUiCheck(const QString &captures) {
             QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
             input->clear();
 
+            // Review fix 1: a retry that fails after compacting must leave the conversation exactly as it was,
+            // and a successful one must keep its summary with its own reply.
+            fixture.chatEmpty=false; fixture.chatStatus=200; fixture.usageStatus=200; fixture.holdChat=false; fixture.holdCompact=false;
+            fixture.chatReply="turn reply"; fixture.usageUsed=1000; fixture.compactStatus=200; fixture.compactMethod="summary"; fixture.compactCovered=4;
+            bool grownF=true; for (int i=1;i<=5;++i) grownF&=sendAndWait(QString("f%1").arg(i));
+            pump(700); fixture.compactRequests.clear();
+            check(grownF && rows().size()==10,"a five-turn chat exists for the failed-retry checks");
+            fixture.usageUsed=3600; fixture.chatEmpty=true;
+            const int beforeFailedRetry=fixture.chatRequests.size();
             clickRetry(rows().last());
             waitUntil([&]{ return fixture.compactRequests.size()==1 && fixture.chatRequests.size()>beforeFailedRetry && sendButton->text()=="Send  ↑"; }); pump(250);
             check(fixture.compactRequests.size()==1 && rows().size()==10 && dividers().isEmpty() && versionOf(rows().last()).isEmpty(),"a retry that compacts and then returns nothing leaves the conversation as it was");
@@ -3718,9 +3727,9 @@ int runUiCheck(const QString &captures) {
             auto *pencil=messageRow->findChild<QPushButton *>("editButton"); auto *retry=replyRow->findChild<QPushButton *>("retryButton"); auto *box=messageRow->findChild<QPlainTextEdit *>("messageEditBox");
             check(pencil && retry && box && pencil->accessibleName()=="Edit message" && retry->accessibleName()=="Retry reply" && box->accessibleName()=="Edit your message","row: pencil, retry and editor have accessible names");
             check(pencil && retry && pencil->focusPolicy()!=Qt::NoFocus && retry->focusPolicy()!=Qt::NoFocus,"row: pencil and retry accept keyboard focus");
-            check(messageRow->focusPolicy()==Qt::TabFocus && replyRow->focusPolicy()==Qt::NoFocus,"row: a row with an action is a tab stop, one without is not");
+            check(messageRow->focusPolicy()==Qt::TabFocus && replyRow->focusPolicy()==Qt::NoFocus,"row: a user row with an action is a tab stop, a reply row is not");
             replyRow->setRetryAvailable(true);
-            check(replyRow->focusPolicy()==Qt::TabFocus,"row: a reply that can be retried becomes a tab stop");
+            check(replyRow->focusPolicy()==Qt::NoFocus && retry->isVisibleTo(replyRow),"row: a reply's retry button is always shown and takes focus itself, so the row is not a tab stop");
             auto *outside=new QPushButton("Outside message rows",&host); hostLayout->addWidget(outside);
             host.activateWindow(); pump(40);
             // A test run in the background is not the frontmost macOS app, so the OS never activates the window;
@@ -3734,10 +3743,9 @@ int runUiCheck(const QString &captures) {
             const bool editRevealed=messageRow->hasFocus() && pencil->isVisibleTo(messageRow);
             pencil->setFocus(Qt::TabFocusReason); pump(20);
             check(pencil->hasFocus() && pencil->isVisibleTo(messageRow),"row: moving focus to its action keeps the pencil visible");
-            replyRow->setFocus(Qt::TabFocusReason); pump(20);
-            check(editRevealed && replyRow->hasFocus() && retry->isVisibleTo(replyRow),"row: tabbing to a row reveals its pencil or retry button");
+            check(editRevealed,"row: tabbing to a row reveals its pencil");
             outside->setFocus(Qt::TabFocusReason); pump(40);
-            check(outside->hasFocus() && !pencil->isVisibleTo(messageRow) && !retry->isVisibleTo(replyRow),"row: leaving a row with the keyboard hides them again");
+            check(outside->hasFocus() && !pencil->isVisibleTo(messageRow) && retry->isVisibleTo(replyRow),"row: leaving a row hides its pencil, while a reply's buttons stay shown");
             replyRow->setRetryAvailable(false);
         }
         auto *rowSwitcher=messageRow->findChild<VersionSwitcher *>("versionSwitcher");

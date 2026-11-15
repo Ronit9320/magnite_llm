@@ -4,11 +4,13 @@
 #include "widgets/versionswitcher.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include "widgets/button.h"
 #include <QTextCursor>
@@ -16,12 +18,20 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+namespace {
+// Icon-only buttons paint their icon into an iconSize box; rendering at exactly that size keeps it
+// from being resampled (which made the 14px icons look soft).
+constexpr int kIconPx = 16;
+}
+
 MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QString &text, QWidget *parent)
     : QWidget(parent)
     , m_role(role)
     , m_lineHost(nullptr)
     , m_bubble(nullptr)
     , m_editButton(nullptr)
+    , m_actionsRow(nullptr)
+    , m_copyButton(nullptr)
     , m_retryButton(nullptr)
     , m_editor(nullptr)
     , m_editBox(nullptr)
@@ -31,7 +41,7 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
     setObjectName(QStringLiteral("messageRow"));
     auto *column = new QVBoxLayout(this);
     column->setContentsMargins(0, 0, 0, 0);
-    column->setSpacing(4);
+    column->setSpacing(role == ChatBubble::User ? 4 : 0);   // a reply's bubble already has 10px of padding below its text
 
     // The bubble line: [stretch] [pencil] [bubble] for the user, [bubble] [stretch] for the model.
     m_lineHost = new QWidget(this);
@@ -43,7 +53,8 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
     if (role == ChatBubble::User) {
         m_editButton = new Button(m_lineHost);
         m_editButton->setObjectName(QStringLiteral("editButton"));
-        m_editButton->setIcon(Theme::coloredIcon(QStringLiteral("pencil"), QColor(Theme::textMuted()), 14));
+        m_editButton->setIcon(Theme::coloredIcon(QStringLiteral("pencil"), QColor(Theme::textMuted()), kIconPx));
+        m_editButton->setIconSize(QSize(kIconPx, kIconPx));
         m_editButton->setFixedSize(24, 24);
         m_editButton->setFlat(true);
         m_editButton->setCursor(Qt::PointingHandCursor);
@@ -56,23 +67,41 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
         line->addWidget(m_bubble);
         connect(m_editButton, &QPushButton::clicked, this, [this]() { emit editRequested(m_node); });
     } else {
-        m_retryButton = new Button(m_lineHost);
-        m_retryButton->setObjectName(QStringLiteral("retryButton"));
-        m_retryButton->setIcon(Theme::coloredIcon(QStringLiteral("refresh-cw"), QColor(Theme::textMuted()), 14));
-        m_retryButton->setFixedSize(24, 24);
-        m_retryButton->setFlat(true);
-        m_retryButton->setCursor(Qt::PointingHandCursor);
-        m_retryButton->setAccessibleName(QStringLiteral("Retry reply"));
-        m_retryButton->setToolTip(QStringLiteral("Retry reply"));
-        m_retryButton->setEnabled(false);
-        m_retryButton->hide();
-        m_retryButton->installEventFilter(this);
         line->addWidget(m_bubble);
-        line->addWidget(m_retryButton, 0, Qt::AlignBottom);
         line->addStretch(1);
+
+        // Under the reply, left-aligned with its text: [copy] [retry] [version switcher].
+        m_actionsRow = new QWidget(this);
+        m_actionsRow->setObjectName(QStringLiteral("replyActions"));
+        auto *actions = new QHBoxLayout(m_actionsRow);
+        actions->setContentsMargins(11, 0, 0, 0);   // the 16px icon sits 4px inside its 24px button; 15px is the text's own inset
+        actions->setSpacing(2);
+        auto makeButton = [this](const char *name, const char *icon, const QString &label) {
+            auto *button = new Button(m_actionsRow);
+            button->setObjectName(QString::fromLatin1(name));
+            button->setIcon(Theme::coloredIcon(QString::fromLatin1(icon), QColor(Theme::textMuted()), kIconPx));
+            button->setIconSize(QSize(kIconPx, kIconPx));
+            button->setFixedSize(24, 24);
+            button->setFlat(true);
+            button->setCursor(Qt::PointingHandCursor);
+            button->setAccessibleName(label);
+            button->setToolTip(label);
+            button->hide();
+            return button;
+        };
+        m_copyButton = makeButton("copyButton", "copy", QStringLiteral("Copy response"));
+        m_retryButton = makeButton("retryButton", "refresh-cw", QStringLiteral("Retry reply"));
+        m_retryButton->setEnabled(false);
+        actions->addWidget(m_copyButton);
+        actions->addWidget(m_retryButton);
+        connect(m_copyButton, &QPushButton::clicked, this, [this]() { copyReply(); });
         connect(m_retryButton, &QPushButton::clicked, this, [this]() { emit retryClicked(m_node); });
     }
     column->addWidget(m_lineHost);
+    if (m_actionsRow) {
+        column->addWidget(m_actionsRow);
+        m_actionsRow->hide();
+    }
 
     if (role == ChatBubble::User) {
         // The inline editor, right-aligned and as wide as a bubble can be.
@@ -108,10 +137,17 @@ MessageRow::MessageRow(ChatBubble::Role role, ChatTree::NodeId node, const QStri
         connect(m_editBox, &QPlainTextEdit::textChanged, this, [this]() { resizeEditor(); });
     }
 
-    m_switcher = new VersionSwitcher(this);
+    m_switcher = new VersionSwitcher(m_actionsRow ? m_actionsRow : this);
     m_switcher->hide();
-    column->addWidget(m_switcher, 0, role == ChatBubble::User ? Qt::AlignRight : Qt::AlignLeft);
+    if (m_actionsRow) {
+        static_cast<QHBoxLayout *>(m_actionsRow->layout())->addSpacing(6);
+        m_actionsRow->layout()->addWidget(m_switcher);
+        static_cast<QHBoxLayout *>(m_actionsRow->layout())->addStretch(1);
+    } else {
+        column->addWidget(m_switcher, 0, Qt::AlignRight);
+    }
     connect(m_switcher, &VersionSwitcher::step, this, [this](int delta) { emit versionStep(m_node, delta); });
+    updateCopyButton();
     updateFocusPolicy();
 }
 
@@ -119,9 +155,13 @@ void MessageRow::setNode(ChatTree::NodeId node) {
     m_node = node;
     updateEditButton();
     updateRetryButton();
+    updateCopyButton();
 }
 
-void MessageRow::setVersion(int index, int total) { m_switcher->setVersion(index, total); }
+void MessageRow::setVersion(int index, int total) {
+    m_switcher->setVersion(index, total);
+    updateActionsRow();
+}
 
 void MessageRow::setActionsEnabled(bool enabled) {
     m_actionsEnabled = enabled;
@@ -187,8 +227,7 @@ void MessageRow::updateEditButton() {
 }
 
 void MessageRow::updateFocusPolicy() {
-    const bool hasAction = m_actionsEnabled && m_node != ChatTree::kRoot && !m_editing &&
-                           (m_role == ChatBubble::User || m_retryAvailable);
+    const bool hasAction = m_actionsEnabled && m_node != ChatTree::kRoot && !m_editing && m_role == ChatBubble::User;
     setFocusPolicy(hasAction ? Qt::TabFocus : Qt::NoFocus);
 }
 
@@ -196,21 +235,46 @@ void MessageRow::updateFocusWithin() {
     QWidget *focused = QApplication::focusWidget();
     m_focusWithin = focused && (focused == this || isAncestorOf(focused));
     updateEditButton();
-    updateRetryButton();
 }
 
 void MessageRow::updateRetryButton() {
     if (!m_retryButton) return;
     const bool usable = m_retryAvailable && m_actionsEnabled && m_node != ChatTree::kRoot;
     m_retryButton->setEnabled(usable);
-    m_retryButton->setVisible(usable && (m_hover || m_focusWithin));
+    m_retryButton->setVisible(usable);
+    updateActionsRow();
     updateFocusPolicy();
+}
+
+void MessageRow::updateCopyButton() {
+    if (!m_copyButton) return;
+    // Only a finished reply with something to copy: a row still streaming has no node yet.
+    m_copyButton->setVisible(m_node != ChatTree::kRoot && !m_bubble->text().isEmpty());
+    updateActionsRow();
+}
+
+void MessageRow::updateActionsRow() {
+    if (!m_actionsRow) return;
+    m_actionsRow->setVisible(!m_copyButton->isHidden() || !m_retryButton->isHidden() || !m_switcher->isHidden());
+}
+
+void MessageRow::copyReply() {
+    const QString answer = m_bubble->answerText();
+    QApplication::clipboard()->setText(answer.isEmpty() ? m_bubble->text() : answer);
+    // Confirm with a check mark for a moment, then go back to the copy icon.
+    m_copyButton->setIcon(Theme::coloredIcon(QStringLiteral("check"), QColor(Theme::textMuted()), kIconPx));
+    m_copyButton->setToolTip(QStringLiteral("Copied"));
+    QPointer<QPushButton> button = m_copyButton;
+    QTimer::singleShot(1500, this, [button]() {
+        if (!button) return;
+        button->setIcon(Theme::coloredIcon(QStringLiteral("copy"), QColor(Theme::textMuted()), kIconPx));
+        button->setToolTip(QStringLiteral("Copy response"));
+    });
 }
 
 void MessageRow::focusInEvent(QFocusEvent *event) {
     m_focusWithin = true;
     updateEditButton();
-    updateRetryButton();
     QWidget::focusInEvent(event);
 }
 
@@ -223,23 +287,20 @@ void MessageRow::focusOutEvent(QFocusEvent *event) {
 void MessageRow::enterEvent(QEnterEvent *event) {
     m_hover = true;
     updateEditButton();
-    updateRetryButton();
     QWidget::enterEvent(event);
 }
 
 void MessageRow::leaveEvent(QEvent *event) {
     m_hover = false;
     updateEditButton();
-    updateRetryButton();
     QWidget::leaveEvent(event);
 }
 
 bool MessageRow::eventFilter(QObject *watched, QEvent *event) {
-    if ((watched == m_editButton || watched == m_retryButton) && event->type() == QEvent::FocusIn) {
+    if (watched == m_editButton && event->type() == QEvent::FocusIn) {
         m_focusWithin = true;
         updateEditButton();
-        updateRetryButton();
-    } else if ((watched == m_editButton || watched == m_retryButton) && event->type() == QEvent::FocusOut) {
+    } else if (watched == m_editButton && event->type() == QEvent::FocusOut) {
         QTimer::singleShot(0, this, [this]() { updateFocusWithin(); });
     }
     if (watched == m_editBox && event->type() == QEvent::KeyPress) {

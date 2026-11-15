@@ -12,9 +12,10 @@ class QPushButton;
 class VersionSwitcher;
 
 // One message in the transcript: its bubble, aligned to the right for the user and to the
-// left for the model, with a version switcher underneath when the message has several
-// versions. User rows also have an edit pencil (shown on hover) and an inline editor. It
-// knows the conversation-tree node it shows (0 until a streaming reply is committed).
+// left for the model. User rows have an edit pencil (shown on hover), an inline editor and,
+// when the message has several versions, a version switcher underneath. Reply rows have an
+// action row under the bubble that is always visible: copy, retry (latest reply only) and the
+// version switcher. It knows the conversation-tree node it shows (0 until a streaming reply is committed).
 class MessageRow : public QWidget {
     Q_OBJECT
 
@@ -32,7 +33,7 @@ public:
     // User rows only: true for a message that never got a reply, so saving it unchanged sends it again
     // instead of counting as a cancel.
     void setResendable(bool resendable) { m_resendable = resendable; }
-    // Reply rows only: whether the retry button can be used (it only appears on hover).
+    // Reply rows only: whether the retry button is offered (it is shown, and usable, only on the latest reply).
     void setRetryAvailable(bool available);
     // Turns only the version arrows on or off (they also stay off while an editor is open elsewhere).
     void setSwitcherEnabled(bool enabled);
@@ -60,6 +61,9 @@ protected:
 private:
     void updateEditButton();
     void updateRetryButton();
+    void updateCopyButton();
+    void updateActionsRow();        // reply rows: the row under the bubble shows only while it has something to offer
+    void copyReply();
     void updateFocusPolicy();       // a row is a tab stop only while it has an action to offer
     void updateFocusWithin();       // keyboard focus on the row or one of its buttons keeps the buttons shown
     void closeEditor();
@@ -71,6 +75,8 @@ private:
     QWidget *m_lineHost;          // holds the bubble and the pencil
     ChatBubble *m_bubble;
     QPushButton *m_editButton;    // null on reply rows
+    QWidget *m_actionsRow;        // null on user rows: [copy] [retry] [version switcher] under the bubble
+    QPushButton *m_copyButton;    // null on user rows
     QPushButton *m_retryButton;   // null on user rows
     QWidget *m_editor;            // null on reply rows
     QPlainTextEdit *m_editBox;
