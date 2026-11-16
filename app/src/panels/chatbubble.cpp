@@ -1,5 +1,6 @@
 #include "panels/chatbubble.h"
 
+#include "markdown_text.h"
 #include "theme.h"
 #include "trainingduration.h"
 #include <QPushButton>
@@ -41,6 +42,31 @@ namespace {
         return int(std::ceil(document.size().height()));
     }
 
+    // The same document the label builds for Markdown text, so the bubble is sized to what is drawn.
+    void fillMarkdown(QTextDocument &document, const QString &markdown, const QFont &font) {
+        document.setDocumentMargin(0);
+        document.setDefaultFont(font);
+        QTextOption option;
+        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        document.setDefaultTextOption(option);
+        document.setMarkdown(markdown);
+    }
+
+    int markdownHeight(const QString &markdown, const QFont &font, int width) {
+        QTextDocument document;
+        fillMarkdown(document, markdown, font);
+        document.setTextWidth(width);
+        return int(std::ceil(document.size().height()));
+    }
+
+    // Widest the rendered text gets when it may use `limit` pixels.
+    int markdownNaturalWidth(const QString &markdown, const QFont &font, int limit) {
+        QTextDocument document;
+        fillMarkdown(document, markdown, font);
+        document.setTextWidth(limit);
+        return int(std::ceil(document.idealWidth()));
+    }
+
     int widestLine(const QString &text, const QFontMetrics &metrics) {
         int widest = 0;
         for (const QString &line : text.split('\n')) widest = qMax(widest, metrics.horizontalAdvance(line));
@@ -62,7 +88,8 @@ ChatBubble::ChatBubble(Role role, const QString &text, QWidget *parent)
     m_content = new QLabel(this);
     m_content->setObjectName(QStringLiteral("chatBubbleText"));
     m_content->setWordWrap(true);
-    m_content->setTextFormat(Qt::PlainText);
+    // Replies are Markdown; the user's own messages are shown exactly as typed.
+    m_content->setTextFormat(role == Assistant ? Qt::MarkdownText : Qt::PlainText);
     if (parent) parent->installEventFilter(this);
     m_content->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     m_content->setAccessibleName(role == User ? "Your message" : "Model response");
@@ -126,7 +153,8 @@ void ChatBubble::refresh() {
     m_showHeader = m_thinkToggle && (m_parsed.hasThinking || live);
 
     const QString cursor = m_cursor ? QStringLiteral("▍") : QString();
-    m_content->setText(m_parsed.answer + (m_parsed.open ? QString() : cursor));
+    const QString answerShown = m_parsed.answer + (m_parsed.open ? QString() : cursor);
+    m_content->setText(m_role == Assistant ? MarkdownText::prepare(answerShown) : answerShown);
     if (m_thinkToggle) {
         m_thinkText->setText(m_parsed.thinking + (m_parsed.open ? cursor : QString()));
         m_thinkToggle->setVisible(m_showHeader);
@@ -158,7 +186,8 @@ QSize ChatBubble::layoutParts(bool apply) {
     const int available = reference ? reference->width() - 48 : 680;
     const int innerWidth = qBound(kMinInner, available - 2 * kPadX - 2 * kFrame, kMaxInner);
 
-    int naturalWidth = qMax(kMinInner, widestLine(answer, fm));
+    const bool markdown = m_role == Assistant;
+    int naturalWidth = qMax(kMinInner, markdown ? markdownNaturalWidth(answer, m_content->font(), innerWidth) : widestLine(answer, fm));
     int headerWidth = 0;
     if (m_showHeader) {
         m_thinkToggle->ensurePolished();
@@ -186,7 +215,7 @@ QSize ChatBubble::layoutParts(bool apply) {
     int answerHeight = 0;
     if (showAnswer) {
         if (m_showHeader) y += kGapAboveAnswer;
-        answerHeight = documentHeight(answer, m_content->font(), wrapWidth);
+        answerHeight = markdown ? markdownHeight(answer, m_content->font(), wrapWidth) : documentHeight(answer, m_content->font(), wrapWidth);
         if (apply) m_content->setGeometry(x, top + y, wrapWidth, answerHeight);
         y += answerHeight;
     }

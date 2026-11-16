@@ -1,5 +1,6 @@
 #include "reasoning_tests.h"
 
+#include "../markdown_text.h"
 #include "../reasoning.h"
 
 #include <cstdio>
@@ -62,6 +63,18 @@ int runReasoningCheck() {
     check(Reasoning::answerOnly("a\n</think>answer") == "answer", "history: closing-tag-only thinking is dropped");
     check(Reasoning::answerOnly("<think>cut off while thinking") == "<think>cut off while thinking",
           "history: a reply with no answer is kept rather than sent empty");
+
+    check(MarkdownText::prepare("one line") == "one line", "markdown: a single line is untouched");
+    check(MarkdownText::prepare("a\nb") == "a  \nb", "markdown: a single newline becomes a line break");
+    check(MarkdownText::prepare("a  \nb") == "a  \nb", "markdown: a line already ending in a break is not doubled");
+    check(MarkdownText::prepare("a\n\nb") == "a\n\n&nbsp;\n\nb", "markdown: a blank line between paragraphs keeps a line of space");
+    check(MarkdownText::prepare("a\n\n\n\nb") == "a\n\n&nbsp;\n\nb", "markdown: several blank lines count as one gap");
+    check(MarkdownText::prepare("- x\n\n- y") == "- x\n\n- y", "markdown: a blank line inside a list does not split the list");
+    check(MarkdownText::prepare("- x\n\nNext") == "- x\n\n&nbsp;\n\nNext", "markdown: a paragraph after a list is set apart");
+    check(MarkdownText::prepare("```\nx\n\ny\n```\nz") == "```\nx\n\ny\n```\nz", "markdown: code fences stay exactly as written");
+    check(MarkdownText::prepare("a <b>x</b>") == "a \\<b>x\\</b>", "markdown: raw HTML tags are escaped so they show literally");
+    check(MarkdownText::prepare("use `a<b` here") == "use `a<b` here", "markdown: inline code is left alone");
+    check(MarkdownText::prepare("end\n\n") == "end\n\n", "markdown: trailing blank lines add no gap");
 
     fprintf(stderr, "[reasoning-check] %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

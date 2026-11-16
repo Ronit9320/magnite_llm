@@ -2555,6 +2555,16 @@ int runUiCheck(const QString &captures) {
                 check(sendAndWait("last"),"a fourth reply with thinking is received");
                 check(!rows().last()->bubble()->thinkingExpanded(),"hiding it again hides it for the replies after");
             }
+            // Replies are rendered as Markdown (bold, lists, code), sized so nothing is clipped; the user's text is not.
+            fixture.chatReply="Key features:\n- **Multilingual Support**: many languages\n- **Strong Reasoning**: problem solving\n\n1. first step\n2. second step\n\n```\ncode line one\ncode line two\n```\nDone with `inline code`.\nPlain next line <b>not bold</b>";
+            check(sendAndWait("markdown please"),"a reply with Markdown is received");
+            {
+                auto *bubble=rows().last()->bubble(); auto *text=bubble->findChild<QLabel *>("chatBubbleText");
+                auto *mine=rows().at(rows().size()-2)->bubble()->findChild<QLabel *>("chatBubbleText");
+                check(text && text->textFormat()==Qt::MarkdownText && mine && mine->textFormat()==Qt::PlainText,"replies render Markdown while the user's message stays plain text");
+                check(text && text->heightForWidth(text->width())<=text->height()+1,"the Markdown reply is sized to its rendered height, nothing is clipped");
+                if (!captures.isEmpty()) { QDir().mkpath(captures); chat.grab().save(QDir(captures).filePath("chat-markdown.png")); }
+            }
             QMetaObject::invokeMethod(&chat,"onClearChat",Qt::DirectConnection); pump(100);
             input->clear();
 
