@@ -264,19 +264,20 @@ void MainWindow::setupUi() {
     m_history = m_sidebar->history();
     connect(m_sidebar, &Sidebar::panelRequested, this, &MainWindow::switchPanel);
 
-    auto *mode = new QPushButton("Dark mode", central);
+    auto *mode = new QPushButton(central);
     m_themeButton=mode;
     mode->setObjectName("themeToggle");
     mode->setCheckable(true);
     mode->setChecked(Theme::isDark());
-    mode->setText(Theme::isDark() ? "Light mode" : "Dark mode");
-    mode->setToolTip("Switch between light and dark appearance");
+    mode->setFixedSize(32, 32);
+    mode->setIconSize(QSize(16, 16));
     mode->setCursor(Qt::PointingHandCursor);
+    syncThemeButton();
     connect(mode, &QPushButton::toggled, this, [this, mode](bool dark) {
         Theme::setDark(dark);
         QSettings().setValue("appearance/studio3Dark", dark);
         QSettings().setValue("appearance/themeMode", dark?"dark":"light");
-        mode->setText(dark ? "Light mode" : "Dark mode");
+        syncThemeButton();
         m_sidebar->refreshIcons();
     });
 
@@ -403,7 +404,7 @@ void MainWindow::setupUi() {
     connect(m_settingsPanel,&SettingsPanel::notificationPreviewRequested,this,[this]{notifyCompletion("training",true,true);});
 
     connect(m_settingsPanel,&SettingsPanel::settingsChanged,this,[this,mode]{
-        QSignalBlocker block(mode);mode->setChecked(Theme::isDark());mode->setText(Theme::isDark()?"Light mode":"Dark mode");m_sidebar->refreshIcons();
+        QSignalBlocker block(mode);mode->setChecked(Theme::isDark());syncThemeButton();m_sidebar->refreshIcons();
     });
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, this, &MainWindow::savePanelSettings);
     connect(m_settingsPanel, &SettingsPanel::settingsChanged, m_chatPanel, &ChatPanel::reloadContextSettings);
@@ -625,6 +626,11 @@ void MainWindow::captureScreenshots(const QString &dir) {
     // MAGNITE_SCREENSHOT_THEME=dark shows the dark theme without storing it.
     if (qEnvironmentVariable("MAGNITE_SCREENSHOT_THEME") == "dark") {
         Theme::setDark(true);
+        if(m_themeButton) {
+            QSignalBlocker block(m_themeButton);
+            m_themeButton->setChecked(true);
+        }
+        syncThemeButton();
         m_sidebar->refreshIcons();
     }
     m_skipFade = true;
@@ -787,7 +793,12 @@ void MainWindow::runSelfTest() {
 #endif
         auto *mode = findChild<QPushButton *>("themeToggle");
         const bool initialDark = Theme::isDark();
+        checkC(mode->text().isEmpty() && !mode->icon().isNull() && !mode->accessibleName().isEmpty() &&
+               mode->toolTip() == mode->accessibleName(), "theme button is icon-only with a spoken name");
         mode->click();
+        checkC(mode->text().isEmpty() && !mode->icon().isNull() &&
+               mode->accessibleName() == (Theme::isDark() ? "Switch to light mode" : "Switch to dark mode"),
+               "theme button icon and name follow the mode");
         checkC(Theme::isDark() != initialDark &&
                QSettings().value("appearance/studio3Dark").toBool() == Theme::isDark(),
                "theme switch applies and persists");
@@ -1617,12 +1628,23 @@ void MainWindow::notifyCompletion(const QString &kind,bool success,bool preview)
     if(sound)QApplication::beep();
 }
 
+// The theme button shows only an icon: the sun while dark (click for light), the moon while light.
+// The words live in the tooltip and accessible name.
+void MainWindow::syncThemeButton() {
+    if(!m_themeButton) return;
+    const bool dark=Theme::isDark();
+    const QString action=dark ? "Switch to light mode" : "Switch to dark mode";
+    m_themeButton->setIcon(Theme::coloredIcon(dark ? "sun" : "moon", QColor(Theme::textSecondary()), 16));
+    m_themeButton->setToolTip(action);
+    m_themeButton->setAccessibleName(action);
+}
+
 void MainWindow::changeEvent(QEvent *event) {
     QMainWindow::changeEvent(event);
     if(event->type()==QEvent::ApplicationPaletteChange && m_themeButton && m_sidebar) {
         QSignalBlocker block(m_themeButton);
         m_themeButton->setChecked(Theme::isDark());
-        m_themeButton->setText(Theme::isDark()?"Light mode":"Dark mode");
+        syncThemeButton();
         m_sidebar->refreshIcons();
     }
 }

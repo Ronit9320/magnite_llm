@@ -63,6 +63,7 @@ public:
     bool openChat(const QString &id);
     // False for an empty title, an unknown chat, or the open chat while busy.
     bool renameChat(const QString &id, const QString &title);
+    bool pinChat(const QString &id, bool pinned);
     // False for an unknown chat, or the open chat while busy. Deleting the open chat leaves a blank one.
     bool deleteChat(const QString &id);
 

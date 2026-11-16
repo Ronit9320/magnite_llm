@@ -105,7 +105,8 @@ QHash<QString, ChatStore::IndexEntry> ChatStore::loadIndex() const {
         if (!o.value("created").isDouble() || !o.value("updated").isDouble()) continue;   // a bad row is just re-read
         entry.summary = ChatSummary{it.key(), o.value("title").toString(), o.value("customTitle").toBool(),
                                     QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("created").toDouble()), QTimeZone::utc()),
-                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("updated").toDouble()), QTimeZone::utc())};
+                                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(o.value("updated").toDouble()), QTimeZone::utc()),
+                                    o.value("pinned").toBool()};
         entries.insert(it.key(), entry);
     }
     return entries;
@@ -118,6 +119,7 @@ void ChatStore::saveIndex(const QHash<QString, IndexEntry> &entries) const {
         if (it->readable) {
             o.insert("title", it->summary.title);
             o.insert("customTitle", it->summary.customTitle);
+            o.insert("pinned", it->summary.pinned);
             o.insert("created", static_cast<double>(it->summary.created.toMSecsSinceEpoch()));
             o.insert("updated", static_cast<double>(it->summary.updated.toMSecsSinceEpoch()));
         }
@@ -162,7 +164,8 @@ std::optional<ChatStore::Parsed> ChatStore::read(const QString &id) const {
     auto tree = ChatTree::fromJson(o.value("tree").toObject());
     if (!tree) return std::nullopt;
     Parsed parsed;
-    parsed.summary = ChatSummary{id, o.value("title").toString(), o.value("customTitle").toBool(), created, updated};
+    parsed.summary = ChatSummary{id, o.value("title").toString(), o.value("customTitle").toBool(), created, updated,
+                                 o.value("pinned").toBool()};
     parsed.tree = std::move(*tree);
     return parsed;
 }
@@ -220,7 +223,7 @@ bool ChatStore::save(const QString &id, const ChatTree &tree) {
     summary.updated = nextStamp();
     if (!summary.created.isValid()) summary.created = summary.updated;
     const QJsonObject file{{"version", kFileVersion}, {"id", id}, {"title", summary.title}, {"customTitle", summary.customTitle},
-                           {"created", stamp(summary.created)}, {"updated", stamp(summary.updated)}, {"tree", tree.toJson()}};
+                           {"pinned", summary.pinned}, {"created", stamp(summary.created)}, {"updated", stamp(summary.updated)}, {"tree", tree.toJson()}};
     if (!write(file, id)) return false;
     upsert(summary);
     emit changed();
@@ -237,7 +240,22 @@ bool ChatStore::rename(const QString &id, const QString &title) {
     parsed->summary.customTitle = true;
     const ChatSummary &s = parsed->summary;   // renaming is not conversation activity: the order stays as it is
     const QJsonObject file{{"version", kFileVersion}, {"id", id}, {"title", s.title}, {"customTitle", true},
-                           {"created", stamp(s.created)}, {"updated", stamp(s.updated)}, {"tree", parsed->tree.toJson()}};
+                           {"pinned", s.pinned}, {"created", stamp(s.created)}, {"updated", stamp(s.updated)}, {"tree", parsed->tree.toJson()}};
+    if (!write(file, id)) return false;
+    upsert(s);
+    emit changed();
+    return true;
+}
+
+bool ChatStore::setPinned(const QString &id, bool pinned) {
+    m_lastError.clear();
+    if (!validId(id)) return false;
+    auto parsed = read(id);
+    if (!parsed) return false;
+    parsed->summary.pinned = pinned;
+    const ChatSummary &s = parsed->summary;
+    const QJsonObject file{{"version", kFileVersion}, {"id", id}, {"title", s.title}, {"customTitle", s.customTitle},
+                           {"pinned", pinned}, {"created", stamp(s.created)}, {"updated", stamp(s.updated)}, {"tree", parsed->tree.toJson()}};
     if (!write(file, id)) return false;
     upsert(s);
     emit changed();

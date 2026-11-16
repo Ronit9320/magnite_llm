@@ -18,6 +18,7 @@ struct ChatSummary {
     bool customTitle = false;   // true once the user renamed it; the title then stops following the first message
     QDateTime created;
     QDateTime updated;
+    bool pinned = false;        // shown under "Pinned" in the sidebar; absent in older chat files, which read as false
 };
 
 class ChatStore : public QObject {
@@ -34,6 +35,8 @@ public:
     bool save(const QString &id, const ChatTree &tree);        // atomic; false + lastError() on failure
     std::optional<ChatTree> load(const QString &id) const;     // nullopt for anything missing, unreadable, too new or inconsistent
     bool rename(const QString &id, const QString &title);
+    // Pins or unpins a chat. Like renaming it is not conversation activity: the order stays as it is.
+    bool setPinned(const QString &id, bool pinned);
     bool remove(const QString &id);
     QString directory() const { return m_dir; }
     bool exportAll(QJsonObject *result, QString *error) const;

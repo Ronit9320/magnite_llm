@@ -12,7 +12,7 @@ QLabel#connectionDot { background: @textMuted; border-radius: 3px; }
 QLabel#connectionDot[state="ok"] { background: @statusSuccess; }
 QLabel#connectionDot[state="err"] { background: @statusError; }
 QFrame#headerDivider { background: @surfaceBorder; border: none; }
-QPushButton#themeToggle { background: transparent; border: 1px solid transparent; border-radius: 6px; color: @textSecondary; padding: 3px 8px; }
+QPushButton#themeToggle { background: transparent; border: 1px solid transparent; border-radius: 6px; color: @textSecondary; padding: 0; }
 QPushButton#themeToggle:hover { background: @surfaceFillHover; color: @textPrimary; }
 QPushButton#themeToggle:focus { color: @textPrimary; }
 QLabel#statusPill[state="err"] { color: @statusError; }
