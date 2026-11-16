@@ -524,9 +524,9 @@ int runUiCheck(const QString &captures) {
             groupedHistory.setProjectLookup([&library](const QString &id) { return library.chatProjects(id); });
             groupedHistory.setChats(store.list(), chatId);
             auto *groupedRows = groupedHistory.findChild<QListWidget *>("historyList");
-            check(groupedRows && groupedRows->count() == 2 && groupedRows->item(0)->text() == "Local assistant" &&
-                  groupedRows->item(0)->flags() == Qt::NoItemFlags &&
-                  groupedRows->item(1)->data(Qt::UserRole).toString() == chatId,
+            check(groupedRows && groupedRows->count() == 3 && groupedRows->item(0)->text() == "Projects" &&
+                  groupedRows->item(1)->text() == "Local assistant" &&
+                  groupedRows->item(2)->data(Qt::UserRole).toString() == chatId,
                   "Conversation history groups the saved chat under its Library project");
             groupedHistory.show();
             auto *searchToggle = groupedHistory.findChild<QPushButton *>("conversationSearchToggle");
@@ -539,8 +539,37 @@ int runUiCheck(const QString &captures) {
                 check(searchField->isVisibleTo(&groupedHistory) && groupedRows->count() == 0,
                       "Conversation search opens and filters the history");
                 searchToggle->click();
-                check(searchField->isHidden() && searchField->text().isEmpty() && groupedRows->count() == 2,
+                check(searchField->isHidden() && searchField->text().isEmpty() && groupedRows->count() == 3,
                       "Closing conversation search restores all rows");
+            }
+            {   // Pinned / Projects / Recents sections
+                QSettings().remove("sidebar/collapsedSections");
+                const QDateTime now=QDateTime::currentDateTimeUtc();
+                const QList<ChatSummary> chats{{"a","Alpha",false,now,now,true},{"b","Beta",false,now,now,false},{"c","Gamma",false,now,now,true},{"d","Delta",false,now,now,false}};
+                ChatHistoryList sectioned; sectioned.useConversationWorkspace();
+                sectioned.setProjectLookup([](const QString &id){ return id=="a"||id=="b" ? QStringList{"Atlas"} : QStringList(); });
+                sectioned.setChats(chats,"");
+                auto *rows=sectioned.findChild<QListWidget *>("historyList");
+                const auto texts=[rows]{ QStringList t; for(int i=0;rows && i<rows->count();++i) t<<rows->item(i)->text(); return t; };
+                check(texts()==QStringList({"Pinned","Alpha","Gamma","Projects","Atlas","Alpha","Beta","Recents","Delta"}),
+                      "Conversations: a pinned project chat also stays under its project; a pinned chat outside projects is listed once; Recents hold the rest");
+                if(rows){
+                    emit rows->itemClicked(rows->item(0));
+                    check(texts()==QStringList({"Pinned","Projects","Atlas","Alpha","Beta","Recents","Delta"}),"Conversations: clicking a section heading folds it");
+                    ChatHistoryList again; again.useConversationWorkspace(); again.setChats(chats,"");
+                    auto *againRows=again.findChild<QListWidget *>("historyList");
+                    check(againRows && againRows->count()==4 && againRows->item(0)->text()=="Pinned" && againRows->item(1)->text()=="Recents","Conversations: a folded section stays folded after a restart");
+                    emit rows->itemClicked(rows->item(0));
+                    check(rows->count()==9,"Conversations: clicking the heading again unfolds it");
+                }
+                QStringList pinCalls;
+                QObject::connect(&sectioned,&ChatHistoryList::pinRequested,&sectioned,[&](const QString &id,bool pin){ pinCalls<<id+(pin?":pin":":unpin"); });
+                QMenu *unpinMenu=sectioned.contextMenuFor("a"), *pinMenu=sectioned.contextMenuFor("b");
+                check(unpinMenu->actions().first()->text()=="Unpin" && pinMenu->actions().first()->text()=="Pin","Conversations: the row menu offers Pin or Unpin to match the chat");
+                unpinMenu->actions().first()->trigger(); pinMenu->actions().first()->trigger();
+                check(pinCalls==QStringList({"a:unpin","b:pin"}),"Conversations: Pin and Unpin ask for the right change");
+                delete unpinMenu; delete pinMenu;
+                QSettings().remove("sidebar/collapsedSections");
             }
             ChatPanel renamePanel;
             renamePanel.setChatStore(&store);
@@ -549,8 +578,21 @@ int runUiCheck(const QString &captures) {
             check(conversationOptions->testAttribute(Qt::WA_TranslucentBackground) &&
                   !conversationOptions->actions().first()->icon().isNull(), "Conversation options use the rounded menu with action icons");
             armDialog("Rename conversation", "Save", "Updated project chat");
-            conversationOptions->actions().first()->trigger();
+            conversationOptions->actions().at(1)->trigger();
             check(store.list().first().title == "Updated project chat", "The rounded rename dialog saves the new title");
+            {   // pinning end to end: menu -> controller -> panel -> store -> list
+                std::unique_ptr<QMenu> pinMenu(groupedHistory.contextMenuFor(chatId));
+                check(pinMenu->actions().first()->text() == "Pin", "A saved chat's menu offers Pin");
+                pinMenu->actions().first()->trigger();
+                const auto pinnedNow = [&] { for (const auto &row : store.list()) if (row.id == chatId) return row.pinned; return false; };
+                QStringList rowTexts; for (int i = 0; groupedRows && i < groupedRows->count(); ++i) rowTexts << groupedRows->item(i)->text();
+                check(pinnedNow() && rowTexts.value(0) == "Pinned" && rowTexts.contains("Projects") && rowTexts.count("Updated project chat") == 2,
+                      "Pinning from the menu saves the pin and shows the chat under Pinned and under its project");
+                std::unique_ptr<QMenu> unpinMenu(groupedHistory.contextMenuFor(chatId));
+                check(unpinMenu->actions().first()->text() == "Unpin", "A pinned chat's menu offers Unpin");
+                unpinMenu->actions().first()->trigger();
+                check(!pinnedNow() && groupedRows && groupedRows->item(0)->text() == "Projects", "Unpinning removes the Pinned section again");
+            }
             const auto organization = [] {
                 return QJsonDocument::fromJson(QSettings().value("library/organization").toByteArray()).object();
             };
@@ -3171,6 +3213,18 @@ int runUiCheck(const QString &captures) {
         check(store.list().at(0).id==idB && store.list().at(0).title=="My renamed chat","chat store: a renamed chat keeps its name when saved again");
         check(!store.rename(idB,"   ") && !store.rename(idB,"") && !store.rename("not-an-id","x") && !store.rename("0b6c3a52-9d0e-4f1c-8a77-0123456789ab","x") && store.list().at(0).title=="My renamed chat",
               "chat store: an empty title, a bad id or an unknown chat cannot rename");
+        {   // pinning
+            const auto order=ids(store.list()); changes=0;
+            check(!store.list().at(0).pinned && !store.list().at(1).pinned,"chat store: chats start unpinned, including files written before pinning existed");
+            check(store.setPinned(idA,true) && changes==1 && ids(store.list())==order && store.list().at(order.indexOf(idA)).pinned,"chat store: pinning keeps the order and marks the chat");
+            store.save(idA,makeTree("First chat","reply again"));
+            bool stillPinned=false; for(const auto &r:store.list()) if(r.id==idA) stillPinned=r.pinned;
+            check(stillPinned,"chat store: saving a pinned chat again keeps it pinned");
+            { ChatStore reopened(dir); bool pinnedAfter=false,otherPinned=false; for(const auto &r:reopened.list()){ if(r.id==idA) pinnedAfter=r.pinned; else otherPinned|=r.pinned; }
+              check(pinnedAfter && !otherPinned,"chat store: a pin survives a restart"); }
+            check(store.setPinned(idA,false) && !store.list().at(0).pinned && !store.list().at(1).pinned,"chat store: unpinning clears the mark");
+            check(!store.setPinned("not-an-id",true) && !store.setPinned("0b6c3a52-9d0e-4f1c-8a77-0123456789ab",true),"chat store: a bad id or unknown chat cannot be pinned");
+        }
         check(!store.remove("0b6c3a52-9d0e-4f1c-8a77-0123456789ab") && !store.remove("../x"),"chat store: removing an unknown or invalid id does nothing");
         {
             ChatStore again(dir);
@@ -3648,8 +3702,8 @@ int runUiCheck(const QString &captures) {
             check(opened==QStringList({"id3","id5"}) && deleted==QStringList({"id5"}),"history list: Enter opens the current row and Delete asks to delete it");
             {
                 QMenu *menu=list.contextMenuFor("id4"); QStringList names; for (auto *a : menu->actions()) names << a->text();
-                check(names==QStringList({"Rename","Delete"}),"history list: the row menu offers Rename and Delete");
-                menu->actions().at(0)->trigger(); menu->actions().at(1)->trigger();
+                check(names==QStringList({"Pin","Rename","Delete"}),"history list: the row menu offers Pin, Rename and Delete");
+                menu->actions().at(1)->trigger(); menu->actions().at(2)->trigger();
                 check(renamed==QStringList({"id4"}) && deleted==QStringList({"id5","id4"}),"history list: the menu actions ask to rename and delete that chat");
                 delete menu;
             }

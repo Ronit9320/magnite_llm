@@ -3,6 +3,7 @@
 #include "panels/chatstore.h"
 
 #include <QList>
+#include <QSet>
 #include <functional>
 #include <QString>
 #include <QWidget>
@@ -21,6 +22,7 @@ class ChatHistoryList : public QWidget {
 public:
     static constexpr int kVisibleRows = 5;
     static constexpr int kRowHeight = 30;
+    static constexpr int kSectionKeyRole = Qt::UserRole + 1;   // set on heading rows only
 
     explicit ChatHistoryList(QWidget *parent = nullptr);
 
@@ -43,6 +45,7 @@ signals:
     void newChatRequested();
     void openRequested(const QString &id);
     void renameRequested(const QString &id);
+    void pinRequested(const QString &id, bool pinned);
     void deleteRequested(const QString &id);
 
 protected:
@@ -53,6 +56,9 @@ private:
     void highlightOpen();
     void requestOpen(const QString &id);
     void requestDelete(const QString &id);
+    bool isSection(int row) const;
+    void toggleSection(const QString &key);
+    QIcon sectionIcon(const QString &key, bool project) const;
     void showMenuAt(const QPoint &viewportPos);
     void updateHeights();
     void rebuild();
@@ -65,5 +71,6 @@ private:
     QListWidget *m_list = nullptr;
     QLabel *m_notice = nullptr;
     QString m_openId;
+    QSet<QString> m_collapsed;   // section keys the user folded: "pinned", "projects", "recents", "project:<name>"
     bool m_busy = false;
 };

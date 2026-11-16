@@ -54,6 +54,7 @@ ChatHistoryController::ChatHistoryController(ChatStore *store, ChatPanel *panel,
         const QString title = askTitle(titleOf(id));
         if (!title.trimmed().isEmpty()) m_panel->renameChat(id, title);
     });
+    connect(list, &ChatHistoryList::pinRequested, this, [this](const QString &id, bool pinned) { m_panel->pinChat(id, pinned); });
     connect(list, &ChatHistoryList::deleteRequested, this, [this](const QString &id) {
         if (confirmDelete(titleOf(id))) m_panel->deleteChat(id);
     });

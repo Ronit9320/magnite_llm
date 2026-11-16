@@ -120,6 +120,7 @@ private:
 
     Sidebar *m_sidebar = nullptr;
     QPushButton *m_themeButton=nullptr;
+    void syncThemeButton();
     QLabel *m_statusPill;
     QLabel *m_connectionDot = nullptr;
     QPropertyAnimation *m_crossfade;

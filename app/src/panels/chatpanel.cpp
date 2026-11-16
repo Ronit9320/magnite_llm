@@ -1242,6 +1242,13 @@ bool ChatPanel::renameChat(const QString &id, const QString &title) {
     return false;
 }
 
+bool ChatPanel::pinChat(const QString &id, bool pinned) {
+    if (!m_store || (id == m_chatId && isBusy())) return false;
+    if (m_store->setPinned(id, pinned)) return true;
+    setStatus(QString("Could not %1 that chat").arg(pinned ? "pin" : "unpin") + (m_store->lastError().isEmpty() ? QString(".") : ": " + m_store->lastError()), "warn");
+    return false;
+}
+
 bool ChatPanel::deleteChat(const QString &id) {
     if (!m_store) return false;
     auto removeOrReport = [this](const QString &target) {
