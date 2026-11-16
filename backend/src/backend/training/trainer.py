@@ -152,6 +152,15 @@ def _target_modules(cfg: TrainingConfig, model=None, torch=None) -> list[str] | 
     return "all-linear"
 
 
+def _micro_batch(batch_size: int) -> int:
+    """MAGNITE_TRAIN_MICRO_BATCH: micro-batch size, used only if it divides the batch size."""
+    try:
+        micro = int(os.environ.get("MAGNITE_TRAIN_MICRO_BATCH", "0"))
+    except ValueError:
+        return batch_size
+    return micro if 0 < micro < batch_size and batch_size % micro == 0 else batch_size
+
+
 def _messages_to_text(tokenizer, messages: list[dict]) -> str:
     try:
         return tokenizer.apply_chat_template(
@@ -376,9 +385,13 @@ def train_lora(cfg: TrainingConfig, dataset_path: str, adapter_dir_root: str, jo
         report({"total_steps": total_steps})
         warmup_steps = int(cfg.warmup_ratio * total_steps)
 
+        # Optional: split each batch into micro-batches of this size (gradient accumulation) so the same
+        # effective batch fits in memory. Unset or invalid = no change (micro-batch == batch_size).
+        micro = _micro_batch(cfg.batch_size)
         args = TrainingArguments(
             output_dir=os.path.join(adapter_dir_root, "_work"),
-            per_device_train_batch_size=cfg.batch_size,
+            per_device_train_batch_size=micro,
+            gradient_accumulation_steps=cfg.batch_size // micro,
             num_train_epochs=cfg.epochs,
             max_steps=cfg.max_steps if cfg.max_steps > 0 else -1,
             learning_rate=cfg.learning_rate,
