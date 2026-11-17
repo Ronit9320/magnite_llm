@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Compare embedding models on your own documents. Not shipped in the app.
+
+Questions file (JSONL), one object per line:
+    {"question": "What is the notice period?", "doc": "contract.pdf",
+     "answer_contains": ["30 days"]}
+
+A retrieved chunk is a hit when it comes from `doc` and contains every phrase in
+`answer_contains` (case-insensitive, whitespace-normalized). That ground truth does not
+depend on how the text was chunked, so models with different chunk sizes compare fairly.
+
+Run every default candidate (each in its own process, so peak RAM is clean):
+    python backend/evals/rag_eval.py --all --docs ~/my_docs --questions q.jsonl --out results.md
+Run one:
+    python backend/evals/rag_eval.py --candidate Qwen/Qwen3-Embedding-0.6B --dtype float16 \
+        --docs ~/my_docs --questions q.jsonl
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Callable, Optional
+
+import numpy as np
+
+_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+KS = (1, 4, 10)
+TOKENS_PER_WORD = 1.7          # measured 1.3-1.65 on real text; conservative
+TARGET_CHUNK_TOKENS = 512
+BATCH_SIZE = 4                 # small batches keep activations (and GPU cache growth) bounded
+RELEASE_EVERY = 8              # batches between accelerator cache releases
+EXIT_MEMORY_GUARD = 75         # exit code when the memory guard stops a run
+MAX_SEQ_CAP = 1024             # bounds memory for 32k-context models; chunks are far shorter
+
+QWEN_QUERY_PROMPT = ("Instruct: Given a web search query, retrieve relevant passages "
+                     "that answer the query\nQuery: ")
+
+# Rough memory each candidate needs while running (MB), for the preflight check.
+REQUIRED_MB = {"Qwen/Qwen3-Embedding-0.6B": 1800, "BAAI/bge-m3": 2000,
+               "sentence-transformers/all-MiniLM-L6-v2": 400}
+DEFAULT_REQUIRED_MB = 1500
+
+# (model id, dtype, query prompt, document prompt)
+DEFAULT_CANDIDATES = [
+    ("Qwen/Qwen3-Embedding-0.6B", "float16", QWEN_QUERY_PROMPT, ""),
+    ("BAAI/bge-m3", "float16", "", ""),
+    ("sentence-transformers/all-MiniLM-L6-v2", "float32", "", ""),
+]
+
+
+@dataclass(frozen=True)
+class Question:
+    question: str
+    doc: str
+    answer_contains: list
+
+
+@dataclass
+class CandidateResult:
+    model: str
+    dtype: str
+    dim: int
+    chunk_words: int
+    chunks: int
+    recall: dict
+    mrr: float
+    ingest_chunks_per_s: float
+    peak_rss_mb: float
+    load_seconds: float = 0.0
+    query_ms: float = 0.0
+    device: str = ""
+    first_hit_ranks: list = field(default_factory=list)   # one per question, 0 = miss in top 10
+    notes: list = field(default_factory=list)
+
+
+# ---- pure helpers (unit-tested, no ML imports) ---------------------------------
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def is_hit(chunk_text: str, answer_contains: list) -> bool:
+    if not answer_contains:
+        return False
+    haystack = _norm(chunk_text)
+    return all(_norm(n) in haystack for n in answer_contains)
+
+
+def recall_at_k(ranked_hits: list, k: int) -> float:
+    if not ranked_hits:
+        return 0.0
+    return sum(1 for row in ranked_hits if any(row[:k])) / len(ranked_hits)
+
+
+def mrr(ranked_hits: list) -> float:
+    if not ranked_hits:
+        return 0.0
+    total = 0.0
+    for row in ranked_hits:
+        for rank, hit in enumerate(row, 1):
+            if hit:
+                total += 1.0 / rank
+                break
+    return total / len(ranked_hits)
+
+
+def first_hit_ranks(ranked_hits: list) -> list:
+    """1-based rank of the first hit per question; 0 when nothing in the list is a hit."""
+    return [next((i for i, hit in enumerate(row, 1) if hit), 0) for row in ranked_hits]
+
+
+def recall_by_doc(questions: list, ranks: list, k: int) -> dict:
+    """recall@k grouped by each question's document."""
+    groups: dict = {}
+    for q, rank in zip(questions, ranks):
+        groups.setdefault(q.doc, []).append(1 <= rank <= k)
+    return {doc: sum(flags) / len(flags) for doc, flags in groups.items()}
+
+
+def load_questions(path: str) -> list:
+    questions = []
+    with open(path, "r", encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path} line {number}: invalid JSON ({exc})") from exc
+            needles = row.get("answer_contains") if isinstance(row, dict) else None
+            if (not isinstance(row, dict) or not row.get("question") or not row.get("doc")
+                    or not isinstance(needles, list) or not needles):
+                raise ValueError(
+                    f"{path} line {number}: need 'question', 'doc' and a non-empty 'answer_contains' list")
+            questions.append(Question(str(row["question"]), str(row["doc"]), [str(n) for n in needles]))
+    return questions
+
+
+def default_chunk_words(max_seq_tokens: int) -> int:
+    """Words per chunk: about 512 tokens, but never more than the model can embed."""
+    budget = min(max_seq_tokens, TARGET_CHUNK_TOKENS) - 2
+    return max(32, int(budget / TOKENS_PER_WORD))
+
+
+def rank_hits(query_vec: np.ndarray, vecs: np.ndarray, chunks: list, needles: list, k: int,
+              chunk_docs: Optional[list] = None, doc: Optional[str] = None) -> list:
+    """Hit flags for the top-k chunks by cosine score (vectors are L2-normalized)."""
+    scores = vecs @ query_vec.reshape(-1)
+    order = np.argsort(-scores, kind="stable")[:k]
+    hits = []
+    for idx in order:
+        from_doc = chunk_docs is None or doc is None or chunk_docs[idx] == doc
+        hits.append(bool(from_doc and is_hit(chunks[idx], needles)))
+    hits.extend([False] * (k - len(hits)))
+    return hits
+
+
+def evaluate(docs: dict, questions: list, embed_docs: Callable, embed_query: Callable,
+             chunk_words: int, overlap: Optional[int] = None, ks=KS) -> dict:
+    """Chunk every document, embed once, then rank each question against the whole library."""
+    from backend.rag.chunking import chunk_text
+
+    overlap = chunk_words // 8 if overlap is None else overlap
+    chunks, chunk_docs = [], []
+    for name, text in docs.items():
+        for piece in chunk_text(text, chunk_words, overlap):
+            chunks.append(piece)
+            chunk_docs.append(name)
+    if not chunks:
+        raise ValueError("No chunks produced; check the documents")
+
+    started = time.perf_counter()
+    vecs = np.asarray(embed_docs(chunks), dtype=np.float32)
+    ingest_seconds = time.perf_counter() - started
+
+    kmax = max(ks)
+    ranked = []
+    query_seconds = 0.0
+    for q in questions:
+        t0 = time.perf_counter()
+        qv = np.asarray(embed_query(q.question), dtype=np.float32)
+        query_seconds += time.perf_counter() - t0
+        ranked.append(rank_hits(qv, vecs, chunks, q.answer_contains, kmax, chunk_docs, q.doc))
+    return {
+        "chunks": len(chunks),
+        "dim": int(vecs.shape[1]),
+        "ranked_hits": ranked,
+        "ingest_seconds": ingest_seconds,
+        "ingest_chunks_per_s": len(chunks) / ingest_seconds if ingest_seconds > 0 else 0.0,
+        "query_ms": 1000.0 * query_seconds / max(1, len(questions)),
+    }
+
+
+def format_report(rows: list) -> str:
+    head = ("| model | dtype | dim | chunk words | chunks | recall@1 | recall@4 | recall@10 | MRR "
+            "| ingest chunks/s | load s | query ms | peak footprint MB |\n"
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    lines = [head]
+    for r in rows:
+        lines.append(
+            f"| {r.model} | {r.dtype} | {r.dim} | {r.chunk_words} | {r.chunks} "
+            f"| {r.recall[1]:.2f} | {r.recall[4]:.2f} | {r.recall[10]:.2f} | {r.mrr:.2f} "
+            f"| {r.ingest_chunks_per_s:.1f} | {r.load_seconds:.1f} | {r.query_ms:.0f} "
+            f"| {r.peak_rss_mb:.0f} |")
+    return "\n".join(lines)
+
+
+# ---- model-backed part (only runs in the candidate subprocess) -----------------
+
+
+def load_documents(directory: str) -> tuple:
+    from backend.rag.chunking import detect_kind, extract_text
+
+    docs, notes = {}, []
+    for name in sorted(os.listdir(directory)):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path) or name.startswith("."):
+            continue
+        kind = detect_kind(name)
+        if os.path.splitext(name)[1].lower().lstrip(".") not in ("txt", "md", "html", "pdf"):
+            continue
+        try:
+            text = extract_text(path, kind)
+        except ValueError as exc:
+            notes.append(f"skipped {name}: {exc}")
+            continue
+        docs[name] = text
+        notes.append(f"{name}: {len(text):,} chars, {len(text.split()):,} words")
+    return docs, notes
+
+
+def run_candidate(model_id: str, dtype: str, query_prompt: str, document_prompt: str,
+                  docs: dict, questions: list, chunk_words: Optional[int],
+                  device: Optional[str] = None) -> CandidateResult:
+    from backend.rag import memguard
+
+    memguard.apply_mps_limits()            # must happen before torch is imported
+    memguard.preflight(REQUIRED_MB.get(model_id, DEFAULT_REQUIRED_MB))
+    guard = memguard.MemoryGuard(memguard.limits_from_env())
+
+    def stop(exc):
+        print(f"\nMEMORY GUARD: {exc}", file=sys.stderr, flush=True)
+        os._exit(EXIT_MEMORY_GUARD)        # hard stop: the loop may be stuck inside one GPU call
+
+    with guard.watch(stop):
+        return _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions,
+                            chunk_words, device, guard, memguard)
+
+
+def _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions, chunk_words,
+                 device, guard, memguard) -> CandidateResult:
+    from sentence_transformers import SentenceTransformer
+
+    started = time.perf_counter()
+    try:
+        model = SentenceTransformer(model_id, device=device, model_kwargs={"dtype": dtype})
+    except TypeError:
+        model = SentenceTransformer(model_id, device=device, model_kwargs={"torch_dtype": dtype})
+    model.max_seq_length = min(model.max_seq_length or MAX_SEQ_CAP, MAX_SEQ_CAP)
+    load_seconds = time.perf_counter() - started
+    guard.check()
+
+    def encode(texts):
+        parts = []
+        for n, start in enumerate(range(0, len(texts), BATCH_SIZE), 1):
+            parts.append(model.encode(texts[start:start + BATCH_SIZE], batch_size=BATCH_SIZE,
+                                      normalize_embeddings=True, convert_to_numpy=True,
+                                      show_progress_bar=False))
+            guard.check()
+            if n % RELEASE_EVERY == 0:
+                memguard.release_accelerator_memory()
+        memguard.release_accelerator_memory()
+        return np.concatenate(parts, axis=0)
+
+    def embed_docs(texts):
+        return encode([document_prompt + t for t in texts])
+
+    def embed_query(text):
+        return encode([query_prompt + text])[0]
+
+    words = chunk_words or default_chunk_words(model.max_seq_length)
+    result = evaluate(docs, questions, embed_docs, embed_query, words)
+    ranked = result["ranked_hits"]
+    return CandidateResult(
+        model=model_id, dtype=dtype, dim=result["dim"], chunk_words=words, chunks=result["chunks"],
+        recall={k: recall_at_k(ranked, k) for k in KS}, mrr=mrr(ranked),
+        ingest_chunks_per_s=result["ingest_chunks_per_s"], peak_rss_mb=guard.peak_footprint_mb,
+        load_seconds=load_seconds, query_ms=result["query_ms"], device=str(model.device),
+        first_hit_ranks=first_hit_ranks(ranked),
+    )
+
+
+def _run_all(args) -> list:
+    rows = []
+    for model_id, dtype, _q, _d in DEFAULT_CANDIDATES:
+        fd, out = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        cmd = [sys.executable, os.path.abspath(__file__), "--candidate", model_id, "--dtype", dtype,
+               "--docs", args.docs, "--questions", args.questions, "--json-out", out]
+        if args.chunk_words:
+            cmd += ["--chunk-words", str(args.chunk_words)]
+        if args.device:
+            cmd += ["--device", args.device]
+        print(f"== {model_id} ({dtype})", flush=True)
+        proc = subprocess.run(cmd)
+        if proc.returncode == 0:
+            with open(out, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["recall"] = {int(k): v for k, v in data["recall"].items()}
+            rows.append(CandidateResult(**data))
+        else:
+            why = " (stopped by the memory guard)" if proc.returncode == EXIT_MEMORY_GUARD else ""
+            print(f"   failed (exit {proc.returncode}){why}; continuing", file=sys.stderr)
+        os.remove(out)
+    return rows
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--docs", required=True, help="directory of .txt/.md/.html/.pdf files")
+    ap.add_argument("--questions", required=True, help="JSONL question file")
+    ap.add_argument("--all", action="store_true", help="run every default candidate")
+    ap.add_argument("--candidate", help="one Hugging Face model id")
+    ap.add_argument("--dtype", default="float16", choices=["float16", "bfloat16", "float32"])
+    ap.add_argument("--query-prompt", default=None)
+    ap.add_argument("--document-prompt", default="")
+    ap.add_argument("--chunk-words", type=int, default=0, help="override words per chunk")
+    ap.add_argument("--device", default=None, help="cpu, mps or cuda (default: library choice)")
+    ap.add_argument("--out", help="write the markdown report here")
+    ap.add_argument("--json-out", help=argparse.SUPPRESS)
+    args = ap.parse_args()
+
+    if args.all == bool(args.candidate):
+        ap.error("pass exactly one of --all or --candidate")
+
+    if args.all:
+        rows = _run_all(args)
+        report = format_report(rows) if rows else "No candidate finished."
+        print("\n" + report)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(report + "\n")
+            with open(args.out + ".json", "w", encoding="utf-8") as f:
+                json.dump([asdict(r) for r in rows], f, indent=1)
+        return 0 if rows else 1
+
+    docs, notes = load_documents(args.docs)
+    questions = load_questions(args.questions)
+    missing = sorted({q.doc for q in questions} - set(docs))
+    if missing:
+        print(f"Questions reference documents that were not loaded: {missing}", file=sys.stderr)
+        return 2
+    for note in notes:
+        print("  " + note)
+    prompt = args.query_prompt
+    if prompt is None:
+        prompt = next((q for m, _d, q, _dp in DEFAULT_CANDIDATES if m == args.candidate), "")
+    from backend.rag.memguard import MemoryGuardTripped
+    try:
+        result = run_candidate(args.candidate, args.dtype, prompt, args.document_prompt,
+                               docs, questions, args.chunk_words or None, args.device)
+    except MemoryGuardTripped as exc:
+        print(f"MEMORY GUARD: {exc}", file=sys.stderr)
+        return EXIT_MEMORY_GUARD
+    result.notes = notes
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as f:
+            json.dump(asdict(result), f)
+    else:
+        print(format_report([result]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
