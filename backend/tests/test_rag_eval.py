@@ -83,6 +83,57 @@ class FirstHitRankTests(unittest.TestCase):
         self.assertEqual(out, {"x.pdf": 1.0, "y.md": 0.5})
 
 
+class KitSupportTests(unittest.TestCase):
+    def test_default_candidates_are_the_three_presets(self):
+        ids = [c[0] for c in rag_eval.candidates(include_large=False)]
+        self.assertEqual(ids, ["Qwen/Qwen3-Embedding-0.6B", "BAAI/bge-m3", "sentence-transformers/all-MiniLM-L6-v2"])
+
+    def test_include_large_adds_the_4b_with_a_big_memory_requirement(self):
+        rows = rag_eval.candidates(include_large=True)
+        self.assertEqual(rows[-1][0], "Qwen/Qwen3-Embedding-4B")
+        self.assertGreaterEqual(rag_eval.REQUIRED_MB["Qwen/Qwen3-Embedding-4B"], 9000)
+
+    def test_big_models_use_auto_dtype_and_minilm_stays_float32(self):
+        dtypes = {c[0]: c[1] for c in rag_eval.candidates(True)}
+        self.assertEqual(dtypes["sentence-transformers/all-MiniLM-L6-v2"], "float32")
+        self.assertTrue(all(v == "auto" for k, v in dtypes.items() if "MiniLM" not in k))
+
+    def test_auto_dtype_per_accelerator(self):
+        import types
+        def torch_stub(cuda=False, mps=False, bf16=True):
+            return types.SimpleNamespace(
+                cuda=types.SimpleNamespace(is_available=lambda: cuda, is_bf16_supported=lambda: bf16),
+                backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: mps)))
+        self.assertEqual(rag_eval.auto_dtype(torch_stub(cuda=True)), "bfloat16")
+        self.assertEqual(rag_eval.auto_dtype(torch_stub(cuda=True, bf16=False)), "float16")
+        self.assertEqual(rag_eval.auto_dtype(torch_stub(mps=True)), "bfloat16")
+        self.assertEqual(rag_eval.auto_dtype(torch_stub()), "float32")
+        self.assertEqual(rag_eval.auto_dtype(None), "float32")
+        self.assertEqual(rag_eval.resolve_dtype("float16", torch_stub(cuda=True)), "float16")
+        self.assertEqual(rag_eval.resolve_dtype("auto", torch_stub(cuda=True)), "bfloat16")
+
+    def test_qwen_embedding_models_get_the_instruction_prompt_others_do_not(self):
+        for model in ("Qwen/Qwen3-Embedding-0.6B", "Qwen/Qwen3-Embedding-4B", "Qwen/Qwen3-Embedding-8B"):
+            prompt = rag_eval.prompt_for(model)
+            self.assertTrue(prompt.startswith("Instruct: "))
+            self.assertTrue(prompt.endswith("\nQuery:"))               # exactly the model card's format
+        self.assertEqual(rag_eval.prompt_for("BAAI/bge-m3"), "")
+        self.assertEqual(rag_eval.prompt_for("sentence-transformers/all-MiniLM-L6-v2"), "")
+
+    def test_system_summary_names_the_platform_and_memory(self):
+        text = rag_eval.system_summary()
+        for word in ("Python", "RAM"):
+            self.assertIn(word, text)
+
+    def test_report_file_header_includes_the_system_summary(self):
+        row = rag_eval.CandidateResult(model="m", dtype="float16", dim=8, chunk_words=100, chunks=5,
+                                       recall={1: 1.0, 4: 1.0, 10: 1.0}, mrr=1.0,
+                                       ingest_chunks_per_s=1.0, peak_rss_mb=10.0)
+        text = rag_eval.report_with_header([row], "Test machine")
+        self.assertTrue(text.startswith("Machine: Test machine"))
+        self.assertIn("| m |", text)
+
+
 class ReportTests(unittest.TestCase):
     def _row(self, model):
         return rag_eval.CandidateResult(

@@ -30,9 +30,10 @@ from typing import Callable, Optional
 
 import numpy as np
 
-_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
-if _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _src in (os.path.join(_HERE, "..", "src"), os.path.join(_HERE, "src")):   # repo layout, then standalone kit
+    if os.path.isdir(os.path.join(_src, "backend")) and _src not in sys.path:
+        sys.path.insert(0, _src)
 
 KS = (1, 4, 10)
 TOKENS_PER_WORD = 1.7          # measured 1.3-1.65 on real text; conservative
@@ -43,19 +44,69 @@ EXIT_MEMORY_GUARD = 75         # exit code when the memory guard stops a run
 MAX_SEQ_CAP = 1024             # bounds memory for 32k-context models; chunks are far shorter
 
 QWEN_QUERY_PROMPT = ("Instruct: Given a web search query, retrieve relevant passages "
-                     "that answer the query\nQuery: ")
+                     "that answer the query\nQuery:")          # exactly the model card's format
 
 # Rough memory each candidate needs while running (MB), for the preflight check.
 REQUIRED_MB = {"Qwen/Qwen3-Embedding-0.6B": 1800, "BAAI/bge-m3": 2000,
-               "sentence-transformers/all-MiniLM-L6-v2": 400}
+               "sentence-transformers/all-MiniLM-L6-v2": 400,
+               "Qwen/Qwen3-Embedding-4B": 9000}
 DEFAULT_REQUIRED_MB = 1500
 
-# (model id, dtype, query prompt, document prompt)
-DEFAULT_CANDIDATES = [
-    ("Qwen/Qwen3-Embedding-0.6B", "float16", QWEN_QUERY_PROMPT, ""),
-    ("BAAI/bge-m3", "float16", "", ""),
-    ("sentence-transformers/all-MiniLM-L6-v2", "float32", "", ""),
-]
+
+def prompt_for(model_id: str) -> str:
+    """Query instruction prefix: the Qwen3-Embedding family expects one; the others use none."""
+    return QWEN_QUERY_PROMPT if "Qwen3-Embedding" in model_id else ""
+
+
+def candidates(include_large: bool = False) -> list:
+    """(model id, dtype, query prompt, document prompt). dtype 'auto' lets each machine pick its own."""
+    ids = ["Qwen/Qwen3-Embedding-0.6B", "BAAI/bge-m3", "sentence-transformers/all-MiniLM-L6-v2"]
+    if include_large:
+        ids.append("Qwen/Qwen3-Embedding-4B")
+    # The 90 MB MiniLM stays in float32 (half precision only adds noise); the big models use auto.
+    return [(m, "float32" if "MiniLM" in m else "auto", prompt_for(m), "") for m in ids]
+
+
+def auto_dtype(torch_module) -> str:
+    """Half precision wherever the hardware supports it (Qwen is trained in bfloat16)."""
+    if torch_module is None:
+        return "float32"
+    try:
+        if torch_module.cuda.is_available():
+            return "bfloat16" if torch_module.cuda.is_bf16_supported() else "float16"
+        if torch_module.backends.mps.is_available():
+            return "bfloat16"
+    except (AttributeError, RuntimeError):
+        pass
+    return "float32"
+
+
+def resolve_dtype(dtype: str, torch_module) -> str:
+    return auto_dtype(torch_module) if dtype == "auto" else dtype
+
+
+def system_summary() -> str:
+    import platform
+    from backend.rag import memguard
+    parts = [f"{platform.system()} {platform.release()} {platform.machine()}",
+             f"Python {platform.python_version()}",
+             f"{memguard.total_memory_mb() / 1024:.0f} GB RAM"]
+    try:
+        import torch
+        parts.append(f"torch {torch.__version__}")
+        if torch.cuda.is_available():
+            parts.append(f"CUDA {torch.cuda.get_device_name(0)}")
+        elif torch.backends.mps.is_available():
+            parts.append("Apple GPU (MPS)")
+        else:
+            parts.append("CPU only")
+    except ImportError:
+        parts.append("torch not installed")
+    return ", ".join(parts)
+
+
+def report_with_header(rows: list, machine: str) -> str:
+    return f"Machine: {machine}\n\n{format_report(rows)}"
 
 
 @dataclass(frozen=True)
@@ -263,6 +314,11 @@ def _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions
                  device, guard, memguard) -> CandidateResult:
     from sentence_transformers import SentenceTransformer
 
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    dtype = resolve_dtype(dtype, torch)
     started = time.perf_counter()
     try:
         model = SentenceTransformer(model_id, device=device, model_kwargs={"dtype": dtype})
@@ -304,7 +360,7 @@ def _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions
 
 def _run_all(args) -> list:
     rows = []
-    for model_id, dtype, _q, _d in DEFAULT_CANDIDATES:
+    for model_id, dtype, _q, _d in candidates(args.include_large):
         fd, out = tempfile.mkstemp(suffix=".json")
         os.close(fd)
         cmd = [sys.executable, os.path.abspath(__file__), "--candidate", model_id, "--dtype", dtype,
@@ -333,7 +389,10 @@ def main() -> int:
     ap.add_argument("--questions", required=True, help="JSONL question file")
     ap.add_argument("--all", action="store_true", help="run every default candidate")
     ap.add_argument("--candidate", help="one Hugging Face model id")
-    ap.add_argument("--dtype", default="float16", choices=["float16", "bfloat16", "float32"])
+    ap.add_argument("--dtype", default="auto", choices=["auto", "float16", "bfloat16", "float32"],
+                    help="auto = bfloat16 on CUDA/Apple GPU where supported, else float32")
+    ap.add_argument("--include-large", action="store_true",
+                    help="with --all, also run Qwen3-Embedding-4B (needs ~9 GB free; set MAGNITE_RAG_MAX_MB=12000)")
     ap.add_argument("--query-prompt", default=None)
     ap.add_argument("--document-prompt", default="")
     ap.add_argument("--chunk-words", type=int, default=0, help="override words per chunk")
@@ -347,13 +406,15 @@ def main() -> int:
 
     if args.all:
         rows = _run_all(args)
-        report = format_report(rows) if rows else "No candidate finished."
+        machine = system_summary()
+        report = report_with_header(rows, machine) if rows else "No candidate finished."
         print("\n" + report)
         if args.out:
             with open(args.out, "w", encoding="utf-8") as f:
                 f.write(report + "\n")
             with open(args.out + ".json", "w", encoding="utf-8") as f:
-                json.dump([asdict(r) for r in rows], f, indent=1)
+                json.dump({"machine": machine, "chunk_words": args.chunk_words or "per-model",
+                           "results": [asdict(r) for r in rows]}, f, indent=1)
         return 0 if rows else 1
 
     docs, notes = load_documents(args.docs)
@@ -366,7 +427,7 @@ def main() -> int:
         print("  " + note)
     prompt = args.query_prompt
     if prompt is None:
-        prompt = next((q for m, _d, q, _dp in DEFAULT_CANDIDATES if m == args.candidate), "")
+        prompt = prompt_for(args.candidate)
     from backend.rag.memguard import MemoryGuardTripped
     try:
         result = run_candidate(args.candidate, args.dtype, prompt, args.document_prompt,
