@@ -409,6 +409,40 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 201, response.text)
         self.assertTrue(any("token limit" in line for line in logs.output))
 
+    def encoder_with_tokens_per_word(self, per_word):
+        def loader(spec, device, dtype):
+            enc = FakeEncoder(dim=spec.dim or 16, max_seq_length=spec.max_seq_tokens or 256)
+            enc.tokenizer = lambda texts, **kw: {"input_ids": [[0] * (2 + per_word * len(t.split())) for t in texts]}
+            return enc
+        return patch.object(embeddings, "_load_encoder", side_effect=loader)
+
+    async def test_ingest_refits_chunks_using_the_real_token_counts(self):
+        """Number-heavy text tokenizes far above the 1.7 tokens/word estimate; chunks must still fit."""
+        text = ". ".join(" ".join(f"term{s}x{i}" for i in range(15)) for s in range(400)) + "."
+        with self.encoder_with_tokens_per_word(4), self.assertNoLogs("backend.rag", level="WARNING"):
+            response = await self.client.post("/rag/documents", json={"name": "num.txt", "content": text})
+        self.assertEqual(response.status_code, 201, response.text)
+        with self.store._conn() as conn:
+            sizes = [len(r["text"].split()) for r in conn.execute("SELECT text FROM rag_chunks")]
+        self.assertLessEqual(max(sizes), (256 - 2) // 4)               # 63 words = 254 tokens
+        self.assertGreater(len(sizes), 6000 // 63 - 5)                 # and nothing was dropped
+        self.assertEqual(sum(1 for _ in sizes), response.json()["chunks"])
+
+    async def test_ingest_does_not_rechunk_when_chunks_already_fit(self):
+        text = " ".join(f"word{i}" for i in range(400)) + "."
+        with self.encoder_with_tokens_per_word(1):
+            response = await self.client.post("/rag/documents", json={"name": "fits.txt", "content": text})
+        with self.store._conn() as conn:
+            sizes = [len(r["text"].split()) for r in conn.execute("SELECT text FROM rag_chunks")]
+        self.assertEqual(max(sizes), 149)                              # the clamp from fit_chunking, untouched
+
+    async def test_refit_gives_up_after_a_few_rounds_and_warns(self):
+        text = " ".join(f"word{i}" for i in range(400)) + "."
+        with patch.object(Embedder, "count_tokens", side_effect=lambda texts: [999] * len(texts)):
+            with self.assertLogs("backend.rag", level="WARNING"):
+                response = await self.client.post("/rag/documents", json={"name": "bad.txt", "content": text})
+        self.assertEqual(response.status_code, 201, response.text)
+
     async def test_memory_guard_trip_during_ingest_is_503_with_the_message(self):
         with patch.object(memguard, "available_memory_mb", return_value=10.0):
             response = await self.client.post("/rag/documents", json={"name": "a.txt", "content": "some text"})

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 
+import numpy as np
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
@@ -10,7 +12,8 @@ from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
 from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content, fit_chunking
-from backend.rag.batching import IngestCancelled
+from backend.rag.activity import exclusive, get_activity
+from backend.rag.batching import IngestCancelled, embed_batches
 from backend.rag.memguard import MemoryGuard, MemoryGuardTripped, limits_from_env
 from backend.rag.schemas import (
     RagConfig,
@@ -55,6 +58,12 @@ def rag_status():
     }
 
 
+@rag_router.get("/activity")
+def rag_activity():
+    """The running ingest or reindex (phase and progress), for polling clients."""
+    return get_activity().snapshot()
+
+
 @rag_router.get("/embedders")
 def list_embedders():
     """Supported embedding models with their limits, prompts and approximate memory use."""
@@ -96,6 +105,54 @@ async def ingest_document(body: RagIngestRequest, request: Request):
         return Response(status_code=499)
 
 
+MAX_REFITS = 3
+
+
+class _NeedsSmallerChunks(Exception):
+    """The model's own tokenizer shows these chunks are longer than its limit."""
+
+    def __init__(self, chunk_size: int, chunk_overlap: int):
+        self.chunk_size, self.chunk_overlap = chunk_size, chunk_overlap
+
+
+def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: int, cancelled, progress):
+    """Embed every chunk in small batches into one preallocated float32 matrix (N x dim): memory is
+    that matrix plus one batch, whatever the document size. Nothing is stored until all succeed.
+
+    When ``refit_limit`` is set, the first batch (which loads the model) is followed by a check of real
+    token counts; chunks over the limit raise ``_NeedsSmallerChunks`` with a size that will fit."""
+    total, batch = len(chunks), _batch_size()
+    progress.set_phase("embedding", total)
+    matrix = {"vectors": None, "checked": refit_limit is None}
+
+    def write(offset: int, vecs: np.ndarray) -> None:
+        if matrix["vectors"] is None:
+            matrix["vectors"] = np.empty((total, vecs.shape[1]), dtype=np.float32)
+        matrix["vectors"][offset:offset + vecs.shape[0]] = vecs
+
+    def embed(texts: list) -> np.ndarray:
+        vecs = embeddings.embed_documents(texts, cfg.model, cfg.truncate_dim)
+        if not matrix["checked"]:
+            matrix["checked"] = True
+            counts = embeddings.count_tokens(chunks, cfg.model)
+            if counts and max(counts) > refit_limit:
+                worst = max(n / max(1, len(c.split())) for n, c in zip(counts, chunks))
+                size = max(16, min(chunk_size - 1, int((refit_limit - 2) / worst * 0.95)))
+                raise _NeedsSmallerChunks(size, min(chunk_overlap, size // 4))
+        return vecs
+
+    embed_batches((chunks[i:i + batch] for i in range(0, total, batch)), embed, write, cancelled,
+                  progress.advance, MemoryGuard(limits_from_env()))
+    return matrix["vectors"]
+
+
+def _batch_size() -> int:
+    try:
+        return max(1, int(os.environ.get("MAGNITE_RAG_BATCH", "16")))
+    except ValueError:
+        return 16
+
+
 def _ingest_document(body: RagIngestRequest, cancelled=None):
     store = _get_store()
     if store.reindexing:
@@ -110,6 +167,17 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
             detail="RAG embedding needs 'sentence-transformers'. Install with "
             "'uv pip install --python .venv/bin/python -e 'backend[ml]''.",
         )
+    label = body.name.strip() or os.path.basename(body.path.strip()) or "document"
+    try:
+        # One heavy operation at a time: extraction, chunking and embedding all hold large buffers.
+        with exclusive("ingest", label, cancelled) as progress:
+            return _ingest_locked(store, body, cancelled, progress)
+    except IngestCancelled as exc:
+        raise HTTPException(status_code=499, detail=f"Document ingestion cancelled: {exc}") from exc
+
+
+def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
+    progress.set_phase("extracting")
     if body.content.strip():
         if not body.name.strip():
             raise HTTPException(status_code=400, detail="'name' is required when sending raw content")
@@ -144,15 +212,25 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
     if (chunk_size, chunk_overlap) != requested:
         logger.info("Chunk size %s words clamped to %s to fit the %s-token limit of %s",
                     requested[0], chunk_size, token_limit, cfg.model)
-    try:
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Document contains no usable text")
 
     try:
-        vecs = embeddings.embed_documents(chunks, cfg.model, cfg.truncate_dim)
+        for attempt in range(MAX_REFITS + 1):
+            progress.set_phase("chunking")
+            try:
+                chunks = chunk_text(text, chunk_size, chunk_overlap)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not chunks:
+                raise HTTPException(status_code=400, detail="Document contains no usable text")
+            try:
+                vectors = _embed_all(chunks, cfg, token_limit if attempt < MAX_REFITS else None,
+                                     chunk_size, chunk_overlap, cancelled, progress)
+                break
+            except _NeedsSmallerChunks as refit:
+                logger.info("Chunks exceed the %s-token limit; re-chunking at %d words (was %d)",
+                            token_limit, refit.chunk_size, chunk_size)
+                chunk_size, chunk_overlap = refit.chunk_size, refit.chunk_overlap
+        del text
         counts = embeddings.count_tokens(chunks, cfg.model)
         if counts and token_limit:
             over = sum(1 for n in counts if n > token_limit)
@@ -160,18 +238,21 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
                 logger.warning("%d of %d chunks exceed the embedding model's token limit (%d); their tails "
                                "were not embedded. Lower the chunk size.", over, len(counts), token_limit)
         if cancelled is not None and cancelled.is_set():
-            raise RuntimeError("Document ingestion cancelled before registration")
+            raise IngestCancelled("before registration")
+        progress.set_phase("saving")
         rec = store.add_document(
             name=body.name.strip() or os.path.splitext(os.path.basename(path))[0],
             kind=kind,
             path=path,
             model=cfg.model,
             chunks=chunks,
-            embeddings=vecs,
+            embeddings=vectors,
             size_kb=size_kb,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
+    except (IngestCancelled, HTTPException):
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MemoryGuardTripped as exc:
@@ -222,10 +303,12 @@ def _reindex(body: RagReindexRequest, cancelled=None):
     if not embeddings.is_available():
         raise HTTPException(status_code=503, detail="Embeddings unavailable; install the ML extras")
     try:
-        return store.reindex(
-            model, body.truncate_dim,
-            lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim),
-            cancelled=cancelled, guard=MemoryGuard(limits_from_env()))
+        with exclusive("reindex", model, cancelled) as progress:
+            progress.set_phase("embedding", store.count_chunks())
+            return store.reindex(
+                model, body.truncate_dim,
+                lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim),
+                cancelled=cancelled, progress=progress.advance, guard=MemoryGuard(limits_from_env()))
     except IngestCancelled as exc:
         raise HTTPException(status_code=499, detail=str(exc)) from exc
     except MemoryGuardTripped as exc:

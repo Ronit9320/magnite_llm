@@ -258,7 +258,7 @@ class Embedder:
         tokenizer = getattr(self._encoder, "tokenizer", None)
         if tokenizer is not None:
             try:
-                ids = tokenizer(list(texts), add_special_tokens=True, truncation=False)["input_ids"]
+                ids = tokenizer(list(texts), add_special_tokens=True, truncation=False, verbose=False)["input_ids"]
                 return [len(x) for x in ids]
             except Exception:  # noqa: BLE001 - tokenizers differ; fall back rather than fail an ingest
                 pass
