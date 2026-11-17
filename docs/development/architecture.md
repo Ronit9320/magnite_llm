@@ -69,7 +69,7 @@ The implementation assumes a single desktop-oriented backend process. Module-lev
 | [`backend/src/backend/inference/`](../../backend/src/backend/inference/) | Engine selection, single-engine ownership, inference request schemas and engine implementations |
 | [`backend/src/backend/training/`](../../backend/src/backend/training/) | Dataset normalization, training queue, Trainer integration and job schemas |
 | [`backend/src/backend/adapters/`](../../backend/src/backend/adapters/) | Adapter records and SQLite persistence; archive operations live in the adapter router |
-| [`backend/src/backend/rag/`](../../backend/src/backend/rag/) | Text extraction, chunking, embeddings, vector retrieval and prompt context |
+| [`backend/src/backend/rag/`](../../backend/src/backend/rag/) | Text extraction, sentence-aware chunking, the `Embedder` and memory guard, batched ingest/reindex, the cached vector index and prompt context |
 | [`backend/src/backend/request_work.py`](../../backend/src/backend/request_work.py) | Disconnect-aware ownership of long-running worker-thread operations |
 | [`backend/tests/`](../../backend/tests/) | Offline regressions and live workflow verification |
 | [`app/src/testing/`](../../app/src/testing/) | UI interaction and layout checks |
@@ -128,7 +128,7 @@ An unexpected backend exit causes the desktop to abort outstanding requests, cle
 | --- | --- | --- |
 | `ModelsPanel` | Registry cards, Hub search, pulls, deletion, workspace overview, sending a selected model to Chat | `/models`, overview reads from other services |
 | `TrainingPanel` | Base-model and dataset selection, dataset import, training configuration, progress/loss display, cancellation | `/models`, `/datasets`, `/training` |
-| `RagPanel` | Document ingestion/deletion, retrieval configuration, query experiments | `/rag` |
+| `RagPanel` | Knowledge drawer inside the Conversation workspace: document ingestion/deletion, retrieval configuration, query experiments. It does not yet expose embedding presets, reindex or ingest progress | `/rag` |
 | `AdaptersPanel` | Adapter listing, activation/clearing, deletion, ZIP import/export | `/adapters`, `/inference/adapter`, `/inference/status` |
 | `ChatPanel` | Model loading, sampling settings, in-memory conversation, streaming response rendering, stop/new chat, optional retrieval | `/models`, `/inference` |
 | `SettingsPanel` | Engine preference, data-directory preference, ambient motion and reduced motion | QSettings; MainWindow forwards runtime engine changes |
@@ -167,8 +167,9 @@ Paths below are relative to the dynamically discovered loopback base URL. `{id}`
 | Training | `POST /training/start`, `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` | Submit with HTTP 202, inspect, cooperatively cancel |
 | Adapter registry | `GET /adapters`, `GET /adapters/{id}`, `DELETE /adapters/{id}` | List/filter, inspect, remove weights/metadata |
 | Adapter archives | `POST /adapters/export/{id}`, `GET /adapters/export/{filename}`, `POST /adapters/import` | Create ZIP, download ZIP, import a local ZIP path |
-| RAG configuration | `GET /rag/status`, `GET /rag/config`, `POST /rag/config` | Capability/counts and persisted configuration |
+| RAG configuration | `GET /rag/status`, `GET /rag/config`, `POST /rag/config`, `GET /rag/embedders` | Capability/counts, effective embedder and chunking, persisted configuration, supported embedding models |
 | RAG documents | `GET /rag/documents`, `POST /rag/documents`, `DELETE /rag/documents/{id}`, `POST /rag/clear` | Manage the indexed collection |
+| RAG reindex and progress | `POST /rag/reindex`, `GET /rag/activity` | Switch the whole library to another embedding model; poll the running ingest/reindex |
 | Retrieval | `POST /rag/query` | Return ranked chunks and similarity scores |
 
 Dataset and document ingestion accept local filesystem paths or inline content. Adapter import accepts a local archive path. These are local-service operations, not multipart upload endpoints. FastAPI also provides its standard generated OpenAPI/docs endpoints.
@@ -340,29 +341,51 @@ Training output directories use unique `adapters/adapter-<job-id>` paths; displa
 
 ## Retrieval and document processing
 
-RAG is a local pipeline implemented by extraction/chunking helpers, a cached sentence-transformers embedder, and [`RagStore`](../../backend/src/backend/rag/store.py).
+RAG is a local pipeline: extraction and chunking helpers, an [`Embedder`](../../backend/src/backend/rag/embeddings.py) (sentence-transformers, loaded lazily), a [memory guard](../../backend/src/backend/rag/memguard.py), a shared [batching loop](../../backend/src/backend/rag/batching.py) and [`RagStore`](../../backend/src/backend/rag/store.py). `torch` and `sentence_transformers` are imported only when a model loads, so the base backend starts without the `[ml]` extras.
+
+### Embedding models
+
+| Preset | Model | Token limit | Dimensions | Approx. RAM | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Light | `sentence-transformers/all-MiniLM-L6-v2` | 256 | 384 | ~450 MB | No prompts; chunks are clamped to about 150 words |
+| Quality | `BAAI/bge-m3` | 8192 | 1024 | ~3 GB | No prompts; multilingual |
+| Alternative | `Qwen/Qwen3-Embedding-0.6B` | 32768 | 1024 | ~3 GB | Query instruction prefix; supports Matryoshka truncation (`truncate_dim`) |
+
+- **Default.** With nothing saved and no documents, the default is chosen from the hardware: 16 GB of RAM or more (15,000 MB or more reported), or a CUDA GPU, gives BGE-M3; otherwise MiniLM. A library that already has documents keeps the model it was built with, so a changed default never hides existing documents. Other Hugging Face ids work as generic embedders without prompts.
+- **Evidence.** On a 47-question set (17 questions on this repository's docs, 30 on a synthetic 24k-word PDF) BGE-M3 reached recall@1 0.68 and MRR 0.78, against 0.51 / 0.67 for MiniLM and 0.53 / 0.68 for Qwen3. The set is small and partly synthetic; [`backend/evals/`](../../backend/evals/) reruns it on other documents.
+- **One model at a time.** Switching unloads the old embedder and releases accelerator memory before the preflight check and the new load. A loaded embedder is unloaded after 300 idle seconds (`MAGNITE_RAG_IDLE_UNLOAD_S`, `0` disables) and reloads on next use.
+- **Device and precision.** CUDA when present; the Apple GPU only for the heavy presets on machines with 16 GB or more (initializing it costs about 1 GB and was not faster for small models); CPU otherwise. Precision is float32 on CPU, float16 on the Apple GPU and bfloat16/float16 on CUDA. `MAGNITE_RAG_DEVICE` and `MAGNITE_RAG_DTYPE` override.
+- **Prompts and truncation.** Queries and documents are embedded with the model's own prompts. `truncate_dim` cuts and renormalizes vectors for models that support it and is refused for the rest.
+
+### Memory guard
+
+An unguarded embedding run once exhausted an 8 GB Mac and caused a kernel panic, so every embedding loop is guarded. Before loading, a preflight check requires free memory of 1.5 times the preset's approximate RAM. During work, the guard checks the process's physical footprint (which includes GPU and compressed memory; `ru_maxrss` does not), system-available memory and swap growth, and cached accelerator memory is released between batches. A trip stops the work with an error (HTTP 503 with the reason) and leaves the index untouched. Limits: `MAGNITE_RAG_MAX_MB` (default 35% of RAM, at most 8 GB), `MAGNITE_RAG_MIN_FREE_MB` (400) and `MAGNITE_RAG_MAX_SWAP_MB` (1024).
 
 ### Ingestion
 
-1. Accept a local document path or named inline content.
+1. Accept a local document path or named inline content. Ingests and reindexes run one at a time; queued requests wait, and `GET /rag/activity` reports the phase (`extracting`, `chunking`, `embedding`, `saving`), progress and queue length.
 2. For paths, extract text from TXT, Markdown, HTML or PDF. Markdown processing retains code content; HTML stripping removes scripts/styles/tags; PDFs use `pypdf` text extraction without OCR. Inline HTML/Markdown goes through the same extraction logic; inline PDFs are rejected and require a file path.
-3. Split into overlapping whitespace-separated word chunks. Defaults are 512 words with 64-word overlap; schema fields and stored counts sometimes call these “tokens,” but they are not tokenizer tokens.
-4. Lazily load the configured sentence-transformers model, defaulting to `all-MiniLM-L6-v2`, and encode normalized float32 vectors.
-5. Check cancellation and store document metadata, chunk text and vectors in one SQLite transaction.
+3. Split on sentence boundaries into chunks sized in words (whitespace-separated; CJK characters and very long tokens count as several words). Defaults are 320 words with 40-word overlap. A chunk starts and ends on a sentence boundary, the next chunk begins with trailing whole sentences within the overlap, and only a sentence longer than the chunk size is cut into fixed windows. The size is clamped to the embedding model's limit using an estimate of 1.7 tokens per word, and then checked against the model's real tokenizer after the first batch: if any chunk is over the limit (numbers, code and non-English text tokenize heavily) the document is re-chunked smaller, up to three times. A warning is logged if chunks still exceed the limit.
+4. Embed in batches (16 chunks, `MAGNITE_RAG_BATCH`) into one preallocated float32 matrix, checking cancellation and memory before each batch and reporting progress. Memory is the matrix plus one batch; at the 16M-character content limit with the smallest chunks this is on the order of 100 to 200 MB.
+5. Check cancellation and store document metadata, chunk text and vectors in one SQLite transaction. Cancelling stops within one batch and stores nothing.
 
-The document index lives in `rag/rag.db`, with `rag_documents`, `rag_chunks`, and `rag_config` tables. Vectors are float32 BLOBs. Original documents are not copied into a separate managed document repository; extracted chunks are persisted and source paths are recorded.
+The document index lives in `rag/rag.db`, with `rag_documents`, `rag_chunks`, and `rag_config` tables. Vectors are float32 BLOBs, the source of truth. Original documents are not copied into a separate managed document repository; extracted chunks are persisted and source paths are recorded.
 
 ### Retrieval and chat augmentation
 
-A query is embedded with the configured model. `RagStore.search()` reads compatible chunks from SQLite, stacks their vectors into a NumPy matrix, computes dot products, sorts by similarity, applies the threshold, and returns the top results. L2 normalization makes the dot product equivalent to cosine similarity. Defaults are `top_k=4` and threshold `0`, with zero disabling score filtering.
+A query is embedded with the configured model's query prompt. `RagStore.search()` keeps a derived in-memory index per model: float16 vectors by default (`MAGNITE_RAG_INDEX_DTYPE` selects `int8` or `float32`), built lazily and dropped on every add, delete, clear or reindex, so there is no durable index to synchronize. It scores in blocks, takes the best `max(2 * top_k, top_k + 16)` candidates, rescores them exactly from the stored float32 vectors, applies the threshold and loads chunk text only for the hits. L2 normalization makes the dot product equivalent to cosine similarity. Defaults are `top_k=4` and threshold `0`, with zero disabling score filtering. At 50,000 chunks of 1,024 dimensions a search took 17 ms with a 98 MB index (float16), against 240 ms before.
 
-There is no FAISS dependency, vector server, approximate-nearest-neighbor index, or persistent in-memory search index. Each search reconstructs the matrix and performs a full scan plus sorting. This suits modest local collections; cost and memory grow with chunk count and embedding dimension.
+The index is capped by `MAGNITE_RAG_INDEX_MB` (default 512). A model whose vectors exceed it is searched by streaming them from SQLite in batches instead, with the same results. There is still no FAISS dependency, vector server or approximate-nearest-neighbor index; the scan is exact, and memory, not time, is the limit.
 
-For RAG-enabled chat, the latest user message becomes the retrieval query. Retrieved passages are numbered and labeled with document names, assembled into a system message, and prepended to conversation history. A binary search truncates the context string to fit the engine's remaining input budget. This can cut a passage partway through; it is not a passage-aware packing algorithm.
+For RAG-enabled chat, the latest user message becomes the retrieval query. Retrieved passages are packed whole, in rank order, into a numbered system message labelled with document names, and packing stops at the first passage that does not fit the engine's remaining input budget. Only when not even the top passage fits is it trimmed, at a sentence end where possible. The chat stream's `sources` event lists exactly the passages (and trimmed text) the model saw.
 
-Missing dependencies, an empty index, no matching passages, or insufficient context space produce errors instead of silently generating without retrieval. Chat SSE contains text deltas, not a separate structured citation payload; explicit `/rag/query` results provide source/chunk metadata.
+Missing dependencies, an empty index, no matching passages, or insufficient context space produce errors instead of silently generating without retrieval. Explicit `/rag/query` results provide source/chunk metadata.
 
-Configuration is merged and validated on update. Changing the embedding model is blocked while incompatible documents remain; users must clear and re-ingest. Ingestion checks for model changes and embedding-dimension mismatches before commit. Deleting indexed documents removes chunks and metadata but preserves original files.
+### Reindex
+
+`POST /rag/reindex` re-embeds the stored chunk text with another model (and optional `truncate_dim`), so original files are not needed. New vectors are staged in a temporary memory-mapped file, then one SQLite transaction rewrites every vector, every document's model and the saved configuration. Search keeps using the old vectors until that commit; a failure, cancellation or memory-guard stop leaves everything untouched, and adding, deleting and clearing are refused while it runs. Changing the model or `truncate_dim` through `POST /rag/config` is still blocked while documents exist.
+
+Configuration is merged and validated on update. Ingestion checks for model changes and embedding-dimension mismatches before commit. Deleting indexed documents removes chunks and metadata but preserves original files.
 
 ## Persistence and configuration
 
@@ -469,6 +492,6 @@ For an API change, update the relevant route and Pydantic schemas, service behav
 
 For a new workspace, derive from `BasePanel`, add navigation and backend wiring in `MainWindow`, add explicit CMake sources, and use the token/QSS/icon system. Persist preferences through the existing settings pathway; durable user content should have an explicitly designed store rather than being placed implicitly in panel settings.
 
-For retrieval changes, preserve embedding-model/dimension consistency and atomic document/chunk insertion. Replacing the flat search with a scalable index would also require a durable synchronization/rebuild strategy, not just a different similarity function.
+For retrieval changes, preserve embedding-model/dimension consistency and atomic document/chunk insertion, and route every embedding loop through the memory guard and the shared batching loop. Replacing the exact scan with an approximate index would also require a durable synchronization/rebuild strategy (the current derived index avoids one by being rebuilt lazily); it is not warranted below roughly 300,000 chunks.
 
-Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, flat full-scan retrieval, and remaining public-release/signing/updater work for Mac/Windows despite verified native testing packages. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).
+Current architectural limits include single-engine inference, cooperative cancellation, no global GPU scheduling, no durable chat, no automatic training resume, no automatic schema/path migration, in-memory exact-scan retrieval (no approximate index, no hybrid keyword search, no reranker), and remaining public-release/signing/updater work for Mac/Windows despite verified native testing packages. Tiny-model tests establish workflow behavior rather than useful model quality, training effectiveness, or large-model reliability. These limits are documented further in [LIMITATIONS.md](../LIMITATIONS.md).
