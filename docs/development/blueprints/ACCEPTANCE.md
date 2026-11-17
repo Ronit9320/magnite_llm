@@ -74,3 +74,14 @@ verification passed on `dev` at `42e55e2`.
 
 The [native package run](https://github.com/Ronit9320/magnite_llm/actions/runs/44175410782)
 checks the same candidate on Ubuntu 22.04, macOS ARM, and Windows x64.
+Its Linux job passed the glibc 2.35 audit, bundled regressions, and relocated
+smoke checks for the ML and GGUF-only packages.
+[Linux job and artifacts](https://github.com/Ronit9320/magnite_llm/actions/runs/44175410782/job/134365565474)
+
+GitHub cancelled the macOS job while queued on November 18, 2026. The Windows
+job built the installer with bundled Pi and stopped at two backend test
+portability failures. The follow-up fixes use the native path representation
+and close the mocked vLLM log before leaving the temporary test directory.
+The three-platform artifact gate needs a completed macOS job and a successful
+Windows installer test.
+[Windows failure details](https://github.com/Ronit9320/magnite_llm/actions/runs/44175410782/job/134365565656)
