@@ -51,13 +51,95 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-class RagStore:
-    """SQLite-backed document registry + flat (FAISS-style) vector store.
+_SCAN_BATCH = 10_000        # rows per read when the index is over budget
+_SCORE_BLOCK = 8192         # rows scored at a time (converted to float32 per block)
+_LOAD_BATCH = 5_000         # rows per read while building the index
+_HYDRATE_BATCH = 500        # ids per SELECT ... IN (...)
+_INT8_SCALE = 127.0
 
-    Embeddings are stored per chunk as float32 blobs; queries do a full scan
-    with a dot product over L2-normalized vectors (equivalently cosine
-    similarity), which is what a flat FAISS index does and is plenty for a
-    local knowledge base of a few thousand chunks. Thread-safe.
+_DTYPES = {"float16": np.float16, "float32": np.float32, "int8": np.int8}
+
+
+def _index_dtype() -> np.dtype:
+    name = os.environ.get("MAGNITE_RAG_INDEX_DTYPE", "float16").strip().lower()
+    return np.dtype(_DTYPES.get(name, np.float16))
+
+
+def _index_budget_bytes() -> int:
+    try:
+        mb = float(os.environ.get("MAGNITE_RAG_INDEX_MB", "512"))
+    except ValueError:
+        mb = 512.0
+    return int(max(mb, 0) * 1024 * 1024)
+
+
+def _candidate_count(top_k: int) -> int:
+    """Over-select by approximate score, then rescore exactly from the float32 vectors on disk."""
+    return max(2 * top_k, top_k + 16)
+
+
+def _top_n(scores: np.ndarray, n: int) -> np.ndarray:
+    """Positions of the n highest finite scores (unordered)."""
+    n = min(n, scores.shape[0])
+    if n <= 0:
+        return np.empty(0, dtype=np.int64)
+    idx = np.argpartition(-scores, n - 1)[:n] if n < scores.shape[0] else np.arange(scores.shape[0])
+    return idx[np.isfinite(scores[idx])]
+
+
+class _SearchIndex:
+    """Compact in-memory copy of one model's vectors. Holds no chunk text."""
+
+    def __init__(self, chunk_ids: np.ndarray, doc_codes: np.ndarray, doc_table: list,
+                 matrix: np.ndarray):
+        self.chunk_ids = chunk_ids          # int64, row -> rag_chunks.id
+        self.doc_codes = doc_codes          # int32, row -> index into doc_table
+        self.doc_table = doc_table          # list[str] of document ids
+        self.matrix = matrix                # (N, D) float16 | float32 | int8
+
+    @property
+    def size(self) -> int:
+        return int(self.matrix.shape[0])
+
+    @property
+    def dim(self) -> int:
+        return int(self.matrix.shape[1]) if self.matrix.ndim == 2 else 0
+
+    def doc_mask(self, document_ids) -> np.ndarray:
+        wanted = set(document_ids)
+        codes = [i for i, d in enumerate(self.doc_table) if d in wanted]
+        return np.isin(self.doc_codes, codes)
+
+    def top_candidates(self, query: np.ndarray, mask: Optional[np.ndarray], n: int) -> np.ndarray:
+        """Row indices of the n best rows by approximate score (matrix blocks scored in float32)."""
+        best_scores, best_rows = [], []
+        quantized = self.matrix.dtype == np.int8
+        for start in range(0, self.size, _SCORE_BLOCK):
+            block = self.matrix[start:start + _SCORE_BLOCK].astype(np.float32, copy=False)
+            scores = block @ query
+            if quantized:
+                scores = scores / _INT8_SCALE
+            if mask is not None:
+                scores = np.where(mask[start:start + _SCORE_BLOCK], scores, -np.inf)
+            keep = _top_n(scores, n)
+            best_scores.append(scores[keep])
+            best_rows.append(keep + start)
+        if not best_rows:
+            return np.empty(0, dtype=np.int64)
+        scores = np.concatenate(best_scores)
+        rows = np.concatenate(best_rows)
+        keep = _top_n(scores, n)
+        return rows[keep]
+
+
+class RagStore:
+    """SQLite-backed document registry + exact vector search.
+
+    Embeddings are stored per chunk as float32 blobs (the source of truth). Search keeps a derived,
+    compact in-memory index (float16 by default, capped by MAGNITE_RAG_INDEX_MB), picks candidates
+    by approximate score, then rescores them exactly from the float32 vectors and loads text only
+    for the hits. Every write drops the index; it is rebuilt lazily, so nothing needs syncing.
+    Over the memory cap, search streams the vectors from SQLite in batches instead. Thread-safe.
     """
 
     def __init__(self, data_dir: str):
@@ -65,6 +147,7 @@ class RagStore:
         os.makedirs(data_dir, exist_ok=True)
         self._db_path = os.path.join(data_dir, "rag.db")
         self._lock = threading.RLock()
+        self._indexes: dict = {}          # model -> _SearchIndex (derived; rebuilt lazily)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -161,6 +244,7 @@ class RagStore:
                     ],
                 )
                 conn.commit()
+            self._invalidate()
 
         return RagDocument(
             id=doc_id, name=name, kind=kind, path=path, chunks=len(chunks),
@@ -193,6 +277,7 @@ class RagStore:
             cur = conn.execute("DELETE FROM rag_documents WHERE id = ?", (doc_id,))
             conn.execute("DELETE FROM rag_chunks WHERE doc_id = ?", (doc_id,))
             conn.commit()
+            self._invalidate()
             return cur.rowcount > 0
 
     def clear(self) -> None:
@@ -200,6 +285,7 @@ class RagStore:
             conn.execute("DELETE FROM rag_chunks")
             conn.execute("DELETE FROM rag_documents")
             conn.commit()
+            self._invalidate()
 
     def count_chunks(self) -> int:
         with self._lock, self._conn() as conn:
@@ -208,49 +294,153 @@ class RagStore:
 
     # ---- retrieval ------------------------------------------------------
 
+    def _invalidate(self) -> None:
+        with self._lock:
+            self._indexes.clear()
+
+    def _index_for(self, model: str) -> Optional[_SearchIndex]:
+        """The cached index for a model, or None when it would exceed the memory budget."""
+        with self._lock:
+            cached = self._indexes.get(model)
+            if cached is not None:
+                return cached
+            index = self._build_index(model)
+            if index is not None:
+                self._indexes[model] = index
+            return index
+
+    def _build_index(self, model: str) -> Optional[_SearchIndex]:
+        dtype = _index_dtype()
+        with self._lock, self._conn() as conn:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM rag_chunks c JOIN rag_documents d ON d.id = c.doc_id "
+                "WHERE d.model = ?", (model,)).fetchone()["n"]
+            if n == 0:
+                return _SearchIndex(np.empty(0, np.int64), np.empty(0, np.int32), [],
+                                    np.empty((0, 0), dtype))
+            first = conn.execute(
+                "SELECT length(c.embedding) AS b FROM rag_chunks c JOIN rag_documents d "
+                "ON d.id = c.doc_id WHERE d.model = ? LIMIT 1", (model,)).fetchone()
+            dim = int(first["b"]) // 4
+            if n * dim * dtype.itemsize > _index_budget_bytes():
+                return None
+            chunk_ids = np.empty(n, np.int64)
+            doc_codes = np.empty(n, np.int32)
+            matrix = np.empty((n, dim), dtype)
+            doc_table: list = []
+            codes: dict = {}
+            cursor = conn.execute(
+                "SELECT c.id, c.doc_id, c.embedding FROM rag_chunks c JOIN rag_documents d "
+                "ON d.id = c.doc_id WHERE d.model = ? ORDER BY c.id", (model,))
+            pos = 0
+            while True:
+                rows = cursor.fetchmany(_LOAD_BATCH)
+                if not rows:
+                    break
+                block = self._stack(rows, dim)
+                if dtype == np.int8:
+                    block = np.clip(np.rint(block * _INT8_SCALE), -127, 127)
+                matrix[pos:pos + len(rows)] = block
+                for i, row in enumerate(rows):
+                    chunk_ids[pos + i] = row["id"]
+                    code = codes.get(row["doc_id"])
+                    if code is None:
+                        code = codes[row["doc_id"]] = len(doc_table)
+                        doc_table.append(row["doc_id"])
+                    doc_codes[pos + i] = code
+                pos += len(rows)
+            return _SearchIndex(chunk_ids[:pos], doc_codes[:pos], doc_table, matrix[:pos])
+
+    @staticmethod
+    def _stack(rows, dim: int) -> np.ndarray:
+        block = np.empty((len(rows), dim), np.float32)
+        for i, row in enumerate(rows):
+            vec = np.frombuffer(row["embedding"], dtype=np.float32)
+            if vec.shape[0] != dim:
+                raise ValueError(
+                    f"Stored embedding dimension {vec.shape[0]} does not match index dimension {dim}; "
+                    "re-ingest the documents with a single embedding model.")
+            block[i] = vec
+        return block
+
+    def _scan_candidates(self, model: str, query: np.ndarray, allowed: Optional[set], n: int) -> list:
+        """Over-budget path: stream vectors from SQLite in batches, keeping the best n chunk ids."""
+        best_scores = np.empty(0, np.float32)
+        best_ids = np.empty(0, np.int64)
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT c.id, c.doc_id, c.embedding FROM rag_chunks c JOIN rag_documents d "
+                "ON d.id = c.doc_id WHERE d.model = ? ORDER BY c.id", (model,))
+            while True:
+                rows = cursor.fetchmany(_SCAN_BATCH)
+                if not rows:
+                    break
+                block = self._stack(rows, query.shape[0])
+                scores = block @ query
+                if allowed is not None:
+                    keep_rows = np.fromiter((r["doc_id"] in allowed for r in rows), bool, len(rows))
+                    scores = np.where(keep_rows, scores, -np.inf)
+                ids = np.fromiter((r["id"] for r in rows), np.int64, len(rows))
+                best_scores = np.concatenate([best_scores, scores])
+                best_ids = np.concatenate([best_ids, ids])
+                keep = _top_n(best_scores, n)
+                best_scores, best_ids = best_scores[keep], best_ids[keep]
+        return [int(i) for i in best_ids]
+
+    def _hydrate(self, chunk_ids: list) -> list:
+        """Text, names and float32 vectors for just these chunks."""
+        rows = []
+        with self._conn() as conn:
+            for start in range(0, len(chunk_ids), _HYDRATE_BATCH):
+                part = chunk_ids[start:start + _HYDRATE_BATCH]
+                marks = ",".join("?" * len(part))
+                rows += conn.execute(
+                    "SELECT c.id, c.doc_id, c.chunk_index, c.text, c.tokens, c.embedding, "
+                    f"d.name AS doc_name FROM rag_chunks c JOIN rag_documents d ON d.id = c.doc_id "
+                    f"WHERE c.id IN ({marks})", part).fetchall()
+        return rows
+
     def search(self, query_vec: np.ndarray, model: str, top_k: int = 4,
                min_score: float = 0.0, document_ids: Optional[list[str]] = None) -> list[RagChunk]:
-        """Flat cosine search over chunks embedded with ``model``."""
-        with self._lock, self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT c.id, c.doc_id, c.chunk_index, c.text, c.tokens, c.embedding,
-                       d.name AS doc_name
-                FROM rag_chunks c
-                JOIN rag_documents d ON d.id = c.doc_id
-                WHERE d.model = ?
-                ORDER BY c.id
-                """,
-                (model,),
-            ).fetchall()
-        if document_ids is not None:
-            selected = set(document_ids)
-            rows = [row for row in rows if row["doc_id"] in selected]
-        if not rows:
+        """Exact cosine search over chunks embedded with ``model`` (vectors are L2-normalized)."""
+        if document_ids is not None and not document_ids:
             return []
-
-        matrix = np.stack(
-            [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows],
-            axis=0,
-        )
-        scores = matrix @ query_vec.reshape(-1)
-        order = np.argsort(-scores)
+        query = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+        wanted = _candidate_count(top_k)
+        with self._lock:
+            index = self._index_for(model)
+            if index is not None:
+                if index.size == 0:
+                    return []
+                if query.shape[0] != index.dim:
+                    raise ValueError(
+                        f"Query embedding dimension {query.shape[0]} does not match the index "
+                        f"dimension {index.dim}; the embedding model changed.")
+                mask = None if document_ids is None else index.doc_mask(document_ids)
+                rows = index.top_candidates(query, mask, wanted)
+                ids = [int(i) for i in index.chunk_ids[rows]]
+            else:
+                allowed = None if document_ids is None else set(document_ids)
+                ids = self._scan_candidates(model, query, allowed, wanted)
+            if not ids:
+                return []
+            hydrated = self._hydrate(ids)
+            if not hydrated:
+                return []
+            scores = np.array([float(np.frombuffer(r["embedding"], dtype=np.float32) @ query)
+                               for r in hydrated])
+            row_ids = np.array([r["id"] for r in hydrated], dtype=np.int64)
+        order = np.lexsort((row_ids, -scores))          # best score first, ties by chunk id
         results: list[RagChunk] = []
-        for idx in order:
-            score = float(scores[idx])
+        for pos in order:
+            score = float(scores[pos])
             if min_score > 0 and score < min_score:
                 break
-            row = rows[idx]
-            results.append(
-                RagChunk(
-                    document_id=row["doc_id"],
-                    document_name=row["doc_name"],
-                    index=int(row["chunk_index"]),
-                    text=row["text"],
-                    tokens=int(row["tokens"]),
-                    score=round(score, 4),
-                )
-            )
+            row = hydrated[pos]
+            results.append(RagChunk(
+                document_id=row["doc_id"], document_name=row["doc_name"],
+                index=int(row["chunk_index"]), text=row["text"], tokens=int(row["tokens"]),
+                score=round(score, 4)))
             if len(results) >= top_k:
                 break
         return results
