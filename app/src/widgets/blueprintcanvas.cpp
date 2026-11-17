@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QContextMenuEvent>
+#include <QIcon>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QMouseEvent>
