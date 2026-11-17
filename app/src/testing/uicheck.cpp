@@ -240,7 +240,9 @@ struct Fixture : QTcpServer {
     // chunking clamped to the model); POSTs to /rag/config are recorded and can fail.
     QString ragModel = "all-MiniLM-L6-v2";
     int ragChunks = 36, ragDocuments = 2, ragConfigStatus = 200;
-    QStringList ragConfigRequests;
+    QStringList ragConfigRequests, ragReindexRequests;
+    int ragReindexStatus = 200;
+    QString ragReindexDetail;
     QByteArray ragStatusJson() const {
         const bool bge = ragModel == "BAAI/bge-m3";
         return QJsonDocument(QJsonObject{{"engine_ready",true},{"model",ragModel},{"documents",ragDocuments},{"chunks",ragChunks},
@@ -409,6 +411,13 @@ struct Fixture : QTcpServer {
                         else if (request.contains("model")) ragModel=request["model"].toString();
                     }
                     else if (path == "/rag/config") body=R"({"chunk_size":512,"chunk_overlap":64,"top_k":4})";
+                    else if (path == "/rag/reindex") {
+                        const QJsonObject request=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object();
+                        ragReindexRequests << request["model"].toString();
+                        status=ragReindexStatus;
+                        if (status==200) ragModel=request["model"].toString();
+                        else body=QJsonDocument(QJsonObject{{"detail",ragReindexDetail}}).toJson(QJsonDocument::Compact);
+                    }
                     else if (path == "/rag/query") { status=failQuery?500:200; body=failQuery?R"({"detail":"Fixture query failure"})":R"({"results":[{"score":0.92,"document_name":"Project guide.md","index":0,"text":"Magnite keeps the training and inference workflows in your local workspace."}]})"; }
                     else if (path == "/rag/clear") { ++clears; status=204; }
                     else if (path == "/export-ok") { body="test-archive-payload"; type="application/zip"; }
@@ -1574,6 +1583,63 @@ int runUiCheck(const QString &captures) {
             check(status->text().contains("Chunk overlap must be smaller than chunk size") && status->property("state")=="error",
                   "a rejected setting shows the backend's message");
             fixture.ragConfigStatus=200; fixture.ragConfigRequests.clear(); fixture.ragModel="all-MiniLM-L6-v2";
+            knowledge.refresh(); waitUntil([&]() { return modelInfo->text().contains("Light"); },2000);
+        }
+        // Model picker: presets from GET /rag/embedders; a switch with documents goes through reindex.
+        auto *picker=knowledge.findChild<QComboBox *>("ragModelPicker");
+        auto *hint=knowledge.findChild<QLabel *>("ragModelHint");
+        check(picker && hint && picker->count()==3 && picker->currentIndex()==0 && picker->itemText(0).contains("Light") &&
+              picker->itemText(0).contains("450 MB") && picker->itemText(0).contains("256 tokens") && picker->itemText(1).contains("Quality"),
+              "model picker lists the backend's presets with RAM and token limit, current model selected");
+        if (picker && hint && modelInfo && picker->count()==3) {
+            check(!hint->isVisibleTo(&knowledge),"the machine's default model shows no warning");
+            picker->setCurrentIndex(1); pump();
+            check(hint->isVisibleTo(&knowledge) && hint->text().contains("3 GB") && hint->text().contains("0.2 chunks/s") &&
+                  hint->text().contains("1,000 pages") && picker->isEnabled(),
+                  "a heavy preset warns about RAM and indexing speed without blocking");
+            const auto respond=[](bool accept,QString *text) -> QPointer<QTimer> {
+                auto *timer=new QTimer; timer->setInterval(20);
+                QObject::connect(timer,&QTimer::timeout,[=]() {
+                    for (auto *w : QApplication::topLevelWidgets())
+                        if (auto *d=qobject_cast<QDialog *>(w); d && d->objectName()=="appMessageDialog" && d->isVisible()) {
+                            if (text) *text=d->findChild<QLabel *>("appMessageBody")->text();
+                            accept ? d->accept() : d->reject();
+                            timer->stop(); timer->deleteLater(); return;
+                        }
+                });
+                timer->start();
+                return timer;
+            };
+            QString asked; respond(false,&asked);
+            emit picker->activated(1); pump(200);
+            check(asked.contains("36 chunks") && asked.contains("Quality") && asked.contains("0.2 chunks/s") && fixture.ragReindexRequests.isEmpty() &&
+                  fixture.ragConfigRequests.isEmpty() && picker->currentIndex()==0,
+                  "declining the re-index sends nothing and keeps the configured model");
+
+            respond(true,nullptr); picker->setCurrentIndex(1); emit picker->activated(1);
+            waitUntil([&]() { return modelInfo->text().contains("Quality"); },3000);
+            check(fixture.ragReindexRequests==QStringList{"BAAI/bge-m3"} && fixture.ragConfigRequests.isEmpty() && picker->currentIndex()==1 &&
+                  modelInfo->text().contains("1024 dimensions"),
+                  "switching models with documents re-indexes (never POST /rag/config) and refreshes from status");
+
+            fixture.ragReindexRequests.clear(); fixture.ragReindexStatus=503;
+            fixture.ragReindexDetail="Not enough free memory to load Qwen/Qwen3-Embedding-0.6B: needs about 4500 MB, 2100 MB available.";
+            respond(true,nullptr); picker->setCurrentIndex(2); emit picker->activated(2);
+            auto *status=knowledge.findChild<QLabel *>("statusLabel");
+            waitUntil([&]() { return status->text().contains("Not enough free memory"); },3000); pump(200);
+            check(status->text()==fixture.ragReindexDetail && status->property("state")=="error" && picker->currentIndex()==1 && picker->isEnabled(),
+                  "a memory-guard refusal is shown verbatim and the configured model stays selected");
+
+            fixture.ragReindexStatus=200; fixture.ragReindexRequests.clear(); fixture.ragModel="all-MiniLM-L6-v2";
+            fixture.ragDocuments=0; fixture.ragChunks=0; knowledge.refresh(); waitUntil([&]() { return picker->currentIndex()==0; },2000);
+            QString unexpected; const QPointer<QTimer> watcher=respond(false,&unexpected);
+            picker->setCurrentIndex(1); emit picker->activated(1);
+            waitUntil([&]() { return !fixture.ragConfigRequests.isEmpty(); },2000); pump(200);
+            check(unexpected.isEmpty() && fixture.ragReindexRequests.isEmpty() &&
+                  QJsonDocument::fromJson(fixture.ragConfigRequests.value(0).toUtf8()).object().value("model").toString()=="BAAI/bge-m3",
+                  "with no documents a model change is a plain config change, without a dialog");
+            if (watcher) watcher->deleteLater();
+            fixture.ragConfigRequests.clear(); fixture.ragModel="all-MiniLM-L6-v2"; fixture.ragDocuments=2; fixture.ragChunks=36;
             knowledge.refresh(); waitUntil([&]() { return modelInfo->text().contains("Light"); },2000);
         }
     }

@@ -8,6 +8,7 @@
 #include <QList>
 #include <QJsonValue>
 class QTimer;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -50,6 +51,7 @@ private slots:
     void onCardClicked(RagDocCard *card, bool ctrl);
     void onTestQuery();
     void onConfigChanged();
+    void onModelChosen(int index);
 
 private:
     void setupUi();
@@ -60,6 +62,12 @@ private:
     QString selectedIds() const;
     void pushConfig();
     void applyStatus();
+    void populatePicker();
+    void revertPicker();
+    void updateModelHint();
+    QString modelWarning(const RagParams::Preset &preset) const;
+    void startReindex(const RagParams::Preset &preset);
+    void setMutating(bool on);
 
     BackendClient *m_client;
     QPushButton *m_addButton;
@@ -72,6 +80,8 @@ private:
     QSpinBox *m_chunkSizeSpin;
     QSpinBox *m_chunkOverlapSpin;
     QSpinBox *m_topKSpin;
+    QComboBox *m_modelPicker = nullptr;
+    QLabel *m_modelHint = nullptr;
     QLabel *m_modelInfo = nullptr;
     QLabel *m_chunkingInfo = nullptr;
     QLabel *m_clampHint = nullptr;

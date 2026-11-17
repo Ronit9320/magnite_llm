@@ -1,4 +1,5 @@
 #include "widgets/spinbox.h"
+#include "widgets/combobox.h"
 #include "widgets/confirmation.h"
 #include <QTimer>
 #include <memory>
@@ -17,6 +18,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -100,6 +102,18 @@ void RagPanel::setupUi() {
     auto *modelCard = Surface::card(this, "Embedding model");
     modelCard->parentWidget()->setObjectName("ragModelCard");
     modelCard->parentWidget()->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    m_modelPicker = new ComboBox(this);
+    m_modelPicker->setObjectName("ragModelPicker");
+    m_modelPicker->setEnabled(false);
+    Surface::field(modelCard, "Model", m_modelPicker);
+    m_modelHint = new QLabel(this);
+    m_modelHint->setObjectName("ragModelHint");
+    m_modelHint->setTextFormat(Qt::PlainText);
+    m_modelHint->setWordWrap(true);
+    m_modelHint->hide();
+    modelCard->addWidget(m_modelHint);
+    connect(m_modelPicker, &QComboBox::currentIndexChanged, this, &RagPanel::updateModelHint);
+    connect(m_modelPicker, &QComboBox::activated, this, &RagPanel::onModelChosen);
     m_modelInfo = new QLabel("Reading the embedding model…", this);
     m_modelInfo->setObjectName("ragModelInfo");
     m_modelInfo->setTextFormat(Qt::PlainText);
@@ -243,7 +257,7 @@ void RagPanel::refresh(bool preserveStatus) {
     m_client->get("/rag/embedders", [this, revision](int status, const QJsonDocument &doc) {
         if (revision != m_refreshRevision || status != 200) return;
         m_presets = RagParams::parseEmbedders(doc.array());
-        applyStatus();
+        populatePicker();
     });
     m_client->get("/rag/status", [this, revision, preserveStatus](int status, const QJsonDocument &doc) {
         if (revision != m_refreshRevision) return;
@@ -259,6 +273,7 @@ void RagPanel::refresh(bool preserveStatus) {
             return;
         }
         applyStatus();
+        populatePicker();
         if (!preserveStatus) setStatus(m_active->engineReady
                       ? QString("%1 document(s) · %2 chunks").arg(m_active->documents).arg(m_active->chunks)
                       : "Embeddings unavailable — RAG needs sentence-transformers (backend[ml]).");
@@ -533,6 +548,114 @@ void RagPanel::applyStatus() {
     m_topKSpin->setMinimum(1);
     if (a.topK > 0) m_topKSpin->setValue(a.topK);
     m_loadingConfig = false;
+}
+
+namespace {
+QString memoryText(int mb) {
+    return mb >= 1000 ? QString("%1 GB").arg(QString::number(mb / 1000.0, 'g', 2)) : QString("%1 MB").arg(mb);
+}
+}
+
+void RagPanel::populatePicker() {
+    const QSignalBlocker block(m_modelPicker);
+    m_modelPicker->clear();
+    const QLocale en(QLocale::English);
+    for (const auto &p : m_presets) {
+        QStringList parts{p.label};
+        if (p.approxRamMb > 0) parts << QString("~%1 RAM").arg(memoryText(p.approxRamMb));
+        if (p.maxTokens > 0) parts << QString("%1 tokens").arg(en.toString(p.maxTokens));
+        m_modelPicker->addItem(parts.join(" · "), p.model);
+    }
+    // A model that is not a preset (set through the API) is still shown as the current one.
+    if (m_active && RagParams::indexOf(m_presets, m_active->model) < 0)
+        m_modelPicker->addItem(m_active->model, m_active->model);
+    revertPicker();
+    m_modelPicker->setEnabled(!m_mutating && m_active && !m_presets.isEmpty());
+}
+
+void RagPanel::revertPicker() {
+    const QSignalBlocker block(m_modelPicker);
+    if (m_active) {
+        const int index = RagParams::indexOf(m_presets, m_active->model);
+        m_modelPicker->setCurrentIndex(index >= 0 ? index : m_modelPicker->count() - 1);
+    }
+    updateModelHint();
+}
+
+QString RagPanel::modelWarning(const RagParams::Preset &preset) const {
+    if (!m_active) return {};
+    QStringList lines;
+    if (RagParams::ramIsHigh(preset, m_presets))
+        lines << QString("%1 needs about %2 of RAM, more than this machine's default model. Indexing may be "
+                         "refused or stopped if memory runs short.").arg(preset.label, memoryText(preset.approxRamMb));
+    const QString speed = RagParams::speedWarning(preset, *m_active);
+    if (!speed.isEmpty()) lines << speed;
+    return lines.join("\n");
+}
+
+void RagPanel::updateModelHint() {
+    const int index = m_modelPicker->currentIndex();
+    const QString text = index >= 0 && index < m_presets.size() ? modelWarning(m_presets[index]) : QString();
+    m_modelHint->setText(text);
+    m_modelHint->setVisible(!text.isEmpty());
+}
+
+void RagPanel::onModelChosen(int index) {
+    if (!m_active || index < 0 || index >= m_presets.size()) { revertPicker(); return; }
+    const RagParams::Preset preset = m_presets[index];
+    if (RagParams::sameModel(preset.model, m_active->model)) return;
+    if (m_mutating || !m_client || !m_client->isReady()) { revertPicker(); return; }
+    if (m_active->documents == 0) {
+        // Nothing to re-embed: a plain config change (the backend refuses it once documents exist).
+        m_client->post("/rag/config", QJsonObject{{"model", preset.model}},
+            [this, label = preset.label](int status, const QJsonDocument &doc) {
+                if (status != 200) {
+                    const QString detail = doc.object()["detail"].toString();
+                    setStatus(detail.isEmpty() ? QString("Model not changed (HTTP %1).").arg(status) : detail, "error");
+                } else {
+                    setStatus(QString("Now using %1. New documents will be indexed with it.").arg(label), "ok");
+                }
+                refresh(true);
+            });
+        return;
+    }
+    QString message = QString("Switch Knowledge to %1 (%2)? All %3 chunks from %4 document(s) will be "
+                              "re-indexed. Your current index keeps working until this finishes, and "
+                              "cancelling leaves it unchanged.")
+                          .arg(preset.label, preset.model, QLocale(QLocale::English).toString(m_active->chunks))
+                          .arg(m_active->documents);
+    const QString warning = modelWarning(preset);
+    if (!warning.isEmpty()) message += "\n\n" + warning;
+    if (!Ui::confirmAction(this, "Re-index Knowledge?", message, "Re-index")) { revertPicker(); return; }
+    startReindex(preset);
+}
+
+void RagPanel::startReindex(const RagParams::Preset &preset) {
+    setMutating(true);
+    setStatus(QString("Re-indexing %1 chunks with %2…").arg(m_active ? m_active->chunks : 0).arg(preset.label));
+    m_client->post("/rag/reindex", QJsonObject{{"model", preset.model}},
+        [this, label = preset.label](int status, const QJsonDocument &doc) {
+            setMutating(false);
+            if (status == 200) {
+                setStatus(QString("Re-indexed with %1. Ready to search.").arg(label), "ok");
+            } else {
+                const QString detail = doc.object()["detail"].toString();
+                setStatus(detail.isEmpty() ? QString("Re-index failed (HTTP %1).").arg(status) : detail, "error");
+            }
+            m_resultLabel->setText("Your document collection changed. Search again for updated results.");
+            refresh(true);
+        });
+}
+
+void RagPanel::setMutating(bool on) {
+    m_mutating = on;
+    if (on) ++m_collectionRevision;
+    m_addButton->setEnabled(!on);
+    m_removeButton->setEnabled(!on && hasSelection());
+    m_clearButton->setEnabled(!on && !m_cards.isEmpty());
+    m_queryButton->setEnabled(!on && !m_queryBusy && !m_queryEdit->text().trimmed().isEmpty());
+    m_modelPicker->setEnabled(!on && m_active && !m_presets.isEmpty());
+    for (QSpinBox *spin : {m_chunkSizeSpin, m_chunkOverlapSpin, m_topKSpin}) spin->setEnabled(!on && m_active);
 }
 
 void RagPanel::setDocumentScope(const QJsonValue &scope) {
