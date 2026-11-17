@@ -13,6 +13,7 @@
 #include "panels/trainingpanel.h"
 #include "panels/trainingrunpanel.h"
 #include "panels/ragpanel.h"
+#include "testing/ragparams_tests.h"
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
 #include "panels/chathistorycontroller.h"
@@ -906,6 +907,7 @@ void MainWindow::runSelfTest() {
             switchPanel(PanelSettings);
         }
 
+        ragParamsChecks(checkC);
         switchPanel(PanelRag);
         auto *drawer = m_chatPanel->findChild<QWidget *>("conversationKnowledge");
         auto *knowledgeToggle = m_chatPanel->findChild<QPushButton *>("conversationKnowledgeToggle");

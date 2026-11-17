@@ -65,6 +65,10 @@ set(MAGNITE_SOURCES
     src/testing/windowchrome_tests.h
     src/testing/settings_tests.cpp
     src/testing/settings_tests.h
+    src/panels/ragparams.cpp
+    src/panels/ragparams.h
+    src/testing/ragparams_tests.cpp
+    src/testing/ragparams_tests.h
     src/testing/uicheck.cpp
     src/testing/uicheck.h
     src/testing/textfit.h
