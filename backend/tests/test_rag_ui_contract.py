@@ -63,10 +63,12 @@ class UiContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_effective_chunking_follows_the_model_when_it_changes(self):
         await self.client.post("/rag/config", json={"model": BGE, "chunk_size": 512, "chunk_overlap": 64})
-        self.assertEqual((await self.status())["chunking"], {"chunk_size": 512, "chunk_overlap": 64, "clamped": False})
+        self.assertEqual((await self.status())["chunking"], {"chunk_size": 512, "chunk_overlap": 64, "clamped": False,
+                                                            "max_chunk_size": 601})
         await self.client.post("/rag/config", json={"model": MINILM})
         data = await self.status()
-        self.assertEqual(data["chunking"], {"chunk_size": 149, "chunk_overlap": 37, "clamped": True})
+        self.assertEqual(data["chunking"], {"chunk_size": 149, "chunk_overlap": 37, "clamped": True,
+                                            "max_chunk_size": 149})
         self.assertEqual(data["embedder"]["max_seq_tokens"], 256)
         self.assertEqual(data["embedder"]["dim"], 384)
         self.assertEqual(data["config"]["chunk_size"], 512)          # the stored value is untouched; "effective" is separate

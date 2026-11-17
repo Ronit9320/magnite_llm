@@ -15,11 +15,12 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import platform
 import shutil
 import sys
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Callable, Mapping, Optional
 
 import numpy as np
@@ -48,6 +49,8 @@ class EmbedderSpec:
     approx_ram_mb: int = 1500            # measured guard footprint, used for the preflight check
     supports_truncation: bool = True     # trained with Matryoshka (MRL) so cutting dims is safe
     trust_remote_code: bool = False
+    # Indexing speed measured on REFERENCE_HARDWARE, by device kind ("cpu", "gpu"). Advisory only.
+    reference_chunks_per_s: dict = field(default_factory=dict)
 
 
 MINILM = "sentence-transformers/all-MiniLM-L6-v2"
@@ -56,12 +59,14 @@ QWEN3 = "Qwen/Qwen3-Embedding-0.6B"
 
 PRESETS: dict = {
     MINILM: EmbedderSpec(MINILM, "Light", max_seq_tokens=256, dim=384, approx_ram_mb=450,
-                         supports_truncation=False),
+                         supports_truncation=False, reference_chunks_per_s={"cpu": 40.0}),
     BGE_M3: EmbedderSpec(BGE_M3, "Quality", max_seq_tokens=8192, dim=1024, approx_ram_mb=3000,
-                         supports_truncation=False),
+                         supports_truncation=False, reference_chunks_per_s={"cpu": 0.2, "gpu": 2.0}),
     QWEN3: EmbedderSpec(QWEN3, "Alternative", max_seq_tokens=32768, dim=1024, approx_ram_mb=3000,
-                        query_prompt=f"Instruct: {_QWEN_TASK}\nQuery:", supports_truncation=True),
+                        query_prompt=f"Instruct: {_QWEN_TASK}\nQuery:", supports_truncation=True,
+                        reference_chunks_per_s={"cpu": 0.2, "gpu": 2.0}),
 }
+REFERENCE_HARDWARE = "Apple M1, 8 GB"   # where reference_chunks_per_s was measured (MiniLM GPU was not)
 _ALIASES = {"all-MiniLM-L6-v2": MINILM}      # the id RagConfig has always defaulted to
 
 
@@ -74,7 +79,14 @@ def spec_for(model_id: str) -> EmbedderSpec:
 
 
 def list_presets() -> list:
-    return [asdict(spec) for spec in PRESETS.values()]
+    """Every preset, plus what the UI needs to warn before slow or memory-hungry indexing: reference
+    speeds, whether it is this machine's default, and the device kind it would run on."""
+    recommended = recommended_model()
+    total_mb, cuda, apple_gpu = memguard.total_memory_mb(), _cuda_hint(), _apple_gpu_hint()
+    return [{**asdict(spec), "reference_hardware": REFERENCE_HARDWARE,
+             "recommended": spec.model_id == recommended,
+             "expected_device": planned_device(spec, total_mb, cuda, apple_gpu)}
+            for spec in PRESETS.values()]
 
 
 # ---- hardware policy --------------------------------------------------------------------------
@@ -97,6 +109,22 @@ def _cuda_hint() -> bool:
         except (AttributeError, RuntimeError):
             return False
     return bool(shutil.which("nvidia-smi")) or os.path.exists("/proc/driver/nvidia")
+
+
+def _apple_gpu_hint() -> bool:
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def planned_device(spec: EmbedderSpec, total_mb: float, cuda: bool, apple_gpu: bool,
+                   env: Optional[Mapping[str, str]] = None) -> str:
+    """The device kind ("cpu" or "gpu") ``pick_device`` would choose, without importing torch."""
+    env = os.environ if env is None else env
+    forced = env.get("MAGNITE_RAG_DEVICE", "").strip().lower()
+    if forced:
+        return "cpu" if forced == "cpu" else "gpu"
+    if cuda or (apple_gpu and spec.approx_ram_mb >= GPU_PRESET_RAM_MB and total_mb >= BIG_MACHINE_MB):
+        return "gpu"
+    return "cpu"
 
 
 def default_model(total_mb: float, cuda: bool) -> str:
@@ -348,17 +376,43 @@ def loaded_info() -> Optional[dict]:
                 "dim": _current.dim, "device": _current.device, "dtype": _current.dtype}
 
 
+# ---- measured speed (in memory only) ----------------------------------------------------------
+
+_measured: dict = {}
+_measured_lock = threading.Lock()
+
+
+def record_speed(model: str, chunks: int, seconds: float, device: Optional[str], dtype: Optional[str]) -> None:
+    """Remember how fast a real batched ingest/reindex embedded (latest run wins)."""
+    if chunks <= 0 or seconds <= 0:
+        return
+    with _measured_lock:
+        _measured[spec_for(model).model_id] = {"chunks_per_s": chunks / seconds, "device": device, "dtype": dtype}
+
+
+def measured_speed(model: str) -> Optional[float]:
+    with _measured_lock:
+        entry = _measured.get(spec_for(model).model_id)
+    return entry["chunks_per_s"] if entry else None
+
+
+def _reset_measured_for_tests() -> None:
+    with _measured_lock:
+        _measured.clear()
+
+
 def status_for(model: str, truncate_dim: int = 0) -> dict:
     """Describe the configured embedder without loading it."""
     spec = spec_for(model)
     with _lock:
         if _current is not None and _current.loaded and _current.spec.model_id == spec.model_id:
             return {"model": model, "label": spec.label, "max_seq_tokens": _current.max_seq_tokens,
-                    "dim": _current.dim, "loaded": True, "device": _current.device, "dtype": _current.dtype}
+                    "dim": _current.dim, "loaded": True, "device": _current.device, "dtype": _current.dtype,
+                    "measured_chunks_per_s": measured_speed(model)}
     declared = min(spec.max_seq_tokens, MAX_SEQ_TOKENS_CAP) if spec.max_seq_tokens else None
     dim = min(spec.dim, truncate_dim) if (spec.dim and truncate_dim) else (spec.dim or truncate_dim or None)
     return {"model": model, "label": spec.label, "max_seq_tokens": declared, "dim": dim,
-            "loaded": False, "device": None, "dtype": None}
+            "loaded": False, "device": None, "dtype": None, "measured_chunks_per_s": measured_speed(model)}
 
 
 def max_seq_tokens(model: str) -> Optional[int]:
@@ -380,6 +434,7 @@ def _reset_for_tests() -> None:
             _timer.cancel()
             _timer = None
         _current = None
+    _reset_measured_for_tests()
     clear = getattr(recommended_model, "cache_clear", None)
     if clear is not None:
         clear()

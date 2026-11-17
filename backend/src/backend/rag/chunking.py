@@ -267,11 +267,18 @@ def chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 64) -> lis
     return chunks
 
 
+def chunk_limit(max_seq_tokens: Optional[int]) -> Optional[int]:
+    """The largest chunk size (words) that fits the model's token limit; None when unknown."""
+    if not max_seq_tokens:
+        return None
+    return max(16, int((max_seq_tokens - 2) / TOKENS_PER_WORD))
+
+
 def fit_chunking(chunk_size: int, chunk_overlap: int, max_seq_tokens: Optional[int]) -> tuple:
     """Clamp a chunk size (words) so a chunk fits the embedding model's token limit."""
-    if not max_seq_tokens:
+    limit = chunk_limit(max_seq_tokens)
+    if limit is None:
         return chunk_size, chunk_overlap
-    limit = max(16, int((max_seq_tokens - 2) / TOKENS_PER_WORD))
     if chunk_size <= limit:
         return chunk_size, chunk_overlap
     return limit, min(chunk_overlap, limit // 4)

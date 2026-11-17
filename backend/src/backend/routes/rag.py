@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import numpy as np
 
@@ -11,7 +12,7 @@ from pydantic import ValidationError
 from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
-from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content, fit_chunking
+from backend.rag.chunking import chunk_limit, chunk_text, detect_kind, extract_text, extract_content, fit_chunking
 from backend.rag.activity import exclusive, get_activity
 from backend.rag.batching import IngestCancelled, embed_batches
 from backend.rag.memguard import MemoryGuard, MemoryGuardTripped, limits_from_env
@@ -54,7 +55,8 @@ def rag_status():
         "config": cfg.model_dump(),
         "embedder": embedder,
         "chunking": {"chunk_size": size, "chunk_overlap": overlap,
-                     "clamped": (size, overlap) != (cfg.chunk_size, cfg.chunk_overlap)},
+                     "clamped": (size, overlap) != (cfg.chunk_size, cfg.chunk_overlap),
+                     "max_chunk_size": chunk_limit(embedder["max_seq_tokens"])},
     }
 
 
@@ -108,6 +110,36 @@ async def ingest_document(body: RagIngestRequest, request: Request):
 MAX_REFITS = 3
 
 
+class _SpeedMeter:
+    """Times the embedding calls of one ingest/reindex so status can report real chunks/s.
+
+    A call that starts before this model is loaded is not counted (it includes the model load, and
+    maybe a download). Nothing is recorded unless the whole run succeeds (``commit``)."""
+
+    def __init__(self, model: str):
+        self.model_id = embeddings.spec_for(model).model_id
+        self.chunks, self.seconds = 0, 0.0
+
+    def _loaded(self) -> bool:
+        info = embeddings.loaded_info()
+        return bool(info) and info.get("model") == self.model_id
+
+    def wrap(self, embed_fn):
+        def timed(texts: list):
+            counted = self._loaded()
+            start = time.perf_counter()
+            vectors = embed_fn(texts)
+            if counted:
+                self.chunks += len(texts)
+                self.seconds += time.perf_counter() - start
+            return vectors
+        return timed
+
+    def commit(self) -> None:
+        info = embeddings.loaded_info() or {}
+        embeddings.record_speed(self.model_id, self.chunks, self.seconds, info.get("device"), info.get("dtype"))
+
+
 class _NeedsSmallerChunks(Exception):
     """The model's own tokenizer shows these chunks are longer than its limit."""
 
@@ -115,7 +147,8 @@ class _NeedsSmallerChunks(Exception):
         self.chunk_size, self.chunk_overlap = chunk_size, chunk_overlap
 
 
-def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: int, cancelled, progress):
+def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: int, cancelled, progress,
+               meter: "_SpeedMeter | None" = None):
     """Embed every chunk in small batches into one preallocated float32 matrix (N x dim): memory is
     that matrix plus one batch, whatever the document size. Nothing is stored until all succeed.
 
@@ -141,8 +174,8 @@ def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: i
                 raise _NeedsSmallerChunks(size, min(chunk_overlap, size // 4))
         return vecs
 
-    embed_batches((chunks[i:i + batch] for i in range(0, total, batch)), embed, write, cancelled,
-                  progress.advance, MemoryGuard(limits_from_env()))
+    embed_batches((chunks[i:i + batch] for i in range(0, total, batch)), meter.wrap(embed) if meter else embed,
+                  write, cancelled, progress.advance, MemoryGuard(limits_from_env()))
     return matrix["vectors"]
 
 
@@ -213,6 +246,7 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
         logger.info("Chunk size %s words clamped to %s to fit the %s-token limit of %s",
                     requested[0], chunk_size, token_limit, cfg.model)
 
+    meter = _SpeedMeter(cfg.model)
     try:
         for attempt in range(MAX_REFITS + 1):
             progress.set_phase("chunking")
@@ -224,7 +258,7 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
                 raise HTTPException(status_code=400, detail="Document contains no usable text")
             try:
                 vectors = _embed_all(chunks, cfg, token_limit if attempt < MAX_REFITS else None,
-                                     chunk_size, chunk_overlap, cancelled, progress)
+                                     chunk_size, chunk_overlap, cancelled, progress, meter)
                 break
             except _NeedsSmallerChunks as refit:
                 logger.info("Chunks exceed the %s-token limit; re-chunking at %d words (was %d)",
@@ -251,6 +285,7 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
+        meter.commit()
     except (IngestCancelled, HTTPException):
         raise
     except ValueError as exc:
@@ -303,12 +338,15 @@ def _reindex(body: RagReindexRequest, cancelled=None):
     if not embeddings.is_available():
         raise HTTPException(status_code=503, detail="Embeddings unavailable; install the ML extras")
     try:
+        meter = _SpeedMeter(model)
         with exclusive("reindex", model, cancelled) as progress:
             progress.set_phase("embedding", store.count_chunks())
-            return store.reindex(
+            result = store.reindex(
                 model, body.truncate_dim,
-                lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim),
+                meter.wrap(lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim)),
                 cancelled=cancelled, progress=progress.advance, guard=MemoryGuard(limits_from_env()))
+        meter.commit()
+        return result
     except IngestCancelled as exc:
         raise HTTPException(status_code=499, detail=str(exc)) from exc
     except MemoryGuardTripped as exc:

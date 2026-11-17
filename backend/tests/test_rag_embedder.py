@@ -383,13 +383,15 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["embedder"]["model"], SHORT_MINILM)
         self.assertEqual(data["embedder"]["max_seq_tokens"], 256)
         self.assertFalse(data["embedder"]["loaded"])                         # status never loads a model
-        self.assertEqual(data["chunking"], {"chunk_size": 149, "chunk_overlap": 37, "clamped": True})
+        self.assertEqual(data["chunking"], {"chunk_size": 149, "chunk_overlap": 37, "clamped": True,
+                                            "max_chunk_size": 149})
         self.assertIn("config", data)                                        # existing keys untouched
 
     async def test_status_not_clamped_for_a_long_context_model(self):
         self.store.update_config({"model": BGE, "chunk_size": 320, "chunk_overlap": 40})
         data = (await self.client.get("/rag/status")).json()
-        self.assertEqual(data["chunking"], {"chunk_size": 320, "chunk_overlap": 40, "clamped": False})
+        self.assertEqual(data["chunking"], {"chunk_size": 320, "chunk_overlap": 40, "clamped": False,
+                                            "max_chunk_size": 601})
 
     async def test_ingest_clamps_chunks_to_the_model_limit(self):
         self.store.update_config({"chunk_size": 512, "chunk_overlap": 64})
