@@ -186,6 +186,7 @@ class RetrieveChunksTests(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
         self.store = RagStore(self.dir)
+        self.store.update_config({"model": "all-MiniLM-L6-v2"})
         self.doc = self.store.add_document("facts.txt", "txt", "", "all-MiniLM-L6-v2",
                                            ["Paris has the Eiffel Tower."], np.array([[1.0, 0.0]], np.float32),
                                            1.0, 64, 8)
@@ -193,7 +194,7 @@ class RetrieveChunksTests(unittest.TestCase):
     def patches(self):
         return (patch.object(context, "get_rag_store", return_value=self.store),
                 patch.object(context, "is_available", return_value=True),
-                patch.object(context, "embed_texts", return_value=np.array([[1.0, 0.0]], np.float32)))
+                patch.object(context, "embed_query", return_value=np.array([1.0, 0.0], np.float32)))
 
     def run_retrieve(self, **kwargs):
         a, b, c = self.patches()

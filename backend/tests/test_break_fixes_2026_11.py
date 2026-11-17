@@ -773,7 +773,7 @@ class Finding10BadCharacters(unittest.IsolatedAsyncioTestCase):
 
     async def test_rag_route_names_the_problem_and_never_embeds(self):
         with patch("backend.routes.rag.embeddings.is_available", return_value=True), \
-                patch("backend.routes.rag.embeddings.embed_texts", side_effect=AssertionError("must not embed")):
+                patch("backend.routes.rag.embeddings.embed_documents", side_effect=AssertionError("must not embed")):
             response = await self.client.post("/rag/documents", **self.raw({"name": "s.txt", "kind": "txt", "content": "a\ud800b"}))
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("invalid character", response.json()["detail"])

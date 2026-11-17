@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from backend.rag.schemas import RagChunk
 
-from backend.rag.embeddings import embed_texts, is_available
+from backend.rag.embeddings import embed_query, is_available
 from backend.rag.store import get_rag_store
 
 NO_ROOM = "No room for retrieved context. Start a new chat or reduce max tokens."
@@ -29,7 +29,7 @@ def retrieve_chunks(query: str, top_k: Optional[int], min_score: Optional[float]
     cfg = store.get_config()
     top_k = top_k if top_k is not None else cfg.top_k
     min_score = min_score if min_score is not None else cfg.min_score
-    query_vec = embed_texts([query], cfg.model)[0]
+    query_vec = embed_query(query, cfg.model, cfg.truncate_dim)
     chunks = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=document_ids)
     if not chunks:
         raise ValueError("No matching document passages. Lower the similarity threshold or disable retrieval.")

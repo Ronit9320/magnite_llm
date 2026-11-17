@@ -13,6 +13,7 @@ class RagConfig(BaseModel):
     top_k: int = Field(4, ge=1, le=20, description="Default chunks retrieved per query")
     min_score: float = Field(0.0, ge=0.0, le=1.0, description="Similarity threshold (0 = off)")
     model: str = Field("all-MiniLM-L6-v2", description="sentence-transformers model id")
+    truncate_dim: int = Field(0, ge=0, le=4096, description="Cut embeddings to this many dimensions (0 = full; needs a Matryoshka model)")
 
     @model_validator(mode="after")
     def valid_overlap(self):
@@ -29,6 +30,7 @@ class RagConfigUpdate(BaseModel):
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
     min_score: Optional[float] = Field(default=None, ge=0, le=1)
     model: Optional[str] = None
+    truncate_dim: Optional[int] = Field(default=None, ge=0, le=4096)
 
 
 class RagDocument(BaseModel):

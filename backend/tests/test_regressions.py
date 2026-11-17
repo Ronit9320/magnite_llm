@@ -178,7 +178,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ingest_query_delete_and_model_change_guard(self):
         with patch.object(rag.embeddings,'is_available',return_value=True), \
-             patch.object(rag.embeddings,'embed_texts',side_effect=lambda texts,model: np.array([[1.,0.]]*len(texts), dtype=np.float32)):
+             patch.object(rag.embeddings,'embed_documents',side_effect=lambda texts,model,truncate_dim=0: np.array([[1.,0.]]*len(texts), dtype=np.float32)), \
+             patch.object(rag.embeddings,'embed_query',side_effect=lambda text,model,truncate_dim=0: np.array([1.,0.], dtype=np.float32)):
             response = await self.client.post('/rag/documents', json={'name':'facts.txt','content':'Paris has the Eiffel Tower.'})
             self.assertEqual(response.status_code, 201, response.text)
             doc = response.json()['id']
@@ -191,7 +192,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             empty = await self.client.post('/rag/query', json={'query':'Paris','document_ids':[]})
             self.assertEqual(empty.json()['results'], [])
             with patch.object(rag_context, 'is_available', return_value=True), \
-                 patch.object(rag_context, 'embed_texts', return_value=np.array([[1., 0.]], dtype=np.float32)):
+                 patch.object(rag_context, 'embed_query', return_value=np.array([1., 0.], dtype=np.float32)):
                 chat = await self.client.post('/inference/chat', json={
                     'messages': [{'role': 'user', 'content': 'Paris'}],
                     'rag': {'enabled': True, 'document_ids': [doc]},
@@ -208,18 +209,18 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get('/rag/documents')).json(),[])
 
     async def test_ingest_does_not_register_cancelled_or_stale_embeddings(self):
-        def embed_and_change_model(texts, model):
+        def embed_and_change_model(texts, model, truncate_dim=0):
             rag._get_store().update_config({'model':'changed-during-ingestion'})
             return np.ones((len(texts),2),dtype=np.float32)
         with patch.object(rag.embeddings,'is_available',return_value=True), \
-             patch.object(rag.embeddings,'embed_texts',side_effect=embed_and_change_model):
+             patch.object(rag.embeddings,'embed_documents',side_effect=embed_and_change_model):
             response = await self.client.post('/rag/documents',json={'name':'facts.txt','content':'Some facts'})
             self.assertEqual(response.status_code,409,response.text)
             self.assertEqual(rag._get_store().count_chunks(),0)
         cancelled=threading.Event()
         cancelled.set()
         with patch.object(rag.embeddings,'is_available',return_value=True), \
-             patch.object(rag.embeddings,'embed_texts',return_value=np.ones((1,2),dtype=np.float32)):
+             patch.object(rag.embeddings,'embed_documents',return_value=np.ones((1,2),dtype=np.float32)):
             with self.assertRaises(Exception) as error:
                 rag._ingest_document(rag.RagIngestRequest(name='facts.txt',content='Some facts'),cancelled)
             self.assertIn('cancelled',str(error.exception.detail))

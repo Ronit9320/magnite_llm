@@ -22,6 +22,7 @@ class IndexTestCase(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
         self.store = RagStore(self.dir)
+        self.store.update_config({"model": MODEL})      # pin: the fresh-store default depends on the machine
 
     def fill(self, docs=10, per_doc=50, dim=64, seed=1):
         """Add random documents; returns (matrix of all vectors in insert order, doc id per row, chunk idx per row)."""

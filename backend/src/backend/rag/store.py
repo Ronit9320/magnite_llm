@@ -168,6 +168,15 @@ class RagStore:
         cfg = RagConfig()
         with self._lock, self._conn() as conn:
             rows = conn.execute("SELECT key, value FROM rag_config").fetchall()
+            existing = conn.execute("SELECT model FROM rag_documents WHERE model != '' LIMIT 1").fetchone()
+        if not any(row["key"] == "model" for row in rows):
+            # Nothing saved yet. An existing library keeps the model it was built with, so changing the
+            # recommended default never hides it; a fresh store gets the recommendation for this machine.
+            if existing is not None:
+                cfg.model = existing["model"]
+            else:
+                from backend.rag import embeddings
+                cfg.model = embeddings.recommended_model()
         for row in rows:
             key, value = row["key"], row["value"]
             if not hasattr(cfg, key):
@@ -183,6 +192,9 @@ class RagStore:
         with self._lock, self._conn() as conn:
             if conn.execute("SELECT 1 FROM rag_documents WHERE model != ? LIMIT 1", (cfg.model,)).fetchone():
                 raise ValueError("Clear and re-ingest documents before changing embedding models")
+            if (cfg.truncate_dim != self.get_config().truncate_dim
+                    and conn.execute("SELECT 1 FROM rag_documents LIMIT 1").fetchone()):
+                raise ValueError("Clear and re-ingest documents before changing the embedding size")
             for key, value in cfg.model_dump().items():
                 conn.execute(
                     "INSERT INTO rag_config (key, value) VALUES (?, ?) "

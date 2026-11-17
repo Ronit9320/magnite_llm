@@ -94,7 +94,7 @@ class OctoberApiTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): _resolve_base(record.id)
 
     async def test_raw_and_path_documents_match_and_bad_pdf_is_400(self):
-        with patch.object(rag.embeddings, 'is_available', return_value=True), patch.object(rag.embeddings, 'embed_texts', side_effect=lambda texts, model: np.ones((len(texts),2),dtype=np.float32)):
+        with patch.object(rag.embeddings, 'is_available', return_value=True), patch.object(rag.embeddings, 'embed_documents', side_effect=lambda texts, model, truncate_dim=0: np.ones((len(texts),2),dtype=np.float32)):
             for kind, content in [('html','<script>irrelevant</script><p>Actual answer</p>'), ('md','# Actual answer\n[link](https://example.com)')]:
                 path = self.root/('doc.'+kind)
                 path.write_text(content)

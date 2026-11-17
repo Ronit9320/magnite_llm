@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request
@@ -8,7 +9,8 @@ from pydantic import ValidationError
 from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
-from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content
+from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content, fit_chunking
+from backend.rag.memguard import MemoryGuardTripped
 from backend.rag.schemas import (
     RagConfig,
     RagConfigUpdate,
@@ -22,6 +24,7 @@ from backend.paths import app_home
 from backend.textcheck import MAX_CONTENT_CHARS, ensure_utf8
 
 rag_router = APIRouter(prefix="/rag", tags=["rag"])
+logger = logging.getLogger("backend.rag")
 
 
 def _get_store() -> RagStore:
@@ -36,13 +39,24 @@ def rag_status():
     store = _get_store()
     cfg = store.get_config()
     docs = store.list_documents()
+    embedder = embeddings.status_for(cfg.model, cfg.truncate_dim)
+    size, overlap = fit_chunking(cfg.chunk_size, cfg.chunk_overlap, embedder["max_seq_tokens"])
     return {
         "engine_ready": embeddings.is_available(),
         "model": cfg.model,
         "documents": len(docs),
         "chunks": store.count_chunks(),
         "config": cfg.model_dump(),
+        "embedder": embedder,
+        "chunking": {"chunk_size": size, "chunk_overlap": overlap,
+                     "clamped": (size, overlap) != (cfg.chunk_size, cfg.chunk_overlap)},
     }
+
+
+@rag_router.get("/embedders")
+def list_embedders():
+    """Supported embedding models with their limits, prompts and approximate memory use."""
+    return embeddings.list_presets()
 
 
 # ---- config -------------------------------------------------------------
@@ -119,9 +133,13 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     cfg = store.get_config()
-    chunk_size = body.chunk_size or cfg.chunk_size
-    chunk_overlap = (body.chunk_overlap
-                     if body.chunk_overlap is not None else cfg.chunk_overlap)
+    token_limit = embeddings.status_for(cfg.model, cfg.truncate_dim)["max_seq_tokens"]
+    requested = (body.chunk_size or cfg.chunk_size,
+                 body.chunk_overlap if body.chunk_overlap is not None else cfg.chunk_overlap)
+    chunk_size, chunk_overlap = fit_chunking(requested[0], requested[1], token_limit)
+    if (chunk_size, chunk_overlap) != requested:
+        logger.info("Chunk size %s words clamped to %s to fit the %s-token limit of %s",
+                    requested[0], chunk_size, token_limit, cfg.model)
     try:
         chunks = chunk_text(text, chunk_size, chunk_overlap)
     except ValueError as exc:
@@ -130,7 +148,13 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
         raise HTTPException(status_code=400, detail="Document contains no usable text")
 
     try:
-        vecs = embeddings.embed_texts(chunks, cfg.model)
+        vecs = embeddings.embed_documents(chunks, cfg.model, cfg.truncate_dim)
+        counts = embeddings.count_tokens(chunks, cfg.model)
+        if counts and token_limit:
+            over = sum(1 for n in counts if n > token_limit)
+            if over:
+                logger.warning("%d of %d chunks exceed the embedding model's token limit (%d); their tails "
+                               "were not embedded. Lower the chunk size.", over, len(counts), token_limit)
         if cancelled is not None and cancelled.is_set():
             raise RuntimeError("Document ingestion cancelled before registration")
         rec = store.add_document(
@@ -146,6 +170,8 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MemoryGuardTripped as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Document embedding failed: {exc}") from exc
     return rec
@@ -178,8 +204,10 @@ def query_documents(body: RagQueryRequest):
     top_k = body.top_k or cfg.top_k
     min_score = body.min_score if body.min_score is not None else cfg.min_score
     try:
-        query_vec = embeddings.embed_texts([query], cfg.model)[0]
+        query_vec = embeddings.embed_query(query, cfg.model, cfg.truncate_dim)
         results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=body.document_ids)
+    except MemoryGuardTripped as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RagQueryResponse(query=query, results=results)
