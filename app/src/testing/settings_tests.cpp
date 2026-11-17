@@ -334,6 +334,16 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
     panel.selectCategory(2);
     check(panel.findChild<QGraphicsOpacityEffect*>()->opacity() == 1,
           "reduced motion snaps the category transition");
+    auto* maximized = panel.findChild<QCheckBox*>("startMaximizedToggle");
+    check(maximized && maximized->isChecked() &&
+              preferences.value("appearance/startMaximized", true).toBool(),
+          "open maximized is on by default");
+    if (maximized) {
+        maximized->setChecked(false);
+        check(!preferences.value("appearance/startMaximized", true).toBool(),
+              "open maximized persists when turned off");
+        maximized->setChecked(true);
+    }
     auto* send = panel.findChild<QComboBox*>("sendKeyCombo");
     send->setCurrentIndex(1);
     auto* input = chat.findChild<QPlainTextEdit*>("chatInput");

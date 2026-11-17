@@ -60,6 +60,7 @@ class SettingsPanel : public BasePanel {
     QLineEdit* m_dataDir = nullptr;
     QCheckBox* m_grid = nullptr;
     QCheckBox* m_reducedMotion = nullptr;
+    QCheckBox* m_startMaximized = nullptr;
     QLineEdit* m_profileName = nullptr;
     QComboBox* m_meterStyle = nullptr;
     QComboBox* m_autoCompact = nullptr;

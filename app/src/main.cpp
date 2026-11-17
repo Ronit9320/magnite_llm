@@ -80,7 +80,12 @@ int main(int argc, char *argv[]) {
     if (uiCheck) return runUiCheck(argc > 2 ? QString::fromLocal8Bit(argv[2]) : QString());
 
     MainWindow window;
-    window.show();
+    // Verification runs keep the fixed 1280x820 window so captures stay deterministic.
+    const bool verification = selftest || (argc > 1 && QString(argv[1]) == "--screenshot");
+    if (!verification && QSettings().value("appearance/startMaximized", true).toBool())
+        window.showMaximized();
+    else
+        window.show();
 
     // Dev tool: capture every panel to <dir>/panel-<n>.png, then exit.
     if (argc > 2 && QString(argv[1]) == "--screenshot") {

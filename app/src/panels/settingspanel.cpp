@@ -251,6 +251,11 @@ void SettingsPanel::setupUi() {
     m_reducedMotion->setAccessibleName("Reduce motion");
     row(appearance, "Reduce motion", "Keep activity indicators still and simplify animations.",
         m_reducedMotion);
+    m_startMaximized = new ToggleSwitch("", this);
+    m_startMaximized->setObjectName("startMaximizedToggle");
+    m_startMaximized->setAccessibleName("Open maximized");
+    row(appearance, "Open maximized", "Fill the screen when Magnite Space starts.",
+        m_startMaximized);
     m_scale = new ComboBox;
     m_scale->setObjectName("settingsInterfaceSize");
     m_scale->addItems({"Compact", "Default", "Large"});
@@ -439,7 +444,7 @@ void SettingsPanel::setupUi() {
         connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this,
                 [this] { saveImmediate(); });
     for (auto* control :
-         {m_grid, m_reducedMotion, m_trainingNotice, m_downloadNotice, m_sound, m_automatic})
+         {m_grid, m_reducedMotion, m_startMaximized, m_trainingNotice, m_downloadNotice, m_sound, m_automatic})
         connect(control, &QCheckBox::toggled, this, [this] { saveImmediate(); });
     connect(m_profileName, &QLineEdit::editingFinished, this, [this] {
         Greeting::setUserName(m_profileName->text());
@@ -466,6 +471,7 @@ void SettingsPanel::loadFromSettings() {
     m_profileName->setText(Greeting::userName());
     m_grid->setChecked(s.value("appearance/studio3Ambient", true).toBool());
     m_reducedMotion->setChecked(s.value("appearance/studio3ReducedMotion", false).toBool());
+    m_startMaximized->setChecked(s.value("appearance/startMaximized", true).toBool());
     m_theme->setCurrentIndex(qMax(
         0, m_theme->findData(s.value("appearance/themeMode", Theme::isDark() ? "dark" : "light"))));
     m_scale->setCurrentIndex(qBound(0, s.value("appearance/interfaceSize", 1).toInt(), 2));
@@ -492,6 +498,7 @@ void SettingsPanel::saveImmediate() {
     s.setValue("appearance/interfaceSize", m_scale->currentIndex());
     s.setValue("appearance/studio3Ambient", m_grid->isChecked());
     s.setValue("appearance/studio3ReducedMotion", m_reducedMotion->isChecked());
+    s.setValue("appearance/startMaximized", m_startMaximized->isChecked());
     s.setValue("chat/sendKey", m_sendKey->currentData());
     s.setValue("chat/meterStyle", m_meterStyle->currentData());
     s.setValue("chat/autoCompactPercent", m_autoCompact->currentData());
@@ -710,7 +717,7 @@ void SettingsPanel::resetPreferences() {
     QSettings s;
     for (const auto& key :
          {"appearance/themeMode", "appearance/interfaceSize", "appearance/studio3Ambient",
-          "appearance/studio3ReducedMotion", "chat/sendKey", "chat/meterStyle",
+          "appearance/studio3ReducedMotion", "appearance/startMaximized", "chat/sendKey", "chat/meterStyle",
           "chat/autoCompactPercent", "notifications/training", "notifications/downloads",
           "notifications/sound", "engine/override", "updates/checkOnStartup"})
         s.remove(key);
