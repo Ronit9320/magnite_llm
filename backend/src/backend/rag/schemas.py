@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, model_validator
 class RagConfig(BaseModel):
     """Retrieval configuration (chunking + query defaults)."""
 
-    chunk_size: int = Field(512, ge=64, le=4096, description="Target chunk size in tokens")
-    chunk_overlap: int = Field(64, ge=0, le=1024, description="Overlap between chunks (tokens)")
+    chunk_size: int = Field(320, ge=64, le=4096, description="Target chunk size in words (clamped to the embedding model's limit at ingest)")
+    chunk_overlap: int = Field(40, ge=0, le=1024, description="Overlap between chunks in words")
     top_k: int = Field(4, ge=1, le=20, description="Default chunks retrieved per query")
     min_score: float = Field(0.0, ge=0.0, le=1.0, description="Similarity threshold (0 = off)")
     model: str = Field("all-MiniLM-L6-v2", description="sentence-transformers model id")
@@ -24,8 +24,8 @@ class RagConfig(BaseModel):
 
 
 class RagConfigUpdate(BaseModel):
-    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096)
-    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024)
+    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096, description="Chunk size in words")
+    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024, description="Chunk overlap in words")
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
     min_score: Optional[float] = Field(default=None, ge=0, le=1)
     model: Optional[str] = None
@@ -47,8 +47,8 @@ class RagIngestRequest(BaseModel):
     content: str = Field(default="", description="Raw content (requires 'name')")
     kind: str = Field(default="", description="txt|md|html|pdf; detected from name/path when empty")
     name: str = Field(default="", description="Display name; default from filename")
-    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096)
-    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024)
+    chunk_size: Optional[int] = Field(default=None, ge=64, le=4096, description="Chunk size in words")
+    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024, description="Chunk overlap in words")
 
 
 class RagQueryRequest(BaseModel):
