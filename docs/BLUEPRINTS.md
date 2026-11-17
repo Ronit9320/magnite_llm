@@ -47,7 +47,8 @@ format. Exact acceptance evidence and platform coverage are in the
 | Ollama | Local text | Use a Transformers checkpoint for Model and Reasoning nodes | Use a supported loaded engine for Pi |
 | Package without optional ML dependencies | GGUF with llama.cpp | Input, Dataset, Transform, Output, and fixed approval steps are available. Use a package with ML support for Model, Reasoning, or adapter training. | Pi can use a supported loaded GGUF model |
 
-Use unquantized decoder-only Transformers weights for Blueprint generation.
+Use a complete unquantized Safetensors checkpoint for a decoder-only
+Transformers model, including its local tokenizer files.
 Adapters need PEFT LoRA weights with the same base checkpoint, compatible
 tokenizer, and no shared bias. The readiness check estimates required memory
 from the checkpoint weights, device, and output budget. If the estimate exceeds
