@@ -51,6 +51,9 @@ When RAG supplies passages, a `sources` event precedes the reply deltas.
 It contains an array of passages with `document_name`, a zero-based chunk
 `index`, and the `text` included in the model context. Chat `rag.document_ids`
 limits retrieval to the listed sources. Omitting it searches all indexed documents.
+Context is packed from whole passages in rank order; only when not even the top
+passage fits is it trimmed (at a sentence end), and the `sources` text is exactly
+what the model saw.
 
 The terminal event can instead be `{"error":"message"}`. A stream that ends
 without `done` or `error` is incomplete. Startup errors may return an ordinary
@@ -90,10 +93,12 @@ stream requests cleanup; native work may stop only after yielding or returning.
 | Activate / clear adapter | `POST /inference/adapter` with `adapter_id`; empty string clears |
 | Export / download | `POST /adapters/export/{id}`, then GET the returned `download_path` |
 | Import / delete | `POST /adapters/import` with local ZIP `path`; `DELETE /adapters/{id}` |
-| RAG status/config | `GET /rag/status`, `GET /rag/config`, `POST /rag/config` with partial settings |
+| RAG status/config | `GET /rag/status` (also reports the `embedder` and the effective `chunking`), `GET /rag/config`, `POST /rag/config` with partial settings (`model`, `truncate_dim`, `chunk_size`, `chunk_overlap`, `top_k`, `min_score`). Changing the model or `truncate_dim` while documents exist returns 409; use reindex. |
+| Embedding models | `GET /rag/embedders`: supported models with token limit, dimensions, approximate memory and whether truncation is supported. One model is loaded at a time and unloaded after 5 idle minutes. |
 | Ingest/list documents | `POST /rag/documents` with `path` or `name`/`content`; `GET /rag/documents` |
 | Retrieve | `POST /rag/query` with `query`, optional `top_k`, `min_score`, `document_ids` |
-| Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` |
+| Delete/clear index | `DELETE /rag/documents/{id}`, `POST /rag/clear` (409 while a reindex runs) |
+| Reindex | `POST /rag/reindex` with `model` and optional `truncate_dim` re-embeds the stored chunks (original files are not needed) and switches the library in one step. All or nothing: a failure, cancellation or low-memory stop leaves the index untouched. Errors: 400 empty model or unsupported truncation, 409 another reindex or an ingest conflict, 503 embeddings unavailable, memory guard stop or embedding failure. |
 | Context usage | `POST /inference/context-usage` with `messages`, `max_tokens`; returns `used`, `reserved`, `limit`, `fill`, `exact` (409 when no model is loaded; works during generation) |
 | Compact a long chat | `POST /inference/compact` with `messages`, optional `previous_summary`, `max_tokens`, `target_fill`, `keep_recent`; returns `summary`, `covered`, `method` (409 while busy) |
 | Runtime engine preference | `POST /inference/settings` with `engine_override`: 0 Auto, 1 vLLM, 2 llama.cpp |

@@ -10,7 +10,8 @@ from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings
 from backend.rag.chunking import chunk_text, detect_kind, extract_text, extract_content, fit_chunking
-from backend.rag.memguard import MemoryGuardTripped
+from backend.rag.batching import IngestCancelled
+from backend.rag.memguard import MemoryGuard, MemoryGuardTripped, limits_from_env
 from backend.rag.schemas import (
     RagConfig,
     RagConfigUpdate,
@@ -18,6 +19,7 @@ from backend.rag.schemas import (
     RagIngestRequest,
     RagQueryRequest,
     RagQueryResponse,
+    RagReindexRequest,
 )
 from backend.rag.store import RagStore, get_rag_store, set_rag_store
 from backend.paths import app_home
@@ -96,6 +98,8 @@ async def ingest_document(body: RagIngestRequest, request: Request):
 
 def _ingest_document(body: RagIngestRequest, cancelled=None):
     store = _get_store()
+    if store.reindexing:
+        raise HTTPException(status_code=409, detail="Reindex in progress")
     if len(body.content) > MAX_CONTENT_CHARS:
         raise HTTPException(status_code=413, detail=f"Content too long (limit {MAX_CONTENT_CHARS:,} characters)")
     if not body.path.strip() and not body.content.strip():
@@ -179,13 +183,57 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
 
 @rag_router.delete("/documents/{doc_id}", status_code=204)
 def delete_document(doc_id: str):
-    if not _get_store().delete_document(doc_id):
+    try:
+        deleted = _get_store().delete_document(doc_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail=f"No document '{doc_id}'")
 
 
 @rag_router.post("/clear", status_code=204)
 def clear_documents():
-    _get_store().clear()
+    try:
+        _get_store().clear()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+# ---- reindex ------------------------------------------------------------
+
+
+@rag_router.post("/reindex", response_model=RagConfig)
+async def reindex(body: RagReindexRequest, request: Request):
+    """Re-embed every stored chunk with another model (or size) without the original files."""
+    try:
+        return await request_work(request, lambda cancelled: _reindex(body, cancelled))
+    except ClientDisconnected:
+        return Response(status_code=499)
+
+
+def _reindex(body: RagReindexRequest, cancelled=None):
+    store = _get_store()
+    model = body.model.strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="'model' is required")
+    spec = embeddings.spec_for(model)
+    if body.truncate_dim and embeddings.spec_is_known(spec) and not spec.supports_truncation:
+        raise HTTPException(status_code=400, detail=f"{model} does not support embedding truncation; use truncate_dim 0")
+    if not embeddings.is_available():
+        raise HTTPException(status_code=503, detail="Embeddings unavailable; install the ML extras")
+    try:
+        return store.reindex(
+            model, body.truncate_dim,
+            lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim),
+            cancelled=cancelled, guard=MemoryGuard(limits_from_env()))
+    except IngestCancelled as exc:
+        raise HTTPException(status_code=499, detail=str(exc)) from exc
+    except MemoryGuardTripped as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Reindex failed: {exc}") from exc
 
 
 # ---- retrieval ----------------------------------------------------------

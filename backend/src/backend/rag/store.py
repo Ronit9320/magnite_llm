@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 import sqlite3
 
@@ -11,6 +12,7 @@ from typing import Optional
 
 import numpy as np
 
+from backend.rag.batching import embed_batches
 from backend.rag.schemas import RagChunk, RagConfig, RagDocument
 
 _DOC_SCHEMA = """
@@ -148,7 +150,13 @@ class RagStore:
         self._db_path = os.path.join(data_dir, "rag.db")
         self._lock = threading.RLock()
         self._indexes: dict = {}          # model -> _SearchIndex (derived; rebuilt lazily)
+        self._reindexing = False
         self._init_db()
+        for stale in glob.glob(os.path.join(data_dir, "reindex-*.tmp")):     # left by a crashed reindex
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
 
     def _init_db(self) -> None:
         def init(conn):
@@ -224,6 +232,7 @@ class RagStore:
         tokens = sum(len(c.split()) for c in chunks)
 
         with self._lock:
+            self._refuse_during_reindex()
             if model != self.get_config().model:
                 raise ValueError("Embedding model changed during ingestion; retry with the current configuration")
             dim = embeddings.shape[1]
@@ -286,6 +295,7 @@ class RagStore:
 
     def delete_document(self, doc_id: str) -> bool:
         with self._lock, self._conn() as conn:
+            self._refuse_during_reindex()
             cur = conn.execute("DELETE FROM rag_documents WHERE id = ?", (doc_id,))
             conn.execute("DELETE FROM rag_chunks WHERE doc_id = ?", (doc_id,))
             conn.commit()
@@ -294,6 +304,7 @@ class RagStore:
 
     def clear(self) -> None:
         with self._lock, self._conn() as conn:
+            self._refuse_during_reindex()
             conn.execute("DELETE FROM rag_chunks")
             conn.execute("DELETE FROM rag_documents")
             conn.commit()
@@ -305,6 +316,94 @@ class RagStore:
         return int(row["n"])
 
     # ---- retrieval ------------------------------------------------------
+
+    # ---- reindex --------------------------------------------------------
+
+    @property
+    def reindexing(self) -> bool:
+        return self._reindexing
+
+    def _refuse_during_reindex(self) -> None:
+        if self._reindexing:
+            raise ValueError("Reindex in progress")
+
+    def _chunk_page(self, after_id: int, limit: int) -> list:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, text FROM rag_chunks WHERE id > ? ORDER BY id LIMIT ?",
+                                (after_id, limit)).fetchall()
+        return [(r["id"], r["text"]) for r in rows]
+
+    def reindex(self, model: str, truncate_dim: int, embed_fn, cancelled=None, progress=None,
+                batch: int = 64, guard=None) -> RagConfig:
+        """Re-embed every stored chunk with ``model`` and switch the library to it, all or nothing.
+
+        New vectors are staged in a temporary on-disk array (bounded memory), then written in one
+        transaction together with every document's model and the config. Until that commit, search
+        keeps serving the old vectors; any failure or cancellation leaves the library untouched.
+        Adding, deleting and clearing are refused while this runs.
+        """
+        with self._lock:
+            self._refuse_during_reindex()
+            cfg = self.get_config()
+            with self._conn() as conn:
+                total = conn.execute("SELECT COUNT(*) AS n FROM rag_chunks").fetchone()["n"]
+                other = conn.execute("SELECT 1 FROM rag_documents WHERE model != ? LIMIT 1", (model,)).fetchone()
+            if total == 0:
+                return self.update_config({"model": model, "truncate_dim": truncate_dim})
+            if model == cfg.model and truncate_dim == cfg.truncate_dim and other is None:
+                return cfg
+            self._reindexing = True
+        path = os.path.join(self._data_dir, f"reindex-{uuid.uuid4().hex[:8]}.tmp")
+        staged = {"array": None}
+        ids: list = []
+
+        def batches():
+            last = 0
+            while True:
+                page = self._chunk_page(last, batch)
+                if not page:
+                    return
+                last = page[-1][0]
+                ids.extend(chunk_id for chunk_id, _ in page)
+                yield [text for _, text in page]
+
+        def write(offset: int, vectors: np.ndarray) -> None:
+            if staged["array"] is None:
+                staged["array"] = np.lib.format.open_memmap(path, mode="w+", dtype=np.float32,
+                                                            shape=(total, vectors.shape[1]))
+            elif vectors.shape[1] != staged["array"].shape[1]:
+                raise ValueError("Embedding dimension changed between batches")
+            staged["array"][offset:offset + vectors.shape[0]] = vectors
+
+        try:
+            embed_batches(batches(), embed_fn, write, cancelled, progress, guard)
+            array = staged["array"]
+            if array is None or len(ids) != total:
+                raise ValueError("The library changed during reindex; nothing was applied")
+            array.flush()
+            self._apply_reindex(array, ids, model, truncate_dim)
+            return self.get_config()
+        finally:
+            staged["array"] = None
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            with self._lock:
+                self._reindexing = False
+
+    def _apply_reindex(self, array: np.ndarray, ids: list, model: str, truncate_dim: int) -> None:
+        with self._lock:
+            with self._conn() as conn:               # commits on success, rolls back on any error
+                for start in range(0, len(ids), 1000):
+                    stop = min(start + 1000, len(ids))
+                    conn.executemany("UPDATE rag_chunks SET embedding = ? WHERE id = ?",
+                                     [(array[i].tobytes(), ids[i]) for i in range(start, stop)])
+                conn.execute("UPDATE rag_documents SET model = ?", (model,))
+                for key, value in (("model", model), ("truncate_dim", str(truncate_dim))):
+                    conn.execute("INSERT INTO rag_config (key, value) VALUES (?, ?) "
+                                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+            self._invalidate()
 
     def _invalidate(self) -> None:
         with self._lock:

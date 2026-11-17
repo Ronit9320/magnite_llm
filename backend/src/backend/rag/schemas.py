@@ -33,6 +33,11 @@ class RagConfigUpdate(BaseModel):
     truncate_dim: Optional[int] = Field(default=None, ge=0, le=4096)
 
 
+class RagReindexRequest(BaseModel):
+    model: str = Field(description="Embedding model to switch the whole library to")
+    truncate_dim: int = Field(0, ge=0, le=4096, description="Cut embeddings to this many dimensions (0 = full)")
+
+
 class RagDocument(BaseModel):
     id: str
     name: str
