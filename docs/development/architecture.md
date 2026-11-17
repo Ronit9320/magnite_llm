@@ -381,6 +381,16 @@ For RAG-enabled chat, the latest user message becomes the retrieval query. Retri
 
 Missing dependencies, an empty index, no matching passages, or insufficient context space produce errors instead of silently generating without retrieval. Explicit `/rag/query` results provide source/chunk metadata.
 
+### UI contract: the panel must show the parameters in use
+
+Whichever embedding model is configured, or whenever it is changed (config, reindex, a new default), the Knowledge panel must show the parameters the backend is actually using, not hardcoded or stored-only values. The backend side of this is guaranteed by `GET /rag/status` and tested in `backend/tests/test_rag_ui_contract.py`:
+
+- `embedder`: the configured model's `label`, `max_seq_tokens`, `dim`, `loaded`, `device` and `dtype`.
+- `chunking`: the **effective** `chunk_size` and `chunk_overlap` (what ingest will really use after clamping to the model's token limit) and `clamped`. The stored values in `config` are not changed by clamping, so `config.chunk_size` can differ from `chunking.chunk_size`.
+- `config` always equals `GET /rag/config`; `GET /rag/embedders` lists every preset with the same limits and dimensions that `status` reports.
+
+Panel rules: read `status` (not constants) on open and after every config change, reindex or document change; show the effective chunk size and a "clamped for this model" hint when `chunking.clamped` is true; derive spin-box limits, defaults and the displayed dimension from `status`/`embedders`; do not assume 512/64 or 384 dimensions; and when the model is switched, refresh everything from `status` instead of keeping old values.
+
 ### Reindex
 
 `POST /rag/reindex` re-embeds the stored chunk text with another model (and optional `truncate_dim`), so original files are not needed. New vectors are staged in a temporary memory-mapped file, then one SQLite transaction rewrites every vector, every document's model and the saved configuration. Search keeps using the old vectors until that commit; a failure, cancellation or memory-guard stop leaves everything untouched, and adding, deleting and clearing are refused while it runs. Changing the model or `truncate_dim` through `POST /rag/config` is still blocked while documents exist.

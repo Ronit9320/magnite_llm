@@ -45,7 +45,10 @@ and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance wo
   management need further work; model-pull history is not durable and has no cancel API.
   RAG ingest and reindex report progress (`GET /rag/activity`) and stop within one
   embedding batch, but the desktop Knowledge panel does not show progress, embedding
-  presets or reindex yet (API only).
+  presets or reindex yet (API only). It also still starts from hardcoded 512/64 chunk
+  values and shows the stored settings, so after a model change it can differ from the
+  effective chunking that `GET /rag/status` reports; see "UI contract" in
+  `docs/development/architecture.md`.
 - RAG: scanned/image-only PDFs have no OCR, and `pypdf` extraction can mangle tables and
   multi-column layouts. Retrieval is exact and in memory (float16 index capped at 512 MB,
   about 250,000 chunks at 1,024 dimensions; larger libraries are streamed from disk and
