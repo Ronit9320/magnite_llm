@@ -241,5 +241,5 @@ All of Phase A shipped on branch `rag-engine-update`, one commit per task. Devia
 - **Chunking:** CJK characters and tokens over 24 characters are weighted; after the first batch loads the model, real token counts trigger re-chunking (up to 3 times) because number-heavy text measured ~2.3 tokens/word against the 1.7 estimate.
 - **Reindex** takes `truncate_dim: int = 0` and refuses unsupported truncation with 400; staging is an on-disk memmap.
 - **Ingest/reindex are serialized** (queued, cancellable while queued) and `GET /rag/activity` reports progress.
-- **UI contract (requirement, 2026-11-18):** whatever model is used, the Knowledge panel must display the parameters the backend is using (`GET /rag/status` `embedder` and effective `chunking`). Documented in architecture.md, guarded by `test_rag_ui_contract.py`; the C++ panel still hardcodes 512/64 and shows stored values, so it needs updating.
-- **Not done (Phase B/C):** hybrid FTS5 search, reranker, GGUF embedding backend, Docling; C++ UI for presets, reindex and progress.
+- **UI contract (requirement, 2026-11-18):** whatever model is used, the Knowledge panel must display the parameters the backend is using (`GET /rag/status` `embedder` and effective `chunking`). Documented in architecture.md, guarded by `test_rag_ui_contract.py`; the Knowledge panel now follows it (branch `rag-knowledge-ui`), with a model picker, reindex, progress and speed hints.
+- **Not done (Phase B/C):** hybrid FTS5 search, reranker, GGUF embedding backend, Docling.

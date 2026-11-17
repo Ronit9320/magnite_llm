@@ -128,7 +128,7 @@ An unexpected backend exit causes the desktop to abort outstanding requests, cle
 | --- | --- | --- |
 | `ModelsPanel` | Registry cards, Hub search, pulls, deletion, workspace overview, sending a selected model to Chat | `/models`, overview reads from other services |
 | `TrainingPanel` | Base-model and dataset selection, dataset import, training configuration, progress/loss display, cancellation | `/models`, `/datasets`, `/training` |
-| `RagPanel` | Knowledge drawer inside the Conversation workspace: document ingestion/deletion, retrieval configuration, query experiments. It does not yet expose embedding presets, reindex or ingest progress | `/rag` |
+| `RagPanel` | Knowledge drawer inside the Conversation workspace: document ingestion/deletion, embedding-model picker (reindex when documents exist), the embedder and effective chunking from `GET /rag/status`, ingest/reindex progress with cancel, RAM and indexing-time hints, retrieval configuration, query experiments | `/rag` |
 | `AdaptersPanel` | Adapter listing, activation/clearing, deletion, ZIP import/export | `/adapters`, `/inference/adapter`, `/inference/status` |
 | `ChatPanel` | Model loading, sampling settings, in-memory conversation, streaming response rendering, stop/new chat, optional retrieval | `/models`, `/inference` |
 | `SettingsPanel` | Engine preference, data-directory preference, ambient motion and reduced motion | QSettings; MainWindow forwards runtime engine changes |
@@ -388,6 +388,8 @@ Whichever embedding model is configured, or whenever it is changed (config, rein
 - `embedder`: the configured model's `label`, `max_seq_tokens`, `dim`, `loaded`, `device` and `dtype`.
 - `chunking`: the **effective** `chunk_size` and `chunk_overlap` (what ingest will really use after clamping to the model's token limit) and `clamped`. The stored values in `config` are not changed by clamping, so `config.chunk_size` can differ from `chunking.chunk_size`.
 - `config` always equals `GET /rag/config`; `GET /rag/embedders` lists every preset with the same limits and dimensions that `status` reports.
+
+The panel follows these rules (`app/src/panels/ragpanel.cpp`, with the parsing and the indexing-time estimate in `ragparams.cpp`; covered by `--ui-check` and `--selftest`). Time estimates use `embedder.measured_chunks_per_s` for the configured model, otherwise the preset's `reference_chunks_per_s` for the loaded or `expected_device`, applied to the library's chunk count or a 1,000-page (3,000-chunk) document; above about 10 minutes it shows a warning and suggests the Light model, without blocking. Presets heavier than the `recommended` one get a memory warning.
 
 Panel rules: read `status` (not constants) on open and after every config change, reindex or document change; show the effective chunk size and a "clamped for this model" hint when `chunking.clamped` is true; derive spin-box limits, defaults and the displayed dimension from `status`/`embedders`; do not assume 512/64 or 384 dimensions; and when the model is switched, refresh everything from `status` instead of keeping old values.
 
