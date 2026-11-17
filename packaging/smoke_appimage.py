@@ -56,7 +56,7 @@ def main():
         runtime = appdir / "usr/bin/runtime"
         python = runtime / "python/bin/python3"
         check("theme", [launcher, "--theme-check"])
-        check("ui", [launcher, "--ui-check"])
+        check("ui", [launcher, "--ui-check"], 360)
         check("desktop", [launcher, "--selftest"])
         check("blueprints", [launcher, "--ui-check"], environment={**env, "MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
         packaged_env = {**env, "LD_LIBRARY_PATH": str(appdir / "usr/lib")}

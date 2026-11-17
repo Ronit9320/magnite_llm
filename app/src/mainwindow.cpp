@@ -1157,7 +1157,8 @@ void MainWindow::inferenceSelfTest(std::shared_ptr<int> failCount,
                                    std::function<void()> finish) {
     // Load a tiny GGUF repo through the real /inference/load path, then
     // stream a chat through BackendClient::streamPost and count the deltas.
-    const QString ref = "aladar/tiny-random-LlamaForCausalLM-GGUF";
+    const QString ref = qEnvironmentVariable("MAGNITE_SELFTEST_INFERENCE_MODEL",
+        "aladar/tiny-random-LlamaForCausalLM-GGUF");
     QJsonObject body;
     body["model"] = ref;
     body["engine"] = "llamacpp";

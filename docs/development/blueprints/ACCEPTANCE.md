@@ -36,6 +36,9 @@ The offline backend suite passed 437 checks with one macOS-only skip. The
 native build, the 16 packaging tests and the update manifest CTest passed.
 Local logs and screenshots are under `build/packaging/blueprints-phase6/`
 and `design/blueprints-preview/native-acceptance/`.
+For an offline GGUF smoke check, set `MAGNITE_SELFTEST_INFERENCE_MODEL` to an
+absolute path to a complete cached GGUF file. The default selftest fixture
+uses the Hub to look up the model file by repository name.
 
 ## Package verification
 

@@ -723,8 +723,10 @@ int runLiveBlueprintChecks(const QString &captures) {
     check(visibleText(panel, runId) && visibleButton(panel, "Deny"), "chat links to the same pending run in Blueprints");
     client.abortAll();
     client.setBaseUrl({});
-    auto *offlineDeny = visibleButton(panel, "Deny");
-    check(offlineDeny && !offlineDeny->isEnabled(), "pending decisions are unavailable while disconnected");
+    check(until([&] {
+        const auto *deny = visibleButton(panel, "Deny");
+        return deny && !deny->isEnabled();
+    }), "pending decisions are unavailable while disconnected");
     client.setBaseUrl(manager.baseUrl());
     check(until([&] { return visibleButton(panel, "Deny") && visibleButton(panel, "Deny")->isEnabled(); }),
           "the pending decision is restored on reconnect");
