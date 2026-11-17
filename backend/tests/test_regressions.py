@@ -30,6 +30,7 @@ from backend.models.registry import ModelRegistry
 from backend.models.schemas import ModelRecord
 from backend.models.store import ModelStore
 from backend.rag import context as rag_context
+from backend.rag.schemas import RagChunk
 from backend.rag.chunking import chunk_text, _strip_markdown
 from backend.training.datasets import DatasetStore, _normalize_jsonl, _normalize_csv
 from backend.training.jobs import TrainingJobManager
@@ -227,7 +228,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_rag_context_budget_and_failure(self):
         req = ChatRequest(messages=[ChatMessage(role='user',content='question')],max_tokens=256,rag={'enabled':True})
         engine = FakeEngine('test')
-        with patch.object(inference,'injectable_context',return_value='context '*2000):
+        big = RagChunk(document_id='d',document_name='big.txt',index=0,text='context '*2000,tokens=2000,score=0.9)
+        with patch.object(inference,'retrieve_chunks',return_value=[big]):
             messages = inference._with_rag_context(req,engine)
             self.assertEqual(messages[0].role,'system')
             self.assertLessEqual(engine.count_messages(messages)+req.max_tokens,engine.context_size())

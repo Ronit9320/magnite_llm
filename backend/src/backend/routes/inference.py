@@ -19,7 +19,7 @@ from backend.inference.schemas import (ChatMessage, ChatRequest, ChatRole, Compa
                                        InferenceStatus)
 from backend.inference.engines.base import EngineUnloaded
 from backend.inference.supervisor import get_supervisor
-from backend.rag.context import injectable_context
+from backend.rag.context import pack_context, retrieve_chunks
 from backend.request_work import request_work, watch_disconnect, ClientDisconnected
 
 router = APIRouter(prefix="/inference", tags=["inference"])
@@ -47,29 +47,16 @@ def _with_rag_context(req: ChatRequest, engine, citations=None) -> list[ChatMess
     last_user = next((m for m in reversed(messages) if m.role == ChatRole.user), None)
     if last_user is None:
         raise ValueError("RAG requires a user message")
-    sources = []
-    context = injectable_context(last_user.content, top_k=req.rag.top_k, min_score=req.rag.min_score,
-                                 document_ids=req.rag.document_ids, sources=sources)
-    low, high = 0, len(context)
-    while low < high:
-        mid = (low + high + 1) // 2
-        candidate = [ChatMessage(role=ChatRole.system, content=context[:mid])] + messages
-        if engine.count_messages(candidate) <= limit:
-            low = mid
-        else:
-            high = mid - 1
-    if low < min(128, len(context)):
-        raise ValueError("No room for retrieved context. Start a new chat or reduce max tokens.")
+    chunks = retrieve_chunks(last_user.content, req.rag.top_k, req.rag.min_score, req.rag.document_ids)
+
+    def fits(text: str) -> bool:
+        return engine.count_messages([ChatMessage(role=ChatRole.system, content=text)] + messages) <= limit
+
+    context, used = pack_context(chunks, fits)
     if citations is not None:
-        for offset, source in sources:
-            if offset >= low:
-                break
-            citations.append({
-                "document_name": source.document_name,
-                "index": source.index,
-                "text": source.text[:low - offset],
-            })
-    return [ChatMessage(role=ChatRole.system, content=context[:low])] + messages
+        for chunk in used:
+            citations.append({"document_name": chunk.document_name, "index": chunk.index, "text": chunk.text})
+    return [ChatMessage(role=ChatRole.system, content=context)] + messages
 
 
 @router.get("/status", response_model=InferenceStatus)
