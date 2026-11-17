@@ -236,6 +236,24 @@ struct Fixture : QTcpServer {
     }
     QPointer<QTcpSocket> chatSocket;
     int starts = 0, clears = 0;
+    // Knowledge (RAG): GET /rag/status follows ragModel the way the backend does (effective
+    // chunking clamped to the model); POSTs to /rag/config are recorded and can fail.
+    QString ragModel = "all-MiniLM-L6-v2";
+    int ragChunks = 36, ragDocuments = 2, ragConfigStatus = 200;
+    QStringList ragConfigRequests;
+    QByteArray ragStatusJson() const {
+        const bool bge = ragModel == "BAAI/bge-m3";
+        return QJsonDocument(QJsonObject{{"engine_ready",true},{"model",ragModel},{"documents",ragDocuments},{"chunks",ragChunks},
+            {"config",QJsonObject{{"chunk_size",bge?320:512},{"chunk_overlap",bge?40:64},{"top_k",4},{"min_score",0.0},{"model",ragModel},{"truncate_dim",0}}},
+            {"embedder",QJsonObject{{"model",ragModel},{"label",bge?"Quality":"Light"},{"max_seq_tokens",bge?1024:256},{"dim",bge?1024:384},
+                {"loaded",!bge},{"device",bge?QJsonValue():QJsonValue("cpu")},{"dtype",bge?QJsonValue():QJsonValue("float32")},{"measured_chunks_per_s",QJsonValue()}}},
+            {"chunking",QJsonObject{{"chunk_size",bge?320:149},{"chunk_overlap",bge?40:37},{"clamped",!bge},{"max_chunk_size",bge?601:149}}}}).toJson(QJsonDocument::Compact);
+    }
+    static QByteArray ragEmbeddersJson() {
+        return R"([{"model_id":"sentence-transformers/all-MiniLM-L6-v2","label":"Light","max_seq_tokens":256,"dim":384,"approx_ram_mb":450,"recommended":true,"expected_device":"cpu","reference_hardware":"Apple M1, 8 GB","reference_chunks_per_s":{"cpu":40.0}},)"
+               R"({"model_id":"BAAI/bge-m3","label":"Quality","max_seq_tokens":8192,"dim":1024,"approx_ram_mb":3000,"recommended":false,"expected_device":"cpu","reference_hardware":"Apple M1, 8 GB","reference_chunks_per_s":{"cpu":0.2,"gpu":2.0}},)"
+               R"({"model_id":"Qwen/Qwen3-Embedding-0.6B","label":"Alternative","max_seq_tokens":32768,"dim":1024,"approx_ram_mb":3000,"recommended":false,"expected_device":"cpu","reference_hardware":"Apple M1, 8 GB","reference_chunks_per_s":{"cpu":0.2,"gpu":2.0}}])";
+    }
     Fixture() {
         connect(this,&QTcpServer::newConnection,this,[this]() {
             while (auto *socket = nextPendingConnection()) {
@@ -381,7 +399,15 @@ struct Fixture : QTcpServer {
                     else if (path == "/system/logs") body=R"({"text":"Runtime ready\nNo model loaded","truncated":false})";
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
-                    else if (path == "/rag/status") body=R"({"documents":2,"chunks":36,"engine_ready":true,"model":"local embeddings"})";
+                    else if (path == "/rag/status") body=ragStatusJson();
+                    else if (path == "/rag/embedders") body=ragEmbeddersJson();
+                    else if (path == "/rag/config" && method == "POST") {
+                        const QJsonObject request=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object();
+                        ragConfigRequests << QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Compact));
+                        status=ragConfigStatus;
+                        if (status!=200) body=R"({"detail":"Chunk overlap must be smaller than chunk size"})";
+                        else if (request.contains("model")) ragModel=request["model"].toString();
+                    }
                     else if (path == "/rag/config") body=R"({"chunk_size":512,"chunk_overlap":64,"top_k":4})";
                     else if (path == "/rag/query") { status=failQuery?500:200; body=failQuery?R"({"detail":"Fixture query failure"})":R"({"results":[{"score":0.92,"document_name":"Project guide.md","index":0,"text":"Magnite keeps the training and inference workflows in your local workspace."}]})"; }
                     else if (path == "/rag/clear") { ++clears; status=204; }
@@ -1515,6 +1541,42 @@ int runUiCheck(const QString &captures) {
         fixture.removedModels.clear(); fixture.deleteStatus=204;
     }
     knowledge.show(); pump();
+    {
+        // The panel shows what GET /rag/status reports, never hardcoded or stored values.
+        auto *modelInfo=knowledge.findChild<QLabel *>("ragModelInfo");
+        auto *chunkInfo=knowledge.findChild<QLabel *>("ragChunkingInfo");
+        auto *clampHint=knowledge.findChild<QLabel *>("ragClampHint");
+        auto *sizeSpin=knowledge.findChild<QSpinBox *>("ragChunkSize");
+        auto *overlapSpin=knowledge.findChild<QSpinBox *>("ragChunkOverlap");
+        auto *topK=knowledge.findChild<QSpinBox *>("ragTopK");
+        check(modelInfo && chunkInfo && clampHint && sizeSpin && overlapSpin && topK,"knowledge exposes model, chunking and retrieval controls");
+        if (modelInfo && chunkInfo && clampHint && sizeSpin && overlapSpin && topK) {
+            const QString info=modelInfo->text();
+            check(info.contains("Light") && info.contains("all-MiniLM-L6-v2") && info.contains("384 dimensions") && info.contains("256 tokens") && info.contains("cpu"),
+                  "knowledge shows the configured embedder's label, id, dimensions, token limit and device");
+            check(sizeSpin->value()==149 && sizeSpin->maximum()==149 && overlapSpin->value()==37 && overlapSpin->maximum()==148 && topK->value()==4,
+                  "chunk settings show the effective values and the model's limits");
+            check(chunkInfo->text().contains("149") && chunkInfo->text().contains("37") && clampHint->isVisibleTo(&knowledge) && clampHint->text().contains("256"),
+                  "clamped chunking is explained for this model");
+            bool stale=false; for (auto *label:knowledge.findChildren<QLabel *>()) stale=stale||label->text().contains("512");
+            check(!stale && sizeSpin->value()!=512 && overlapSpin->value()!=64,"no hardcoded 512/64 chunk values are shown");
+
+            fixture.ragModel="BAAI/bge-m3"; knowledge.refresh(); waitUntil([&]() { return modelInfo->text().contains("Quality"); },2000);
+            check(modelInfo->text().contains("1024 dimensions") && modelInfo->text().contains("BAAI/bge-m3") && modelInfo->text().contains("Not loaded") && sizeSpin->value()==320 &&
+                  sizeSpin->maximum()==601 && overlapSpin->maximum()==319 && !clampHint->isVisibleTo(&knowledge),
+                  "after a model change every parameter is refreshed from status");
+
+            topK->setValue(6); waitUntil([&]() { return fixture.ragConfigRequests.size()==1; },2000);
+            const QJsonObject sent=QJsonDocument::fromJson(fixture.ragConfigRequests.value(0).toUtf8()).object();
+            check(sent.value("top_k").toInt()==6 && !sent.contains("chunk_size") && !sent.contains("model"),"changing Top-K saves only Top-K");
+            fixture.ragConfigStatus=422; overlapSpin->setValue(50); waitUntil([&]() { return fixture.ragConfigRequests.size()==2; },2000); pump(200);
+            auto *status=knowledge.findChild<QLabel *>("statusLabel");
+            check(status->text().contains("Chunk overlap must be smaller than chunk size") && status->property("state")=="error",
+                  "a rejected setting shows the backend's message");
+            fixture.ragConfigStatus=200; fixture.ragConfigRequests.clear(); fixture.ragModel="all-MiniLM-L6-v2";
+            knowledge.refresh(); waitUntil([&]() { return modelInfo->text().contains("Light"); },2000);
+        }
+    }
     auto docs=knowledge.findChildren<RagDocCard *>();
     check(docs.size()==2,"populated document cards");
     if (docs.size()==2) {

@@ -96,6 +96,28 @@ void RagPanel::setupUi() {
     m_emptyState->setLayout(emptyLayout);
     documents->addWidget(m_emptyState);
 
+    // The embedding model and chunking the backend is really using (GET /rag/status).
+    auto *modelCard = Surface::card(this, "Embedding model");
+    modelCard->parentWidget()->setObjectName("ragModelCard");
+    modelCard->parentWidget()->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    m_modelInfo = new QLabel("Reading the embedding model…", this);
+    m_modelInfo->setObjectName("ragModelInfo");
+    m_modelInfo->setTextFormat(Qt::PlainText);
+    m_modelInfo->setWordWrap(true);
+    modelCard->addWidget(m_modelInfo);
+    m_chunkingInfo = new QLabel(this);
+    m_chunkingInfo->setObjectName("ragChunkingInfo");
+    m_chunkingInfo->setTextFormat(Qt::PlainText);
+    m_chunkingInfo->setWordWrap(true);
+    modelCard->addWidget(m_chunkingInfo);
+    m_clampHint = new QLabel(this);
+    m_clampHint->setObjectName("ragClampHint");
+    m_clampHint->setTextFormat(Qt::PlainText);
+    m_clampHint->setWordWrap(true);
+    m_clampHint->hide();
+    modelCard->addWidget(m_clampHint);
+    layout->addWidget(modelCard->parentWidget());
+
     // Retrieval config as a surface card (design doc §4/§8).
     auto *configCard = new QFrame(this);
     configCard->setObjectName("ragConfigCard");
@@ -106,22 +128,27 @@ void RagPanel::setupUi() {
     form->setSpacing(8);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
+    // No values until GET /rag/status says what the configured model really uses.
     m_chunkSizeSpin = new SpinBox(this);
-    m_chunkSizeSpin->setRange(64, 4096);
-    m_chunkSizeSpin->setSingleStep(64);
-    m_chunkSizeSpin->setValue(512);
+    m_chunkSizeSpin->setObjectName("ragChunkSize");
+    m_chunkSizeSpin->setSingleStep(16);
     form->addRow("Chunk size (words):", m_chunkSizeSpin);
 
     m_chunkOverlapSpin = new SpinBox(this);
-    m_chunkOverlapSpin->setRange(0, 1024);
-    m_chunkOverlapSpin->setSingleStep(16);
-    m_chunkOverlapSpin->setValue(64);
-    form->addRow("Chunk overlap:", m_chunkOverlapSpin);
+    m_chunkOverlapSpin->setObjectName("ragChunkOverlap");
+    m_chunkOverlapSpin->setSingleStep(8);
+    form->addRow("Chunk overlap (words):", m_chunkOverlapSpin);
 
     m_topKSpin = new SpinBox(this);
-    m_topKSpin->setRange(1, 20);
-    m_topKSpin->setValue(4);
+    m_topKSpin->setObjectName("ragTopK");
+    m_topKSpin->setRange(1, 20);                      // the backend's own bounds for top_k
     form->addRow("Top-K retrieved chunks:", m_topKSpin);
+    for (QSpinBox *spin : {m_chunkSizeSpin, m_chunkOverlapSpin, m_topKSpin}) {
+        spin->setSpecialValueText(QStringLiteral("—"));
+        spin->setMinimum(0);
+        spin->setValue(0);
+        spin->setEnabled(false);
+    }
 
     configLayout->addLayout(form);
 
@@ -180,12 +207,21 @@ void RagPanel::setupUi() {
     connect(m_clearButton, &QPushButton::clicked, this, &RagPanel::onClearAll);
     connect(searchButton, &QPushButton::clicked, this, &RagPanel::onTestQuery);
     connect(m_queryEdit, &QLineEdit::returnPressed, this, &RagPanel::onTestQuery);
-    connect(m_chunkSizeSpin, qOverload<int>(&QSpinBox::valueChanged),
-            this, &RagPanel::onConfigChanged);
-    connect(m_chunkOverlapSpin, qOverload<int>(&QSpinBox::valueChanged),
-            this, &RagPanel::onConfigChanged);
-    connect(m_topKSpin, qOverload<int>(&QSpinBox::valueChanged),
-            this, &RagPanel::onConfigChanged);
+    connect(m_chunkSizeSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this] {
+        if (m_loadingConfig) return;
+        m_dirtyChunking = true;
+        onConfigChanged();
+    });
+    connect(m_chunkOverlapSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this] {
+        if (m_loadingConfig) return;
+        m_dirtyChunking = true;
+        onConfigChanged();
+    });
+    connect(m_topKSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this] {
+        if (m_loadingConfig) return;
+        m_dirtyTopK = true;
+        onConfigChanged();
+    });
 
     updateEmptyState();
 }
@@ -203,32 +239,29 @@ void RagPanel::refresh(bool preserveStatus) {
         return;
     }
 
-    m_client->get("/rag/status", [this,preserveStatus](int status, const QJsonDocument &doc) {
+    const quint64 revision = ++m_refreshRevision;
+    m_client->get("/rag/embedders", [this, revision](int status, const QJsonDocument &doc) {
+        if (revision != m_refreshRevision || status != 200) return;
+        m_presets = RagParams::parseEmbedders(doc.array());
+        applyStatus();
+    });
+    m_client->get("/rag/status", [this, revision, preserveStatus](int status, const QJsonDocument &doc) {
+        if (revision != m_refreshRevision) return;
         if (status != 200) {
-            setStatus(QString("RAG status unavailable (HTTP %1).").arg(status), "error");
+            const QString detail = doc.object()["detail"].toString();
+            setStatus(detail.isEmpty() ? QString("Knowledge status unavailable (HTTP %1).").arg(status) : detail, "error");
             return;
         }
         const QJsonObject obj = doc.object();
-        const QString model = obj["model"].toString();
-        const int docs = obj["documents"].toInt();
-        const int chunks = obj["chunks"].toInt();
-        const bool engineReady = obj["engine_ready"].toBool();
-        if (!preserveStatus) setStatus(engineReady
-                      ? QString("%1 document(s) · %2 chunks · model %3")
-                            .arg(docs).arg(chunks).arg(model)
-                      : "Embeddings unavailable — RAG needs sentence-transformers "
-                        "(backend[ml]).");
-    });
-
-    m_client->get("/rag/config", [this](int status, const QJsonDocument &doc) {
-        if (status != 200) return;
-        const QJsonObject cfg = doc.object();
-        m_loadingConfig = true;
-        if (cfg.contains("chunk_size")) m_chunkSizeSpin->setValue(cfg["chunk_size"].toInt());
-        m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
-        if (cfg.contains("chunk_overlap")) m_chunkOverlapSpin->setValue(cfg["chunk_overlap"].toInt());
-        if (cfg.contains("top_k")) m_topKSpin->setValue(cfg["top_k"].toInt());
-        m_loadingConfig = false;
+        m_active = RagParams::parseStatus(obj);
+        if (!m_active) {
+            setStatus("The backend did not report its embedding parameters; update Magnite.", "error");
+            return;
+        }
+        applyStatus();
+        if (!preserveStatus) setStatus(m_active->engineReady
+                      ? QString("%1 document(s) · %2 chunks").arg(m_active->documents).arg(m_active->chunks)
+                      : "Embeddings unavailable — RAG needs sentence-transformers (backend[ml]).");
     });
 
     m_client->get("/rag/documents", [this](int status, const QJsonDocument &doc) {
@@ -448,19 +481,58 @@ void RagPanel::onTestQuery() {
 
 void RagPanel::onConfigChanged() {
     if (m_loadingConfig) return;
-    m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
+    m_chunkOverlapSpin->setMaximum(qMax(0, qMin(1024, m_chunkSizeSpin->value() - 1)));
     m_configTimer->start();
 }
 
 void RagPanel::pushConfig() {
     if (!m_client || !m_client->isReady()) return;
+    // Send only what the user changed: Top-K alone must not rewrite the stored chunking.
     QJsonObject body;
-    body["chunk_size"] = m_chunkSizeSpin->value();
-    body["chunk_overlap"] = m_chunkOverlapSpin->value();
-    body["top_k"] = m_topKSpin->value();
+    if (m_dirtyChunking) {
+        body["chunk_size"] = m_chunkSizeSpin->value();
+        body["chunk_overlap"] = m_chunkOverlapSpin->value();
+    }
+    if (m_dirtyTopK) body["top_k"] = m_topKSpin->value();
+    m_dirtyChunking = m_dirtyTopK = false;
+    if (body.isEmpty()) return;
     m_client->post("/rag/config", body, [this](int status, const QJsonDocument &doc) {
-        if (status != 200) setStatus("Configuration was not saved: " + doc.object()["detail"].toString());
+        if (status != 200) {
+            const QString detail = doc.object()["detail"].toString();
+            setStatus("Settings not saved: " + (detail.isEmpty() ? QString("HTTP %1").arg(status) : detail), "error");
+        }
+        refresh(true);
     });
+}
+
+void RagPanel::applyStatus() {
+    if (!m_active) return;
+    const RagParams::Active &a = *m_active;
+    QString device = a.loaded
+        ? QString("Loaded on %1%2").arg(a.device.isEmpty() ? QStringLiteral("unknown device") : a.device,
+                                         a.dtype.isEmpty() ? QString() : QString(" (%1)").arg(a.dtype))
+        : QStringLiteral("Not loaded (loads on first use)");
+    const QString dims = a.dim > 0 ? QString("%1 dimensions").arg(a.dim) : QStringLiteral("dimensions known after first use");
+    const QString tokens = a.maxTokens > 0 ? QString("%1 tokens").arg(a.maxTokens) : QStringLiteral("token limit known after first use");
+    m_modelInfo->setText(QString("%1 · %2\n%3 · %4 · %5").arg(a.label, a.model, dims, tokens, device));
+    m_chunkingInfo->setText(QString("Chunks of %1 words with %2 words of overlap").arg(a.chunkSize).arg(a.chunkOverlap));
+    m_clampHint->setText(QString("Clamped for this model: its %1-token limit fits about %2 words per chunk.")
+                             .arg(a.maxTokens).arg(a.maxChunkSize));
+    m_clampHint->setVisible(a.clamped);
+
+    m_loadingConfig = true;
+    const int maxSize = a.maxChunkSize > 0 ? a.maxChunkSize : 4096;
+    for (QSpinBox *spin : {m_chunkSizeSpin, m_chunkOverlapSpin, m_topKSpin}) {
+        spin->setSpecialValueText(QString());
+        spin->setEnabled(!m_mutating);
+    }
+    m_chunkSizeSpin->setRange(qMin(64, maxSize), maxSize);
+    m_chunkSizeSpin->setValue(a.chunkSize);
+    m_chunkOverlapSpin->setRange(0, qMax(0, qMin(1024, a.chunkSize - 1)));
+    m_chunkOverlapSpin->setValue(a.chunkOverlap);
+    m_topKSpin->setMinimum(1);
+    if (a.topK > 0) m_topKSpin->setValue(a.topK);
+    m_loadingConfig = false;
 }
 
 void RagPanel::setDocumentScope(const QJsonValue &scope) {
@@ -512,9 +584,7 @@ void RagPanel::setStatus(const QString &text, const QString &tone) {
 
 QString RagPanel::settingsJson() const {
     QJsonObject obj;
-    obj["chunkSize"] = m_chunkSizeSpin->value();
-    obj["chunkOverlap"] = m_chunkOverlapSpin->value();
-    obj["topK"] = m_topKSpin->value();
+    obj["topK"] = m_topKSpin->value();   // chunking always comes from the backend
     return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
@@ -525,9 +595,6 @@ void RagPanel::applySettingsJson(const QString &json) {
         return;
     m_loadingConfig = true;
     auto o = doc.object();
-    if (o.contains("chunkSize")) m_chunkSizeSpin->setValue(o["chunkSize"].toInt());
-    m_chunkOverlapSpin->setMaximum(m_chunkSizeSpin->value()-1);
-    if (o.contains("chunkOverlap")) m_chunkOverlapSpin->setValue(o["chunkOverlap"].toInt());
-    if (o.contains("topK")) m_topKSpin->setValue(o["topK"].toInt());
+    if (o.contains("topK") && m_topKSpin->isEnabled()) m_topKSpin->setValue(o["topK"].toInt());
     m_loadingConfig = false;
 }

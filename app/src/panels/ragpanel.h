@@ -1,6 +1,9 @@
 #pragma once
 
 #include "panels/basepanel.h"
+#include "panels/ragparams.h"
+
+#include <optional>
 
 #include <QList>
 #include <QJsonValue>
@@ -56,6 +59,7 @@ private:
     bool hasSelection() const;
     QString selectedIds() const;
     void pushConfig();
+    void applyStatus();
 
     BackendClient *m_client;
     QPushButton *m_addButton;
@@ -68,6 +72,13 @@ private:
     QSpinBox *m_chunkSizeSpin;
     QSpinBox *m_chunkOverlapSpin;
     QSpinBox *m_topKSpin;
+    QLabel *m_modelInfo = nullptr;
+    QLabel *m_chunkingInfo = nullptr;
+    QLabel *m_clampHint = nullptr;
+    QList<RagParams::Preset> m_presets;
+    std::optional<RagParams::Active> m_active;   // what GET /rag/status last reported
+    quint64 m_refreshRevision = 0;
+    bool m_dirtyChunking = false, m_dirtyTopK = false;
     QLineEdit *m_queryEdit;
     QLabel *m_resultLabel;
     QLabel *m_statusLabel;
