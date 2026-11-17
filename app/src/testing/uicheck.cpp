@@ -40,6 +40,7 @@
 #include <QClipboard>
 #include <QWheelEvent>
 #include <QAbstractItemView>
+#include <QStyleOptionViewItem>
 #include <QCheckBox>
 #include <QAccessible>
 #include "widgets/toggleswitch.h"
@@ -1598,9 +1599,17 @@ int runUiCheck(const QString &captures) {
         // Model picker: presets from GET /rag/embedders; a switch with documents goes through reindex.
         auto *picker=knowledge.findChild<QComboBox *>("ragModelPicker");
         auto *hint=knowledge.findChild<QLabel *>("ragModelHint");
-        check(picker && hint && picker->count()==3 && picker->currentIndex()==0 && picker->itemText(0).contains("Light") &&
-              picker->itemText(0).contains("450 MB") && picker->itemText(0).contains("256 tokens") && picker->itemText(1).contains("Quality"),
-              "model picker lists the backend's presets with RAM and token limit, current model selected");
+        check(picker && hint && picker->count()==3 && picker->currentIndex()==0 && picker->itemText(0)=="Light" && picker->itemText(1)=="Quality",
+              "model picker lists the backend's presets by name (short enough for the drawer), current model selected");
+        if (picker && picker->count()==3) {
+            QStyleOptionViewItem option; option.initFrom(picker->view());
+            const QSize row=picker->view()->itemDelegate()->sizeHint(option,picker->model()->index(0,0));
+            const QString detail=picker->itemData(0,Qt::ToolTipRole).toString();
+            check(detail.contains("450 MB") && detail.contains("256 tokens") &&
+                  row.width()>=picker->fontMetrics().horizontalAdvance("Light · ~450 MB RAM · 256 tokens") &&
+                  picker->view()->minimumWidth()>=row.width(),
+                  "picker rows show each preset's RAM and token limit, and the list is wide enough for them");
+        }
         if (picker && hint && modelInfo && picker->count()==3) {
             check(!hint->isVisibleTo(&knowledge),"the machine's default model shows no warning");
             picker->setCurrentIndex(1); pump();
@@ -1980,7 +1989,8 @@ int runUiCheck(const QString &captures) {
         auto *archiveToggle=training.findChild<QPushButton *>("trainingArchiveToggle");
         auto *workspaceTabs=training.findChild<SegmentedTabBar *>("trainingWorkspaceTabs");
         const QList<QPair<QString,QWidget *>> pages={{"library",&models},{"training",&training},{"adapters",&adapters},{"knowledge",&knowledge},{"chat",&chat}};
-        ChatPanel drawerChat; drawerChat.setKnowledgePanel(new RagPanel);   // the real chat page with its Knowledge drawer
+        ChatPanel drawerChat; auto *drawerKnowledge=new RagPanel; drawerChat.setKnowledgePanel(drawerKnowledge);   // the real chat page with its Knowledge drawer
+        drawerKnowledge->setBackendClient(&client);   // real model details, so wrapped text is measured at every size
         auto *drawerToggle=drawerChat.findChild<QPushButton *>("conversationKnowledgeToggle");
         for (int size : {1,0,2}) {
             for (bool dark : {true,false}) {

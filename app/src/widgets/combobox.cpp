@@ -13,8 +13,15 @@ namespace {
 class SelectDelegate : public QStyledItemDelegate {
 public:
     SelectDelegate(QComboBox *combo,QObject *parent) : QStyledItemDelegate(parent),m_combo(combo) {}
+    static QString rowText(const QModelIndex &index,const QString &text) {
+        const QString detail=index.data(ComboBox::DetailRole).toString();
+        return detail.isEmpty()?text:text+QStringLiteral(" · ")+detail;
+    }
     QSize sizeHint(const QStyleOptionViewItem &option,const QModelIndex &index) const override {
-        auto size=QStyledItemDelegate::sizeHint(option,index); size.setHeight(qMax(36,size.height())); return size;
+        auto size=QStyledItemDelegate::sizeHint(option,index); size.setHeight(qMax(36,size.height()));
+        if (!index.data(ComboBox::DetailRole).toString().isEmpty())
+            size.setWidth(qMax(size.width(),option.fontMetrics.horizontalAdvance(rowText(index,index.data().toString()))+44));
+        return size;
     }
     void paint(QPainter *p,const QStyleOptionViewItem &option,const QModelIndex &index) const override {
         QStyleOptionViewItem item(option); initStyleOption(&item,index);
@@ -28,7 +35,7 @@ public:
         if (rtl) text=option.rect.adjusted(32,0,-12,0);
         const bool enabled=index.flags().testFlag(Qt::ItemIsEnabled);
         p->setPen(QColor(enabled?Theme::textPrimary():Theme::textMuted())); p->setFont(option.font);
-        p->drawText(text,Qt::AlignVCenter|(rtl?Qt::AlignRight:Qt::AlignLeft),option.fontMetrics.elidedText(item.text,Qt::ElideMiddle,text.width()));
+        p->drawText(text,Qt::AlignVCenter|(rtl?Qt::AlignRight:Qt::AlignLeft),option.fontMetrics.elidedText(rowText(index,item.text),Qt::ElideMiddle,text.width()));
         if (index.row()==m_combo->currentIndex() && m_combo->currentText()==item.text)
             Theme::coloredIcon("check",QColor(enabled?Theme::accentLabel():Theme::textMuted()),14)
                 .paint(p,QRect(rtl?option.rect.left()+10:option.rect.right()-24,option.rect.center().y()-7,14,14));
@@ -65,6 +72,14 @@ void ComboBox::paintEvent(QPaintEvent *event) {
     const QRect bounds(arrow.center().x() - 7, arrow.center().y() - 7, 14, 14);
     painter.translate(bounds.center()); painter.rotate(180*m_arrow->value());
     Theme::coloredIcon("chevron-down",ink,14).paint(&painter,QRect(-7,-7,14,14));
+}
+
+void ComboBox::fitPopupToRows() {
+    QStyleOptionViewItem option; option.initFrom(view());
+    int widest=0;
+    for (int row=0; row<count(); ++row)
+        widest=qMax(widest,view()->itemDelegate()->sizeHint(option,model()->index(row,modelColumn())).width());
+    view()->setMinimumWidth(widest);
 }
 
 void ComboBox::showPopup() { QComboBox::showPopup(); m_arrow->to(view()->isVisible()?1:0,isVisible()); }

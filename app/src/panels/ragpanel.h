@@ -9,7 +9,7 @@
 #include <QPointer>
 #include <QJsonValue>
 class QTimer;
-class QComboBox;
+class ComboBox;
 class QLabel;
 class QLineEdit;
 class QNetworkReply;
@@ -90,7 +90,7 @@ private:
     QSpinBox *m_chunkSizeSpin;
     QSpinBox *m_chunkOverlapSpin;
     QSpinBox *m_topKSpin;
-    QComboBox *m_modelPicker = nullptr;
+    ComboBox *m_modelPicker = nullptr;
     QLabel *m_modelHint = nullptr;
     QWidget *m_progressBox = nullptr;
     QLabel *m_progressLabel = nullptr;

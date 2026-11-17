@@ -131,7 +131,6 @@ void RagPanel::setupUi() {
     // The embedding model and chunking the backend is really using (GET /rag/status).
     auto *modelCard = Surface::card(this, "Embedding model");
     modelCard->parentWidget()->setObjectName("ragModelCard");
-    modelCard->parentWidget()->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     m_modelPicker = new ComboBox(this);
     m_modelPicker->setObjectName("ragModelPicker");
     m_modelPicker->setEnabled(false);
@@ -670,14 +669,18 @@ void RagPanel::populatePicker() {
     m_modelPicker->clear();
     const QLocale en(QLocale::English);
     for (const auto &p : m_presets) {
-        QStringList parts{p.label};
-        if (p.approxRamMb > 0) parts << QString("~%1 RAM").arg(memoryText(p.approxRamMb));
-        if (p.maxTokens > 0) parts << QString("%1 tokens").arg(en.toString(p.maxTokens));
-        m_modelPicker->addItem(parts.join(" · "), p.model);
+        QStringList detail;
+        if (p.approxRamMb > 0) detail << QString("~%1 RAM").arg(memoryText(p.approxRamMb));
+        if (p.maxTokens > 0) detail << QString("%1 tokens").arg(en.toString(p.maxTokens));
+        m_modelPicker->addItem(p.label, p.model);
+        const int row = m_modelPicker->count() - 1;
+        m_modelPicker->setItemData(row, detail.join(" · "), ComboBox::DetailRole);
+        m_modelPicker->setItemData(row, (QStringList{p.label} + detail).join(" · ") + "\n" + p.model, Qt::ToolTipRole);
     }
     // A model that is not a preset (set through the API) is still shown as the current one.
     if (m_active && RagParams::indexOf(m_presets, m_active->model) < 0)
         m_modelPicker->addItem(m_active->model, m_active->model);
+    m_modelPicker->fitPopupToRows();
     revertPicker();
     m_modelPicker->setEnabled(!m_mutating && m_active && !m_presets.isEmpty());
 }
