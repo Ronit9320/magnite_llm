@@ -3472,7 +3472,7 @@ int runUiCheck(const QString &captures) {
             QSettings().setValue("appearance/studio3ReducedMotion",false);   // the glide is skipped under reduced motion
             const int rest=handleWidth();
             const QPoint at(bar->width()-4,24);
-            QEnterEvent enter(QPointF(at),QPointF(at),QPointF(bar->mapToGlobal(at)));
+            QEnterEvent enter{QPointF(at), QPointF(at), QPointF(bar->mapToGlobal(at))};
             QApplication::sendEvent(bar,&enter);
             int mid=rest; bool sawBetween=false;
             const bool glides=waitUntil([&]{ const int w=handleWidth(); if (w>rest&&w<8) { sawBetween=true; mid=w; } return w>=8; },800);
