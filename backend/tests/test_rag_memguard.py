@@ -173,5 +173,54 @@ class RealReaderTests(unittest.TestCase):
         self.assertGreater(after - before, 150)
 
 
+class LinuxReaderTests(unittest.TestCase):
+    """The Linux branches, driven by realistic /proc contents (these tests run on any OS)."""
+
+    MEMINFO = ("MemTotal:       32768000 kB\nMemFree:         1024000 kB\nMemAvailable:   20480000 kB\n"
+               "Buffers:          512000 kB\nSwapTotal:       8388608 kB\nSwapFree:        6291456 kB\n")
+    STATUS = "Name:\tpython\nVmPeak:\t 9000000 kB\nVmRSS:\t 2048000 kB\nVmSwap:\t  512000 kB\nThreads:\t4\n"
+
+    def run_linux(self, fn):
+        import builtins
+        real_open = builtins.open
+
+        def fake_open(path, *args, **kwargs):
+            import io
+            if path == "/proc/meminfo":
+                return io.StringIO(self.MEMINFO)
+            if path == "/proc/self/status":
+                return io.StringIO(self.STATUS)
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(memguard.sys, "platform", "linux"), patch("builtins.open", fake_open):
+            return fn()
+
+    def test_total_available_and_swap_come_from_meminfo(self):
+        self.assertAlmostEqual(self.run_linux(memguard.total_memory_mb), 32768000 / 1024)
+        self.assertAlmostEqual(self.run_linux(memguard.available_memory_mb), 20480000 / 1024)
+        self.assertAlmostEqual(self.run_linux(memguard.swap_used_mb), (8388608 - 6291456) / 1024)
+
+    def test_footprint_is_resident_plus_swapped_memory(self):
+        self.assertAlmostEqual(self.run_linux(memguard.process_footprint_mb), (2048000 + 512000) / 1024)
+
+    def test_default_limits_on_a_32gb_linux_box(self):
+        limits = self.run_linux(memguard.limits_from_env)
+        self.assertEqual(limits.max_footprint_mb, 8192)            # 35% of 32 GB, capped at 8 GB
+
+    def test_missing_proc_files_mean_unknown_not_a_crash(self):
+        import builtins
+        real_open = builtins.open
+
+        def no_proc(path, *a, **k):
+            if str(path).startswith("/proc/"):
+                raise FileNotFoundError(path)
+            return real_open(path, *a, **k)
+
+        with patch.object(memguard.sys, "platform", "linux"), patch("builtins.open", no_proc):
+            self.assertEqual(memguard.available_memory_mb(), 0.0)
+            self.assertEqual(memguard.swap_used_mb(), 0.0)
+            memguard.preflight(required_mb=10 ** 6)               # unknown memory never blocks
+
+
 if __name__ == "__main__":
     unittest.main()
