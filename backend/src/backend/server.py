@@ -4,11 +4,13 @@ from backend.maintenance import UpdateGate
 from backend.request_limits import BodyLimitMiddleware
 
 from backend.routes.adapters import router as adapters_router, _adapter_setup
+from backend.routes.blueprints import blueprint_setup, router as blueprints_router, shutdown_blueprints
 from backend.routes.health import router as health_router
 from backend.routes.system import router as system_router
 from backend.routes.inference import router as inference_router
 from backend.routes.models import router as models_router, _registry_setup
 from backend.routes.rag import _rag_setup, rag_router
+from backend.routes.tooling import router as tooling_router
 from backend.routes.training import (
     datasets_router,
     training_router,
@@ -25,6 +27,7 @@ async def shutdown():
     import asyncio
     from backend.inference.supervisor import get_supervisor
     from backend.routes.training import _get_manager
+    await asyncio.to_thread(shutdown_blueprints)
     await asyncio.to_thread(_get_manager().shutdown)
     from backend.routes import models as model_routes
     if model_routes._registry is not None:
@@ -40,6 +43,7 @@ async def startup():
     _training_setup()
     store = _adapter_setup()
     _rag_setup()
+    blueprint_setup()
     from backend.inference.supervisor import get_supervisor
 
     get_supervisor().set_adapter_store(store)
@@ -53,3 +57,5 @@ app.include_router(training_router)
 app.include_router(datasets_router)
 app.include_router(adapters_router)
 app.include_router(rag_router)
+app.include_router(blueprints_router)
+app.include_router(tooling_router)

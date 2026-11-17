@@ -312,10 +312,17 @@ class InferenceSupervisor:
         return self._stream("complete_stream", prompt, **kwargs)
 
     @contextmanager
-    def operation(self):
-        if not self._operation.acquire(blocking=False):
-            raise RuntimeError("Inference is busy. Stop generation or wait for model loading to finish.")
+    def operation(self, *, wait_for=None):
+        if wait_for is None:
+            if not self._operation.acquire(blocking=False):
+                raise RuntimeError("Inference is busy. Stop generation or wait for model loading to finish.")
+        else:
+            while not self._operation.acquire(timeout=0.1):
+                if wait_for.is_set():
+                    raise RuntimeError("Inference cancelled while waiting for the model")
         try:
+            if wait_for is not None and wait_for.is_set():
+                raise RuntimeError("Inference cancelled before generation")
             yield
         finally:
             self._operation.release()

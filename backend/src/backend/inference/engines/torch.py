@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import threading
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from typing import AsyncIterator
 
 from backend.inference.engines.base import BaseEngine, EngineUnloaded
 from backend.inference.engines.streaming import threaded_stream
+
+
+def torch_device(torch) -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
+def messages_to_prompt(tokenizer, messages, thinking: bool | None = None) -> str:
+    options = {} if thinking is None else {"enable_thinking": thinking}
+    try:
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, **options)
+    except Exception:
+        if thinking:
+            raise
+        lines = [f"{m['role']}: {m['content']}" for m in messages if m["content"].strip()]
+        return "\n".join(lines) + "\nassistant:"
 
 
 class TorchPeftEngine(BaseEngine):
@@ -19,11 +36,13 @@ class TorchPeftEngine(BaseEngine):
 
     name = "torch"
 
-    def __init__(self, model_ref: str, adapter_path: str = ""):
+    def __init__(self, model_ref: str, adapter_path: str = "", *, offline_only: bool = False):
         super().__init__(model_ref)
         self.adapter_path = adapter_path
         self._model = None
         self._tokenizer = None
+        self.offline_only = offline_only
+        self._blueprint_adapter: tuple[str, str] | None = None
 
     @staticmethod
     def is_available() -> bool:
@@ -40,10 +59,11 @@ class TorchPeftEngine(BaseEngine):
         from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+        device = torch_device(torch)
         dtype = torch.float16 if device != "cpu" else torch.float32
 
-        tokenizer = AutoTokenizer.from_pretrained(self.model_ref)
+        local = {"local_files_only": True, "trust_remote_code": False} if self.offline_only else {}
+        tokenizer = AutoTokenizer.from_pretrained(self.model_ref, **local)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
@@ -51,6 +71,7 @@ class TorchPeftEngine(BaseEngine):
             self.model_ref,
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
+            **({"use_safetensors": True, **local} if self.offline_only else {}),
         ).to(device)
         peft = PeftModel.from_pretrained(model, self.adapter_path) if self.adapter_path else model
         peft.eval()
@@ -61,13 +82,63 @@ class TorchPeftEngine(BaseEngine):
 
     def _messages_to_prompt(self, messages) -> str:
         raw = [{"role": m.role.value, "content": m.content} for m in messages]
-        try:
-            return self._tokenizer.apply_chat_template(
-                raw, tokenize=False, add_generation_prompt=True
-            )
-        except Exception:  # noqa: BLE001 -- no chat template (e.g. GPT-2)
-            lines = [f"{m['role']}: {m['content']}" for m in raw if m["content"].strip()]
-            return "\n".join(lines) + "\nassistant:"
+        return messages_to_prompt(self._tokenizer, raw)
+
+    def _select_blueprint_adapter(self, path: str) -> None:
+        """Keep at most one selected adapter on a Blueprint-owned base model."""
+        if self._blueprint_adapter is None:
+            from peft import PeftModel
+
+            self._model = PeftModel.from_pretrained(self._model, path, adapter_name="first",
+                                                    local_files_only=True)
+            self._blueprint_adapter = (path, "first")
+        elif path != self._blueprint_adapter[0]:
+            _, previous = self._blueprint_adapter
+            name = "second" if previous == "first" else "first"
+            self._model.load_adapter(path, adapter_name=name, local_files_only=True)
+            self._model.set_adapter(name)
+            self._model.delete_adapter(previous)
+            self._blueprint_adapter = (path, name)
+        self._model.eval()
+
+    def generate_blueprint(self, messages, *, max_tokens: int, adapter: str,
+                           reasoning: bool, stop) -> str:
+        """Select an adapter and generate synchronously under the supervisor lock."""
+        import torch
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        if not self.offline_only or self._model is None:
+            raise RuntimeError("Blueprint generation requires a loaded local engine")
+        if adapter:
+            self._select_blueprint_adapter(adapter)
+        tokenizer = self._tokenizer
+        prompt = messages_to_prompt(tokenizer, messages, thinking=reasoning)
+        inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self._model.device)
+        prompt_length = inputs["input_ids"].shape[1]
+        if prompt_length + max_tokens > self.context_size():
+            raise ValueError(f"Prompt ({prompt_length} tokens) and output budget ({max_tokens} tokens) "
+                             f"exceed the model context ({self.context_size()} tokens)")
+        if stop.is_set():
+            raise RuntimeError("Blueprint generation cancelled")
+
+        class Cancelled(StoppingCriteria):
+            def __call__(self, input_ids, scores, **kwargs):
+                return stop.is_set()
+
+        selected = self._model.disable_adapter() if not adapter and self._blueprint_adapter else nullcontext()
+        with torch.inference_mode(), selected:
+            result = self._model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False,
+                                          pad_token_id=tokenizer.pad_token_id,
+                                          stopping_criteria=StoppingCriteriaList([Cancelled()]))
+        tokens = result[0, prompt_length:].tolist()
+        if reasoning:
+            ending = tokenizer.encode("</think>", add_special_tokens=False)
+            boundary = next((i + len(ending) for i in range(len(tokens))
+                             if ending and tokens[i:i + len(ending)] == ending), None)
+            if boundary is None:
+                raise ValueError("The reasoning model did not finish its thinking within the token budget")
+            tokens = tokens[boundary:]
+        return tokenizer.decode(tokens, skip_special_tokens=True).strip()
 
     def _produce(self, prompt: str, kwargs: dict, stop):
         import torch
@@ -119,7 +190,11 @@ class TorchPeftEngine(BaseEngine):
     async def chat_stream(self, messages, **kwargs) -> AsyncIterator[str]:
         if self._tokenizer is None:
             raise RuntimeError("Engine not loaded")
-        prompt = self._messages_to_prompt(messages)
+        if kwargs.pop("tool_mode", False):
+            raw = [{"role": m.role.value, "content": m.content} for m in messages]
+            prompt = messages_to_prompt(self._tokenizer, raw, thinking=False)
+        else:
+            prompt = self._messages_to_prompt(messages)
         async with aclosing(self._stream(prompt, kwargs)) as stream:
             async for delta in stream:
                 yield delta
@@ -150,11 +225,13 @@ class TorchPeftEngine(BaseEngine):
         super().unload()
         self._model = None
         self._tokenizer = None
+        self._blueprint_adapter = None
         try:
             import torch
 
-            torched = torch
-            if torched.cuda.is_available():
-                torched.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif self.offline_only and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         except Exception:  # noqa: BLE001
             pass

@@ -43,6 +43,17 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/testing/blueprint_tests.cpp
+    src/testing/blueprint_tests.h
+    src/panels/blueprintpanel.cpp
+    src/panels/blueprintnodedialog.cpp
+    src/panels/blueprintnodedialog.h
+    src/panels/blueprintpanel.h
+    src/panels/blueprintpreview.cpp
+    src/panels/blueprintbackend.cpp
+    src/panels/blueprintpreview.h
+    src/widgets/blueprintcanvas.cpp
+    src/widgets/blueprintcanvas.h
     src/panels/modelhubpanel.cpp
     src/panels/modelhubpanel.h
     src/testing/modelhub_tests.cpp

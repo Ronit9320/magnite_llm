@@ -15,6 +15,12 @@ BackendClient::BackendClient(QObject *parent)
 {
 }
 
+void BackendClient::setBaseUrl(const QString &url) {
+    if (url == m_baseUrl) return;
+    m_baseUrl = url;
+    emit baseUrlChanged();
+}
+
 void BackendClient::abortAll() {
     for (auto *reply : m_nam->findChildren<QNetworkReply*>()) {
         reply->abort();
@@ -40,6 +46,10 @@ void BackendClient::remove(const QString &path, Callback onDone) {
     send("DELETE", path, QJsonObject(), onDone);
 }
 
+void BackendClient::put(const QString &path, const QJsonObject &body, Callback onDone) {
+    send("PUT", path, body, onDone);
+}
+
 QNetworkRequest BackendClient::request(const QString &path) const {
     QNetworkRequest req(QUrl(m_baseUrl + path));
     if (!m_authToken.isEmpty())
@@ -59,6 +69,8 @@ QNetworkReply *BackendClient::send(const QString &method, const QString &path,
         reply = m_nam->get(req);
     } else if (method == "POST") {
         reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    } else if (method == "PUT") {
+        reply = m_nam->put(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     } else if (method == "DELETE") {
         reply = m_nam->deleteResource(req);
     } else {
@@ -83,6 +95,41 @@ QNetworkReply *BackendClient::send(const QString &method, const QString &path,
         if (onDone) {
             onDone(status, doc);
         }
+    });
+    return reply;
+}
+
+QNetworkReply *BackendClient::streamGet(const QString &path, qint64 after,
+    std::function<void(qint64)> onEvent, SseDone onDone) {
+    auto req = request(path);
+    req.setRawHeader("Accept", "text/event-stream");
+    if (after > 0) req.setRawHeader("Last-Event-ID", QByteArray::number(after));
+    req.setTransferTimeout(40000); // The backend sends keepalives every 15 seconds.
+    auto *reply = m_nam->get(req);
+    auto buffer = std::make_shared<QByteArray>();
+    const auto drain = [reply, buffer, onEvent] {
+        buffer->append(reply->readAll());
+        qsizetype end;
+        while ((end = buffer->indexOf("\n\n")) >= 0) {
+            const auto frame = buffer->left(end);
+            buffer->remove(0, end + 2);
+            for (const auto &line : frame.split('\n')) {
+                if (!line.startsWith("id:")) continue;
+                bool ok = false;
+                const auto id = line.mid(3).trimmed().toLongLong(&ok);
+                if (ok) onEvent(id);
+                break;
+            }
+        }
+        if (buffer->size() > 1024 * 1024) reply->abort();
+    };
+    connect(reply, &QNetworkReply::readyRead, this, drain);
+    connect(reply, &QNetworkReply::finished, this, [reply, onDone, drain] {
+        drain();
+        const int status = reply->error() == QNetworkReply::NoError
+            ? reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() : 0;
+        reply->deleteLater();
+        onDone(status);
     });
     return reply;
 }

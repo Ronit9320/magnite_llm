@@ -13,6 +13,8 @@
 #include <QJsonObject>
 
 class StudioCanvas;
+class BlueprintChatPanel;
+class QStackedWidget;
 class QComboBox;
 class QPlainTextEdit;
 class QPushButton;
@@ -47,6 +49,7 @@ public:
     void refreshModels();
     void setKnowledgePanel(RagPanel *panel);
     void showKnowledge();
+    void setBlueprintChat(BlueprintChatPanel *panel);
 
     QString settingsJson() const override;
 
@@ -107,6 +110,7 @@ private:
     };
 
     void setupUi();
+    void showOrdinaryChat();
     QVBoxLayout *addDrawer(const QString &title, const QString &name, QPushButton *toggle);
     void requestEngineStatus(const QString &error = {});
     void applyEngineStatus(const QJsonObject &status);
@@ -185,6 +189,8 @@ private:
     QVBoxLayout *m_chatLayout;
 
     // Input row.
+    QStackedWidget *m_chatContents = nullptr;
+    QComboBox *m_previewMode = nullptr;
     QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
     QPushButton *m_modelButton = nullptr;

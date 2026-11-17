@@ -70,6 +70,153 @@ RAG requires indexed documents and enough remaining context. Loading/unloading
 and adapter changes can be rejected while generation owns the model. Closing a
 stream requests cleanup; native work may stop only after yielding or returning.
 
+## Blueprints
+
+Blueprint runs use deterministic transforms and dataset snapshots. Select
+`mode: "local"` for Torch/PEFT generation, or `mode: "fixture"` to replay
+provided responses. Existing requests default to fixture mode.
+
+| Operation | Route |
+| --- | --- |
+| List saved blueprints | `GET /blueprints` with optional `limit` and `offset` |
+| Save a new blueprint or add a revision | `POST /blueprints` or `PUT /blueprints/{id}` with the document as JSON |
+| Delete a blueprint | `DELETE /blueprints/{id}?expected_revision=N`. Existing run snapshots and approval records remain available. |
+| Read a saved blueprint | `GET /blueprints/{id}` with optional `revision`. The default is the latest revision. |
+| Check graph and local bindings | `POST /blueprints/validate` with a document. The result has `valid` and `issues`. |
+| Check local runtime support | `POST /blueprints/capabilities` with a document. Reports device, estimated memory, context and thinking support by model node. |
+| List local checkpoint options | `GET /blueprints/checkpoints` lists eligible local Transformers checkpoints. `GET /blueprints/checkpoints/{model_id}` checks context size, thinking support, and compatible adapters for one checkpoint. |
+| Export or import the portable document | `GET /blueprints/{id}/export` with optional `revision`, or `POST /blueprints/import` with the exported JSON |
+| Load the editable order starter | `GET /blueprints/starters/order` with an optional registered `model_id`. Returns the document, fixture samples, and training examples for each adapter. |
+| Train an adapter for a node | `POST /blueprints/{id}/nodes/{node_id}/training` with typed `examples`, optional `revision`, and optional training `settings`. Returns an ordinary training job. |
+| Bind an existing or trained adapter | `PUT /blueprints/{id}/nodes/{node_id}/adapter` with the current `revision` and either `adapter_id` or a completed `training_job_id` for that node. Returns a new revision. |
+| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning and Tool nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
+| Queue an isolated node test | `POST /blueprints/{id}/node-tests` with the blueprint `name`, the full `node` contract, and named `inputs`. It runs locally without other nodes and returns HTTP 202. An Input node takes its test value under `inputs.value`. |
+| Read history or details | `GET /blueprints/runs` with optional `blueprint_id`, `surface`, `active`, `limit`, and `offset`. `GET /blueprints/runs/{run_id}` includes the snapshot, per-step trace, and results. |
+| Follow or replay events | `GET /blueprints/runs/{run_id}/events` |
+| Cancel a run | `POST /blueprints/runs/{run_id}/cancel` returns the persisted run status. Repeating the request is safe. |
+
+The desktop keeps incomplete graphs as local drafts. To publish one by a
+client-generated ID, use `PUT /blueprints/{id}?expected_revision=0` with a
+32-character lowercase hexadecimal ID. For edits, pass the revision the draft
+was based on. Repeating the same save after a response is lost returns the
+already-saved revision; a competing edit returns HTTP 409.
+
+A node test is available before publication. Its run includes `test_node`,
+and uses revision 0 when the tested node does not match the current saved
+revision. Its result maps the tested node ID to its named outputs. A test of a
+Tool node requires the same authenticated launch and approval broker as a full
+local run.
+
+A portable document has `version: 1`, a name, nodes, and edges. Each edge connects
+`source: {"node": "...", "port": "..."}` to a corresponding `target`. Port
+names are keys in the node's `inputs` and `outputs` maps. Edges must form a DAG
+and each input port must have one source. Declared types must agree on connected
+ports and shared nested fields, with integer outputs accepted by number inputs.
+The runner validates constraints on both sides as values pass through the graph.
+Schemas support `string`, `integer`, `number`, `boolean`, `object`, `array`,
+and `null`, with `minLength`, `minimum`, `items`, `properties`, `required`,
+and `additionalProperties` on the applicable types.
+
+| Node kind / operation | Inputs → outputs |
+| --- | --- |
+| `input` / `input` | Run request `inputs[node_id]` → `value` |
+| `dataset` / `dataset-rows` | Inline `binding: {"source":"inline","rows":[...]}` or registered `binding: {"source":"local","dataset_id":"..."}` → `rows` with an array schema and a declared `items` schema |
+| `transform` / `pass`, `parse-json`, `field`, `first`, `count`, `format` | `value` → `value`. `field` takes `parameters: {"field":"..."}`. |
+| `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
+| `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |
+| `tool` / `approval` | In local mode, an action object on `value` requests approval and produces `receipt` after dispatch. In fixture mode, `receipt` uses the supplied decision. |
+| `tool` / `agent` | Text or a chat message array on `value` starts Pi. `receipt` contains the final `text`. |
+| `output` / `output` | `value` → `value` and run `results[node_id]` |
+
+`parse-json` takes a string, `field` takes an object, and `first` and `count`
+take arrays. `count` returns an integer and `format` returns a string.
+
+Save requires a structurally valid graph. Validate, import, and run admission
+also resolve registered datasets, local Transformers checkpoints, and compatible
+PEFT adapters. Change registry IDs in the document before importing it into a
+profile with different IDs. Import assigns a fresh blueprint ID and revision 1.
+Graph or binding errors include a code and, where applicable, a node ID and path.
+
+Local execution uses a registered, unquantized Transformers text checkpoint
+with local Safetensors weights and tokenizer files. LoRA adapters must match
+that checkpoint and support switching without shared biases. A local run holds
+one Blueprint checkpoint at a time. Model loading, adapter selection, and
+generation share the inference lock with chat. A loaded chat model contributes
+to the machine's memory usage. Checkpoint estimates include runtime overhead and
+the output token budget. The actual prompt and output must fit the checkpoint's
+context window.
+
+The system prompt and port values form the model prompt. One input is sent as
+its value. Multiple inputs are sent as a JSON object keyed by port. With the
+default `response: "json"`, one output uses the model's whole JSON value and
+multiple outputs require a JSON object keyed by port. `response: "text"`
+requires one string port. A Reasoning node can reference a separate checkpoint.
+Its chat template needs an `enable_thinking` control and a `</think>` boundary.
+Its token budget covers thinking and the final answer, and the runner validates
+the final answer against its output ports.
+
+To try the starter, save the returned `blueprint` with `POST /blueprints` and
+submit a `samples[].request` to its run route. For real generation, bind adapters
+for `select` and `extract` and submit the sample's `inputs` with `mode: "local"`.
+To train those adapters, send the corresponding `training_examples` array to the
+node's training route. Each example contains `inputs` and `outputs` maps keyed by
+runtime ports. Training uses the node's prompt and learns the provided final answer.
+After the job finishes, use its ID and the current revision on the adapter
+route. An existing compatible adapter can be bound by ID.
+
+A fixture has the shape `fixtures: {"node_id":{"outputs":{"port":"value"}}}`.
+The `outputs` map uses the node's declared output ports. An optional `delay_ms`
+from 0 to 5000 simulates a slow step. A run reports `mode: "fixture"`.
+The executor supports up to 64 nodes
+and 512 edges per document, 16 MiB of linked dataset files per run, and 32 MiB of
+recorded step inputs and outputs per run.
+
+The SSE stream emits named `run` and `node` events with an `id` and JSON `data`.
+Pass the last received ID in `Last-Event-ID` or `?after=` to resume. The stream
+closes after replaying the terminal event. Runs end as `passed`, `failed`, or
+`cancelled`. Inspect the run detail for values and validation errors. Closing
+the event stream leaves the run active. An interrupted run is marked failed on
+startup with an `interrupted` error.
+
+[`blueprints.db` storage and compatibility](development/BACKEND_PROCESS.md#9-storage-and-environment-reference)
+
+## Tool chat and approvals
+
+External actions require the authenticated desktop launch. To try the routes in
+a standalone backend, start it with `MAGNITE_API_TOKEN` and supply the same
+Bearer credential on requests. Pi uses the already loaded Torch, llama.cpp, or
+local vLLM chat engine. Install the locked Pi dependencies with Node 22.19 or later.
+[Pi integration and setup](development/blueprints/PI_INTEGRATION.md)
+
+| Operation | Route |
+| --- | --- |
+| Check Pi and the loaded model | `GET /inference/tool-runs/capabilities` reports availability and engine |
+| Start tool chat | `POST /inference/tool-runs` with `messages` and optional absolute `working_directory` |
+| Inspect pending actions or review audit history | `GET /blueprints/runs/{run_id}/approvals` |
+| Decide once | `POST /blueprints/runs/{run_id}/approvals/{approval_id}/decision` with the displayed `fingerprint` and `decision` of `approve_once` or `deny` |
+
+Tool chat returns a normal run ID with `surface: "chat"`. Follow, reconnect,
+or cancel using the Blueprint run routes above. Read the completed answer at
+`results.reply.text`. The usual `/inference/chat` endpoint continues to
+serve ordinary chat.
+
+A local Blueprint can pass `{"action":"open","target":"..."}` or
+`{"action":"command","executable":"...","arguments":["..."]}` to its
+`approval` node. The run request may specify an absolute `working_directory`
+for either surface. Its default is `tool-workspace/` under `MAGNITE_HOME`.
+Open accepts a regular file, folder, or HTTP(S) URL. Commands run directly with
+the displayed executable, argument array, and working directory. They return
+an outcome code. Open reports dispatch to the operating system.
+
+SSE emits `approval` events containing the proposal ID, status, and
+fingerprint. Fetch approval details to show the exact pending action. The
+approval expires after 90 seconds. Display the normalized target or each
+argument and the working directory before issuing a decision. A stale or
+duplicate decision returns `409`. Another run's approval ID returns `404`.
+Pending approvals close with the run on cancellation or interruption.
+The event and audit history retain identifiers, kind, timing, and outcome.
+Exact pending action details are available while the approval awaits a decision.
+
 ## Other route groups
 
 | Operation | Route / body |

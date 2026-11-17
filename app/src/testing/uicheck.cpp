@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "testing/blueprint_tests.h"
 #include "testing/modelhub_tests.h"
 #include "testing/docs_tests.h"
 #include "testing/settings_tests.h"
@@ -397,6 +398,8 @@ struct Fixture : QTcpServer {
 }
 
 int runUiCheck(const QString &captures) {
+    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) return runLiveBlueprintChecks(captures) ? 1 : 0;
+    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return runBlueprintChecks(captures) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
         int hubFailures = 0;
         const bool original = Theme::isDark();
@@ -3950,6 +3953,7 @@ int runUiCheck(const QString &captures) {
     // Deliver pending callbacks while their panels still exist.
     client.abortAll(); pump();
     failures += runModelHubChecks(captures);
+    failures += runBlueprintChecks(captures);
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

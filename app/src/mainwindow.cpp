@@ -15,6 +15,8 @@
 #include "panels/ragpanel.h"
 #include "panels/adapterspanel.h"
 #include "panels/chatpanel.h"
+#include "panels/blueprintpanel.h"
+#include "panels/blueprintpreview.h"
 #include "panels/chathistorycontroller.h"
 #include "panels/chatstore.h"
 #include "panels/greeting.h"
@@ -259,6 +261,7 @@ void MainWindow::setupUi() {
     m_sidebar = new Sidebar({{"Model hub", "search", PanelHub},
                              {"Library", "box", PanelModels},
                              {"Training", "graduation-cap", PanelTraining},
+                             {"Blueprints", "layers", PanelBlueprints},
                              {"Docs", "file-text", PanelDocs}},
                             {"Settings", "settings", PanelSettings}, PanelChat);
     m_history = m_sidebar->history();
@@ -319,6 +322,16 @@ void MainWindow::setupUi() {
     m_libraryPanel = new LibraryPanel(m_modelsPanel, m_adaptersPanel);
     m_chatPanel = new ChatPanel();
     m_chatPanel->setKnowledgePanel(m_ragPanel);
+    auto *blueprintPreview = new BlueprintPreview(*m_backendClient, this);
+    m_blueprintPanel = new BlueprintPanel(blueprintPreview);
+    auto *blueprintChat = new BlueprintChatPanel(blueprintPreview);
+    m_chatPanel->setBlueprintChat(blueprintChat);
+    connect(m_modelsPanel, &ModelsPanel::modelsChanged, blueprintPreview, &BlueprintPreview::refreshOptions);
+    connect(m_blueprintPanel, &BlueprintPanel::chatRequested, this, [this] { switchPanel(PanelChat); });
+    connect(blueprintChat, &BlueprintChatPanel::runRequested, this, [this](const QString &id) {
+        m_blueprintPanel->openRun(id);
+        switchPanel(PanelBlueprints);
+    });
     // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
     m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
     m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
@@ -358,6 +371,7 @@ void MainWindow::setupUi() {
     m_docsPanel = new DocsPanel;
     m_stack->addWidget(m_docsPanel);
     m_stack->addWidget(m_modelHubPanel);
+    m_stack->addWidget(m_blueprintPanel);
     connect(m_modelHubPanel, &ModelHubPanel::loadRequested, this, [this](const QString &id) {
         switchPanel(PanelChat);
         m_chatPanel->loadModel(id);
@@ -850,8 +864,8 @@ void MainWindow::runSelfTest() {
             switchPanel(i);
         }
 
-        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelHub, "settings opens as a window above the current workspace");
-        checkC(m_stack->count() == PanelCount-1, "seven workspaces plus a settings window");
+        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelBlueprints, "settings opens as a window above the current workspace");
+        checkC(m_stack->count() == PanelCount-1, "eight workspace slots plus a settings window");
         switchPanel(PanelDocs);
         checkC(m_docsPanel->openArticle("model-learning"), "Docs opens a bundled reference in the real workspace");
         const bool sidebarCollapsed=m_sidebar->isCollapsed();

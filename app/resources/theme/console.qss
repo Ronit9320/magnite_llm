@@ -197,9 +197,9 @@ QPushButton#conversationModelAction:pressed { background: @surfaceFillActive; }
 QPushButton#conversationModelAction:disabled { background: @insetBackground; }
 QLabel#conversationUtilization { color: @textSecondary; font-family: @monoFont; font-size: 11px; }
 QFrame[conversationDrawer="true"] { background: @surfaceFill; border: none; border-radius: 10px; }
-QFrame#chatComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
-QPlainTextEdit#chatInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
-QPlainTextEdit#chatInput:focus { border: none; }
+QFrame#chatComposer, QFrame#blueprintChatComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
+QPlainTextEdit#chatInput, QPlainTextEdit#blueprintChatInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
+QPlainTextEdit#chatInput:focus, QPlainTextEdit#blueprintChatInput:focus { border: none; }
 QLabel#chatEyebrow { color: @accentLabel; font-size: 10px; letter-spacing: 2px; }
 QPushButton#promptSuggestion { background: @surfaceFill; border: 1px solid transparent; color: @textSecondary; text-align: left; padding: 12px; border-radius: 12px; }
 QPushButton#promptSuggestion:hover, QPushButton#promptSuggestion:focus { color: @textPrimary; border-color: transparent; background: @surfaceFillHover; }
@@ -612,3 +612,44 @@ QMenu#conversationOptions::item {
     padding-left: 30px;
     min-width: 92px;
 }
+
+/* Blueprints canvas, inspector, and flat run trace */
+QWidget#blueprintsWorkspace, QWidget#blueprintChat, QWidget#blueprintEmptyCanvas { background: @canvasBackground; }
+QFrame#blueprintSurface { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QFrame#blueprintRule { background: @surfaceBorder; border: 0; }
+QLabel#blueprintTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; }
+QLabel#blueprintSection { font-family: @headingFont; font-size: 16px; font-weight: 600; }
+QLabel#blueprintCode, QPlainTextEdit#blueprintCode { font-family: @monoFont; font-size: 11px; }
+QLabel#blueprintError, QLabel#blueprintStepError { color: @statusError; }
+QLabel#blueprintSuccess { color: @statusSuccess; }
+QLabel#blueprintWarning { color: @statusWarning; }
+QLabel#blueprintRunning { color: @comparisonSeries; }
+QLabel#blueprintStepError { font-size: 11px; padding-left: 31px; padding-bottom: 3px; }
+QPushButton#blueprintStep {
+    background: transparent; text-align: left; border: 1px solid transparent; border-radius: 0;
+    min-height: 29px; padding: 4px 8px; font-weight: 500;
+}
+QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background: @surfaceFillHover; }
+QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
+QWidget#blueprintStepDetail { background: @surfaceFill; }
+QPushButton#blueprintFullscreen { padding: 0; }
+QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 0; border-radius: 0; }
+QFrame#blueprintCreateForm, QFrame#blueprintPalette { background: @surfaceFill; border: none; border-radius: 8px; }
+QPushButton#blueprintIconButton, QPushButton#blueprintEdit, QPushButton#blueprintDuplicate,
+QPushButton#blueprintDelete { padding: 0; }
+QPushButton#blueprintPaletteItem {
+    background: transparent; border: none; border-radius: 6px; padding: 6px;
+    min-height: 38px; text-align: left; font-size: 11px;
+}
+QPushButton#blueprintPaletteItem:hover, QPushButton#blueprintPaletteItem:focus { background: @surfaceFillHover; }
+QLabel#blueprintNodeIcon, QFrame#blueprintBinding { background: @canvasBackground; border: none; border-radius: 7px; }
+QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 600; }
+QLabel#blueprintRevision {
+    font-family: @monoFont; font-size: 10px; color: @textMuted;
+    background: @surfaceFill; border-radius: 5px; padding: 3px 6px;
+}
+QPushButton#blueprintPortContract {
+    background: @canvasBackground; text-align: left; border: 1px solid @surfaceBorder;
+    border-radius: 6px; min-height: 20px; padding: 4px 8px; font-size: 12px;
+}
+QPushButton#blueprintPortContract:hover { background: @surfaceFillHover; }

@@ -173,6 +173,8 @@ def _messages_to_text(tokenizer, messages: list[dict]) -> str:
 
 def _tokenize_jsonl(path: str, tokenizer, cfg: TrainingConfig, Dataset):
     import json
+    if cfg.blueprint_node is not None:
+        from backend.blueprints.training import example_tokens
 
     samples = []
     with open(path, "r", encoding="utf-8") as f:
@@ -182,6 +184,15 @@ def _tokenize_jsonl(path: str, tokenizer, cfg: TrainingConfig, Dataset):
                 continue
             try:
                 sample = json.loads(line)
+                if cfg.blueprint_node is not None:
+                    ids, labels = example_tokens(tokenizer, sample.get("messages", []))
+                    if len(ids) > cfg.max_length:
+                        raise ValueError("Blueprint example exceeds training max_length")
+                    pad = cfg.max_length - len(ids)
+                    samples.append({"input_ids": ids + [tokenizer.pad_token_id] * pad,
+                                    "attention_mask": [1] * len(ids) + [0] * pad,
+                                    "labels": labels + [-100] * pad})
+                    continue
                 # Normalize before constructing Arrow columns: mixed text/chat rows
                 # otherwise acquire missing/null fields or lose columns entirely.
                 text = (_messages_to_text(tokenizer, sample["messages"])
@@ -190,6 +201,8 @@ def _tokenize_jsonl(path: str, tokenizer, cfg: TrainingConfig, Dataset):
             except json.JSONDecodeError as exc:
                 raise ValueError("Stored dataset contains invalid JSON") from exc
     raw = Dataset.from_list(samples)
+    if cfg.blueprint_node is not None:
+        return raw
 
     def _tok(ex):
         text = ex["text"]
@@ -332,12 +345,21 @@ def train_lora(cfg: TrainingConfig, dataset_path: str, adapter_dir_root: str, jo
         if cancel.is_set():
             raise _Cancelled()
 
-        tokenizer = AutoTokenizer.from_pretrained(base)
+        local = {}
+        if cfg.blueprint_node is not None:
+            from backend.blueprints.runtime import tokenizer_fingerprint
+            from pathlib import Path
+
+            if tokenizer_fingerprint(Path(base)) != cfg.blueprint_node.tokenizer_sha256:
+                raise ValueError("The Blueprint training tokenizer changed after the job was queued")
+            local = {"local_files_only": True, "trust_remote_code": False}
+        tokenizer = AutoTokenizer.from_pretrained(base, **local)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
         load_kwargs = _build_model_kwargs(cfg, torch, BitsAndBytesConfig)
-        model = AutoModelForCausalLM.from_pretrained(base, **load_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(
+            base, **load_kwargs, **({"use_safetensors": True, **local} if local else {}))
         architecture = ""
         try:
             archs = getattr(model.config, "architectures", None) or []
@@ -409,7 +431,12 @@ def train_lora(cfg: TrainingConfig, dataset_path: str, adapter_dir_root: str, jo
             use_cpu=False,
         )
 
-        collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+        if cfg.blueprint_node is not None:
+            from transformers import default_data_collator
+
+            collator = default_data_collator
+        else:
+            collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
         trainer = Trainer(
             model=model,
@@ -491,6 +518,8 @@ def publish_adapter(job: TrainingJob, cfg: TrainingConfig, outcome: TrainOutcome
               "resolved_base_model": outcome.resolved_base},
         status="ready",
     )
+    if cfg.blueprint_node is not None:
+        rec.meta["tokenizer_sha256"] = cfg.blueprint_node.tokenizer_sha256
     with getattr(cancel, "publication_lock", nullcontext()):
         if cancel.is_set():
             shutil.rmtree(outcome.adapter_dir, ignore_errors=True)

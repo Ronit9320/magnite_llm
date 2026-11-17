@@ -1,0 +1,834 @@
+#include "panels/blueprintpreview.h"
+#include "backend_client.h"
+
+#include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
+#include <QCryptographicHash>
+#include <QJsonDocument>
+#include <QRegularExpression>
+#include <QSet>
+#include <QSettings>
+#include <QTimer>
+#include <QUuid>
+#include <algorithm>
+#include <cmath>
+#include <utility>
+
+namespace {
+constexpr auto savedKey = "blueprintsPreview/saved";
+constexpr auto nodeLibraryKey = "blueprintsPreview/nodeLibrary";
+constexpr auto runsKey = "blueprintsPreview/runs";
+constexpr qint64 approvalMs = 45000;
+
+QJsonObject findById(const QJsonArray &entries, const QString &id) {
+    for (const auto &value : entries) {
+        const auto object = value.toObject();
+        if (object["id"].toString() == id) return object;
+    }
+    return {};
+}
+
+QStringList strings(const QJsonArray &values) {
+    QStringList result;
+    for (const auto &value : values) result.append(value.toString());
+    return result;
+}
+
+QJsonObject price(QJsonObject fields) {
+    const double subtotal = std::round(fields["quantity"].toDouble() * fields["unit_price"].toDouble() * 100) / 100;
+    const int shipping = subtotal < 50 ? 5 : 0;
+    fields["subtotal"] = subtotal;
+    fields["shipping"] = shipping;
+    fields["total"] = subtotal + shipping;
+    return fields;
+}
+
+QJsonValue parseJsonValue(const QString &text) {
+    const auto document = QJsonDocument::fromJson("[" + text.toUtf8() + "]");
+    if (document.isArray() && document.array().size() == 1) return document.array().first();
+    return QJsonValue::Undefined;
+}
+
+bool writeEntries(const char *key, const QJsonArray &entries, bool persist) {
+    if (!persist) return true;
+    QSettings settings;
+    settings.setValue(key, QJsonDocument(entries).toJson(QJsonDocument::Compact));
+    settings.sync();
+    return settings.status() == QSettings::NoError;
+}
+
+QString validate(const QJsonValue &value, const QJsonObject &schema, const QString &path) {
+    const auto type = schema["type"].toString();
+    if (type == "integer" && (!value.isDouble() || std::floor(value.toDouble()) != value.toDouble()))
+        return path + " must be an integer";
+    if (type == "number" && !value.isDouble()) return path + " must be a number";
+    if (type == "boolean" && !value.isBool()) return path + " must be a boolean";
+    if (type == "array" && !value.isArray()) return path + " must be an array";
+    if (type == "array" && schema.contains("items")) {
+        const auto items = value.toArray();
+        for (int index = 0; index < items.size(); ++index) {
+            const auto error = validate(items.at(index), schema["items"].toObject(),
+                QString("%1[%2]").arg(path).arg(index));
+            if (!error.isEmpty()) return error;
+        }
+    }
+    if (type == "string" && !value.isString()) return path + " must be text";
+    if (value.isDouble() && schema.contains("minimum") && value.toDouble() < schema["minimum"].toDouble())
+        return path + " must be at least " + QString::number(schema["minimum"].toDouble());
+    if (value.isString() && value.toString().size() < schema["minLength"].toInt())
+        return path + " needs at least " + QString::number(schema["minLength"].toInt()) + " character(s)";
+    if (type != "object") return {};
+    if (!value.isObject()) return path + " must be an object";
+    const auto object = value.toObject();
+    for (const auto &key : strings(schema["required"].toArray()))
+        if (!object.contains(key)) return path + "." + key + " is required";
+    const auto properties = schema["properties"].toObject();
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        if (!object.contains(it.key())) continue;
+        const auto error = validate(object[it.key()], it.value().toObject(), path + "." + it.key());
+        if (!error.isEmpty()) return error;
+    }
+    return {};
+}
+
+QJsonValue exampleValue(const QString &type, const QJsonObject &sample) {
+    const auto lines = strings(sample["lines"].toArray());
+    if (type == "text") return lines.isEmpty() ? QString("Example text") : lines.join(' ');
+    if (type == "index") return sample["active"];
+    if (type == "clause") return lines.value(sample["active"].toInt() - 1);
+    if (type == "integer" || type == "number") return 3;
+    if (type == "boolean") return true;
+    if (type == "object") return QJsonObject{{"name", "Example"}};
+    if (type == "array") return QJsonArray{QJsonObject{{"name", "Example"}}};
+    if (type == "fields") return sample["fields"];
+    if (type == "order") return price(sample["fields"].toObject());
+    return QJsonObject{{"decision", "approved"}};
+}
+
+QJsonObject sampleFor(const QJsonArray &samples, const QString &input) {
+    for (const auto &value : samples) {
+        const auto sample = value.toObject();
+        if (strings(sample["lines"].toArray()).join(' ') == input) return sample;
+    }
+    return samples.first().toObject();
+}
+
+qint64 stepDelay(const QString &kind) {
+    static const QHash<QString, qint64> delays{
+        {"input", 280}, {"selector", 910}, {"lookup", 290}, {"extractor", 1130},
+        {"pricing", 320}, {"tool", 300},
+    };
+    return delays.value(kind, 360);
+}
+
+void finishStep(QJsonObject &run, QJsonArray steps, QJsonObject step, qint64 now, const QString &status) {
+    const int cursor = run["cursor"].toInt();
+    step["status"] = status;
+    if (status == "passed" || status == "failed") step["duration"] = stepDelay(BlueprintPreview::operationId(step));
+    steps.replace(cursor, step);
+    if (status == "passed" && cursor + 1 < steps.size()) {
+        auto next = steps.at(cursor + 1).toObject();
+        next["status"] = "running";
+        steps.replace(cursor + 1, next);
+        run["cursor"] = cursor + 1;
+        run["nextAt"] = now + stepDelay(BlueprintPreview::operationId(next));
+        run["status"] = "running";
+    } else {
+        run["status"] = status;
+        run["ended"] = now;
+        for (int i = cursor + 1; i < steps.size(); ++i) {
+            auto later = steps.at(i).toObject();
+            later["status"] = "skipped";
+            steps.replace(i, later);
+        }
+    }
+    run["steps"] = steps;
+}
+}
+
+BlueprintPreview::BlueprintPreview(QObject *parent, bool persist)
+    : BlueprintPreview(nullptr, parent, persist) {}
+
+BlueprintPreview::BlueprintPreview(BackendClient &backend, QObject *parent)
+    : BlueprintPreview(&backend, parent, true) {}
+
+BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool persist)
+    : QObject(parent), m_persist(persist), m_timer(new QTimer(this)), m_backend(backend) {
+    QFile file(":/blueprints/order-preview.json");
+    if (file.open(QIODevice::ReadOnly)) m_fixtures = QJsonDocument::fromJson(file.readAll()).object();
+    QFile catalogFile(":/blueprints/node-catalog.json");
+    const auto catalog = catalogFile.open(QIODevice::ReadOnly)
+        ? QJsonDocument::fromJson(catalogFile.readAll()).object() : QJsonObject{};
+    auto contracts = m_fixtures["contracts"].toObject();
+    const auto genericContracts = catalog["contracts"].toObject();
+    for (auto it = genericContracts.begin(); it != genericContracts.end(); ++it)
+        contracts.insert(it.key(), it.value());
+    m_fixtures["contracts"] = contracts;
+    m_fixtures["nodeTypes"] = catalog["nodeTypes"];
+    m_fixtures["portTypes"] = QJsonArray{"text", "integer", "number", "boolean", "object", "array"};
+
+    auto operations = catalog["operations"].toArray();
+    const auto legacy = m_fixtures["kinds"].toObject();
+    for (const auto &id : {"selector", "extractor", "lookup", "pricing", "tool"}) {
+        const auto base = legacy[id].toObject();
+        const QString kind = id == QString("selector") || id == QString("extractor") ? "model"
+            : id == QString("tool") ? "tool" : "transform";
+        QJsonObject spec{{"id", id}, {"kind", kind}, {"label", base["name"].toString() + " (order example)"},
+            {"detail", base["detail"]}, {"legacyOnly", id == QString("tool")}};
+        for (const auto &side : {QString("in"), QString("out")}) {
+            QJsonArray ports;
+            for (const auto &type : strings(base[side].toArray()))
+                ports.append(QJsonObject{{"id", type}, {"name", contracts.value(type).toObject()["label"]}, {"type", type}});
+            spec[side] = ports;
+        }
+        operations.append(spec);
+    }
+    m_fixtures["operations"] = operations;
+
+    if (live()) {
+        auto types = m_fixtures["nodeTypes"].toArray();
+        for (int i = 0; i < types.size(); ++i) {
+            auto type = types.at(i).toObject();
+            if (type["id"] != "tool") continue;
+            type["detail"] = "Request actions with approval or ask the loaded local tool model.";
+            types.replace(i, type);
+        }
+        types.append(QJsonObject{{"id", "reasoning"}, {"label", "Reasoning"},
+            {"detail", "Use a checkpoint with explicit thinking support."}});
+        m_fixtures["nodeTypes"] = types;
+        contracts["null"] = QJsonObject{{"label", "Null"}, {"schema", QJsonObject{{"type", "null"}}}};
+        contracts["receipt"] = QJsonObject{{"label", "Receipt"}, {"schema", QJsonObject{{"type", "object"}}}};
+        m_fixtures["contracts"] = contracts;
+        m_fixtures["portTypes"] = QJsonArray{"text", "integer", "number", "boolean", "object", "array", "null"};
+        QJsonArray catalog;
+        for (const auto &value : operations) {
+            auto spec = value.toObject();
+            const auto op = spec["id"].toString();
+            if (op == "selector" || op == "extractor" || op == "tool" || op == "lookup" || op == "pricing") continue;
+            if (op == "input") {
+                auto port = spec["out"].toArray().first().toObject();
+                port["id"] = "value";
+                spec["out"] = QJsonArray{port};
+            } else if (op == "approval") {
+                spec["label"] = "Request approval";
+                spec["detail"] = "Request approval for an action supplied as a structured object.";
+                spec["in"] = QJsonArray{QJsonObject{{"id", "value"}, {"name", "Action"}, {"type", "object"}}};
+            }
+            catalog.append(spec);
+        }
+        const QJsonArray modelIn{QJsonObject{{"id", "value"}, {"name", "Input"}, {"type", "text"}, {"chooseType", true}}};
+        const QJsonArray modelOut{QJsonObject{{"id", "value"}, {"name", "Result"}, {"type", "text"}, {"chooseType", true}}};
+        catalog.append(QJsonObject{{"id", "generate"}, {"kind", "model"}, {"label", "Generate a response"},
+            {"detail", "Generate a typed result with a local checkpoint and optional adapter."}, {"in", modelIn}, {"out", modelOut}});
+        catalog.append(QJsonObject{{"id", "reason"}, {"kind", "reasoning"}, {"label", "Reason through a task"},
+            {"detail", "Use a thinking checkpoint with a separate output token budget."}, {"in", modelIn}, {"out", modelOut}});
+        catalog.append(QJsonObject{{"id", "agent"}, {"kind", "tool"}, {"label", "Ask the local tool model"},
+            {"detail", "Use the loaded tool model. Each external action requires approval."}, {"in", modelIn},
+            {"out", QJsonArray{QJsonObject{{"id", "receipt"}, {"name", "Result"}, {"type", "receipt"}}}}});
+        for (const auto &op : {QString("order-clause"), QString("order-price")})
+            catalog.append(QJsonObject{{"id", op}, {"kind", "transform"}, {"label", op == "order-clause"
+                ? "Look up order clause" : "Validate and price order"}, {"legacyOnly", true}});
+        m_fixtures["operations"] = catalog;
+        for (const auto &key : {"models", "adapters", "samples", "scenarios", "baseline", "starter"})
+            m_fixtures.remove(key);
+        const QSettings settings;
+        const auto home = qEnvironmentVariable("MAGNITE_HOME", settings.value("storage/dataDir").toString().trimmed());
+        const auto identity = home.isEmpty() ? QByteArray{} : QFileInfo(home).absoluteFilePath().toUtf8();
+        const auto profile = QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex();
+        m_draftsKey = "blueprints/" + profile + "/drafts";
+        m_templatesKey = "blueprints/" + profile + "/nodes";
+        m_saved = QJsonDocument::fromJson(settings.value(QString::fromLatin1(m_draftsKey)).toByteArray()).array();
+        m_nodeLibrary = QJsonDocument::fromJson(settings.value(QString::fromLatin1(m_templatesKey)).toByteArray()).array();
+        const auto connectionChanged = [this] {
+            ++m_session;
+            m_streams.clear();
+            const auto waiting = std::exchange(m_refreshingRuns, {});
+            for (const auto &waiters : waiting)
+                for (const auto &waiter : waiters) waiter({}, "The local service connection changed.");
+            m_dirtyRuns.clear();
+            m_serviceError = connected() ? QString{} : QString("The local service is disconnected. Reconnecting…");
+            emit serviceChanged();
+            if (!connected()) return;
+            refreshSaved();
+            refreshRuns("?limit=50");
+            refreshRuns("?active=true");
+            refreshRuns("?surface=chat&limit=20", true);
+            refreshOptions();
+            request("GET", "/blueprints/starters/order", {}, [this](int status, const QJsonDocument &doc) {
+                if (status == 200) {
+                    m_starterData = doc.object();
+                    emit optionsChanged();
+                }
+            });
+        };
+        connect(backend, &BackendClient::baseUrlChanged, this, connectionChanged);
+        connectionChanged();
+        connect(m_timer, &QTimer::timeout, this, [this] {
+            if (!connected()) return;
+            const auto records = m_runs;
+            for (const auto &value : records) {
+                const auto record = value.toObject();
+                const auto id = record["id"].toString();
+                const auto state = record["status"].toString();
+                if ((state == "queued" || state == "running" || state == "waiting") &&
+                    !m_streams.contains(id) && !m_refreshingRuns.contains(id))
+                    loadRun(id);
+            }
+        });
+        m_timer->start(2500);
+        return;
+    }
+
+    if (m_persist) {
+        const QSettings settings;
+        m_nodeLibrary = QJsonDocument::fromJson(settings.value(nodeLibraryKey).toByteArray()).array();
+        m_saved = QJsonDocument::fromJson(settings.value(savedKey).toByteArray()).array();
+        m_runs = QJsonDocument::fromJson(settings.value(runsKey).toByteArray()).array();
+    }
+    const auto starter = m_fixtures["starter"].toObject();
+    if (!starter.isEmpty() && runs(starter["id"].toString()).isEmpty()) {
+        // Seed the same completed and failed traces as the browser preview.
+        QString error;
+        for (const auto &scenario : {QString("failure"), QString("normal")}) {
+            const auto sample = m_fixtures["samples"].toArray().at(scenario == "normal" ? 1 : 0).toObject();
+            const auto runId = start(starter, strings(sample["lines"].toArray()).join(' '), {}, scenario, "Blueprints", &error);
+            if (runId.isEmpty()) continue;
+            auto run = m_runs.first().toObject();
+            const qint64 stamp = QDateTime::currentMSecsSinceEpoch() - (scenario == "normal" ? 3600000 : 7200000);
+            run["created"] = stamp;
+            run["nextAt"] = stamp + stepDelay("input");
+            while (run["status"].toString() == "running") advance(run, run["nextAt"].toInteger());
+            m_runs.replace(0, run);
+        }
+        storeRuns();
+    }
+    connect(m_timer, &QTimer::timeout, this, &BlueprintPreview::tick);
+    m_timer->start(200);
+}
+
+QJsonObject BlueprintPreview::example() const {
+    const auto savedExample = findById(m_saved, "order-intake");
+    return savedExample.isEmpty() ? m_fixtures["starter"].toObject() : savedExample;
+}
+
+QJsonObject BlueprintPreview::blueprint(const QString &id) const {
+    return id == "order-intake" ? example() : findById(m_saved, id);
+}
+
+bool BlueprintPreview::saveBlueprint(const QJsonObject &blueprint) {
+    auto saved = m_saved;
+    const auto key = blueprint["id"].toString();
+    int index = 0;
+    while (index < saved.size() && saved.at(index).toObject()["id"].toString() != key) ++index;
+    if (index == saved.size()) saved.prepend(blueprint);
+    else saved.replace(index, blueprint);
+    return storeBlueprints(saved);
+}
+
+bool BlueprintPreview::deleteBlueprint(const QString &id) {
+    if (id.isEmpty() || id == "order-intake") return false;
+    auto saved = m_saved;
+    for (int index = 0; index < saved.size(); ++index) {
+        if (saved.at(index).toObject()["id"].toString() != id) continue;
+        saved.removeAt(index);
+        return storeBlueprints(saved);
+    }
+    return false;
+}
+
+QJsonArray BlueprintPreview::compatibleAdapters(const QString &model, const QString &kind) const {
+    QJsonArray result;
+    for (const auto &value : m_fixtures["adapters"].toArray()) {
+        const auto adapter = value.toObject();
+        if (adapter["model"].toString() == model && adapter["kind"].toString() == kind) result.append(adapter);
+    }
+    return result;
+}
+
+bool BlueprintPreview::storeBlueprints(const QJsonArray &saved) {
+    if (!writeEntries(live() ? m_draftsKey.constData() : savedKey, saved, m_persist)) return false;
+    m_saved = saved;
+    emit savedChanged();
+    return true;
+}
+
+bool BlueprintPreview::storeNodeLibrary(const QJsonArray &nodes) {
+    if (!writeEntries(live() ? m_templatesKey.constData() : nodeLibraryKey, nodes, m_persist)) return false;
+    m_nodeLibrary = nodes;
+    emit nodeLibraryChanged();
+    return true;
+}
+
+bool BlueprintPreview::saveNodeTemplate(const QString &name, QJsonObject node) {
+    if (name.trimmed().isEmpty() || operation(operationId(node)).isEmpty()) return false;
+    node.remove("id");
+    node.remove("x");
+    node.remove("y");
+    auto entries = m_nodeLibrary;
+    entries.prepend(QJsonObject{{"id", id()}, {"name", name.trimmed()}, {"node", node}});
+    return storeNodeLibrary(entries);
+}
+
+bool BlueprintPreview::removeNodeTemplate(const QString &entryId) {
+    auto entries = m_nodeLibrary;
+    for (int index = 0; index < entries.size(); ++index) {
+        if (entries.at(index).toObject()["id"].toString() != entryId) continue;
+        entries.removeAt(index);
+        return storeNodeLibrary(entries);
+    }
+    return false;
+}
+
+QString BlueprintPreview::operationId(const QJsonObject &node) {
+    return node["operation"].toString(node["kind"].toString());
+}
+
+QJsonObject BlueprintPreview::operation(const QString &id) const {
+    return findById(m_fixtures["operations"].toArray(), id);
+}
+
+QString BlueprintPreview::settingError(const QJsonObject &node) const {
+    const auto code = operationId(node);
+    const auto value = node["setting"].toString();
+    if (code == "dataset-rows" && node["dataset"].toString().isEmpty() && !parseJsonValue(value).isArray())
+        return "Enter a valid JSON array for the dataset rows.";
+    if (code == "field" && value.trimmed().isEmpty()) return "Enter the name of the field to read.";
+    return {};
+}
+
+QString BlueprintPreview::nodeKindLabel(const QString &id) const {
+    return findById(m_fixtures["nodeTypes"].toArray(), id)["label"].toString(id);
+}
+
+QString BlueprintPreview::portLabel(const QJsonObject &port) const {
+    const auto type = QString(port["type"].toString());
+    return port["name"].toString(m_fixtures["contracts"].toObject().value(type).toObject()["label"].toString(type));
+}
+
+bool BlueprintPreview::usesOrderSample(const QJsonObject &blueprint, const QString &target) const {
+    if (target.isEmpty() && blueprint["id"].toString() == "order-intake") return true;
+    for (const auto &value : blueprint["nodes"].toArray()) {
+        const auto node = value.toObject();
+        if (!target.isEmpty() && node["id"].toString() != target) continue;
+        const auto code = operationId(node);
+        if (code == "selector" || code == "extractor" || code == "lookup" || code == "pricing") return true;
+    }
+    return false;
+}
+
+QJsonObject BlueprintPreview::makeNode(const QString &operationKey, const QString &nodeId, int x, int y) const {
+    const auto spec = operation(operationKey);
+    if (spec.isEmpty()) return {};
+    const auto kind = spec["kind"].toString();
+    const auto contracts = m_fixtures["contracts"].toObject();
+    QJsonObject node{{"id", nodeId}, {"kind", kind}, {"operation", operationKey},
+        {"name", nodeKindLabel(kind)}, {"x", x}, {"y", y}};
+    if (!live() && kind == "model") node["model"] = "qwen";
+    const auto setting = spec["setting"].toObject();
+    if (!setting.isEmpty()) node["setting"] = setting["default"].toString();
+    for (const auto &side : {QString("in"), QString("out")}) {
+        QJsonArray ports;
+        for (const auto &value : spec[side].toArray()) {
+            auto port = value.toObject();
+            const auto type = port["type"].toString();
+            port.remove("chooseType");
+            port["schema"] = contracts.value(type).toObject()["schema"];
+            if (live() && kind == "dataset")
+                port["schema"] = QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "object"}}}};
+            ports.append(port);
+        }
+        node[side] = ports;
+    }
+    return node;
+}
+
+QString BlueprintPreview::id() { return QUuid::createUuid().toString(QUuid::Id128); }
+
+QString BlueprintPreview::connectionError(const QJsonObject &blueprint, const QJsonObject &edge) const {
+    const auto from = edge["from"].toString();
+    const auto to = edge["to"].toString();
+    const auto nodes = blueprint["nodes"].toArray();
+    const auto outgoing = findById(findById(nodes, from)["out"].toArray(), edge["out"].toString());
+    const auto incoming = findById(findById(nodes, to)["in"].toArray(), edge["in"].toString());
+    if (outgoing.isEmpty() || incoming.isEmpty()) return "Select an output port and an input port.";
+    const auto fromType = outgoing["schema"].toObject()["type"].toString();
+    const auto toType = incoming["schema"].toObject()["type"].toString();
+    if (fromType != toType && !(live() && fromType == "integer" && toType == "number")) {
+        const auto contracts = m_fixtures["contracts"].toObject();
+        return QString("%1 cannot connect to %2. Choose an input with the same type.")
+            .arg(contracts.value(outgoing["type"].toString()).toObject()["label"].toString(),
+                 contracts.value(incoming["type"].toString()).toObject()["label"].toString());
+    }
+    const auto edges = blueprint["edges"].toArray();
+    for (const auto &value : edges) {
+        const auto existing = value.toObject();
+        if (existing["to"] == edge["to"] && existing["in"] == edge["in"])
+            return "This input already has a connection. Remove it before connecting a new output.";
+    }
+    QStringList pending{to};
+    QSet<QString> visited;
+    while (!pending.isEmpty()) {
+        const auto next = pending.takeLast();
+        if (next == from) return "This connection would create a cycle.";
+        if (visited.contains(next)) continue;
+        visited.insert(next);
+        for (const auto &value : edges) {
+            const auto existing = value.toObject();
+            if (existing["from"].toString() == next) pending.append(existing["to"].toString());
+        }
+    }
+    return {};
+}
+
+QStringList BlueprintPreview::issues(const QJsonObject &blueprint) const {
+    QStringList result;
+    bool hasSource = false;
+    const auto nodes = blueprint["nodes"].toArray();
+    const auto edges = blueprint["edges"].toArray();
+    for (const auto &value : nodes) {
+        const auto node = value.toObject();
+        const auto name = node["name"].toString();
+        const auto kind = operationId(node);
+        hasSource |= kind == "input" || kind == "dataset-rows";
+        const auto invalidSetting = settingError(node);
+        if (!invalidSetting.isEmpty()) result << name + " · " + invalidSetting;
+        if (live() && (kind == "generate" || kind == "reason") && node["model"].toString().isEmpty())
+            result << name + " needs a local checkpoint.";
+        if (kind == "selector" || kind == "extractor") {
+            const auto model = findById(m_fixtures["models"].toArray(), node["model"].toString());
+            const auto adapter = findById(compatibleAdapters(node["model"].toString(), kind), node["adapter"].toString());
+            if (!model["supported"].toBool()) result << name + " needs a Torch / PEFT checkpoint.";
+            else if (adapter.isEmpty()) result << name + " needs a compatible adapter.";
+        }
+        for (const auto &portValue : node["in"].toArray()) {
+            const auto port = portValue.toObject();
+            const bool connected = std::any_of(edges.cbegin(), edges.cend(), [&](const auto &edgeValue) {
+                const auto edge = edgeValue.toObject();
+                return edge["to"] == node["id"] && edge["in"] == port["id"];
+            });
+            if (!connected)
+                result << QString("%1 needs a connection to %2.").arg(name, portLabel(port));
+        }
+    }
+    if (!hasSource) result.prepend("Add an Input or Dataset node.");
+    if (live() && std::none_of(nodes.begin(), nodes.end(), [](const auto &node) {
+        return node.toObject()["kind"].toString() == "output";
+    })) result << "Add an Output node.";
+    for (int i = 0; i < edges.size(); ++i) {
+        auto remaining = edges;
+        remaining.removeAt(i);
+        auto graph = blueprint;
+        graph["edges"] = remaining;
+        const auto error = connectionError(graph, edges.at(i).toObject());
+        if (!error.isEmpty()) result.append(error);
+    }
+    result.removeDuplicates();
+    return result;
+}
+
+QString BlueprintPreview::start(const QJsonObject &blueprint, const QString &input, const QString &target,
+                                const QString &scenario, const QString &source, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error) *error = message;
+        return QString{};
+    };
+    const bool orderSample = usesOrderSample(blueprint, target);
+    if ((blueprint.isEmpty() || orderSample) && input.trimmed().isEmpty()) return fail("Enter a sample message.");
+    const QString runInput = orderSample ? input.trimmed() : input;
+    const auto edges = blueprint["edges"].toArray();
+    QJsonArray steps;
+    if (blueprint.isEmpty()) {
+        steps.append(QJsonObject{{"id", "chat-tool"}, {"kind", "chat-tool"}, {"name", "Review tool request"}});
+    } else if (!target.isEmpty()) {
+        auto node = findById(blueprint["nodes"].toArray(), target);
+        if (node.isEmpty()) return fail("Select an existing node to test.");
+        steps.append(node);
+    } else {
+        const auto problems = issues(blueprint);
+        if (!problems.isEmpty()) return fail(problems.join('\n'));
+        auto remaining = blueprint["nodes"].toArray();
+        QSet<QString> ordered;
+        bool hasTool = false;
+        while (!remaining.isEmpty()) {
+            int index = 0;
+            for (; index < remaining.size(); ++index) {
+                const auto node = remaining.at(index).toObject();
+                if (std::none_of(edges.cbegin(), edges.cend(), [&](const auto &value) {
+                    const auto edge = value.toObject();
+                    return edge["to"] == node["id"] && !ordered.contains(edge["from"].toString());
+                })) break;
+            }
+            if (index == remaining.size()) return fail("This workflow contains a cycle.");
+            const auto node = remaining.takeAt(index).toObject();
+            ordered.insert(node["id"].toString());
+            hasTool |= operationId(node) == "tool" || operationId(node) == "approval";
+            steps.append(node);
+        }
+        if (!hasTool && (scenario == "approval" || scenario == "command"))
+            steps.append(QJsonObject{{"id", "preview-tool"}, {"kind", "tool"},
+                                     {"name", scenario == "command" ? "Check Python version" : "Open order preview"}});
+    }
+    for (int i = 0; i < steps.size(); ++i) {
+        auto step = steps.at(i).toObject();
+        step["status"] = i == 0 ? "running" : "queued";
+        steps.replace(i, step);
+    }
+    const auto runId = id();
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    const auto sample = orderSample ? sampleFor(m_fixtures["samples"].toArray(), runInput.trimmed()) : QJsonObject{};
+    const QJsonObject run{{"id", runId}, {"blueprintId", blueprint["id"].toString()},
+        {"name", blueprint.isEmpty() ? QString("Chat tool request") : blueprint["name"].toString()},
+        {"revision", blueprint["revision"].toInt()}, {"input", runInput}, {"target", target}, {"scenario", scenario},
+        {"source", source}, {"sampleId", sample["id"]}, {"status", "running"}, {"created", now}, {"cursor", 0},
+        {"nextAt", now + stepDelay(operationId(steps.first().toObject()))}, {"steps", steps}, {"edges", edges}};
+    m_runs.prepend(run);
+    storeRuns();
+    emit runChanged(runId);
+    return runId;
+}
+
+bool BlueprintPreview::advance(QJsonObject &run, qint64 now) const {
+    const auto state = run["status"].toString();
+    if (state != "running" && state != "waiting") return false;
+    auto steps = run["steps"].toArray();
+    const int cursor = run["cursor"].toInt(-1);
+    if (cursor < 0 || cursor >= steps.size()) return false;
+    auto step = steps.at(cursor).toObject();
+    if (state == "waiting") {
+        auto decision = run["decision"].toObject();
+        const auto expires = decision["expires"].toInteger();
+        if (now < expires) return false;
+        decision["status"] = "expired";
+        run["decision"] = decision;
+        finishStep(run, steps, step, expires, "expired");
+        return true;
+    }
+    const auto eventAt = run["nextAt"].toInteger();
+    if (now < eventAt) return false;
+
+    const auto kind = operationId(step);
+    const auto sample = findById(m_fixtures["samples"].toArray(), run["sampleId"].toString());
+    const auto rawInput = run["input"].toString();
+    const auto ports = step["in"].toArray();
+    QJsonObject inputs, namedInputs;
+    const bool singleNode = !run["target"].toString().isEmpty();
+    const bool orderOperation = kind == "selector" || kind == "extractor" || kind == "lookup" || kind == "pricing";
+    for (const auto &value : ports) {
+        const auto port = value.toObject();
+        const auto inputId = port["id"].toString();
+        QJsonValue input = QJsonValue::Undefined;
+        if (singleNode) {
+            const auto type = port["schema"].toObject()["type"].toString();
+            if (!orderOperation && ports.size() == 1 && !rawInput.trimmed().isEmpty())
+                input = type == "string" ? QJsonValue(rawInput) : parseJsonValue(rawInput);
+            else input = exampleValue(port["type"].toString(), sample);
+        } else {
+            for (const auto &edgeValue : run["edges"].toArray()) {
+                const auto edge = edgeValue.toObject();
+                if (edge["to"] == step["id"] && edge["in"] == port["id"])
+                    input = findById(steps, edge["from"].toString())["output"];
+            }
+        }
+        inputs.insert(inputId, input);
+        namedInputs.insert(portLabel(port), input);
+    }
+    if (kind == "input") namedInputs["Run input"] = rawInput;
+    if (kind == "dataset-rows") namedInputs["Dataset rows"] = parseJsonValue(step["setting"].toString());
+    step["inputs"] = namedInputs;
+
+    QString error = settingError(step);
+    if (kind == "selector" || kind == "extractor") {
+        const auto model = findById(m_fixtures["models"].toArray(), step["model"].toString());
+        const auto adapter = findById(compatibleAdapters(step["model"].toString(), kind), step["adapter"].toString());
+        if (!model["supported"].toBool() || adapter.isEmpty())
+            error = "Choose a compatible Torch / PEFT model and adapter before testing this node.";
+    }
+    for (const auto &value : ports) {
+        if (!error.isEmpty()) break;
+        const auto port = value.toObject();
+        error = validate(inputs.value(port["id"].toString()), port["schema"].toObject(), "input." + portLabel(port));
+    }
+    if (error.isEmpty() && (kind == "tool" || kind == "chat-tool" || kind == "approval")) {
+        const auto requests = m_fixtures["approvalFixtures"].toObject();
+        auto decision = requests[run["scenario"].toString() == "command" ? "command" : "file"].toObject();
+        decision["status"] = "waiting";
+        decision["stepId"] = step["id"];
+        decision["expires"] = eventAt + approvalMs;
+        run["decision"] = decision;
+        run["status"] = "waiting";
+        step["status"] = "waiting";
+        steps.replace(run["cursor"].toInt(), step);
+        run["steps"] = steps;
+        return true;
+    }
+    if (error.isEmpty()) {
+        QJsonValue output;
+        const auto outputPorts = step["out"].toArray();
+        const auto value = inputs.value("value");
+        if (kind == "input") {
+            const auto schema = outputPorts.at(0).toObject()["schema"].toObject();
+            output = schema["type"].toString() == "string" ? QJsonValue(rawInput) : parseJsonValue(rawInput);
+        } else if (kind == "dataset-rows") output = parseJsonValue(step["setting"].toString());
+        else if (kind == "pass" || kind == "output") output = value;
+        else if (kind == "parse-json") {
+            output = parseJsonValue(value.toString());
+            if (output.isUndefined()) error = "The input is not valid JSON.";
+        } else if (kind == "field") {
+            const auto property = step["setting"].toString();
+            output = value.toObject().value(property);
+            if (output.isUndefined()) error = QString("The object has no field named “%1”.").arg(property);
+        } else if (kind == "first") {
+            if (value.toArray().isEmpty()) error = "The array has no items.";
+            else output = value.toArray().first();
+        } else if (kind == "count") output = int(value.toArray().size());
+        else if (kind == "format") output = value.isString() ? value : QJsonValue(jsonText(value));
+        else if (kind == "selector") output = sample["active"];
+        else if (kind == "lookup") {
+            static const QRegularExpression clausePattern("[^.!?]+[.!?]*");
+            QStringList clauses;
+            auto matches = clausePattern.globalMatch(inputs["text"].toString());
+            while (matches.hasNext()) clauses.append(matches.next().captured().trimmed());
+            const int index = inputs["index"].toInt() - 1;
+            if (index < 0 || index >= clauses.size()) error = "The selected clause index is outside the message.";
+            else output = clauses.at(index);
+        } else if (kind == "extractor") {
+            auto fields = sample["fields"].toObject();
+            if (run["scenario"].toString() == "failure") fields["quantity"] = "six";
+            output = fields;
+        } else if (kind == "pricing") output = price(inputs["fields"].toObject());
+        else error = "This node has an unsupported operation.";
+        if (error.isEmpty()) {
+            step["output"] = output;
+            for (const auto &value : outputPorts) {
+                error = validate(output, value.toObject()["schema"].toObject(), "output");
+                if (!error.isEmpty()) break;
+            }
+        }
+    }
+    if (!error.isEmpty()) step["error"] = error;
+    finishStep(run, steps, step, eventAt, error.isEmpty() ? "passed" : "failed");
+    return true;
+}
+
+QJsonObject BlueprintPreview::run(const QString &runId) const { return findById(m_runs, runId); }
+
+QJsonArray BlueprintPreview::runs(const QString &blueprintId) const {
+    QJsonArray result;
+    for (const auto &value : m_runs)
+        if (value.toObject()["blueprintId"].toString() == blueprintId) result.append(value);
+    return result;
+}
+
+QJsonArray BlueprintPreview::chatRuns() const {
+    QJsonArray result;
+    for (const auto &value : m_runs)
+        if (value.toObject()["source"].toString() == "Local chat") result.prepend(value);
+    if (live()) while (result.size() > 20) result.removeFirst();
+    return result;
+}
+
+void BlueprintPreview::tick() {
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    for (int i = 0; i < m_runs.size(); ++i) {
+        auto run = m_runs.at(i).toObject();
+        if (!advance(run, now)) continue;
+        while (advance(run, now)) {}
+        updateRun(i, run);
+    }
+}
+
+void BlueprintPreview::updateRun(int index, const QJsonObject &run) {
+    m_runs.replace(index, run);
+    storeRuns();
+    emit runChanged(run["id"].toString());
+}
+
+void BlueprintPreview::storeRuns() {
+    if (m_persist) QSettings().setValue(runsKey, QJsonDocument(m_runs).toJson(QJsonDocument::Compact));
+}
+
+void BlueprintPreview::decide(const QString &id, bool approved, const QJsonObject &displayed) {
+    if (live()) {
+        decideLive(id, approved, displayed);
+        return;
+    }
+    for (int i = 0; i < m_runs.size(); ++i) {
+        auto run = m_runs.at(i).toObject();
+        if (run["id"].toString() != id || run["status"].toString() != "waiting") continue;
+        const auto now = QDateTime::currentMSecsSinceEpoch();
+        if (!advance(run, now)) {
+            const auto steps = run["steps"].toArray();
+            auto step = steps.at(run["cursor"].toInt()).toObject();
+            auto decision = run["decision"].toObject();
+            decision["status"] = approved ? "approved" : "denied";
+            run["decision"] = decision;
+            if (approved) step["output"] = QJsonObject{{"decision", "approved"}, {"simulated", true}};
+            finishStep(run, steps, step, now, approved ? "passed" : "denied");
+        }
+        updateRun(i, run);
+        return;
+    }
+}
+
+void BlueprintPreview::cancel(const QString &id) {
+    if (live()) {
+        cancelLive(id);
+        return;
+    }
+    for (int i = 0; i < m_runs.size(); ++i) {
+        auto run = m_runs.at(i).toObject();
+        const auto status = run["status"].toString();
+        if (run["id"].toString() != id || (status != "running" && status != "waiting")) continue;
+        const auto now = QDateTime::currentMSecsSinceEpoch();
+        if (status != "waiting" || !advance(run, now)) {
+            auto decision = run["decision"].toObject();
+            if (status == "waiting") {
+                decision["status"] = "cancelled";
+                run["decision"] = decision;
+            }
+            const auto steps = run["steps"].toArray();
+            finishStep(run, steps, steps.at(run["cursor"].toInt()).toObject(), now, "cancelled");
+        }
+        updateRun(i, run);
+        return;
+    }
+}
+
+QString BlueprintPreview::statusLabel(const QString &status) {
+    static const QHash<QString, QString> labels{{"running", "Running"}, {"waiting", "Waiting for approval"},
+        {"passed", "Completed"}, {"failed", "Failed"}, {"cancelled", "Cancelled"}, {"denied", "Denied"},
+        {"expired", "Expired"}, {"queued", "Queued"}, {"skipped", "Skipped"}, {"approved", "Approved once"},
+        {"pending", "Pending"}, {"unavailable", "Unavailable"}, {"executing", "Executing"},
+        {"completed", "Completed"}, {"interrupted", "Interrupted"}};
+    return labels.value(status, status);
+}
+
+QString BlueprintPreview::duration(qint64 ms) {
+    if (ms < 0) return QString::fromUtf8("—");
+    return ms < 1000 ? QString("%1 ms").arg(ms) : QString("%1 s").arg(ms / 1000.0, 0, 'f', 2);
+}
+
+QString BlueprintPreview::jsonText(const QJsonValue &value) {
+    if (value.isObject()) return QString::fromUtf8(QJsonDocument(value.toObject()).toJson()).trimmed();
+    if (value.isUndefined()) return QString::fromUtf8("—");
+    const auto json = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
+    return QString::fromUtf8(json.mid(1, json.size() - 2));
+}
+
+bool BlueprintPreview::supportedSchema(const QJsonObject &schema) {
+    const auto type = schema["type"].toString();
+    if (type != "string" && type != "integer" && type != "number" && type != "object" &&
+            type != "boolean" && type != "array" && type != "null") return false;
+    if (schema.contains("minimum") && !schema["minimum"].isDouble()) return false;
+    if (schema.contains("minLength") && schema["minLength"].toInt(-1) < 0) return false;
+    if (schema.contains("required") && !schema["required"].isArray()) return false;
+    for (const auto &key : schema["required"].toArray())
+        if (!key.isString()) return false;
+    if (schema.contains("items") && !supportedSchema(schema["items"].toObject())) return false;
+    if (schema.contains("properties") && !schema["properties"].isObject()) return false;
+    const auto props = schema["properties"].toObject();
+    for (const auto &value : props)
+        if (!supportedSchema(value.toObject())) return false;
+    return true;
+}

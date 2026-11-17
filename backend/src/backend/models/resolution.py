@@ -1,7 +1,32 @@
 """Resolve registered identities without silently switching cached revisions."""
+import json
 import os
+from pathlib import Path
 
 from huggingface_hub import snapshot_download
+
+
+def has_transformer_weights(path: Path) -> bool:
+    """Recognize a local Transformers checkpoint without importing ML."""
+    if not (path / "config.json").is_file():
+        return False
+    for name in ("model.safetensors", "pytorch_model.bin"):
+        weight = path / name
+        if weight.is_file() and weight.stat().st_size > 0:
+            return True
+    for name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
+        try:
+            index = json.loads((path / name).read_text(encoding="utf-8"))
+            shards = set(index["weight_map"].values())
+            if shards and all(
+                not Path(shard).is_absolute() and ".." not in Path(shard).parts
+                for shard in shards
+            ) and all((path / shard).is_file() and (path / shard).stat().st_size > 0
+                      for shard in shards):
+                return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return False
 
 
 def registered_model(ref):

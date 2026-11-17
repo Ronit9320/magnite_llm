@@ -72,6 +72,12 @@ their selected distributions separately if they become bundled. Before binary
 distribution, enumerate transitive/native libraries and include their applicable
 license texts and notices. Do not copy this metadata table as a substitute.
 
+The optional Pi bridge uses `@earendil-works/pi-agent-core` and
+`@earendil-works/pi-ai` 1.5.2 under the MIT license.
+[Pi license](https://github.com/earendil-works/pi/blob/main/LICENSE)
+The [npm lockfile](backend/src/backend/tooling/pi/package-lock.json) records
+the transitive packages and their declared licenses.
+
 ## Models and example data
 
 The repo's new `examples/` files are synthetic, original demonstration inputs;
