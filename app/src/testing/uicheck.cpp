@@ -991,12 +991,22 @@ int runUiCheck(const QString &captures) {
             wrapped->setProperty("wordWrap",true);
             plain->setGeometry(0,0,360,36); wrapped->setGeometry(0,40,360,36);
             host.show(); pump(80);
-            const auto inkWidth=[&](QWidget *w) {
-                const QImage image=w->grab().toImage(); const double ratio=image.devicePixelRatio();
-                int left=image.width(), right=-1;
-                for (int y=0;y<image.height();++y) for (int x=0;x<image.width();++x)
-                    if (qGray(image.pixel(x,y))>90) { left=qMin(left,x); right=qMax(right,x); }
-                return right<left?0:int((right-left)/ratio);
+            const auto inkWidth=[](Button *button) {
+                const QImage label = button->grab().toImage();
+                const QString text = button->text();
+                button->setText(QString());
+                const QImage background = button->grab().toImage();
+                button->setText(text);
+                int left = label.width(), right = -1;
+                for (int y = 0; y < label.height(); ++y) {
+                    for (int x = 0; x < label.width(); ++x) {
+                        if (label.pixel(x, y) != background.pixel(x, y)) {
+                            left = qMin(left, x);
+                            right = qMax(right, x);
+                        }
+                    }
+                }
+                return right < left ? 0 : int((right - left) / label.devicePixelRatio());
             };
             const int a=inkWidth(plain), b=inkWidth(wrapped);
             check(a>40 && qAbs(a-b)<=2,QString("button: a wrapping button shows && as one & (ink %1px vs %2px)").arg(b).arg(a));
