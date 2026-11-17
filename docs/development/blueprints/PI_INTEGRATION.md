@@ -35,8 +35,10 @@ npm ci --ignore-scripts --prefix backend/src/backend/tooling/pi
 The Python wheel includes the bridge and npm manifests. It can run after its
 locked npm dependencies are staged beside the bridge. On Linux this was
 verified with Node 26.13.1 and a wheel unpacked outside the source checkout.
-Native release packaging and acceptance on macOS and Windows are Phase 6 work.
-Those builds need a compatible Node binary and the same locked dependencies.
+The native builders install the locked npm packages alongside the installed
+bridge and stage the checksum-pinned Node 22.23.5 executable next to bundled
+Python. The packaged bridge locates Node there. Each package smoke runs the
+bridge with the host Node path removed.
 [Node downloads](https://nodejs.org/en/download)
 
 ## Approval and execution

@@ -10,7 +10,7 @@ import sys
 import runpy
 
 
-def record_build(destination: Path):
+def record_build(destination: Path, *, profile: str = "ml", tooling: dict | None = None):
     repo = Path(__file__).resolve().parents[1]
     python = destination / "runtime/python" / ("python.exe" if sys.platform == "win32" else "bin/python3")
     info = destination / "build-info"
@@ -24,6 +24,11 @@ def record_build(destination: Path):
     if os.environ.get("MAGNITE_REQUIRE_CLEAN") == "1" and dirty:
         raise RuntimeError("Release packages require a clean source checkout")
     identity = runpy.run_path(str(repo / "backend/src/backend/_version.py"))
+    description = ("Python 3.12.12; llama.cpp; base dependencies"
+                   if profile == "base" else
+                   "Python 3.12.12; macOS arm64 torch wheel (CPU/MPS); llama-cpp-python built from "
+                   "sdist with GGML_METAL=ON (embedded shaders); ML extras without bitsandbytes"
+                   if sys.platform == "darwin" else "Python 3.12.12; CPU torch and llama.cpp; ML extras")
     (info / "build.json").write_text(json.dumps({
         "version": identity["RELEASE_VERSION"],
         "update_sequence": identity["UPDATE_SEQUENCE"],
@@ -31,10 +36,9 @@ def record_build(destination: Path):
         "commit": commit, "working_tree_modified": dirty,
         "platform": platform.platform(), "architecture": platform.machine(),
         "host_libc": platform.libc_ver(),
-        "runtime": ("Python 3.12.12; macOS arm64 torch wheel (CPU/MPS); llama-cpp-python built from "
-                    "sdist with GGML_METAL=ON (embedded shaders); ML extras without bitsandbytes"
-                    if sys.platform == "darwin" else
-                    "Python 3.12.12; CPU torch and llama.cpp; ML extras"),
+        "runtime": description,
+        "runtime_profile": profile,
+        "tooling": tooling or {},
     }, indent=2) + "\n", encoding="utf-8")
 
 

@@ -23,6 +23,26 @@ installs the pinned CPU ML runtime and the backend wheel, builds portable CPU
 llama.cpp, then assembles Qt and native libraries into an AppImage. No developer
 venv, personal store or model caches are copied.
 
+The shared runtime builder also stages the pinned Node.js executable and the
+production dependencies from the Pi npm lockfile. Both runtime profiles
+include Pi. The command below builds a GGUF package without optional ML
+dependencies in separate staging and output directories.
+
+```sh
+MAGNITE_PACKAGE_WITHOUT_ML=1 \
+MAGNITE_PACKAGE_DIR="$PWD/build/packaging/base" \
+MAGNITE_DIST_DIR="$PWD/build/packaging/base/dist" \
+bash packaging/build_appimage.sh
+```
+
+Use a separate staging directory for each runtime profile. `build-info`
+records the profile and bundled Node and Pi versions. The relocated smoke
+starts Blueprints, runs the Pi worker with host Node removed from PATH, and
+uses `--features` to exercise GGUF on both profiles and LoRA/RAG on the ML
+profile. The macOS and Windows smoke checks also run the Pi worker from the
+installed package.
+[Pinned Node release](https://nodejs.org/en/blog/release/v22.23.5/)
+
 `requirements-cpu.txt` pins direct runtime requirements and `constraints-cpu.txt`
 pins their resolved versions. Review both when updating dependencies. AppImage
 tool asset-ID URLs, digests and source commits are in `tools.lock.json`. Immutable

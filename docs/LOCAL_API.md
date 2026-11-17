@@ -107,6 +107,11 @@ revision. Its result maps the tested node ID to its named outputs. A test of a
 Tool node requires the same authenticated launch and approval broker as a full
 local run.
 
+`GET /blueprints/runs?active=true` returns queued or running records, including
+runs waiting for a tool approval. Running a saved blueprint from chat records
+`surface: "chat"`. Ad hoc Tool mode runs additionally have `tool_chat: true`
+and expose their final assistant text at `results.reply.text`.
+
 A portable document has `version: 1`, a name, nodes, and edges. Each edge connects
 `source: {"node": "...", "port": "..."}` to a corresponding `target`. Port
 names are keys in the node's `inputs` and `outputs` maps. Edges must form a DAG

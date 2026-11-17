@@ -92,6 +92,232 @@ bool waitForState(BlueprintPreview &preview, const QString &id, const QString &s
     }
     return false;
 }
+
+bool waitFor(const std::function<bool()> &condition, int timeout = 6000) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!condition() && timer.elapsed() < timeout) pump(30);
+    return condition();
+}
+
+QString modelId(QString repo) {
+    return "huggingface:" + repo.replace("/", "--");
+}
+
+QJsonObject edge(const QString &from, const QString &out, const QString &to, const QString &in) {
+    return {{"from", from}, {"out", out}, {"to", to}, {"in", in}};
+}
+
+bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &panel, BlueprintChatPanel &chat,
+    const QString &model, const QString &reasoningModel, const QString &captures) {
+    const auto check = [](bool passed, const char *step) {
+        fprintf(stderr, "[blueprints-model] %s %s\n", passed ? "ok:" : "FAIL:", step);
+        return passed;
+    };
+    const auto publishedRevision = [&](const QString &id) {
+        for (const auto &value : session.published()) {
+            const auto entry = value.toObject();
+            if (entry["id"] == id) return entry["revision"].toInt();
+        }
+        return 0;
+    };
+    const auto back = [&] {
+        if (auto *button = visibleNamed<QPushButton>(panel, "Blueprint library")) button->click();
+        pump();
+    };
+    back();
+    if (auto *starter = visibleButton(panel, "Order intake example")) starter->click();
+    if (!check(waitFor([&] { return visibleText(panel, "Order intake") && panel.findChild<BlueprintCanvas *>()->isVisible(); }),
+               "the order starter opens as an editable draft from the library")) return false;
+    back();
+    if (auto *create = visibleButton(panel, "Create new")) create->click();
+    pump();
+    const QString name = "Local adapter acceptance";
+    if (auto *title = visibleNamed<QLineEdit>(panel, "Name")) title->setText(name);
+    if (auto *create = visibleButton(panel, "Create blueprint")) create->click();
+    pump();
+    QJsonObject draft;
+    for (const auto &value : session.saved())
+        if (value.toObject()["name"] == name) draft = value.toObject();
+    if (!check(!draft["id"].toString().isEmpty() && draft["nodes"].toArray().isEmpty(),
+               "the desktop creates a blank draft")) return false;
+    const auto id = draft["id"].toString();
+    auto answer = session.makeNode("generate", "answer", 230, 0);
+    answer["prompt"] = "Answer the user with a brief factual answer.";
+    answer["response"] = "text";
+    answer["maxTokens"] = 24;
+    draft["nodes"] = QJsonArray{session.makeNode("input", "question", 0, 0), answer,
+                               session.makeNode("output", "result", 460, 0)};
+    draft["edges"] = QJsonArray{edge("question", "value", "answer", "value"), edge("answer", "value", "result", "value")};
+    if (!session.saveBlueprint(draft)) return false;
+    const auto open = [&] {
+        for (auto *button : panel.findChildren<QPushButton *>()) {
+            if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), name)) {
+                button->click();
+                pump();
+                return true;
+            }
+        }
+        return false;
+    };
+    back();
+    if (!check(open(), "the draft reopens from the native library")) return false;
+    auto *node = visibleNamed<QComboBox>(panel, "Select node");
+    if (!node || node->findData("answer") < 0) return check(false, "the Model node appears in the inspector");
+    const int modelIndex = node->findData("answer");
+    node->setCurrentIndex(modelIndex);
+    QMetaObject::invokeMethod(node, "activated", Q_ARG(int, modelIndex));
+    pump();
+
+    // Enter the actual modal selector and wait for the checkpoint options request.
+    QElapsedTimer dialogTime;
+    QTimer driver;
+    driver.setInterval(100);
+    auto bindingDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) return;
+        if (dialogTime.elapsed() > 20000) { dialog->reject(); return; }
+        auto *checkpoints = visibleNamed<QComboBox>(*dialog, "Base checkpoint");
+        if (!checkpoints || checkpoints->findData(modelId(model)) < 0) return;
+        checkpoints->setCurrentIndex(checkpoints->findData(modelId(model)));
+        if (auto *save = visibleButton(*dialog, "Save binding"); save && save->isEnabled()) save->click();
+    });
+    dialogTime.start();
+    driver.start();
+    if (auto *bind = visibleButton(panel, "Change binding")) bind->click();
+    driver.stop();
+    QObject::disconnect(bindingDriver);
+    if (!check(session.blueprint(id)["nodes"].toArray().at(1).toObject()["model"] == modelId(model),
+               "the Model node binds the local checkpoint in the desktop picker")) return false;
+    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (!check(waitFor([&] { return publishedRevision(id) == 1 && visibleText(panel, "Revision 1"); }),
+               "the model graph publishes revision 1")) return false;
+
+    const QString question = "What is the capital of the United Kingdom?";
+    const QJsonArray examples{
+        QJsonObject{{"inputs", QJsonObject{{"value", question}}}, {"outputs", QJsonObject{{"value", "London."}}}},
+        QJsonObject{{"inputs", QJsonObject{{"value", "Name the capital of the United Kingdom."}}},
+                    {"outputs", QJsonObject{{"value", "London."}}}}};
+    bool submitted = false;
+    auto jobDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) return;
+        if (dialogTime.elapsed() > 120000) { dialog->reject(); return; }
+        if (!submitted) {
+            auto *editor = visibleNamed<QPlainTextEdit>(*dialog, "Typed examples (JSON array)");
+            auto *queue = visibleButton(*dialog, "Queue training");
+            if (editor && queue && queue->isEnabled()) {
+                editor->setPlainText(BlueprintPreview::jsonText(examples));
+                submitted = true;
+                queue->click();
+            }
+            return;
+        }
+        auto *jobs = visibleNamed<QComboBox>(*dialog, "Training jobs for this node");
+        if (!jobs) return;
+        for (int i = 1; i < jobs->count(); ++i) {
+            if (jobs->itemText(i).endsWith(" · error")) {
+                fprintf(stderr, "[blueprints-model] %s\n", qUtf8Printable(jobs->itemData(i, Qt::ToolTipRole).toString()));
+                dialog->reject();
+                return;
+            }
+            if (!jobs->itemData(i, Qt::UserRole + 1).toBool()) continue;
+            jobs->setCurrentIndex(i);
+            if (auto *bind = visibleButton(*dialog, "Bind completed adapter"); bind && bind->isEnabled()) bind->click();
+            return;
+        }
+    });
+    dialogTime.restart();
+    driver.start();
+    if (auto *training = visibleButton(panel, "Training jobs…")) training->click();
+    driver.stop();
+    QObject::disconnect(jobDriver);
+    const auto trained = session.blueprint(id);
+    const auto adapter = trained["nodes"].toArray().at(1).toObject()["adapter"].toString();
+    if (!check(submitted && publishedRevision(id) == 2 && !adapter.isEmpty(),
+               "the desktop queues real training and binds the completed adapter as revision 2")) return false;
+
+    const auto latest = [&] {
+        const auto runs = session.runs(id);
+        return runs.isEmpty() ? QJsonObject{} : runs.first().toObject();
+    };
+    const auto runInEditor = [&](const QString &buttonText) {
+        if (auto *input = visibleNamed<QPlainTextEdit>(panel, "Run input")) input->setPlainText(question);
+        const auto before = latest()["id"].toString();
+        auto *start = visibleButton(panel, buttonText);
+        if (!start || !start->isEnabled()) {
+            fprintf(stderr, "[blueprints-model] Run action unavailable: %s\n", qUtf8Printable(buttonText));
+            return false;
+        }
+        start->click();
+        const bool finished = waitFor([&] {
+            const auto run = latest();
+            if (run["id"] != before && (run["status"] == "passed" || run["status"] == "failed")) return true;
+            for (const auto *error : panel.findChildren<QLabel *>("blueprintError"))
+                if (error->isVisible() && !error->text().isEmpty()) return true;
+            return false;
+        }, 35000);
+        if (!finished || latest()["status"] != "passed") {
+            for (const auto *error : panel.findChildren<QLabel *>("blueprintError"))
+                if (error->isVisible()) fprintf(stderr, "[blueprints-model] %s\n", qUtf8Printable(error->text()));
+            fprintf(stderr, "[blueprints-model] Latest run: %s\n", qUtf8Printable(BlueprintPreview::jsonText(latest())));
+            return false;
+        }
+        return true;
+    };
+    pump(); // The completed-job dialog rebuilds the inspector before it closes.
+    auto *test = visibleButton(panel, "Test this node");
+    if (!check(test && test->isEnabled(), "the trained node offers a desktop test")) return false;
+    test->click();
+    pump();
+    if (!check(runInEditor("Test node") && latest()["target"] == "answer",
+               "the bound Model node passes its isolated desktop test")) return false;
+    if (auto *target = visibleNamed<QComboBox>(panel, "Run target")) target->setCurrentIndex(0);
+    if (!check(runInEditor("Start run") && latest()["revision"].toInt() == 2,
+               "Blueprints runs the complete trained graph on revision 2")) return false;
+    const auto editorRun = latest();
+    if (!captures.isEmpty()) panel.grab().save(QDir(captures).filePath("trained-blueprint-run.png"));
+    back();
+    if (!check(open() && visibleText(panel, "Revision 2"), "the trained revision reopens from the native library")) return false;
+    chat.setMode(1);
+    if (auto *picker = visibleNamed<QComboBox>(chat, "Saved blueprint")) picker->setCurrentIndex(picker->findData(id));
+    if (auto *input = visibleNamed<QPlainTextEdit>(chat, "Blueprint or tool message")) input->setPlainText(question);
+    const auto send = [&] { return visibleButton(chat, "Send ↑"); };
+    if (waitFor([&] { return send() && send()->isEnabled(); })) send()->click();
+    const bool chatFinished = waitFor([&] {
+        const auto run = latest();
+        return run["source"] == "Local chat" && (run["status"] == "passed" || run["status"] == "failed");
+    }, 35000);
+    if (!check(chatFinished && latest()["status"] == "passed" && latest()["revision"].toInt() == 2 &&
+               latest()["result"] == editorRun["result"], "chat runs the same saved revision and returns the same result")) return false;
+    if (!captures.isEmpty()) chat.grab().save(QDir(captures).filePath("trained-blueprint-chat.png"));
+
+    if (reasoningModel.isEmpty()) return true;
+    const QJsonObject integer{{"type", "integer"}};
+    const QJsonObject resultSchema{{"type", "object"}, {"required", QJsonArray{"result"}},
+        {"properties", QJsonObject{{"result", integer}}}, {"additionalProperties", false}};
+    auto reason = session.makeNode("reason", "reason", 0, 0);
+    reason["in"] = QJsonArray{QJsonObject{{"id", "index"}, {"type", "integer"}, {"schema", integer}}};
+    reason["out"] = QJsonArray{QJsonObject{{"id", "answer"}, {"type", "object"}, {"schema", resultSchema}}};
+    reason["prompt"] = "Multiply 17 by 23 and add the number provided by the user. "
+        "After reasoning, output a JSON object with one key named \"result\" and an integer value.";
+    reason["maxTokens"] = 1200;
+    auto checkReasoning = [&](const QString &repo) {
+        reason["model"] = modelId(repo);
+        auto response = std::make_shared<QJsonObject>();
+        const QJsonObject graph{{"id", BlueprintPreview::id()}, {"name", "Check typed reasoning"}, {"nodes", QJsonArray{reason}}};
+        session.runLive(graph, QJsonObject{{"index", 2}}, "reason", false, false,
+            [response](const auto &run, const auto &error) { *response = {{"run", run}, {"error", error}}; });
+        waitFor([&] { return !response->isEmpty(); }, 20000);
+        return *response;
+    };
+    if (!check(checkReasoning(model)["error"].toString().contains("explicit thinking"),
+               "unsupported thinking reports the required checkpoint capability")) return false;
+    const auto reasonRun = checkReasoning(reasoningModel)["run"].toObject()["id"].toString();
+    return check(!reasonRun.isEmpty() && waitForState(session, reasonRun, "passed", 45000) &&
+                 session.run(reasonRun)["result"].toObject()["reason"].toObject()["answer"].toObject()["result"].toInt() == 393,
+                 "the second checkpoint produces the typed Reasoning answer 393");
+}
 }
 
 int runBlueprintChecks(const QString &captures) {
@@ -531,12 +757,14 @@ int runLiveBlueprintChecks(const QString &captures) {
     }
 
     const auto testModel = qEnvironmentVariable("MAGNITE_BLUEPRINTS_LIVE_MODEL");
+    const auto adapterModel = qEnvironmentVariable("MAGNITE_BLUEPRINTS_ACCEPTANCE_MODEL");
+    if (!adapterModel.isEmpty())
+        check(runModelBlueprintAcceptance(session, panel, chat, adapterModel, testModel, captures),
+              "clean-profile model and adapter acceptance");
     if (!testModel.isEmpty()) {
-        auto modelId = testModel;
-        modelId.replace("/", "--");
         struct CheckpointCheck { QJsonObject info; QString error; bool ready = false; };
         auto checkpoint = std::make_shared<CheckpointCheck>();
-        session.checkpoint("huggingface:" + modelId, [checkpoint](const auto &info, const auto &error) {
+        session.checkpoint(modelId(testModel), [checkpoint](const auto &info, const auto &error) {
             *checkpoint = {info, error, true};
         });
         check(until([&] { return checkpoint->ready; }, 15000) && checkpoint->error.isEmpty()

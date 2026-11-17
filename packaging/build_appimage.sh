@@ -2,23 +2,28 @@
 # Run from any directory. Requires CMake, Qt6, uv and network for build tools.
 set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-package_dir="$repo_dir/build/packaging"
+package_dir="${MAGNITE_PACKAGE_DIR:-$repo_dir/build/packaging}"
+dist_dir="${MAGNITE_DIST_DIR:-$repo_dir/dist}"
 app_dir="$package_dir/Magnite.AppDir"
-tool_dir="$package_dir/tools"
-mkdir -p "$tool_dir" "$repo_dir/dist"
+tool_dir="$repo_dir/build/packaging/tools"
+mkdir -p "$tool_dir" "$dist_dir"
+dist_dir="$(cd -- "$dist_dir" && pwd)"
 release_version="$(python3 "$repo_dir/packaging/release_metadata.py" --print-version)"
 
 cmake -S "$repo_dir/app" -B "$repo_dir/build" \
     -DCMAKE_BUILD_TYPE=Release \
     -DMAGNITE_RELEASE_REPOSITORY="${GITHUB_REPOSITORY:-Ronit9320/magnite_llm}"
 cmake --build "$repo_dir/build" -j "${MAGNITE_BUILD_JOBS:-2}"
-python3 "$repo_dir/packaging/reset_native_stage.py"
+python3 "$repo_dir/packaging/reset_native_stage.py" "$app_dir"
 cmake --install "$repo_dir/build" --prefix "$app_dir/usr"
 cp "$repo_dir/packaging/AppRun" "$app_dir/AppRun"
 chmod +x "$app_dir/AppRun"
 
 runtime_args=()
 if [[ -d "$app_dir/usr/bin/runtime/python" ]]; then runtime_args+=(--resume); fi
+if [[ -n "${MAGNITE_PACKAGE_PYTHON_ROOT:-}" ]]; then
+    runtime_args+=(--python-root "$MAGNITE_PACKAGE_PYTHON_ROOT")
+fi
 # Refresh the backend wheel and requirements on incremental builds too.
 python3 "$repo_dir/packaging/prepare_runtime.py" \
     --destination "$app_dir/usr/bin" "${runtime_args[@]}"
@@ -55,7 +60,7 @@ for plugin in "$qt_plugins"/platforms/libqwayland*.so; do
 done
 # linuxdeploy's older bundled strip cannot read modern ELF RELR sections.
 export NO_STRIP=1
-export LDAI_OUTPUT="$repo_dir/dist/Magnite-$release_version-linux-x86_64.AppImage"
+export LDAI_OUTPUT="$dist_dir/Magnite-$release_version-linux-x86_64.AppImage"
 export LINUXDEPLOY_OUTPUT_VERSION="$release_version"
 export LDAI_RUNTIME_FILE="$tool_dir/runtime-x86_64"
 "$tool_dir/linuxdeploy-x86_64.AppImage" \
@@ -68,9 +73,9 @@ export LDAI_RUNTIME_FILE="$tool_dir/runtime-x86_64"
     --icon-filename magnite --plugin qt --output appimage
 
 python3 "$repo_dir/packaging/audit_glibc.py" "$app_dir" \
-    --maximum "${MAGNITE_GLIBC_MAX:-2.35}" --output "$repo_dir/dist/linux-compatibility.json"
+    --maximum "${MAGNITE_GLIBC_MAX:-2.35}" --output "$dist_dir/linux-compatibility.json"
 
-cd "$repo_dir/dist"
+cd "$dist_dir"
 sha256sum "Magnite-$release_version-linux-x86_64.AppImage" > SHA256SUMS
 cp "$repo_dir/packaging/TESTING.md" TESTING.md
 printf 'Test AppImage: %s\n' "$LDAI_OUTPUT"

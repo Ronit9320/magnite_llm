@@ -23,6 +23,7 @@ Capture the current interface using the [screenshot instructions](docs/release/S
 - Download and manage Hugging Face models; connect to an existing Ollama service.
 - Fine-tune transformer models with LoRA or QLoRA and track training jobs.
 - Export, import, and activate trained adapters through the PEFT/torch engine.
+- Build and test typed local workflows in Blueprints, run saved revisions from chat, and review tool requests before they run. [Blueprints guide](docs/BLUEPRINTS.md)
 - Run local streaming inference with llama.cpp, torch, or an optional vLLM installation.
 - Ingest PDF, text, Markdown, and HTML documents, test retrieval, and use RAG in chat.
 - Explore the offline Docs reference: ML concepts, dataset quality, training results, examples and primary sources. Save useful articles and return to your reading position.
@@ -75,7 +76,7 @@ Start with the [workflow guide](docs/WORKFLOWS.md) and the small
 ## Architecture and data
 
 ```text
-Qt desktop: Library | Training | Knowledge | Adapters | Playground | Docs | Settings (window)
+Qt desktop: Library | Training | Blueprints | Knowledge | Adapters | Playground | Docs | Settings (window)
                          |
                  BackendClient HTTP/SSE
                          |

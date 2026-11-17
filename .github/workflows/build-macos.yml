@@ -61,6 +61,9 @@ jobs:
           env PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent MAGNITE_HOME="$RUNNER_TEMP/ui-data" \
             "$RUNNER_TEMP/Relocated App/Magnite.app/Contents/MacOS/Magnite" --ui-check \
             > build/packaging/macos/hosted/ui.log 2>&1
+          env PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent MAGNITE_BLUEPRINTS_LIVE_CHECK=1 \
+            "$RUNNER_TEMP/Relocated App/Magnite.app/Contents/MacOS/Magnite" --ui-check \
+            > build/packaging/macos/hosted/blueprints.log 2>&1
       - name: CPU feature acceptance using the bundled runtime
         run: |
           build/packaging/macos/stage/Magnite.app/Contents/Resources/runtime/python/bin/python3 -I -B \

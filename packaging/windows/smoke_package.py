@@ -28,9 +28,9 @@ def main():
                "PYTHONPATH": str(root / "broken-modules"), "QT_FORCE_STDERR_LOGGING": "1",
                "PATH": os.path.join(os.environ["SystemRoot"], "System32")}
 
-        def run(name, command, *, marker=None, timeout=240):
+        def run(name, command, *, marker=None, timeout=240, extra_env=None):
             with (logs / f"{name}.log").open("w") as output:
-                result = subprocess.run([str(a) for a in command], env=env, cwd=root,
+                result = subprocess.run([str(a) for a in command], env={**env, **(extra_env or {})}, cwd=root,
                                         stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
             content = (logs / f"{name}.log").read_text(errors="replace")
             if result.returncode != 0 or (marker and marker not in content):
@@ -44,9 +44,13 @@ def main():
         python = installed / "runtime/python/python.exe"
         if not python.is_file():
             raise RuntimeError("Installer omitted the isolated Python runtime")
+        smoke_pi = Path(__file__).resolve().parents[1] / "smoke_pi.py"
+        run("bundled-pi", [python, "-I", "-B", smoke_pi], marker="Bundled Node and Pi bridge OK")
         run("theme", [exe, "--theme-check"], marker="0 failure(s)")
         run("ui", [exe, "--ui-check"], marker="PASS (0 failures)")
         run("desktop", [exe, "--selftest"], marker="PASS (0 failures)")
+        run("blueprints", [exe, "--ui-check"], marker="[blueprints-live] PASS (0 failures)",
+            extra_env={"MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
         sentinel = root / "data/preserved.txt"
         sentinel.write_text("persistent data outside the installation")
         run("upgrade", install_args)

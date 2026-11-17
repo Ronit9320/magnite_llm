@@ -10,6 +10,7 @@ from pathlib import Path
 from queue import Empty, Full, Queue
 import re
 import shutil
+import sys
 import subprocess
 from threading import Event, Thread
 from time import monotonic
@@ -25,12 +26,23 @@ _MAX_FRAME = 1024 * 1024
 _MESSAGES = TypeAdapter(list[ChatMessage])
 
 
+def _node_environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LANG")
+            if key in os.environ}
+
+
 def node_path() -> str:
-    executable = shutil.which("node")
+    prefix = Path(sys.prefix)
+    if prefix.name == "python" and prefix.parent.name == "runtime":
+        bundled = prefix.parent / "node" / ("node.exe" if sys.platform == "win32" else "node")
+        executable = str(bundled) if bundled.is_file() else None
+    else:
+        executable = shutil.which("node")
     if not executable or not (_BRIDGE.parent / "node_modules" / "@earendil-works" / "pi-agent-core").is_dir():
         raise ValueError("Pi requires Node 22.19 or later and the locked Pi bridge dependencies")
     try:
-        result = subprocess.run([executable, "--version"], capture_output=True, encoding="utf-8", timeout=3)
+        result = subprocess.run([executable, "--version"], capture_output=True, encoding="utf-8",
+                                env=_node_environment(), timeout=3)
     except subprocess.TimeoutExpired as exc:
         raise ValueError("Node did not respond to the Pi runtime check") from exc
     version = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", result.stdout.strip())
@@ -94,10 +106,8 @@ def run(value, engine, approve, stop: Event) -> str:
     executable = node_path()
     # The bridge uses pipes and only needs the host's runtime environment.
     # Omit Node injection settings and provider credentials.
-    env = {key: os.environ[key] for key in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "LANG")
-           if key in os.environ}
     with subprocess.Popen([executable, str(_BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, env=env, cwd=_BRIDGE.parent) as process:
+                          stderr=subprocess.DEVNULL, env=_node_environment(), cwd=_BRIDGE.parent) as process:
         frames: Queue = Queue(maxsize=8)
         finished = Event()
 
