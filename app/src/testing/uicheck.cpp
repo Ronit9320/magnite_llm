@@ -242,7 +242,7 @@ struct Fixture : QTcpServer {
     QString ragModel = "all-MiniLM-L6-v2";
     int ragChunks = 36, ragDocuments = 2, ragConfigStatus = 200;
     QStringList ragConfigRequests, ragReindexRequests;
-    int ragReindexStatus = 200, ragIngests = 0, ragActivityRequests = 0;
+    int ragReindexStatus = 200, ragIngests = 0, ragActivityRequests = 0, ragStatusRequests = 0;
     QString ragReindexDetail;
     bool holdRagWork = false;                      // keep ingest/reindex requests open until the client aborts
     QList<QPointer<QTcpSocket>> heldRagWork;
@@ -411,7 +411,7 @@ struct Fixture : QTcpServer {
                     }
                     else if (path == "/rag/activity") { ++ragActivityRequests; body=QJsonDocument(ragActivity).toJson(QJsonDocument::Compact); }
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
-                    else if (path == "/rag/status") body=ragStatusJson();
+                    else if (path == "/rag/status") { ++ragStatusRequests; body=ragStatusJson(); }
                     else if (path == "/rag/embedders") body=ragEmbeddersJson();
                     else if (path == "/rag/config" && method == "POST") {
                         const QJsonObject request=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object();
@@ -1709,6 +1709,14 @@ int runUiCheck(const QString &captures) {
     QTimer::singleShot(0,[](){ for(auto *widget:QApplication::topLevelWidgets()) if(auto *dialog=qobject_cast<QDialog *>(widget); dialog && dialog->objectName()=="appMessageDialog") dialog->reject(); });
     QMetaObject::invokeMethod(&knowledge,"onClearAll"); pump();
     check(fixture.clears==0,"Cancel preserves Knowledge contents");
+    {
+        const int before=fixture.ragStatusRequests;
+        QTimer::singleShot(0,[](){ for(auto *widget:QApplication::topLevelWidgets()) if(auto *dialog=qobject_cast<QDialog *>(widget); dialog && dialog->objectName()=="appMessageDialog") dialog->accept(); });
+        QMetaObject::invokeMethod(&knowledge,"onClearAll");
+        waitUntil([&]() { return fixture.clears==1 && fixture.ragStatusRequests>before; },2000);
+        check(fixture.clears==1 && fixture.ragStatusRequests>before,"clearing Knowledge re-reads the status it shows");
+        fixture.clears=0; pump(150);
+    }
     auto *query=knowledge.findChild<QLineEdit *>("documentQuery"); query->setText("What is Magnite?");
     QMetaObject::invokeMethod(&knowledge,"onTestQuery"); pump();
     check(knowledge.findChild<QLabel *>("statusLabel")->text().startsWith("Retrieved"),"document query succeeds");

@@ -544,6 +544,7 @@ void RagPanel::onClearAll() {
         emit sourceScopeChanged();
         m_resultLabel->setText("Add documents to start searching your knowledge.");
         setStatus("Cleared all documents.");
+        refresh(true);   // the shown counts and model come from status, never from memory
     });
 }
 
