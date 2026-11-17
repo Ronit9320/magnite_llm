@@ -6,11 +6,14 @@
 #include <optional>
 
 #include <QList>
+#include <QPointer>
 #include <QJsonValue>
 class QTimer;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QNetworkReply;
+class QProgressBar;
 class QPushButton;
 class QScrollArea;
 class QSpinBox;
@@ -33,6 +36,8 @@ public:
     QJsonValue documentScope() const { return m_documentScope; }
     void setDocumentScope(const QJsonValue &scope);
     int enabledSourceCount() const;
+    // Index these files (what "Add files…" does after its dialog); public for the UI checks.
+    void ingestFiles(const QStringList &files);
 
 signals:
     void sourceScopeChanged();
@@ -68,6 +73,11 @@ private:
     QString modelWarning(const RagParams::Preset &preset) const;
     void startReindex(const RagParams::Preset &preset);
     void setMutating(bool on);
+    void beginOperation(QNetworkReply *reply);
+    void endOperation();
+    void pollActivity();
+    void showActivity(const QJsonObject &activity);
+    void cancelOperations();
 
     BackendClient *m_client;
     QPushButton *m_addButton;
@@ -82,6 +92,14 @@ private:
     QSpinBox *m_topKSpin;
     QComboBox *m_modelPicker = nullptr;
     QLabel *m_modelHint = nullptr;
+    QWidget *m_progressBox = nullptr;
+    QLabel *m_progressLabel = nullptr;
+    QProgressBar *m_progressBar = nullptr;
+    QPushButton *m_cancelButton = nullptr;
+    QTimer *m_activityTimer = nullptr;
+    QList<QPointer<QNetworkReply>> m_operations;  // in-flight ingest/reindex requests (abort = cancel)
+    int m_runningOps = 0;
+    bool m_cancelRequested = false;
     QLabel *m_modelInfo = nullptr;
     QLabel *m_chunkingInfo = nullptr;
     QLabel *m_clampHint = nullptr;

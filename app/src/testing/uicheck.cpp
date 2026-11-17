@@ -241,8 +241,11 @@ struct Fixture : QTcpServer {
     QString ragModel = "all-MiniLM-L6-v2";
     int ragChunks = 36, ragDocuments = 2, ragConfigStatus = 200;
     QStringList ragConfigRequests, ragReindexRequests;
-    int ragReindexStatus = 200;
+    int ragReindexStatus = 200, ragIngests = 0, ragActivityRequests = 0;
     QString ragReindexDetail;
+    bool holdRagWork = false;                      // keep ingest/reindex requests open until the client aborts
+    QList<QPointer<QTcpSocket>> heldRagWork;
+    QJsonObject ragActivity{{"active",false},{"kind",QJsonValue()},{"name",""},{"phase",""},{"done",0},{"total",0},{"waiting",0}};
     QByteArray ragStatusJson() const {
         const bool bge = ragModel == "BAAI/bge-m3";
         return QJsonDocument(QJsonObject{{"engine_ready",true},{"model",ragModel},{"documents",ragDocuments},{"chunks",ragChunks},
@@ -400,6 +403,12 @@ struct Fixture : QTcpServer {
                     else if (path == "/system/storage") body=R"({"data_directory":"/fixture/magnite","model_cache":"/fixture/model-cache","workspace":{"bytes":820000000,"complete":true},"models":{"bytes":17800000000,"complete":false},"free_bytes":80000000000,"disk_total_bytes":245000000000,"cache_on_data_volume":true,"combined_locations":false})";
                     else if (path == "/system/logs") body=R"({"text":"Runtime ready\nNo model loaded","truncated":false})";
                     else if (path == "/adapters") body=R"([{"id":"fixture-adapter","training_job_id":"fixture-job","name":"Support assistant","base_model":"studio/sample-model","rank":8,"method":"lora","size_mb":8.5,"trained_at":"2026-09-30T10:00:00Z"},{"id":"fixture-adapter-2","name":"A long adapter name that should remain readable in a compact window","base_model":"studio/another-model","rank":16,"method":"lora","size_mb":12.3}])";
+                    else if (path == "/rag/documents" && method == "POST") {
+                        ++ragIngests;
+                        if (holdRagWork) { heldRagWork << socket; return; }
+                        status=201; body=R"({"id":"doc-3","name":"added","kind":"txt","chunks":3})";
+                    }
+                    else if (path == "/rag/activity") { ++ragActivityRequests; body=QJsonDocument(ragActivity).toJson(QJsonDocument::Compact); }
                     else if (path == "/rag/documents") body=R"([{"id":"doc-1","name":"Project guide.md","path":"/documents/research/project-guide.md","kind":"md","chunks":24},{"id":"doc-2","name":"<b>literal filename</b>.txt","path":"/documents/a-very-long-folder-name/another-long-folder-for-layout-review/meeting-notes.txt","kind":"txt","chunks":12}])";
                     else if (path == "/rag/status") body=ragStatusJson();
                     else if (path == "/rag/embedders") body=ragEmbeddersJson();
@@ -414,6 +423,7 @@ struct Fixture : QTcpServer {
                     else if (path == "/rag/reindex") {
                         const QJsonObject request=QJsonDocument::fromJson(bytes->mid(headerEnd+4,length)).object();
                         ragReindexRequests << request["model"].toString();
+                        if (holdRagWork) { heldRagWork << socket; return; }
                         status=ragReindexStatus;
                         if (status==200) ragModel=request["model"].toString();
                         else body=QJsonDocument(QJsonObject{{"detail",ragReindexDetail}}).toJson(QJsonDocument::Compact);
@@ -1641,6 +1651,40 @@ int runUiCheck(const QString &captures) {
             if (watcher) watcher->deleteLater();
             fixture.ragConfigRequests.clear(); fixture.ragModel="all-MiniLM-L6-v2"; fixture.ragDocuments=2; fixture.ragChunks=36;
             knowledge.refresh(); waitUntil([&]() { return modelInfo->text().contains("Light"); },2000);
+
+            // Progress: while ingest/reindex requests are open the panel polls GET /rag/activity.
+            auto *progress=knowledge.findChild<QWidget *>("ragProgress");
+            auto *progressLabel=knowledge.findChild<QLabel *>("ragProgressLabel");
+            auto *progressBar=knowledge.findChild<QProgressBar *>("ragProgressBar");
+            auto *cancel=button(&knowledge,"Cancel");
+            check(progress && progressLabel && progressBar && cancel && !progress->isVisibleTo(&knowledge),"progress is hidden while nothing runs");
+            if (progress && progressLabel && progressBar && cancel) {
+                fixture.holdRagWork=true; fixture.ragIngests=0;
+                fixture.ragActivity=QJsonObject{{"active",true},{"kind","ingest"},{"name","handbook.pdf"},{"phase","embedding"},{"done",120},{"total",3000},{"waiting",2}};
+                knowledge.ingestFiles({"/fixture/handbook.pdf","/fixture/notes.txt","/fixture/plan.md"});
+                waitUntil([&]() { return progressLabel->text().contains("120 of 3,000"); },3000);
+                check(progress->isVisibleTo(&knowledge) && progressLabel->text().contains("Embedding") && progressLabel->text().contains("handbook.pdf") &&
+                      progressLabel->text().contains("2 queued") && progressBar->maximum()==3000 && progressBar->value()==120 && fixture.ragIngests==3,
+                      "ingest shows phase, done/total and the queue from GET /rag/activity");
+                check(!button(&knowledge,"Add files…")->isEnabled() && !picker->isEnabled() && cancel->isEnabled(),"other changes wait while documents are indexed");
+                cancel->click(); pump(200);
+                auto *status=knowledge.findChild<QLabel *>("statusLabel");
+                const int polls=fixture.ragActivityRequests; pump(900);
+                check(!progress->isVisibleTo(&knowledge) && status->text().startsWith("Cancelled") && status->property("state")!="error" &&
+                      button(&knowledge,"Add files…")->isEnabled() && picker->isEnabled() && fixture.ragActivityRequests==polls,
+                      "Cancel aborts every ingest, stops polling and restores the controls");
+
+                fixture.ragActivity=QJsonObject{{"active",true},{"kind","reindex"},{"name","BAAI/bge-m3"},{"phase","embedding"},{"done",8},{"total",36},{"waiting",0}};
+                respond(true,nullptr); picker->setCurrentIndex(1); emit picker->activated(1);
+                waitUntil([&]() { return progressLabel->text().contains("8 of 36"); },3000);
+                check(progress->isVisibleTo(&knowledge) && progressLabel->text().contains("Re-indexing") && !progressLabel->text().contains("queued"),
+                      "reindex progress is shown the same way");
+                cancel->click(); pump(200); knowledge.refresh(); waitUntil([&]() { return picker->currentIndex()==0; },2000);
+                check(!progress->isVisibleTo(&knowledge) && status->text().contains("unchanged") && fixture.ragModel=="all-MiniLM-L6-v2" && picker->currentIndex()==0,
+                      "cancelling a re-index keeps the current model and index");
+                fixture.holdRagWork=false; fixture.heldRagWork.clear(); fixture.ragReindexRequests.clear();
+                fixture.ragActivity=QJsonObject{{"active",false},{"waiting",0}};
+            }
         }
     }
     auto docs=knowledge.findChildren<RagDocCard *>();

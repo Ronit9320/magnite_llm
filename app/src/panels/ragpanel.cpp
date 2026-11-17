@@ -24,6 +24,8 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include "widgets/button.h"
+#include "widgets/progressbar.h"
+#include <QNetworkReply>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -66,6 +68,34 @@ void RagPanel::setupUi() {
     btnRow->addWidget(m_clearButton);
     auto *documents = Surface::card(this, "Sources");
     documents->addLayout(btnRow);
+
+    // Ingest/reindex progress (GET /rag/activity), shown only while such a request is open.
+    m_progressBox = new QWidget(this);
+    m_progressBox->setObjectName("ragProgress");
+    auto *progressLayout = new QVBoxLayout(m_progressBox);
+    progressLayout->setContentsMargins(0, 0, 0, 0);
+    progressLayout->setSpacing(6);
+    m_progressLabel = new QLabel(m_progressBox);
+    m_progressLabel->setObjectName("ragProgressLabel");
+    m_progressLabel->setTextFormat(Qt::PlainText);
+    m_progressLabel->setWordWrap(true);
+    auto *progressRow = new QHBoxLayout();
+    m_progressBar = new ProgressBar(m_progressBox);
+    m_progressBar->setObjectName("ragProgressBar");
+    m_progressBar->setTextVisible(false);
+    m_progressBar->setAccessibleName("Indexing progress");
+    m_cancelButton = new Button("Cancel", m_progressBox);
+    m_cancelButton->setObjectName("secondaryBtn");
+    progressRow->addWidget(m_progressBar, 1);
+    progressRow->addWidget(m_cancelButton);
+    progressLayout->addWidget(m_progressLabel);
+    progressLayout->addLayout(progressRow);
+    m_progressBox->hide();
+    documents->addWidget(m_progressBox);
+    m_activityTimer = new QTimer(this);
+    m_activityTimer->setInterval(500);
+    connect(m_activityTimer, &QTimer::timeout, this, &RagPanel::pollActivity);
+    connect(m_cancelButton, &QPushButton::clicked, this, &RagPanel::cancelOperations);
     documents->parentWidget()->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     layout->addWidget(documents->parentWidget());
 
@@ -317,36 +347,115 @@ void RagPanel::onAddDocuments() {
         this, "Select documents",
         QString(),
         "Documents (*.pdf *.txt *.md *.html);;All Files (*)");
-    if (files.isEmpty()) return;
+    ingestFiles(files);
+}
 
-    setStatus(QString("Ingesting %1 document(s) — first use downloads the "
-                      "embedding model...").arg(files.size()));
-    m_mutating = true;
-    ++m_collectionRevision;
-    m_queryButton->setEnabled(false);
-    m_addButton->setEnabled(false);
-    m_removeButton->setEnabled(false);
-    m_clearButton->setEnabled(false);
+void RagPanel::ingestFiles(const QStringList &files) {
+    if (m_mutating || files.isEmpty()) return;
+    if (!m_client || !m_client->isReady()) {
+        setStatus("Backend not connected.", "error");
+        return;
+    }
+    setStatus(QString("Indexing %1 document(s). The first use downloads the embedding model.").arg(files.size()));
+    m_cancelRequested = false;
+    setMutating(true);
     auto pending = std::make_shared<int>(files.size());
     auto failed = std::make_shared<QStringList>();
+    auto cancelled = std::make_shared<int>(0);
     for (const QString &f : files) {
-        m_client->post("/rag/documents", QJsonObject{{"path",f}},
-            [this,pending,failed,total=files.size()](int status,const QJsonDocument &doc) {
+        QNetworkReply *reply = m_client->post("/rag/documents", QJsonObject{{"path", f}},
+            [this, pending, failed, cancelled, total = files.size()](int status, const QJsonDocument &doc) {
                 --*pending;
-                if (status != 201) failed->append(doc.object()["detail"].toString(QString("HTTP %1").arg(status)));
-                if (*pending > 0) {
-                    setStatus(QString("Processing documents · %1 of %2 finished").arg(total-*pending).arg(total));
-                    return;
+                endOperation();
+                if (status == 201) {
+                } else if (m_cancelRequested && (status == 0 || status == 499)) {
+                    ++*cancelled;
+                } else {
+                    const QString detail = doc.object()["detail"].toString();
+                    failed->append(detail.isEmpty() ? QString("HTTP %1").arg(status) : detail);
                 }
-                m_mutating = false;
-                m_addButton->setEnabled(true);
+                if (*pending > 0) return;
+                setMutating(false);
                 m_resultLabel->setText("Your document collection changed. Search again for updated results.");
                 refresh(true);
-                setStatus(failed->isEmpty() ? QString("Added %1 document(s). Ready to search.").arg(total)
-                    : QString("Added %1 of %2 documents. %3 failed: %4").arg(total-failed->size()).arg(total).arg(failed->size()).arg(failed->first()),
-                    failed->isEmpty() ? "ok" : "error");
+                const int added = total - failed->size() - *cancelled;
+                if (*cancelled) {
+                    setStatus(QString("Cancelled. Nothing was stored for %1 document(s).%2")
+                                  .arg(*cancelled).arg(added ? QString(" Added %1.").arg(added) : QString()));
+                } else if (failed->isEmpty()) {
+                    setStatus(QString("Added %1 document(s). Ready to search.").arg(total), "ok");
+                } else {
+                    setStatus(QString("Added %1 of %2 documents. %3 failed: %4")
+                                  .arg(added).arg(total).arg(failed->size()).arg(failed->first()), "error");
+                }
             });
+        beginOperation(reply);
     }
+}
+
+void RagPanel::beginOperation(QNetworkReply *reply) {
+    if (!reply) return;
+    m_operations.append(reply);
+    if (m_runningOps++ > 0) return;
+    m_progressLabel->setText("Starting…");
+    m_progressBar->setRange(0, 0);
+    m_cancelButton->setEnabled(true);
+    m_progressBox->show();
+    m_activityTimer->start();
+    pollActivity();
+}
+
+void RagPanel::endOperation() {
+    if (m_runningOps > 0 && --m_runningOps > 0) return;
+    m_runningOps = 0;
+    m_operations.clear();
+    m_activityTimer->stop();
+    m_progressBox->hide();
+}
+
+void RagPanel::pollActivity() {
+    if (!m_client || !m_client->isReady() || m_runningOps == 0) return;
+    m_client->get("/rag/activity", [this](int status, const QJsonDocument &doc) {
+        if (status == 200 && m_runningOps > 0) showActivity(doc.object());
+    });
+}
+
+void RagPanel::showActivity(const QJsonObject &activity) {
+    static const QHash<QString, QString> phases{{"starting", "Starting"}, {"extracting", "Reading"},
+        {"chunking", "Splitting"}, {"embedding", "Embedding"}, {"saving", "Saving"}};
+    const QLocale en(QLocale::English);
+    const int done = activity["done"].toInt(), total = activity["total"].toInt();
+    const int waiting = activity["waiting"].toInt();
+    QStringList parts;
+    if (activity["active"].toBool()) {
+        const QString name = activity["name"].toString();
+        const QString phase = phases.value(activity["phase"].toString(), "Working");
+        parts << (activity["kind"].toString() == "reindex"
+                      ? QString("Re-indexing with %1 (%2)").arg(name, phase.toLower())
+                      : QString("%1 %2").arg(phase, name).trimmed());
+        if (total > 0) parts << QString("%1 of %2 chunks").arg(en.toString(done), en.toString(total));
+    } else {
+        parts << QStringLiteral("Waiting to start");
+    }
+    if (waiting > 0) parts << QString("%1 queued").arg(waiting);
+    m_progressLabel->setText(parts.join(" · "));
+    if (total > 0) {
+        m_progressBar->setRange(0, total);
+        m_progressBar->setValue(qMin(done, total));
+    } else {
+        m_progressBar->setRange(0, 0);
+    }
+}
+
+void RagPanel::cancelOperations() {
+    if (m_operations.isEmpty()) return;
+    m_cancelRequested = true;
+    m_cancelButton->setEnabled(false);
+    setStatus("Cancelling…");
+    // The backend stops within one batch (or immediately for queued requests) and stores nothing.
+    const auto replies = m_operations;
+    for (const auto &reply : replies)
+        if (reply) reply->abort();
 }
 
 void RagPanel::onCardClicked(RagDocCard *card, bool ctrl) {
@@ -631,13 +740,17 @@ void RagPanel::onModelChosen(int index) {
 }
 
 void RagPanel::startReindex(const RagParams::Preset &preset) {
+    m_cancelRequested = false;
     setMutating(true);
     setStatus(QString("Re-indexing %1 chunks with %2…").arg(m_active ? m_active->chunks : 0).arg(preset.label));
-    m_client->post("/rag/reindex", QJsonObject{{"model", preset.model}},
+    QNetworkReply *reply = m_client->post("/rag/reindex", QJsonObject{{"model", preset.model}},
         [this, label = preset.label](int status, const QJsonDocument &doc) {
+            endOperation();
             setMutating(false);
             if (status == 200) {
                 setStatus(QString("Re-indexed with %1. Ready to search.").arg(label), "ok");
+            } else if (m_cancelRequested && (status == 0 || status == 499)) {
+                setStatus("Re-index cancelled. The current model and index are unchanged.");
             } else {
                 const QString detail = doc.object()["detail"].toString();
                 setStatus(detail.isEmpty() ? QString("Re-index failed (HTTP %1).").arg(status) : detail, "error");
@@ -645,6 +758,7 @@ void RagPanel::startReindex(const RagParams::Preset &preset) {
             m_resultLabel->setText("Your document collection changed. Search again for updated results.");
             refresh(true);
         });
+    beginOperation(reply);
 }
 
 void RagPanel::setMutating(bool on) {

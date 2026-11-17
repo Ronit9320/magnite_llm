@@ -62,7 +62,7 @@ QWidget#surfaceCard { background: @surfaceFill; border: 1px solid transparent; b
 QFrame#modelCard { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
 QFrame#adapterCard { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; border-left: 3px solid transparent; }
 QFrame#ragDocCard { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
-QLabel#ragChunkingInfo, QLabel#ragClampHint { color: @textSecondary; font-size: 12px; }
+QLabel#ragChunkingInfo, QLabel#ragClampHint, QLabel#ragProgressLabel { color: @textSecondary; font-size: 12px; }
 QLabel#ragModelHint { color: @statusWarning; font-size: 12px; }
 QFrame#ragConfigCard { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
 QFrame#modelCard[selected="true"], QFrame#adapterCard[active="true"] { background: @surfaceFillHover; }
