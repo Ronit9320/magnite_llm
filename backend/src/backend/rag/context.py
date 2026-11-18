@@ -18,7 +18,7 @@ _SENTENCE_END = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
 
 
 def retrieve_chunks(query: str, top_k: Optional[int], min_score: Optional[float],
-                    document_ids: Optional[list[str]]) -> list[RagChunk]:
+                    document_ids: Optional[list[str]], search_mode: Optional[str] = None) -> list[RagChunk]:
     """Retrieve passages, reporting failures instead of silently answering without RAG."""
     store = get_rag_store()
     if store is None or not is_available():
@@ -30,7 +30,8 @@ def retrieve_chunks(query: str, top_k: Optional[int], min_score: Optional[float]
     top_k = top_k if top_k is not None else cfg.top_k
     min_score = min_score if min_score is not None else cfg.min_score
     query_vec = embed_query(query, cfg.model, cfg.truncate_dim)
-    chunks = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=document_ids)
+    chunks = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=document_ids,
+                          query_text=query, mode=search_mode or cfg.search_mode)
     if not chunks:
         raise ValueError("No matching document passages. Lower the similarity threshold or disable retrieval.")
     return chunks

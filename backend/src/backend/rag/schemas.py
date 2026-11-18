@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -14,6 +14,7 @@ class RagConfig(BaseModel):
     min_score: float = Field(0.0, ge=0.0, le=1.0, description="Similarity threshold (0 = off)")
     model: str = Field("all-MiniLM-L6-v2", description="sentence-transformers model id")
     truncate_dim: int = Field(0, ge=0, le=4096, description="Cut embeddings to this many dimensions (0 = full; needs a Matryoshka model)")
+    search_mode: Literal["hybrid", "vector"] = Field("hybrid", description="hybrid = FTS5 keyword + vector search fused with RRF; vector = vector search only")
 
     @model_validator(mode="after")
     def valid_overlap(self):
@@ -31,6 +32,7 @@ class RagConfigUpdate(BaseModel):
     min_score: Optional[float] = Field(default=None, ge=0, le=1)
     model: Optional[str] = None
     truncate_dim: Optional[int] = Field(default=None, ge=0, le=4096)
+    search_mode: Optional[Literal["hybrid", "vector"]] = None
 
 
 class RagReindexRequest(BaseModel):
@@ -63,6 +65,7 @@ class RagQueryRequest(BaseModel):
     top_k: Optional[int] = Field(default=None, ge=1, le=50)
     min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     document_ids: Optional[list[str]] = None
+    search_mode: Optional[Literal["hybrid", "vector"]] = Field(default=None, description="Override the configured search mode for this query")
 
 
 class RagChunk(BaseModel):
@@ -71,7 +74,9 @@ class RagChunk(BaseModel):
     index: int
     text: str
     tokens: int
-    score: float
+    score: float = Field(description="Cosine similarity to the query (never a fused value)")
+    match: str = Field("vector", description="Which search found it: vector|keyword|both")
+    fused_score: Optional[float] = Field(None, description="Reciprocal Rank Fusion value; null when the keyword leg did not run")
 
 
 class RagQueryResponse(BaseModel):

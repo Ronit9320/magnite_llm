@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from pydantic import ValidationError
 from backend.request_work import request_work, ClientDisconnected
 
-from backend.rag import embeddings
+from backend.rag import embeddings, keyword
 from backend.rag.chunking import chunk_limit, chunk_text, detect_kind, extract_text, extract_content, fit_chunking
 from backend.rag.activity import exclusive, get_activity
 from backend.rag.batching import IngestCancelled, embed_batches
@@ -57,6 +57,10 @@ def rag_status():
         "chunking": {"chunk_size": size, "chunk_overlap": overlap,
                      "clamped": (size, overlap) != (cfg.chunk_size, cfg.chunk_overlap),
                      "max_chunk_size": chunk_limit(embedder["max_seq_tokens"])},
+        "search": {"mode": "hybrid" if cfg.search_mode == "hybrid" and store.keyword_available else "vector",
+                   "requested_mode": cfg.search_mode,
+                   "keyword_available": store.keyword_available,
+                   "rrf_k": keyword.RRF_K},
     }
 
 
@@ -374,7 +378,9 @@ def query_documents(body: RagQueryRequest):
     min_score = body.min_score if body.min_score is not None else cfg.min_score
     try:
         query_vec = embeddings.embed_query(query, cfg.model, cfg.truncate_dim)
-        results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score, document_ids=body.document_ids)
+        results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score,
+                               document_ids=body.document_ids, query_text=query,
+                               mode=body.search_mode or cfg.search_mode)
     except MemoryGuardTripped as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

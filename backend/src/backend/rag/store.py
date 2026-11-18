@@ -220,6 +220,8 @@ class RagStore:
                 setattr(cfg, key, type(current)(value))
             except (TypeError, ValueError):
                 pass
+        if cfg.search_mode not in ("hybrid", "vector"):       # a value this build does not know
+            cfg.search_mode = "hybrid"
         return cfg
 
     def set_config(self, cfg: RagConfig) -> RagConfig:
@@ -649,12 +651,20 @@ class RagStore:
         return rows
 
     def search(self, query_vec: np.ndarray, model: str, top_k: int = 4,
-               min_score: float = 0.0, document_ids: Optional[list[str]] = None) -> list[RagChunk]:
-        """Exact cosine search over chunks embedded with ``model`` (vectors are L2-normalized)."""
+               min_score: float = 0.0, document_ids: Optional[list[str]] = None,
+               query_text: str = "", mode: str = "vector") -> list[RagChunk]:
+        """Exact cosine search over chunks embedded with ``model`` (vectors are L2-normalized).
+
+        With ``mode="hybrid"`` an FTS5 keyword search over ``query_text`` runs as a second leg and the two
+        rankings are merged with Reciprocal Rank Fusion. ``score`` is always the cosine similarity (and
+        ``min_score`` a cosine floor), ``fused_score`` the RRF value. If the keyword leg cannot run
+        (no FTS5, nothing searchable in the text, an FTS error) the result is the vector-only one.
+        """
         if document_ids is not None and not document_ids:
             return []
         query = np.asarray(query_vec, dtype=np.float32).reshape(-1)
         wanted = _candidate_count(top_k)
+        allowed = None if document_ids is None else set(document_ids)
         with self._lock:
             index = self._index_for(model)
             if index is not None:
@@ -666,10 +676,11 @@ class RagStore:
                         f"dimension {index.dim}; the embedding model changed.")
                 mask = None if document_ids is None else index.doc_mask(document_ids)
                 rows = index.top_candidates(query, mask, wanted)
-                ids = [int(i) for i in index.chunk_ids[rows]]
+                vector_ids = [int(i) for i in index.chunk_ids[rows]]
             else:
-                allowed = None if document_ids is None else set(document_ids)
-                ids = self._scan_candidates(model, query, allowed, wanted)
+                vector_ids = self._scan_candidates(model, query, allowed, wanted)
+            keyword_ids = self._keyword_candidates(query_text, model, allowed, wanted) if mode == "hybrid" else None
+            ids = list(dict.fromkeys(vector_ids + (keyword_ids or [])))
             if not ids:
                 return []
             hydrated = self._hydrate(ids)
@@ -678,20 +689,47 @@ class RagStore:
             scores = np.array([float(np.frombuffer(r["embedding"], dtype=np.float32) @ query)
                                for r in hydrated])
             row_ids = np.array([r["id"] for r in hydrated], dtype=np.int64)
-        order = np.lexsort((row_ids, -scores))          # best score first, ties by chunk id
+        fused: Optional[dict] = None
+        if keyword_ids is not None:
+            cosine = {int(i): float(s) for i, s in zip(row_ids, scores)}
+            vector_ranked = sorted((i for i in vector_ids if i in cosine), key=lambda i: (-cosine[i], i))
+            fused = keyword.rrf_fuse([vector_ranked, [i for i in keyword_ids if i in cosine]])
+            order = sorted(range(len(hydrated)),
+                           key=lambda p: (-fused.get(int(row_ids[p]), 0.0), -scores[p], row_ids[p]))
+        else:
+            order = [int(p) for p in np.lexsort((row_ids, -scores))]      # best score first, ties by chunk id
+        in_vector, in_keyword = set(vector_ids), set(keyword_ids or [])
         results: list[RagChunk] = []
         for pos in order:
             score = float(scores[pos])
             if min_score > 0 and score < min_score:
-                break
+                continue
             row = hydrated[pos]
+            chunk_id = int(row["id"])
+            if fused is None:
+                match, fused_score = "vector", None
+            else:
+                match = "both" if chunk_id in in_vector and chunk_id in in_keyword else (
+                    "keyword" if chunk_id in in_keyword else "vector")
+                fused_score = round(fused[chunk_id], 6)
             results.append(RagChunk(
                 document_id=row["doc_id"], document_name=row["doc_name"],
                 index=int(row["chunk_index"]), text=row["text"], tokens=int(row["tokens"]),
-                score=round(score, 4)))
+                score=round(score, 4), match=match, fused_score=fused_score))
             if len(results) >= top_k:
                 break
         return results
+
+    def _keyword_candidates(self, query_text: str, model: str, allowed: Optional[set], n: int) -> Optional[list]:
+        """Keyword-ranked chunk ids, or None when the keyword leg does not run (then search is vector-only)."""
+        expr = keyword.match_expression(query_text)
+        if expr is None or not self._ensure_keyword_index():
+            return None
+        try:
+            return self._keyword_ids(expr, model, allowed, n)
+        except sqlite3.Error as exc:
+            log.warning("Keyword search failed, using vector search only: %s", exc)
+            return None
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> RagDocument:

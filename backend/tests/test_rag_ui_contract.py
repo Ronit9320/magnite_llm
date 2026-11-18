@@ -99,6 +99,13 @@ class UiContractTests(unittest.IsolatedAsyncioTestCase):
         for key in ("engine_ready", "model", "documents", "chunks", "config"):
             self.assertIn(key, status)
 
+    async def test_status_reports_the_effective_search_mode(self):
+        search = (await self.status())["search"]
+        for key in ("mode", "requested_mode", "keyword_available", "rrf_k"):
+            self.assertIn(key, search)
+        self.assertIn(search["mode"], ("hybrid", "vector"))
+        self.assertEqual(search["requested_mode"], (await self.client.get("/rag/config")).json()["search_mode"])
+
     async def test_embedders_listing_matches_what_status_reports_for_each_preset(self):
         listing = {e["model_id"]: e for e in (await self.client.get("/rag/embedders")).json()}
         for model, entry in listing.items():
