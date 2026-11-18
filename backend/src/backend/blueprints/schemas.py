@@ -111,13 +111,19 @@ class DatasetNode(Node):
 class TransformNode(Node):
     kind: Literal["transform"]
     operation: Literal["pass", "parse-json", "field", "first", "count", "format",
-                       "order-clause", "order-price"]
+                       "order-clause", "order-price", "constant", "build-object"]
     parameters: dict[Text, Value] = Field(default_factory=dict)
 
 
 class ModelBinding(Contract):
     model_id: RegistryId
     adapter_id: RegistryId | None = None
+
+
+class AdapterNode(Node):
+    kind: Literal["adapter"]
+    operation: Literal["lora"]
+    adapter_id: RegistryId
 
 
 class GenerationNode(Node):
@@ -149,8 +155,15 @@ class ToolNode(Node):
     operation: Literal["approval", "agent"]
 
 
+class AgentNode(Node):
+    kind: Literal["agent"]
+    operation: Literal["pi-reply"]
+    instructions: Annotated[Text, Field(max_length=16000)] = ""
+
+
 BlueprintNode = Annotated[
-    InputNode | DatasetNode | TransformNode | ModelNode | ReasoningNode | OutputNode | ToolNode,
+    InputNode | DatasetNode | TransformNode | ModelNode | ReasoningNode | OutputNode | ToolNode
+    | AdapterNode | AgentNode,
     Field(discriminator="kind"),
 ]
 

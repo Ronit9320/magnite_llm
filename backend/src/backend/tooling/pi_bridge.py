@@ -101,7 +101,7 @@ async def _local_reply(messages, engine, stop: Event) -> str:
                 await task
 
 
-def run(value, engine, approve, stop: Event) -> str:
+def run(value, engine, approve, stop: Event, *, instructions: str = "") -> str:
     messages = chat_messages(value)
     executable = node_path()
     # The bridge uses pipes and only needs the host's runtime environment.
@@ -132,7 +132,8 @@ def run(value, engine, approve, stop: Event) -> str:
             process.stdin.flush()
 
         try:
-            send({"type": "start", "messages": [message.model_dump(mode="json") for message in messages]})
+            send({"type": "start", "messages": [message.model_dump(mode="json") for message in messages],
+                  "actions": approve is not None, "instructions": instructions})
             turns = proposals = 0
             deadline = monotonic() + 900
             while not stop.is_set() and monotonic() < deadline:
@@ -151,6 +152,8 @@ def run(value, engine, approve, stop: Event) -> str:
                         reply = asyncio.run(_local_reply(prompt, engine, stop))
                         send({"type": "generation", "text": reply})
                     case "proposal":
+                        if approve is None:
+                            raise ValueError("This Pi agent does not have action tools")
                         proposals += 1
                         if proposals > 4:
                             raise RuntimeError("Pi exceeded its action budget")

@@ -67,6 +67,17 @@ QString titleCase(const QString &id) {
     return title;
 }
 
+QJsonObject adapterPort() {
+    return {{"id", "adapter"}, {"name", "LoRA adapter"}, {"type", "adapter-ref"},
+            {"schema", QJsonObject{{"type", "string"}}}};
+}
+
+void addAdapterInput(QJsonObject &node) {
+    auto ports = node["in"].toArray();
+    if (findById(ports, "adapter").isEmpty()) ports.append(adapterPort());
+    node["in"] = ports;
+}
+
 QJsonObject apiNode(const QJsonObject &node) {
     const auto kind = node["kind"].toString();
     const auto op = BlueprintPreview::operationId(node);
@@ -75,6 +86,7 @@ QJsonObject apiNode(const QJsonObject &node) {
         QJsonObject ports;
         for (const auto &value : node[side].toArray()) {
             const auto port = value.toObject();
+            if (side == "in" && port["type"] == "adapter-ref") continue;
             ports[port["id"].toString()] = port["schema"];
         }
         body[side == "in" ? "inputs" : "outputs"] = ports;
@@ -86,6 +98,10 @@ QJsonObject apiNode(const QJsonObject &node) {
         body["max_tokens"] = node["maxTokens"].toInt(kind == "reasoning" ? 1024 : 256);
         body["response"] = node["response"].toString("json");
         body["system_prompt"] = node["prompt"].toString("Return only the requested JSON value.");
+    } else if (kind == "adapter") {
+        body["adapter_id"] = node["adapter"];
+    } else if (kind == "agent") {
+        body["instructions"] = node["setting"].toString();
     } else if (kind == "dataset") {
         if (node["dataset"].toString().isEmpty()) {
             const auto rows = QJsonDocument::fromJson(node["setting"].toString().toUtf8());
@@ -95,6 +111,8 @@ QJsonObject apiNode(const QJsonObject &node) {
         }
     } else if (op == "field") {
         body["parameters"] = QJsonObject{{"field", node["setting"].toString()}};
+    } else if (op == "constant") {
+        body["parameters"] = QJsonObject{{"value", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
     }
     return body;
 }
@@ -143,6 +161,7 @@ QJsonObject editorNode(const QJsonObject &node, const QJsonObject &layout, int i
         result["maxTokens"] = node["max_tokens"];
         result["response"] = node["response"];
         result["prompt"] = node["system_prompt"];
+        addAdapterInput(result);
     } else if (binding["source"] == "local") {
         result["dataset"] = binding["dataset_id"];
         result["setting"] = "[]";
@@ -150,6 +169,13 @@ QJsonObject editorNode(const QJsonObject &node, const QJsonObject &layout, int i
         result["setting"] = BlueprintPreview::jsonText(binding["rows"]);
     }
     if (node["operation"] == "field") result["setting"] = node["parameters"].toObject()["field"];
+    if (node["operation"] == "constant")
+        result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["value"]);
+    if (node["kind"] == "agent") result["setting"] = node["instructions"].toString();
+    if (node["kind"] == "adapter") {
+        result["adapter"] = node["adapter_id"];
+        result["out"] = QJsonArray{adapterPort()};
+    }
     return result;
 }
 
@@ -187,6 +213,7 @@ QJsonObject runSummary(const QJsonObject &raw) {
         {"created", timestamp(raw["created_at"])}};
     if (raw["finished_at"].isString()) record["ended"] = timestamp(raw["finished_at"]);
     if (raw["error"].isObject()) record["error"] = issuesText(QJsonArray{raw["error"]});
+    if (raw["tool_chat"].isBool()) record["toolChat"] = raw["tool_chat"];
     return record;
 }
 
@@ -209,6 +236,8 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
     const auto prompt = supplied.value("messages").toArray();
     if (toolChat && !prompt.isEmpty()) {
         record["input"] = prompt.last().toObject()["content"].toString();
+        record["messages"] = prompt;
+        record["model"] = snapshot["tool_model"].toObject()["model"];
     } else {
         const auto single = supplied.size() == 1 ? supplied.begin().value() : QJsonValue();
         if (single.isString()) record["input"] = single.toString();
@@ -224,7 +253,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         QJsonObject decision{{"id", item["id"]}, {"fingerprint", item["fingerprint"]}, {"stepId", item["node_id"]},
             {"type", item["kind"] == "command" ? "Run command" : "Open target"},
             {"status", pending ? QString("waiting") : status == "pending" ? QString("unavailable") : status},
-            {"expires", timestamp(item["expires_at"])}};
+            {"expires", timestamp(item["expires_at"])}, {"outcome", item["outcome"]}};
         if (action.contains("executable")) {
             decision["executable"] = action["executable"];
             decision["args"] = action["arguments"];
@@ -290,7 +319,9 @@ QJsonArray BlueprintPreview::saved() const {
     return result;
 }
 
-void BlueprintPreview::refreshSaved() { fetchSaved(0, {}, ++m_savedRequest); }
+void BlueprintPreview::refreshSaved() {
+    if (connected()) fetchSaved(0, {}, ++m_savedRequest);
+}
 
 void BlueprintPreview::fetchSaved(int offset, QJsonArray entries, quint64 generation) {
     request("GET", QString("/blueprints?limit=100&offset=%1").arg(offset), {},
@@ -319,17 +350,6 @@ void BlueprintPreview::getBlueprint(const QString &id, bool publishedOnly, Resul
             done(draft, {});
             return;
         }
-    }
-    if (id == "order-intake") {
-        if (m_starterData.isEmpty()) done({}, "The order example is still loading. Try again when the local service is ready.");
-        else {
-            auto graph = editorGraph(QJsonObject{{"id", BlueprintPreview::id()}, {"revision", 0},
-                {"blueprint", m_starterData["blueprint"]}});
-            graph["description"] = "Select the active order, extract its fields, and validate the price.";
-            graph["dirty"] = true;
-            done(graph, {});
-        }
-        return;
     }
     auto path = blueprintPath(id);
     if (revision > 0) path += QString("?revision=%1").arg(revision);
@@ -416,6 +436,7 @@ QJsonObject BlueprintPreview::inputContracts(const QJsonObject &graph, const QSt
         if (target.isEmpty() && !input) continue;
         for (const auto &value : node[input ? "out" : "in"].toArray()) {
             const auto port = value.toObject();
+            if (port["type"] == "adapter-ref") continue;
             ports[target.isEmpty() ? id : port["id"].toString()] = port["schema"];
         }
     }
@@ -423,16 +444,23 @@ QJsonObject BlueprintPreview::inputContracts(const QJsonObject &graph, const QSt
 }
 
 void BlueprintPreview::runLive(const QJsonObject &graph, const QJsonValue &input, const QString &target,
-    bool chat, bool tool, Result done) {
+    bool chat, Result done) {
     const auto id = graph["id"].toString();
     QString path;
     QJsonObject body;
-    if (tool) {
-        path = "/inference/tool-runs";
-        body["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", input.toString()}}};
-    } else if (!target.isEmpty()) {
-        const auto node = findById(graph["nodes"].toArray(), target);
+    if (!target.isEmpty()) {
+        auto node = findById(graph["nodes"].toArray(), target);
         if (node.isEmpty()) { done({}, "Choose a node to test."); return; }
+        if (findById(node["in"].toArray(), "adapter")["type"] == "adapter-ref") {
+            for (const auto &value : graph["edges"].toArray()) {
+                const auto edge = value.toObject();
+                if (edge["to"] != target || edge["in"] != "adapter") continue;
+                const auto adapter = findById(graph["nodes"].toArray(), edge["from"].toString())["adapter"].toString();
+                if (adapter.isEmpty()) { done({}, "Select a trained adapter on the connected Adapter node."); return; }
+                node["adapter"] = adapter;
+                break;
+            }
+        }
         path = blueprintPath(id) + "/node-tests";
         body = {{"name", graph["name"]}, {"node", apiNode(node)}, {"inputs", input}};
     } else {
@@ -444,7 +472,15 @@ void BlueprintPreview::runLive(const QJsonObject &graph, const QJsonValue &input
         path = blueprintPath(id) + "/runs" + (chat ? QString("?surface=chat") : QString{});
         body = {{"revision", revision}, {"mode", "local"}, {"inputs", input}};
     }
-    request("POST", path, body, [this, done](int status, const QJsonDocument &doc) {
+    submitRun(path, body, std::move(done));
+}
+
+void BlueprintPreview::runToolTask(const QJsonArray &messages, Result done) {
+    submitRun("/inference/tool-runs", {{"messages", messages}}, std::move(done));
+}
+
+void BlueprintPreview::submitRun(const QString &path, const QJsonObject &body, Result done) {
+    request("POST", path, body, [this, done = std::move(done)](int status, const QJsonDocument &doc) {
         if (status != 202) { done({}, errorText(status, doc)); return; }
         auto record = runSummary(doc.object());
         rememberRun(record);
@@ -511,6 +547,18 @@ void BlueprintPreview::loadRun(const QString &id, Result done) {
         if (epoch != m_session) return;
         if (record.isEmpty() && !error.isEmpty()) record = run(id);
         if (!record.isEmpty()) {
+            // The broker redacts settled actions. Keep details already reviewed in this desktop session.
+            const auto previous = run(id)["decisions"].toArray();
+            auto decisions = record["decisions"].toArray();
+            for (int index = 0; index < decisions.size(); ++index) {
+                auto decision = decisions.at(index).toObject();
+                if (decision["status"] == "waiting" || decision["status"] == "unavailable") continue;
+                const auto old = findById(previous, decision["id"].toString());
+                for (const auto *field : {"executable", "args", "cwd", "target"})
+                    if (old.contains(field)) decision[field] = old[field];
+                decisions.replace(index, decision);
+            }
+            if (!decisions.isEmpty()) record["decisions"] = decisions;
             const auto message = m_actionErrors.value(id, error);
             if (message.isEmpty()) record.remove("actionError");
             else record["actionError"] = message;
@@ -529,7 +577,11 @@ void BlueprintPreview::loadRun(const QString &id, Result done) {
         for (const auto &value : nodes) {
             if (value.toObject()["kind"] != "tool" || raw["mode"] != "local") continue;
             request("GET", runPath(id) + "/approvals", {}, [raw, finish](int status, const QJsonDocument &doc) {
-                finish(displayRun(raw, doc.array()), status == 200 ? QString{} : errorText(status, doc));
+                if (status != 200) {
+                    finish({}, errorText(status, doc));
+                    return;
+                }
+                finish(displayRun(raw, doc.array()), {});
             });
             return;
         }
@@ -597,6 +649,19 @@ void BlueprintPreview::refreshOptions() {
         m_datasets = doc.array();
         emit optionsChanged();
     });
+    request("GET", "/adapters", {}, [this](int status, const QJsonDocument &doc) {
+        if (status != 200) return;
+        QJsonArray ready;
+        for (const auto &value : doc.array()) {
+            const auto adapter = value.toObject();
+            if (adapter["status"] == "ready")
+                ready.append(QJsonObject{{"id", adapter["id"]}, {"name", adapter["name"]},
+                                         {"base_model", adapter["base_model"]}});
+        }
+        if (m_fixtures["adapters"].toArray() == ready) return;
+        m_fixtures["adapters"] = ready;
+        emit optionsChanged();
+    });
 }
 
 void BlueprintPreview::checkpoint(const QString &model, Result done) {
@@ -610,10 +675,6 @@ void BlueprintPreview::toolCapability(Result done) {
         const auto result = doc.object();
         done(result, status != 200 || !result["available"].toBool() ? errorText(status, doc) : QString{});
     });
-}
-
-QJsonArray BlueprintPreview::orderExamples(const QString &node) const {
-    return m_starterData["training_examples"].toObject()[node].toArray();
 }
 
 void BlueprintPreview::train(const QJsonObject &graph, const QString &node, const QJsonArray &examples,

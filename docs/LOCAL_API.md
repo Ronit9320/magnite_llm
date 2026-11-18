@@ -89,10 +89,9 @@ provided responses. Existing requests default to fixture mode.
 | Check local runtime support | `POST /blueprints/capabilities` with a document. Reports device, estimated memory, context and thinking support by model node. |
 | List local checkpoint options | `GET /blueprints/checkpoints` lists eligible local Transformers checkpoints. `GET /blueprints/checkpoints/{model_id}` checks context size, thinking support, and compatible adapters for one checkpoint. |
 | Export or import the portable document | `GET /blueprints/{id}/export` with optional `revision`, or `POST /blueprints/import` with the exported JSON |
-| Load the editable order starter | `GET /blueprints/starters/order` with an optional registered `model_id`. Returns the document, fixture samples, and training examples for each adapter. |
 | Train an adapter for a node | `POST /blueprints/{id}/nodes/{node_id}/training` with typed `examples`, optional `revision`, and optional training `settings`. Returns an ordinary training job. |
 | Bind an existing or trained adapter | `PUT /blueprints/{id}/nodes/{node_id}/adapter` with the current `revision` and either `adapter_id` or a completed `training_job_id` for that node. Returns a new revision. |
-| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning and Tool nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
+| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning, Tool and Pi Agent nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
 | Queue an isolated node test | `POST /blueprints/{id}/node-tests` with the blueprint `name`, the full `node` contract, and named `inputs`. It runs locally without other nodes and returns HTTP 202. An Input node takes its test value under `inputs.value`. |
 | Read history or details | `GET /blueprints/runs` with optional `blueprint_id`, `surface`, `active`, `limit`, and `offset`. `GET /blueprints/runs/{run_id}` includes the snapshot, per-step trace, and results. |
 | Follow or replay events | `GET /blueprints/runs/{run_id}/events` |
@@ -117,8 +116,9 @@ and expose their final assistant text at `results.reply.text`.
 
 A portable document has `version: 1`, a name, nodes, and edges. Each edge connects
 `source: {"node": "...", "port": "..."}` to a corresponding `target`. Port
-names are keys in the node's `inputs` and `outputs` maps. Edges must form a DAG
-and each input port must have one source. Declared types must agree on connected
+names are keys in the node's `inputs` and `outputs` maps. The optional LoRA link
+uses the reserved target described below. Edges must form a DAG and each data
+input port must have one source. Declared types must agree on connected
 ports and shared nested fields, with integer outputs accepted by number inputs.
 The runner validates constraints on both sides as values pass through the graph.
 Schemas support `string`, `integer`, `number`, `boolean`, `object`, `array`,
@@ -130,14 +130,25 @@ and `additionalProperties` on the applicable types.
 | `input` / `input` | Run request `inputs[node_id]` → `value` |
 | `dataset` / `dataset-rows` | Inline `binding: {"source":"inline","rows":[...]}` or registered `binding: {"source":"local","dataset_id":"..."}` → `rows` with an array schema and a declared `items` schema |
 | `transform` / `pass`, `parse-json`, `field`, `first`, `count`, `format` | `value` → `value`. `field` takes `parameters: {"field":"..."}`. |
+| `transform` / `constant` | `parameters: {"value": ...}` → `value`. The JSON literal must match the output contract. |
+| `transform` / `build-object` | One to sixteen named data inputs → object on `value`. Input keys become fields in the object. |
 | `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
 | `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |
+| `adapter` / `lora` | Registered `adapter_id` → `adapter` (string resource reference). |
+| `agent` / `pi-reply` | `task` (string) → `reply` (string). Optional `instructions` set the Pi system message. Uses the loaded local chat model for text processing. |
 | `tool` / `approval` | In local mode, an action object on `value` requests approval and produces `receipt` after dispatch. In fixture mode, `receipt` uses the supplied decision. |
 | `tool` / `agent` | Text or a chat message array on `value` starts Pi. `receipt` contains the final `text`. |
 | `output` / `output` | `value` → `value` and run `results[node_id]` |
 
 `parse-json` takes a string, `field` takes an object, and `first` and `count`
 take arrays. `count` returns an integer and `format` returns a string.
+
+An Adapter node can connect its `adapter` output to the optional `adapter`
+target of a Model or Reasoning node. Omit that target from the node's
+`inputs` map. The runner resolves the link into the checkpoint's adapter
+binding before execution. A checkpoint can have one Adapter link or a direct
+`binding.adapter_id`. For an isolated test, supply the effective adapter
+as `binding.adapter_id` on the test node.
 
 Save requires a structurally valid graph. Validate, import, and run admission
 also resolve registered datasets, local Transformers checkpoints, and compatible

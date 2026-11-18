@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from backend.blueprints.schemas import (
-    Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue,
+    AdapterNode, AgentNode, Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue,
     Problems, RunRequest, ToolNode, TransformNode, ValueSchema,
 )
 
@@ -61,7 +61,33 @@ def _node_contract(node, issues):
         if rows is not None and rows.items is None:
             issues.append(Issue(code="missing_row_schema", node_id=node.id, path="outputs.rows.items",
                                 message="Dataset output must declare its row schema"))
+    elif isinstance(node, AdapterNode):
+        _signature(issues, node, {}, {"adapter": "string"})
+        if "adapter" in node.outputs:
+            try:
+                validate_value(node.adapter_id, node.outputs["adapter"], node.id, "outputs.adapter")
+            except Problems as exc:
+                issues.extend(exc.issues)
+    elif isinstance(node, AgentNode):
+        _signature(issues, node, {"task": "string"}, {"reply": "string"})
     elif isinstance(node, TransformNode):
+        if node.operation == "constant":
+            _signature(issues, node, {}, {"value": None})
+            if node.parameters.keys() != {"value"}:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters",
+                                    message="Constant requires one JSON value"))
+            elif "value" in node.outputs:
+                try:
+                    validate_value(node.parameters["value"], node.outputs["value"], node.id, "parameters.value")
+                except Problems as exc:
+                    issues.extend(exc.issues)
+            return
+        if node.operation == "build-object":
+            _signature(issues, node, dict.fromkeys(node.inputs), {"value": "object"})
+            if not node.inputs or node.parameters:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="inputs",
+                                    message="Build object requires one or more named input fields and no parameters"))
+            return
         if node.operation in ("order-clause", "order-price"):
             inputs = ({"message": "string", "index": "integer"} if node.operation == "order-clause"
                       else {"clause": "string", "fields": "object"})
@@ -128,7 +154,10 @@ def graph_for(blueprint: Blueprint) -> Graph:
         src, dest = edge.source, edge.target
         source, target = nodes.get(src.node), nodes.get(dest.node)
         path = f"edges[{index}]"
-        if source is None or target is None or src.port not in source.outputs or dest.port not in target.inputs:
+        adapter_link = (isinstance(source, AdapterNode) and isinstance(target, GenerationNode)
+                        and src.port == "adapter" and dest.port == "adapter" and dest.port not in target.inputs)
+        if (not adapter_link and (isinstance(source, AdapterNode) or source is None or target is None
+                                 or src.port not in source.outputs or dest.port not in target.inputs)):
             issues.append(Issue(code="unknown_port", node_id=dest.node, path=path,
                                 message="Edge must connect a declared output to a declared input"))
             continue
@@ -136,7 +165,10 @@ def graph_for(blueprint: Blueprint) -> Graph:
             issues.append(Issue(code="duplicate_connection", node_id=dest.node, path=path,
                                 message="An input port can only have one source"))
             continue
-        if not _compatible(source.outputs[src.port], target.inputs[dest.port]):
+        if adapter_link and target.binding.adapter_id:
+            issues.append(Issue(code="conflicting_adapter", node_id=dest.node, path=path,
+                                message="Use one adapter per checkpoint node. Clear its direct adapter binding."))
+        if not adapter_link and not _compatible(source.outputs[src.port], target.inputs[dest.port]):
             issues.append(Issue(code="incompatible_ports", node_id=dest.node, path=path,
                                 message=f"'{src.node}.{src.port}' is incompatible with '{dest.node}.{dest.port}'"))
         sources[dest.node][dest.port] = (src.node, src.port)
@@ -177,7 +209,7 @@ def validate_request(graph: Graph, request: RunRequest) -> None:
 
     issues = check_keys(request.inputs, {n.id for n in graph.nodes.values() if n.kind == "input"}, "inputs")
     if request.mode == "fixture":
-        fixture_nodes = {n.id for n in graph.nodes.values() if isinstance(n, (GenerationNode, ToolNode))}
+        fixture_nodes = {n.id for n in graph.nodes.values() if isinstance(n, (AgentNode, GenerationNode, ToolNode))}
     else:
         fixture_nodes = set()
     issues.extend(check_keys(request.fixtures, fixture_nodes, "fixtures"))

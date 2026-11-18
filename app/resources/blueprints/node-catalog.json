@@ -1,11 +1,11 @@
 {
   "nodeTypes": [
-    {"id": "input", "label": "Input", "detail": "Receive a value supplied when the workflow starts."},
-    {"id": "dataset", "label": "Dataset", "detail": "Provide a dataset to downstream nodes."},
-    {"id": "transform", "label": "Transform", "detail": "Convert, extract, or summarize a value."},
-    {"id": "model", "label": "Model", "detail": "Apply a model operation with a defined input and output."},
-    {"id": "output", "label": "Output", "detail": "Return a value from the workflow."},
-    {"id": "tool", "label": "Tool", "detail": "Pause the preview for an approval."}
+    {"id": "input", "label": "Input", "detail": "Provide a value at run time."},
+    {"id": "dataset", "label": "Dataset", "detail": "Supply rows from local data."},
+    {"id": "transform", "label": "Transform", "detail": "Convert or combine values."},
+    {"id": "model", "label": "Model", "detail": "Run a local checkpoint."},
+    {"id": "output", "label": "Output", "detail": "Return a workflow result."},
+    {"id": "tool", "label": "Tool", "detail": "Review an action."}
   ],
   "contracts": {
     "text": {"label": "Text", "schema": {"type": "string"}},

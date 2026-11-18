@@ -2,14 +2,19 @@
 
 Magnite uses Pi Agent Core 1.5.2 for model-driven tool turns. A fixed Blueprint
 continues to run through Magnite's graph executor. Its approval node can submit
-a fixed action directly, and its agent node uses the same Pi runtime as tool chat.
+a fixed action directly. Pi Agent nodes use the model loaded in Chat and pass
+their saved instructions as the system message. Their `task` and `reply`
+ports carry text. Pi registers an empty tool list for these nodes and the
+Python bridge rejects proposal frames. Saved Tool nodes with the legacy
+`agent` operation continue to use the same approval flow as tool chat.
 
 Pi's custom `streamFn` exchanges newline-delimited JSON with the Python worker
 over stdin and stdout. Magnite calls its loaded local chat model directly and
 converts a structured proposal into a Pi tool call. This preserves Magnite's
 existing HTTP and SSE protocols. The pipe adapter handles one model response at
 a time, with at most five model turns and four proposed actions per agent node.
-Only the open and command proposal tools are registered. The Python broker
+For tool chat and legacy Tool agent nodes, Pi registers the open and command
+proposal tools. The Python broker
 controls execution and returns an outcome to Pi. The agent process uses the
 same saved run, replayable SSE, and cancel endpoint on both surfaces.
 [Pi Agent Core documentation](https://github.com/earendil-works/pi/tree/main/packages/agent)

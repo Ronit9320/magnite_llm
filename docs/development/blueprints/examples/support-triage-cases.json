@@ -1,0 +1,32 @@
+[
+  {
+    "id": "duplicate-charge",
+    "ticket": "Invoice INV-418 was charged twice on Tuesday. Can you reverse the duplicate? Our service is still working.",
+    "expected": {"ticket": {"category": "billing", "blocked": false, "reference": "INV-418"}, "queue": "finance", "priority": "normal"}
+  },
+  {
+    "id": "account-lockout",
+    "ticket": "The sign-in page rejects the backup code after my phone reset. I am locked out and cannot continue processing customer requests.",
+    "expected": {"ticket": {"category": "access", "blocked": true, "reference": ""}, "queue": "identity", "priority": "high"}
+  },
+  {
+    "id": "missing-shipment",
+    "ticket": "Tracking for shipment SHP-290 says delivered, but the replacement parts never arrived. Production cannot continue without them.",
+    "expected": {"ticket": {"category": "delivery", "blocked": true, "reference": "SHP-290"}, "queue": "fulfillment", "priority": "high"}
+  },
+  {
+    "id": "refund-status",
+    "ticket": "Could you confirm whether the credit for order ORD-714 has been issued? There is no interruption to our work.",
+    "expected": {"ticket": {"category": "billing", "blocked": false, "reference": "ORD-714"}, "queue": "finance", "priority": "normal"}
+  },
+  {
+    "id": "secondary-login",
+    "ticket": "My secondary account stopped accepting its password. I can still use my main account to finish today's work.",
+    "expected": {"ticket": {"category": "access", "blocked": false, "reference": ""}, "queue": "identity", "priority": "normal"}
+  },
+  {
+    "id": "damaged-parcel",
+    "ticket": "Order ORD-592 arrived with a cracked storage case. Could you replace the case? The equipment itself is usable.",
+    "expected": {"ticket": {"category": "delivery", "blocked": false, "reference": "ORD-592"}, "queue": "fulfillment", "priority": "normal"}
+  }
+]

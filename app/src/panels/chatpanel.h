@@ -13,7 +13,8 @@
 #include <QJsonObject>
 
 class StudioCanvas;
-class BlueprintChatPanel;
+class ConversationRunPanel;
+class QButtonGroup;
 class QStackedWidget;
 class QComboBox;
 class QPlainTextEdit;
@@ -49,7 +50,8 @@ public:
     void refreshModels();
     void setKnowledgePanel(RagPanel *panel);
     void showKnowledge();
-    void setBlueprintChat(BlueprintChatPanel *panel);
+    void setRunPanels(ConversationRunPanel *tool, ConversationRunPanel *blueprint);
+    void showBlueprint(const QString &id);
 
     QString settingsJson() const override;
 
@@ -87,6 +89,7 @@ public slots:
 signals:
     void currentChatChanged(const QString &id);   // "" when a blank chat is shown
     void busyChanged(bool busy);
+    void adaptersRequested();
 
 private slots:
     void onLoadModel();
@@ -111,6 +114,7 @@ private:
 
     void setupUi();
     void showOrdinaryChat();
+    void showMode(int mode, const QString &blueprint = {});
     QVBoxLayout *addDrawer(const QString &title, const QString &name, QPushButton *toggle);
     void requestEngineStatus(const QString &error = {});
     void applyEngineStatus(const QJsonObject &status);
@@ -190,7 +194,13 @@ private:
 
     // Input row.
     QStackedWidget *m_chatContents = nullptr;
-    QComboBox *m_previewMode = nullptr;
+    QButtonGroup *m_modes = nullptr;
+    QWidget *m_modeBar = nullptr;
+    QWidget *m_modelToolbar = nullptr;
+    QLabel *m_toolModelStatus = nullptr;
+    QLabel *m_chatAdapter = nullptr;
+    ConversationRunPanel *m_toolMode = nullptr;
+    ConversationRunPanel *m_blueprintMode = nullptr;
     QPlainTextEdit *m_input;
     QPushButton *m_sendButton;
     QPushButton *m_modelButton = nullptr;

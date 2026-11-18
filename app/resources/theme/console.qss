@@ -199,9 +199,19 @@ QPushButton#conversationModelAction:pressed { background: @surfaceFillActive; }
 QPushButton#conversationModelAction:disabled { background: @insetBackground; }
 QLabel#conversationUtilization { color: @textSecondary; font-family: @monoFont; font-size: 11px; }
 QFrame[conversationDrawer="true"] { background: @surfaceFill; border: none; border-radius: 10px; }
-QFrame#chatComposer, QFrame#blueprintChatComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
-QPlainTextEdit#chatInput, QPlainTextEdit#blueprintChatInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
-QPlainTextEdit#chatInput:focus, QPlainTextEdit#blueprintChatInput:focus { border: none; }
+QPushButton#conversationMode { background: transparent; color: @textSecondary; border: 1px solid transparent; padding: 6px 14px; }
+QPushButton#conversationMode:hover { background: @surfaceFillHover; color: @textPrimary; }
+QPushButton#conversationMode:checked { background: @surfaceFillActive; border-color: @surfaceBorder; color: @textPrimary; }
+QPushButton#conversationMode:focus { border-color: @accentPrimary; }
+QPushButton#conversationMode:disabled { color: @textMuted; }
+QFrame#chatComposer, QFrame#toolTaskComposer { background: @surfaceFill; border: 1px solid transparent; border-radius: 16px; }
+QFrame#workflowComposer, QFrame#conversationWorkflowRun { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QFrame#runToolCall { background: @insetBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QProgressBar#conversationWorkflowProgress { border: none; border-radius: 3px; background: @insetBackground; }
+QProgressBar#conversationWorkflowProgress::chunk { border-radius: 3px; background: @accentPrimary; }
+QPlainTextEdit#chatInput, QPlainTextEdit#toolTaskInput { background: transparent; border: none; padding: 4px; font-size: 14px; }
+QPlainTextEdit#chatInput:focus, QPlainTextEdit#toolTaskInput:focus { border: none; }
+QPlainTextEdit#workflowInput { background: @insetBackground; }
 QLabel#chatEyebrow { color: @accentLabel; font-size: 10px; letter-spacing: 2px; }
 QPushButton#promptSuggestion { background: @surfaceFill; border: 1px solid transparent; color: @textSecondary; text-align: left; padding: 12px; border-radius: 12px; }
 QPushButton#promptSuggestion:hover, QPushButton#promptSuggestion:focus { color: @textPrimary; border-color: transparent; background: @surfaceFillHover; }
@@ -616,7 +626,7 @@ QMenu#conversationOptions::item {
 }
 
 /* Blueprints canvas, inspector, and flat run trace */
-QWidget#blueprintsWorkspace, QWidget#blueprintChat, QWidget#blueprintEmptyCanvas { background: @canvasBackground; }
+QWidget#blueprintsWorkspace, QWidget#blueprintEmptyCanvas { background: @canvasBackground; }
 QFrame#blueprintSurface { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; }
 QFrame#blueprintRule { background: @surfaceBorder; border: 0; }
 QLabel#blueprintTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; }
@@ -635,15 +645,11 @@ QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background:
 QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
 QWidget#blueprintStepDetail { background: @surfaceFill; }
 QPushButton#blueprintFullscreen { padding: 0; }
-QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 0; border-radius: 0; }
-QFrame#blueprintCreateForm, QFrame#blueprintPalette { background: @surfaceFill; border: none; border-radius: 8px; }
+QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QFrame#blueprintCreateForm { background: @surfaceFill; border: none; border-radius: 8px; }
+QTreeWidget#blueprintNodeTree { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; }
 QPushButton#blueprintIconButton, QPushButton#blueprintEdit, QPushButton#blueprintDuplicate,
 QPushButton#blueprintDelete { padding: 0; }
-QPushButton#blueprintPaletteItem {
-    background: transparent; border: none; border-radius: 6px; padding: 6px;
-    min-height: 38px; text-align: left; font-size: 11px;
-}
-QPushButton#blueprintPaletteItem:hover, QPushButton#blueprintPaletteItem:focus { background: @surfaceFillHover; }
 QLabel#blueprintNodeIcon, QFrame#blueprintBinding { background: @canvasBackground; border: none; border-radius: 7px; }
 QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 600; }
 QLabel#blueprintRevision {

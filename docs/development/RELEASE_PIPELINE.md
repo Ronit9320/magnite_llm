@@ -63,7 +63,7 @@ uses GitHub over HTTPS. Existing ML execution stays in the local Python backend.
 - `RELEASE_VERSION`: `v0.1-preview`, used for UI, health/API metadata, tags,
   filenames, release metadata, and build information.
 - `UPDATE_SEQUENCE`: `1`, the monotonic update ordering value.
-- `DATA_SCHEMA`: `1`, the current data compatibility generation.
+- `DATA_SCHEMA`: `2`, which includes the new Blueprint node and link types.
 
 Python distribution metadata requires PEP 440. Its `0.1rc0` spelling is computed
 from the release identity and is not another editable application version.

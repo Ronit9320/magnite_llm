@@ -26,6 +26,7 @@ from backend.routes.models import _get_registry
 from backend.routes.training import _get_datasets, _get_manager
 from backend.server import app
 from backend.training.schemas import TrainingJob
+from order_blueprint_fixture import order_blueprint, order_samples, training_examples
 
 STRING = {"type": "string"}
 INTEGER = {"type": "integer"}
@@ -34,6 +35,7 @@ RESULT = {"type": "object", "properties": {"quantity": INTEGER, "note": {"type":
           "required": ["quantity", "note"], "additionalProperties": False}
 TOKEN = "blueprint-test-token"
 MODEL_ID = "huggingface:local-test--checkpoint"
+WORKFLOW_EXAMPLES = Path(__file__).resolve().parents[2] / "docs/development/blueprints/examples"
 
 
 def node(node_id, kind, operation, *, inputs=None, outputs=None, **fields):
@@ -150,13 +152,13 @@ class BlueprintApiTests(unittest.TestCase):
                                                   path=str(weights), ref="local-test/checkpoint"))
         return weights
 
-    def register_adapter(self, base_model, **meta):
-        weights = self.home / "adapter"
+    def register_adapter(self, base_model, *, adapter_id="adapter-1", **meta):
+        weights = self.home / adapter_id
         weights.mkdir()
         (weights / "adapter_config.json").write_text(
             '{"peft_type":"LORA","r":1,"lora_alpha":2,"target_modules":["q_proj"]}', encoding="utf-8")
         save_file({"test": np.zeros(1, dtype=np.float32)}, str(weights / "adapter_model.safetensors"))
-        _get_store().upsert(AdapterRecord(id="adapter-1", name="Test adapter", path=str(weights),
+        _get_store().upsert(AdapterRecord(id=adapter_id, name="Test adapter", path=str(weights),
                                          base_model=base_model, training_job_id="training-fixture", meta=meta))
 
     def test_portable_round_trip_versioned_history_and_auth(self):
@@ -317,6 +319,106 @@ class BlueprintApiTests(unittest.TestCase):
         self.assertIs(result["steps"][1]["outputs"]["order"]["quantity"], True)
         self.assertEqual(result["results"], {})
 
+    def test_linked_lora_is_resolved_without_becoming_a_model_prompt(self):
+        self.register_model()
+        self.register_adapter(MODEL_ID)
+        graph = model_graph()
+        graph["nodes"].append(node("lora", "adapter", "lora", outputs={"adapter": STRING}, adapter_id="adapter-1"))
+        graph["edges"].append(edge("lora", "generate", "adapter", "adapter"))
+        saved = self.save(graph)
+        result, _ = self.terminal(self.start(saved, model_request()))
+        self.assertEqual(result["status"], "passed")
+        bindings = result["snapshot"]["bindings"]["adapters"]
+        self.assertEqual(bindings["lora"], bindings["generate"])
+        steps = {step["node_id"]: step for step in result["steps"]}
+        self.assertEqual(steps["lora"]["outputs"], {"adapter": "adapter-1"})
+        self.assertEqual(steps["generate"]["inputs"], {"prompt": "seven items"})
+
+        conflict = deepcopy(graph)
+        conflict["nodes"][1]["binding"]["adapter_id"] = "adapter-1"
+        report = self.client.post("/blueprints/validate", json=conflict).json()
+        self.assertEqual(report["issues"][0]["code"], "conflicting_adapter")
+        wrong_port = deepcopy(graph)
+        wrong_port["edges"][-1]["target"]["port"] = "prompt"
+        report = self.client.post("/blueprints/validate", json=wrong_port).json()
+        self.assertEqual(report["issues"][0]["code"], "unknown_port")
+        binding = self.client.put(f"/blueprints/{saved['id']}/nodes/generate/adapter",
+                                  json={"revision": 1, "adapter_id": "adapter-1"})
+        self.assertEqual(binding.status_code, 409, binding.text)
+
+    def test_support_triage_example_and_invalid_json_handoff(self):
+        self.register_model()
+        self.register_adapter(MODEL_ID, adapter_id="extractor-adapter")
+        self.register_adapter(MODEL_ID, adapter_id="router-adapter")
+        document = json.loads((WORKFLOW_EXAMPLES / "support-triage.json").read_text(encoding="utf-8"))
+        for model in (n for n in document["nodes"] if n["kind"] == "model"):
+            model["binding"]["model_id"] = MODEL_ID
+        imported = self.client.post("/blueprints/import", json=document)
+        self.assertEqual(imported.status_code, 201, imported.text)
+        saved = imported.json()
+        cases = json.loads((WORKFLOW_EXAMPLES / "support-triage-cases.json").read_text(encoding="utf-8"))
+        for case in cases:
+            with self.subTest(case=case["id"]):
+                expected = case["expected"]
+                request = {"mode": "fixture", "inputs": {"ticket": case["ticket"]}, "fixtures": {
+                    "extract": {"outputs": {"raw_json": json.dumps(expected["ticket"])}},
+                    "route": {"outputs": {"queue": expected["queue"], "priority": expected["priority"]}},
+                }}
+                run, _ = self.terminal(self.start(saved, request))
+                self.assertEqual(run["status"], "passed", run.get("error"))
+                self.assertEqual(run["results"], {"result": expected})
+                steps = {step["node_id"]: step for step in run["steps"]}
+                self.assertEqual(steps["extract"]["inputs"], {"ticket": case["ticket"]})
+                self.assertEqual(steps["parse"]["outputs"], {"value": expected["ticket"]})
+                self.assertEqual(steps["route"]["inputs"], {"record": expected["ticket"]})
+                adapters = run["snapshot"]["bindings"]["adapters"]
+                self.assertEqual(adapters["extract"]["id"], "extractor-adapter")
+                self.assertEqual(adapters["route"]["id"], "router-adapter")
+
+        for raw_json, code, path in [
+            ('{"category":', "operation_failed", None),
+            ('{"category":"billing","blocked":"true","reference":""}', "invalid_value", "outputs.value.blocked"),
+            ('{"category":"billing","blocked":true}', "invalid_value", "outputs.value.reference"),
+        ]:
+            with self.subTest(raw_json=raw_json):
+                invalid = {"mode": "fixture", "inputs": {"ticket": cases[0]["ticket"]}, "fixtures": {
+                    "extract": {"outputs": {"raw_json": raw_json}},
+                    "route": {"outputs": {"queue": "finance", "priority": "normal"}},
+                }}
+                run, _ = self.terminal(self.start(saved, invalid))
+                self.assertEqual(run["status"], "failed")
+                error = run["error"]
+                self.assertEqual((error["node_id"], error["code"], error.get("path")), ("parse", code, path))
+                steps = {step["node_id"]: step["status"] for step in run["steps"]}
+                self.assertEqual([steps[node] for node in ("extract", "parse", "route", "pack", "result")],
+                                 ["passed", "failed", "skipped", "skipped", "skipped"])
+                self.assertEqual(run["results"], {})
+
+    def test_local_pi_agent_composes_a_typed_review_record(self):
+        agent = node("triage", "agent", "pi-reply", inputs={"task": STRING}, outputs={"reply": STRING},
+                     instructions="Summarize the user's request.")
+        constant = node("status", "transform", "constant", outputs={"value": STRING},
+                        parameters={"value": "Needs review"})
+        compose = node("record", "transform", "build-object", inputs={"summary": STRING, "status": STRING},
+                       outputs={"value": OBJECT})
+        graph = blueprint(source(), agent, constant, compose, output(OBJECT), edges=[
+            edge("request", "triage", in_port="task"), edge("triage", "record", "reply", "summary"),
+            edge("status", "record", in_port="status"), edge("record", "result"),
+        ])
+        saved = self.save(graph)
+        with patch("backend.tooling.pi_bridge.loaded_engine", return_value=object()), patch(
+            "backend.tooling.pi_bridge.run", return_value="A request for more labels."
+        ) as pi:
+            result, _ = self.terminal(
+                self.start(saved, {"mode": "local", "inputs": {"request": "We need more labels."}})
+            )
+            self.assertEqual(pi.call_args.args[0], "We need more labels.")
+            self.assertIsNone(pi.call_args.args[2])
+            self.assertEqual(pi.call_args.kwargs["instructions"], agent["instructions"])
+        self.assertEqual(result["results"], {"result": {"status": "Needs review",
+                                                        "summary": "A request for more labels."}})
+        self.assertEqual(self.client.get(f"/blueprints/runs/{result['id']}/approvals").json(), [])
+
     def test_transform_failure_and_consumer_handoff_validation(self):
         parse = node("parse", "transform", "parse-json", inputs={"value": STRING}, outputs={"value": OBJECT})
         get = node("field", "transform", "field", inputs={"value": {"type": "object",
@@ -391,18 +493,16 @@ class BlueprintApiTests(unittest.TestCase):
             self.assertEqual(result["steps"][1]["outputs"]["receipt"]["decision"], decision)
         self.assertFalse(marker.exists())
 
-    def test_editable_starter_runs_with_typed_fixtures(self):
+    def test_saved_order_graph_runs_with_typed_fixtures(self):
         self.register_model()
-        starter = self.client.get("/blueprints/starters/order", params={"model_id": MODEL_ID}).json()
-        saved = self.save(starter["blueprint"])
-        for sample in starter["samples"]:
+        saved = self.save(order_blueprint(MODEL_ID))
+        for sample in order_samples():
             result, _ = self.terminal(self.start(saved, sample["request"]))
             self.assertEqual(result["results"], sample["expected"])
-        sample = deepcopy(starter["samples"][0]["request"])
+        sample = deepcopy(order_samples()[0]["request"])
         sample["fixtures"]["select"]["outputs"]["index"] = 99
         failed, _ = self.terminal(self.start(saved, sample))
         self.assertEqual(failed["error"]["node_id"], "lookup")
-        self.assertEqual(len(starter["training_examples"]["select"]), len(starter["training_examples"]["extract"]))
 
     def test_local_run_reports_unsupported_checkpoint_before_admission(self):
         self.register_model()
@@ -420,10 +520,9 @@ class BlueprintApiTests(unittest.TestCase):
 
     def test_node_training_uses_runtime_schema_and_pins_checkpoint(self):
         weights = self.register_model()
-        starter = self.client.get("/blueprints/starters/order", params={"model_id": MODEL_ID}).json()
-        saved = self.save(starter["blueprint"])
+        saved = self.save(order_blueprint(MODEL_ID))
         path = f"/blueprints/{saved['id']}/nodes/select/training"
-        example = deepcopy(starter["training_examples"]["select"][0])
+        example = deepcopy(training_examples()["select"][0])
         bad = {"inputs": example["inputs"], "outputs": {"index": True}}
 
         class Tokenizer:

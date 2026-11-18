@@ -44,12 +44,6 @@ QJsonObject price(QJsonObject fields) {
     return fields;
 }
 
-QJsonValue parseJsonValue(const QString &text) {
-    const auto document = QJsonDocument::fromJson("[" + text.toUtf8() + "]");
-    if (document.isArray() && document.array().size() == 1) return document.array().first();
-    return QJsonValue::Undefined;
-}
-
 bool writeEntries(const char *key, const QJsonArray &entries, bool persist) {
     if (!persist) return true;
     QSettings settings;
@@ -74,6 +68,7 @@ QString validate(const QJsonValue &value, const QJsonObject &schema, const QStri
         }
     }
     if (type == "string" && !value.isString()) return path + " must be text";
+    if (type == "null" && !value.isNull()) return path + " must be null";
     if (value.isDouble() && schema.contains("minimum") && value.toDouble() < schema["minimum"].toDouble())
         return path + " must be at least " + QString::number(schema["minimum"].toDouble());
     if (value.isString() && value.toString().size() < schema["minLength"].toInt())
@@ -187,18 +182,21 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
     m_fixtures["operations"] = operations;
 
     if (live()) {
-        auto types = m_fixtures["nodeTypes"].toArray();
-        for (int i = 0; i < types.size(); ++i) {
-            auto type = types.at(i).toObject();
-            if (type["id"] != "tool") continue;
-            type["detail"] = "Request actions with approval or ask the loaded local tool model.";
-            types.replace(i, type);
+        QJsonArray types;
+        for (const auto &value : m_fixtures["nodeTypes"].toArray()) {
+            types.append(value);
+            if (value.toObject()["id"] != "model") continue;
+            types.append(QJsonObject{{"id", "reasoning"}, {"label", "Reasoning"},
+                {"detail", "Run a thinking checkpoint."}});
+            types.append(QJsonObject{{"id", "adapter"}, {"label", "Adapter"},
+                {"detail", "Attach trained LoRA weights."}});
+            types.append(QJsonObject{{"id", "agent"}, {"label", "Pi Agent"},
+                {"detail", "Run a text task through Pi."}});
         }
-        types.append(QJsonObject{{"id", "reasoning"}, {"label", "Reasoning"},
-            {"detail", "Use a checkpoint with explicit thinking support."}});
         m_fixtures["nodeTypes"] = types;
         contracts["null"] = QJsonObject{{"label", "Null"}, {"schema", QJsonObject{{"type", "null"}}}};
         contracts["receipt"] = QJsonObject{{"label", "Receipt"}, {"schema", QJsonObject{{"type", "object"}}}};
+        contracts["adapter-ref"] = QJsonObject{{"label", "LoRA adapter"}, {"schema", QJsonObject{{"type", "string"}}}};
         m_fixtures["contracts"] = contracts;
         m_fixtures["portTypes"] = QJsonArray{"text", "integer", "number", "boolean", "object", "array", "null"};
         QJsonArray catalog;
@@ -219,13 +217,36 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
         }
         const QJsonArray modelIn{QJsonObject{{"id", "value"}, {"name", "Input"}, {"type", "text"}, {"chooseType", true}}};
         const QJsonArray modelOut{QJsonObject{{"id", "value"}, {"name", "Result"}, {"type", "text"}, {"chooseType", true}}};
+        const QJsonObject adapterPort{{"id", "adapter"}, {"name", "LoRA adapter"}, {"type", "adapter-ref"}};
+        auto modelPorts = modelIn;
+        modelPorts.append(adapterPort);
         catalog.append(QJsonObject{{"id", "generate"}, {"kind", "model"}, {"label", "Generate a response"},
-            {"detail", "Generate a typed result with a local checkpoint and optional adapter."}, {"in", modelIn}, {"out", modelOut}});
+            {"detail", "Send named inputs to a local Transformers checkpoint. Return typed JSON or a single plain-text result."},
+            {"in", modelPorts}, {"out", modelOut}});
         catalog.append(QJsonObject{{"id", "reason"}, {"kind", "reasoning"}, {"label", "Reason through a task"},
-            {"detail", "Use a thinking checkpoint with a separate output token budget."}, {"in", modelIn}, {"out", modelOut}});
+            {"detail", "Use a Transformers checkpoint with explicit thinking. The output contains the final answer."},
+            {"in", modelPorts}, {"out", modelOut}});
+        catalog.append(QJsonObject{{"id", "lora"}, {"kind", "adapter"}, {"label", "Attach trained LoRA"},
+            {"detail", "Select local adapter weights and connect them to the LoRA adapter port of a compatible checkpoint."},
+            {"out", QJsonArray{adapterPort}}});
+        catalog.append(QJsonObject{{"id", "pi-reply"}, {"kind", "agent"}, {"label", "Respond with Pi"},
+            {"detail", "Use the model loaded in Chat to follow saved instructions. Connect a text task and use the text reply in later steps."},
+            {"in", QJsonArray{QJsonObject{{"id", "task"}, {"name", "Task"}, {"type", "text"}}}},
+            {"out", QJsonArray{QJsonObject{{"id", "reply"}, {"name", "Reply"}, {"type", "text"}}}},
+            {"setting", QJsonObject{{"label", "Agent instructions"}, {"multiline", true},
+                                    {"placeholder", "Summarize the request in three sentences."}}}});
         catalog.append(QJsonObject{{"id", "agent"}, {"kind", "tool"}, {"label", "Ask the local tool model"},
             {"detail", "Use the loaded tool model. Each external action requires approval."}, {"in", modelIn},
+            {"legacyOnly", true},
             {"out", QJsonArray{QJsonObject{{"id", "receipt"}, {"name", "Result"}, {"type", "receipt"}}}}});
+        catalog.append(QJsonObject{{"id", "constant"}, {"kind", "transform"}, {"label", "Provide a constant"},
+            {"detail", "Supply a fixed JSON value such as a label, threshold, or default setting."},
+            {"setting", QJsonObject{{"label", "Value (JSON)"}, {"default", "\"Example\""}, {"multiline", true}}},
+            {"out", QJsonArray{QJsonObject{{"id", "value"}, {"name", "Value"}, {"type", "text"}, {"chooseType", true}}}}});
+        catalog.append(QJsonObject{{"id", "build-object"}, {"kind", "transform"}, {"label", "Build an object"},
+            {"detail", "Combine connected values into one JSON object. Input keys become its field names."},
+            {"in", QJsonArray{QJsonObject{{"id", "field"}, {"name", "Field"}, {"type", "text"}, {"chooseType", true}}}},
+            {"out", QJsonArray{QJsonObject{{"id", "value"}, {"name", "Object"}, {"type", "object"}}}}});
         for (const auto &op : {QString("order-clause"), QString("order-price")})
             catalog.append(QJsonObject{{"id", op}, {"kind", "transform"}, {"label", op == "order-clause"
                 ? "Look up order clause" : "Validate and price order"}, {"legacyOnly", true}});
@@ -255,12 +276,6 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
             refreshRuns("?active=true");
             refreshRuns("?surface=chat&limit=20", true);
             refreshOptions();
-            request("GET", "/blueprints/starters/order", {}, [this](int status, const QJsonDocument &doc) {
-                if (status == 200) {
-                    m_starterData = doc.object();
-                    emit optionsChanged();
-                }
-            });
         };
         connect(backend, &BackendClient::baseUrlChanged, this, connectionChanged);
         connectionChanged();
@@ -313,7 +328,7 @@ QJsonObject BlueprintPreview::example() const {
 }
 
 QJsonObject BlueprintPreview::blueprint(const QString &id) const {
-    return id == "order-intake" ? example() : findById(m_saved, id);
+    return findById(m_saved, id);
 }
 
 bool BlueprintPreview::saveBlueprint(const QJsonObject &blueprint) {
@@ -327,7 +342,7 @@ bool BlueprintPreview::saveBlueprint(const QJsonObject &blueprint) {
 }
 
 bool BlueprintPreview::deleteBlueprint(const QString &id) {
-    if (id.isEmpty() || id == "order-intake") return false;
+    if (id.isEmpty()) return false;
     auto saved = m_saved;
     for (int index = 0; index < saved.size(); ++index) {
         if (saved.at(index).toObject()["id"].toString() != id) continue;
@@ -394,6 +409,13 @@ QString BlueprintPreview::settingError(const QJsonObject &node) const {
     if (code == "dataset-rows" && node["dataset"].toString().isEmpty() && !parseJsonValue(value).isArray())
         return "Enter a valid JSON array for the dataset rows.";
     if (code == "field" && value.trimmed().isEmpty()) return "Enter the name of the field to read.";
+    if (code == "constant") {
+        const auto parsed = parseJsonValue(value);
+        if (parsed.isUndefined()) return "Enter a valid JSON value. Use double quotes around text.";
+        const auto error = validate(parsed, node["out"].toArray().first().toObject()["schema"].toObject(), "Value");
+        if (!error.isEmpty()) return error;
+    }
+    if (code == "pi-reply" && value.size() > 16000) return "Use at most 16,000 characters for agent instructions.";
     return {};
 }
 
@@ -454,6 +476,11 @@ QString BlueprintPreview::connectionError(const QJsonObject &blueprint, const QJ
     if (outgoing.isEmpty() || incoming.isEmpty()) return "Select an output port and an input port.";
     const auto fromType = outgoing["schema"].toObject()["type"].toString();
     const auto toType = incoming["schema"].toObject()["type"].toString();
+    const bool adapterOutput = outgoing["type"] == "adapter-ref";
+    const bool adapterInput = incoming["type"] == "adapter-ref";
+    if (adapterOutput != adapterInput) return "Connect LoRA adapter outputs to LoRA adapter inputs.";
+    if (adapterInput && !findById(nodes, to)["adapter"].toString().isEmpty())
+        return "Clear the checkpoint's direct adapter binding before connecting a LoRA adapter.";
     if (fromType != toType && !(live() && fromType == "integer" && toType == "number")) {
         const auto contracts = m_fixtures["contracts"].toObject();
         return QString("%1 cannot connect to %2. Choose an input with the same type.")
@@ -490,11 +517,13 @@ QStringList BlueprintPreview::issues(const QJsonObject &blueprint) const {
         const auto node = value.toObject();
         const auto name = node["name"].toString();
         const auto kind = operationId(node);
-        hasSource |= kind == "input" || kind == "dataset-rows";
+        hasSource |= kind == "input" || kind == "dataset-rows" || kind == "constant";
         const auto invalidSetting = settingError(node);
         if (!invalidSetting.isEmpty()) result << name + " · " + invalidSetting;
         if (live() && (kind == "generate" || kind == "reason") && node["model"].toString().isEmpty())
             result << name + " needs a local checkpoint.";
+        if (kind == "lora" && node["adapter"].toString().isEmpty())
+            result << name + " needs a trained adapter.";
         if (kind == "selector" || kind == "extractor") {
             const auto model = findById(m_fixtures["models"].toArray(), node["model"].toString());
             const auto adapter = findById(compatibleAdapters(node["model"].toString(), kind), node["adapter"].toString());
@@ -503,6 +532,7 @@ QStringList BlueprintPreview::issues(const QJsonObject &blueprint) const {
         }
         for (const auto &portValue : node["in"].toArray()) {
             const auto port = portValue.toObject();
+            if (port["type"] == "adapter-ref") continue;
             const bool connected = std::any_of(edges.cbegin(), edges.cend(), [&](const auto &edgeValue) {
                 const auto edge = edgeValue.toObject();
                 return edge["to"] == node["id"] && edge["in"] == port["id"];
@@ -511,7 +541,7 @@ QStringList BlueprintPreview::issues(const QJsonObject &blueprint) const {
                 result << QString("%1 needs a connection to %2.").arg(name, portLabel(port));
         }
     }
-    if (!hasSource) result.prepend("Add an Input or Dataset node.");
+    if (!hasSource) result.prepend(live() ? "Add an Input, Dataset, or Constant node." : "Add an Input or Dataset node.");
     if (live() && std::none_of(nodes.begin(), nodes.end(), [](const auto &node) {
         return node.toObject()["kind"].toString() == "output";
     })) result << "Add an Output node.";
@@ -580,7 +610,8 @@ QString BlueprintPreview::start(const QJsonObject &blueprint, const QString &inp
     const QJsonObject run{{"id", runId}, {"blueprintId", blueprint["id"].toString()},
         {"name", blueprint.isEmpty() ? QString("Chat tool request") : blueprint["name"].toString()},
         {"revision", blueprint["revision"].toInt()}, {"input", runInput}, {"target", target}, {"scenario", scenario},
-        {"source", source}, {"sampleId", sample["id"]}, {"status", "running"}, {"created", now}, {"cursor", 0},
+        {"source", source}, {"toolChat", blueprint.isEmpty()},
+        {"sampleId", sample["id"]}, {"status", "running"}, {"created", now}, {"cursor", 0},
         {"nextAt", now + stepDelay(operationId(steps.first().toObject()))}, {"steps", steps}, {"edges", edges}};
     m_runs.prepend(run);
     storeRuns();
@@ -814,6 +845,12 @@ QString BlueprintPreview::jsonText(const QJsonValue &value) {
     if (value.isUndefined()) return QString::fromUtf8("—");
     const auto json = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
     return QString::fromUtf8(json.mid(1, json.size() - 2));
+}
+
+QJsonValue BlueprintPreview::parseJsonValue(const QString &text) {
+    const auto document = QJsonDocument::fromJson("[" + text.toUtf8() + "]");
+    if (document.isArray() && document.array().size() == 1) return document.array().first();
+    return QJsonValue::Undefined;
 }
 
 bool BlueprintPreview::supportedSchema(const QJsonObject &schema) {

@@ -48,9 +48,8 @@ public:
     QJsonArray published() const { return m_published; }
     QJsonArray recentRuns() const;
     QJsonArray datasets() const { return m_datasets; }
-    QJsonArray orderSamples() const { return m_starterData["samples"].toArray(); }
-    QJsonArray orderExamples(const QString &node) const;
     QString serviceError() const { return m_serviceError; }
+    void refreshSaved();
     void refreshOptions();
     void checkpoint(const QString &model, Result done);
     void getBlueprint(const QString &id, bool publishedOnly, Result done, qint64 revision = 0);
@@ -58,7 +57,8 @@ public:
     void removeBlueprint(const QString &id, Result done);
     void validateLive(const QJsonObject &graph, Result done);
     void runLive(const QJsonObject &graph, const QJsonValue &input, const QString &target,
-                 bool chat, bool tool, Result done);
+                 bool chat, Result done);
+    void runToolTask(const QJsonArray &messages, Result done);
     void loadRun(const QString &id, Result done = {});
     void refreshHistory(const QString &id);
     void toolCapability(Result done);
@@ -74,6 +74,7 @@ public:
     static QString statusLabel(const QString &status);
     static QString duration(qint64 ms);
     static QString jsonText(const QJsonValue &value);
+    static QJsonValue parseJsonValue(const QString &text);
     static bool supportedSchema(const QJsonObject &schema);
 
 signals:
@@ -87,8 +88,8 @@ private:
     BlueprintPreview(BackendClient *backend, QObject *parent, bool persist);
     using Response = std::function<void(int, const QJsonDocument &)>;
     void request(const QString &method, const QString &path, const QJsonObject &body, Response done);
-    void refreshSaved();
     void fetchSaved(int offset, QJsonArray entries, quint64 request);
+    void submitRun(const QString &path, const QJsonObject &body, Result done);
     void refreshRuns(const QString &query, bool openChat = false);
     void rememberRun(const QJsonObject &run);
     void connectRun(const QString &id);
@@ -113,7 +114,6 @@ private:
     QByteArray m_templatesKey;
     QJsonArray m_published;
     QJsonArray m_datasets;
-    QJsonObject m_starterData;
     QString m_serviceError;
     quint64 m_session = 0;
     quint64 m_savedRequest = 0;

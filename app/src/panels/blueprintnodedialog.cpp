@@ -12,8 +12,11 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
+#include <QRegularExpression>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace {
 struct PortEditor {
@@ -21,6 +24,8 @@ struct PortEditor {
     QString direction;
     QLineEdit *name;
     ComboBox *type;
+    QLineEdit *key;
+    QWidget *row;
 };
 
 QLabel *caption(const QString &text, const char *style = "cardMeta") {
@@ -64,11 +69,16 @@ public:
         m_name->setMaxLength(60);
         Surface::field(body, "Name (optional)", m_name);
 
+        auto *scroll = new QScrollArea;
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
         auto *options = new QWidget;
+        scroll->setWidget(options);
         m_options = new QVBoxLayout(options);
         m_options->setContentsMargins(0, 0, 0, 0);
         m_options->setSpacing(6);
-        body->addWidget(options);
+        m_options->setAlignment(Qt::AlignTop);
+        body->addWidget(scroll, 1);
         m_error = caption({}, "blueprintError");
         m_error->hide();
         body->addWidget(m_error);
@@ -82,7 +92,14 @@ public:
         connect(m_operation, &QComboBox::currentIndexChanged, this, [this] { loadOptions(); });
         loadOperations(BlueprintPreview::operationId(existing));
         m_operation->setFocus();
-        setMinimumWidth(450);
+        setMinimumWidth(490);
+        resize(520, 470);
+        if (m_preview.live()) {
+            connect(&m_preview, &BlueprintPreview::optionsChanged, this, [this] {
+                if (m_binding) refreshBindings(m_binding->currentData().toString());
+            });
+            m_preview.refreshOptions();
+        }
     }
 
     QJsonObject result() const { return m_result; }
@@ -105,7 +122,10 @@ private:
 
     void loadOptions() {
         m_ports.clear();
+        m_resourcePort = {};
+        m_resourceSide.clear();
         m_line = nullptr;
+        m_binding = nullptr;
         m_text = nullptr;
         m_error->hide();
         if (m_fields) {
@@ -120,10 +140,17 @@ private:
         const auto code = m_operation->currentData().toString();
         const auto spec = m_preview.operation(code);
         const bool sameOperation = code == BlueprintPreview::operationId(m_original);
-        const auto fixtures = m_preview.fixtures();
-        const auto contracts = fixtures["contracts"].toObject();
         m_detail->setText(spec["detail"].toString());
 
+        if (m_preview.live() && (code == "generate" || code == "reason" || code == "lora")) {
+            m_binding = new ComboBox;
+            m_binding->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            m_binding->setMinimumContentsLength(20);
+            const bool adapter = code == "lora";
+            const QString key = adapter ? "adapter" : "model";
+            refreshBindings(m_original["kind"] == spec["kind"] ? m_original[key].toString() : QString{});
+            Surface::field(body, adapter ? "Trained adapter" : "Local checkpoint", m_binding);
+        }
         const auto config = spec["setting"].toObject();
         if (!config.isEmpty()) {
             const auto title = config["label"].toString();
@@ -151,42 +178,53 @@ private:
                 for (int i = 0; i < ports.size(); ++i) {
                     auto port = ports.at(i).toObject();
                     const auto definition = findPort(spec[side].toArray(), port["id"].toString());
-                    port["chooseType"] = definition["chooseType"].toBool() || code == "generate" || code == "reason";
+                    port["chooseType"] = definition["chooseType"].toBool() || editableKeys(code, side);
                     ports.replace(i, port);
                 }
             }
             if (ports.isEmpty()) continue;
             const QString direction = side == "in" ? "Input" : "Output";
+            const bool editable = editableKeys(code, side);
             body->addWidget(caption(direction + " ports", "headingLabel"));
-            for (int index = 0; index < ports.size(); ++index) {
-                const auto definition = ports.at(index).toObject();
+            if (editable) body->addWidget(caption("Key, display label, and data type."));
+            auto *rows = new QVBoxLayout;
+            body->addLayout(rows);
+            for (const auto &value : ports) {
+                const auto definition = value.toObject();
                 auto port = sameOperation ? findPort(m_original[side].toArray(), definition["id"].toString()) : QJsonObject{};
                 if (port.isEmpty()) port = definition;
-                const QString suffix = ports.size() == 1 ? QString{} : QString(" %1").arg(index + 1);
-                auto *row = new QHBoxLayout;
-                auto *name = new QLineEdit(port["name"].toString());
-                name->setMaxLength(60);
-                name->setPlaceholderText(definition["name"].toString());
-                name->setAccessibleName(direction + " port name" + suffix);
-                row->addWidget(name, 1);
-                auto *type = new ComboBox;
-                type->setAccessibleName(direction + " port type" + suffix);
-                const auto selected = port["type"].toString();
-                if (definition["chooseType"].toBool()) {
-                    for (const auto &value : fixtures["portTypes"].toArray()) {
-                        const auto id = value.toString();
-                        type->addItem(contracts.value(id).toObject()["label"].toString(), id);
-                    }
-                    if (type->findData(selected) < 0)
-                        type->addItem(contracts.value(selected).toObject()["label"].toString(), selected);
-                    type->setCurrentIndex(type->findData(selected));
-                } else {
-                    type->addItem(contracts.value(selected).toObject()["label"].toString(), selected);
-                    type->setEnabled(false);
+                if (port["type"] == "adapter-ref") {
+                    auto *note = caption(side == "in" ? "Optional connection from an Adapter node."
+                                                       : "Connect this LoRA output to a Model or Reasoning node.");
+                    rows->addWidget(note);
+                    m_resourcePort = port;
+                    m_resourceSide = side;
+                    continue;
                 }
-                row->addWidget(type);
-                body->addLayout(row);
-                m_ports.append({port, side, name, type});
+                appendPort(rows, side, port, definition["chooseType"].toBool(), editable);
+            }
+            if (editable) {
+                auto *add = new Button("Add " + direction.toLower() + " port");
+                body->addWidget(add, 0, Qt::AlignLeft);
+                connect(add, &Button::clicked, m_fields, [this, add, rows, side] {
+                    QSet<QString> keys;
+                    for (const auto &editor : m_ports)
+                        if (editor.direction == side && editor.key) keys.insert(editor.key->text().trimmed());
+                    if (std::count_if(m_ports.begin(), m_ports.end(), [&](const auto &editor) {
+                        return editor.direction == side;
+                    }) >= 16) {
+                        fail("Use at most 16 data ports per side.");
+                        return;
+                    }
+                    const QString prefix = side == "in" ? "input" : "output";
+                    int number = 1;
+                    while (keys.contains(prefix + QString::number(number))) ++number;
+                    const auto key = prefix + QString::number(number);
+                    appendPort(rows, side, {{"id", key}, {"name", key}, {"type", "text"}}, true, true);
+                    m_ports.last().key->setFocus();
+                    m_ports.last().key->selectAll();
+                    if (auto *scroll = findChild<QScrollArea *>()) scroll->ensureWidgetVisible(add);
+                });
             }
         }
         if (spec["sameType"].toBool() && m_ports.size() == 2) {
@@ -198,7 +236,78 @@ private:
             output->setEnabled(false);
             output->setToolTip("This operation returns the same type it receives.");
         }
-        adjustSize();
+    }
+
+    static bool editableKeys(const QString &operation, const QString &side) {
+        return operation == "generate" || operation == "reason" || (operation == "build-object" && side == "in");
+    }
+
+    void refreshBindings(const QString &selection) {
+        const QSignalBlocker blocked(m_binding);
+        const bool adapter = m_operation->currentData() == "lora";
+        m_binding->clear();
+        m_binding->addItem(adapter ? "Choose a trained adapter" : "Choose a local checkpoint", "");
+        for (const auto &value : m_preview.fixtures()[adapter ? "adapters" : "models"].toArray()) {
+            const auto option = value.toObject();
+            auto title = option["name"].toString();
+            if (adapter && option["base_model"].isString()) title += " · " + option["base_model"].toString();
+            m_binding->addItem(title, option["id"].toString());
+        }
+        if (!selection.isEmpty() && m_binding->findData(selection) < 0)
+            m_binding->addItem("Unavailable · " + selection, selection);
+        m_binding->setCurrentIndex(qMax(0, m_binding->findData(selection)));
+        if (m_binding->count() == 1)
+            m_binding->setItemText(0, adapter ? "No trained adapters. See Adapters." : "No ready checkpoints. See Models.");
+    }
+
+    void appendPort(QVBoxLayout *rows, const QString &side, const QJsonObject &port, bool chooseType, bool editable) {
+        auto *row = new QWidget;
+        auto *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 0, 0, 0);
+        rows->addWidget(row);
+        const QString direction = side == "in" ? "Input" : "Output";
+        QLineEdit *key = nullptr;
+        if (editable) {
+            key = new QLineEdit(port["id"].toString());
+            key->setMaxLength(64);
+            key->setAccessibleName(direction + " port key");
+            key->setToolTip("Key used in JSON and connections");
+            layout->addWidget(key, 1);
+        }
+        auto *name = new QLineEdit(port["name"].toString());
+        name->setMaxLength(60);
+        name->setPlaceholderText(port["name"].toString());
+        name->setAccessibleName(direction + " port name");
+        layout->addWidget(name, 1);
+        auto *type = new ComboBox;
+        type->setAccessibleName(direction + " port type");
+        type->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        type->setMinimumContentsLength(8);
+        const auto fixtures = m_preview.fixtures();
+        const auto contracts = fixtures["contracts"].toObject();
+        const auto selected = port["type"].toString();
+        if (chooseType) {
+            for (const auto &value : fixtures["portTypes"].toArray()) {
+                const auto id = value.toString();
+                type->addItem(contracts.value(id).toObject()["label"].toString(), id);
+            }
+        }
+        if (type->findData(selected) < 0)
+            type->addItem(contracts.value(selected).toObject()["label"].toString(), selected);
+        type->setCurrentIndex(type->findData(selected));
+        type->setEnabled(chooseType);
+        layout->addWidget(type);
+        if (editable) {
+            auto *remove = new Button("−");
+            remove->setAccessibleName("Remove " + direction.toLower() + " port");
+            layout->addWidget(remove);
+            connect(remove, &Button::clicked, row, [this, row] {
+                m_ports.removeIf([row](const auto &editor) { return editor.row == row; });
+                row->hide();
+                row->deleteLater();
+            });
+        }
+        m_ports.append({port, side, name, type, key, row});
     }
 
     void commit() {
@@ -213,10 +322,18 @@ private:
         node["name"] = name.isEmpty() ? m_kind->currentText() : name;
         if (m_line) node["setting"] = m_line->text();
         if (m_text) node["setting"] = m_text->toPlainText();
+        if (m_binding) {
+            const auto choice = m_binding->currentData().toString();
+            if (code == "lora") node["adapter"] = choice;
+            else {
+                if (node["model"].toString() != choice) node.remove("adapter");
+                node["model"] = choice;
+            }
+        }
         const auto contracts = m_preview.fixtures()["contracts"].toObject();
         for (const auto &direction : {QString("in"), QString("out")}) {
             QJsonArray ports;
-            QSet<QString> usedNames;
+            QSet<QString> usedNames, usedKeys;
             for (const auto &editor : m_ports) {
                 if (editor.direction != direction) continue;
                 const auto customName = editor.name->text().trimmed();
@@ -232,11 +349,35 @@ private:
                 if (port["type"].toString() != type || !port.contains("schema"))
                     port["schema"] = contracts.value(type).toObject()["schema"];
                 port.remove("chooseType");
+                if (editor.key) {
+                    const auto key = editor.key->text().trimmed();
+                    static const QRegularExpression validKey("^[A-Za-z][A-Za-z0-9_-]{0,63}$");
+                    if (!validKey.match(key).hasMatch() || usedKeys.contains(key)
+                        || (key == "adapter" && direction == m_resourceSide && !m_resourcePort.isEmpty())) {
+                        fail("Use distinct port keys starting with a letter. Keys can contain numbers, underscores, and hyphens.");
+                        editor.key->setFocus();
+                        return;
+                    }
+                    usedKeys.insert(key);
+                    port["id"] = key;
+                }
                 port["type"] = type;
                 port["name"] = portName;
                 ports.append(port);
             }
+            if (editableKeys(code, direction) && ports.isEmpty()) {
+                fail("Keep at least one " + QString(direction == "in" ? "input" : "output") + " data port.");
+                return;
+            }
+            if (direction == m_resourceSide && !m_resourcePort.isEmpty()) ports.append(m_resourcePort);
             node[direction] = ports;
+        }
+        if (node["response"] == "text") {
+            const auto outputs = node["out"].toArray();
+            if (outputs.size() != 1 || outputs.first().toObject()["type"] != "text") {
+                fail("Plain text requires one text output. Change the response format in Change binding for typed outputs.");
+                return;
+            }
         }
         const auto error = m_preview.settingError(node);
         if (!error.isEmpty()) {
@@ -250,7 +391,6 @@ private:
     void fail(const QString &message) {
         m_error->setText(message);
         m_error->show();
-        adjustSize();
     }
 
     BlueprintPreview &m_preview;
@@ -264,6 +404,9 @@ private:
     QVBoxLayout *m_options;
     QWidget *m_fields = nullptr;
     QLineEdit *m_line = nullptr;
+    ComboBox *m_binding = nullptr;
+    QJsonObject m_resourcePort;
+    QString m_resourceSide;
     QPlainTextEdit *m_text = nullptr;
     QList<PortEditor> m_ports;
 };

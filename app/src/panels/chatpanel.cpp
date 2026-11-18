@@ -29,6 +29,7 @@
 #include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
 #include "widgets/utilizationmeter.h"
+#include <QButtonGroup>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -109,14 +110,31 @@ void ChatPanel::showBlankChat() {
 }
 
 void ChatPanel::setupUi() {
-    m_chatContents = new QStackedWidget(this);
-    auto *regularChat = new QWidget;
-    m_chatContents->addWidget(regularChat);
-    contentLayout()->addWidget(m_chatContents, 1);
-    auto *layout = new QVBoxLayout(regularChat);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(contentLayout()->spacing());
-    auto *toolbar = new QHBoxLayout();
+    m_modeBar = new QWidget(this);
+    auto *modeBar = new QHBoxLayout(m_modeBar);
+    modeBar->setContentsMargins(0, 0, 0, 0);
+    modeBar->setSpacing(4);
+    m_modes = new QButtonGroup(m_modeBar);
+    const QStringList names{"Chat", "Tool mode", "Blueprint"};
+    const QStringList descriptions{"Test messages with a local model or adapter",
+        "Give a task to the local model through Pi", "Run a saved workflow"};
+    for (int index = 0; index < names.size(); ++index) {
+        auto *button = new Button(names.at(index), m_modeBar);
+        button->setObjectName("conversationMode");
+        button->setCheckable(true);
+        button->setChecked(index == 0);
+        button->setToolTip(descriptions.at(index));
+        button->setAccessibleDescription(descriptions.at(index));
+        m_modes->addButton(button, index);
+        modeBar->addWidget(button);
+    }
+    modeBar->addStretch();
+    m_modeBar->hide();
+    contentLayout()->addWidget(m_modeBar);
+
+    m_modelToolbar = new QWidget(this);
+    auto *toolbar = new QHBoxLayout(m_modelToolbar);
+    toolbar->setContentsMargins(0, 0, 0, 0);
     toolbar->setSpacing(6);
     m_modelCombo = new ComboBox(this);
     m_modelCombo->setObjectName("conversationModelPicker");
@@ -157,7 +175,19 @@ void ChatPanel::setupUi() {
     m_knowledgeToggle->setCheckable(true);
     toolbar->addWidget(m_knowledgeToggle);
     m_knowledgeToggle->hide();
-    layout->addLayout(toolbar);
+    contentLayout()->addWidget(m_modelToolbar);
+    m_toolModelStatus = new QLabel(this);
+    m_toolModelStatus->setObjectName("cardMeta");
+    m_toolModelStatus->setTextFormat(Qt::PlainText);
+    m_toolModelStatus->setWordWrap(true);
+    m_toolModelStatus->hide();
+    contentLayout()->addWidget(m_toolModelStatus);
+    m_chatAdapter = new QLabel(this);
+    m_chatAdapter->setObjectName("cardMeta");
+    m_chatAdapter->setTextFormat(Qt::PlainText);
+    m_chatAdapter->setWordWrap(true);
+    m_chatAdapter->hide();
+    contentLayout()->addWidget(m_chatAdapter);
 
     connect(m_settingsToggle, &QPushButton::toggled, this, [this](bool open) {
         if (open) m_knowledgeToggle->setChecked(false);
@@ -168,7 +198,13 @@ void ChatPanel::setupUi() {
 
     m_workspace = new QHBoxLayout;
     m_workspace->setSpacing(12);
-    layout->addLayout(m_workspace, 1);
+    contentLayout()->addLayout(m_workspace, 1);
+    m_chatContents = new QStackedWidget(this);
+    auto *regularChat = new QWidget;
+    auto *layout = new QVBoxLayout(regularChat);
+    layout->setContentsMargins(0, 0, 0, 0);
+    m_chatContents->addWidget(regularChat);
+    m_workspace->addWidget(m_chatContents, 1);
     auto *controls = addDrawer("Model settings", "chatSettings", m_settingsToggle);
     m_engineCombo = new ComboBox(this);
     m_engineCombo->addItems({"Auto (global setting)", "Local (vLLM)", "Local (llama.cpp)", "Local (torch)", "Local (Ollama)"});
@@ -194,6 +230,9 @@ void ChatPanel::setupUi() {
         controls->addWidget(pill);
     }
     m_adapterPill->hide();
+    auto *manageAdapters = new Button("Manage adapters", this);
+    connect(manageAdapters, &QPushButton::clicked, this, &ChatPanel::adaptersRequested);
+    controls->addWidget(manageAdapters, 0, Qt::AlignLeft);
     auto *refreshBtn = new Button("Refresh", this);
     controls->addWidget(refreshBtn, 0, Qt::AlignLeft);
     controls->addStretch();
@@ -216,7 +255,7 @@ void ChatPanel::setupUi() {
     centerRow->addStretch();
     centerRow->addWidget(column, 1);
     centerRow->addStretch();
-    m_workspace->insertLayout(0, centerRow, 1);
+    layout->addLayout(centerRow, 1);
     m_chatScroll = new QScrollArea(this);
     m_chatScroll->setWidgetResizable(true);
     m_chatScroll->setFrameShape(QFrame::NoFrame);
@@ -248,7 +287,7 @@ void ChatPanel::setupUi() {
     m_emptyConversation->setAlignment(Qt::AlignCenter);
     m_emptyConversation->setWordWrap(true);
     welcome->addWidget(m_emptyConversation);
-    auto *hint = new QLabel("Choose the model. Bring your knowledge. Make it yours.", m_welcome);
+    auto *hint = new QLabel("Test a local model or adapter with a prompt.", m_welcome);
     hint->setObjectName("cardMeta");
     hint->setAlignment(Qt::AlignCenter);
     hint->setWordWrap(true);
@@ -259,9 +298,9 @@ void ChatPanel::setupUi() {
         QString description;
     };
     const WorkspaceAction workspaceActions[] = {
-        {"Try a prompt", "Draft a reasoning prompt for your selected model."},
+        {"Test a prompt", "Draft a reasoning prompt for your selected model."},
         {"Ask docs", "Enable Knowledge and draft a question about your ingested documents."},
-        {"Tune response", "Open engine, response length and temperature settings."}
+        {"Test an adapter", "Choose trained weights for your local model."}
     };
     for (int i = 0; i < 3; ++i) {
         auto *button = new Button(workspaceActions[i].label, m_welcome);
@@ -274,8 +313,7 @@ void ChatPanel::setupUi() {
         suggestions->addWidget(button, 1);
         connect(button, &QPushButton::clicked, this, [this, i]() {
             if (i == 2) {
-                m_settingsToggle->setChecked(true);
-                m_tempSpin->setFocus();
+                emit adaptersRequested();
                 return;
             }
             if (i == 1) {
@@ -303,18 +341,13 @@ void ChatPanel::setupUi() {
     composer->setContentsMargins(16, 12, 12, 10);
     m_input = new QPlainTextEdit(this);
     m_input->setObjectName("chatInput");
-    m_input->setPlaceholderText("Start a conversation with your model…");
+    m_input->setPlaceholderText("Enter a prompt to test the loaded model…");
     m_input->setAccessibleName("Chat message");
     m_input->setFixedHeight(64);
     m_input->setTabChangesFocus(true);
     m_input->installEventFilter(this);
     composer->addWidget(m_input);
     auto *actions = new QHBoxLayout();
-    m_previewMode = new ComboBox(this);
-    m_previewMode->setAccessibleName("Chat mode");
-    m_previewMode->addItems({"Chat", "Blueprint", "Tool mode"});
-    m_previewMode->hide();
-    actions->addWidget(m_previewMode);
     m_ragCheck = new ToggleSwitch("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
@@ -502,10 +535,17 @@ void ChatPanel::applyEngineStatus(const QJsonObject &status) {
     const auto engine = status["engine"].toObject();
     m_modelLoaded = !engine.isEmpty();
     m_enginePill->setText("engine: " + (m_modelLoaded ? engine["description"].toString() : QStringLiteral("none")));
-    m_modelPill->setText("model: " + (m_modelLoaded ? status["loaded_model"].toString() : QStringLiteral("—")));
+    const auto loadedModel = status["loaded_model"].toString();
+    const auto modelSummary = "model: " + (m_modelLoaded ? loadedModel : QStringLiteral("—"));
+    if (m_modelLoaded && !loadedModel.isEmpty() && modelSummary != m_modelPill->text())
+        m_modelCombo->setCurrentText(loadedModel);
+    m_modelPill->setText(modelSummary);
     const QString adapter = status["active_adapter"].toString();
     m_adapterPill->setText("adapter: " + adapter);
     m_adapterPill->setVisible(m_modelLoaded && !adapter.isEmpty());
+    m_chatAdapter->setText(adapter.isEmpty() ? QString{} : "Active adapter · " + adapter);
+    m_chatAdapter->setVisible(m_chatContents->currentIndex() == 0 && m_modelLoaded && !adapter.isEmpty());
+    if (m_toolMode) m_toolMode->modelChanged(false);
     refreshContextUsage();
     updateActions();
 }
@@ -521,7 +561,7 @@ QString ChatPanel::currentEngineName() const {
 }
 
 void ChatPanel::onLoadModel() {
-    if (isBusy()) return;
+    if (isBusy() || (m_toolMode && m_toolMode->hasActiveTask())) return;
     if (!m_client || !m_client->isReady()) {
         setStatus("Backend not connected.", "error");
         return;
@@ -537,6 +577,7 @@ void ChatPanel::onLoadModel() {
 
     ++m_engineStatusRequest;
     m_modelOperation = ModelOperation::Loading;
+    if (m_toolMode) m_toolMode->modelChanged(true);
     updateActions();
     setStatus("Loading model… First use may download model files.");
 
@@ -547,7 +588,7 @@ void ChatPanel::onLoadModel() {
             const auto model = doc.object();
             panel->applyEngineStatus(model);
             panel->setStatus("Loaded " + model["loaded_model"].toString() + ".");
-            panel->m_input->setFocus();
+            if (panel->m_chatContents->currentIndex() == 0) panel->m_input->setFocus();
         } else {
             panel->updateActions();
             const auto error = "Load failed: " + doc.object()["detail"].toString(QString("HTTP %1").arg(status));
@@ -558,10 +599,11 @@ void ChatPanel::onLoadModel() {
 }
 
 void ChatPanel::onUnloadModel() {
-    if (isBusy() || !m_modelLoaded || !m_client || !m_client->isReady()) return;
+    if ((m_toolMode && m_toolMode->hasActiveTask()) || isBusy() || !m_modelLoaded || !m_client || !m_client->isReady()) return;
 
     ++m_engineStatusRequest;
     m_modelOperation = ModelOperation::Unloading;
+    if (m_toolMode) m_toolMode->modelChanged(true);
     updateActions();
     setStatus("Unloading model…");
 
@@ -1185,27 +1227,38 @@ void ChatPanel::restoreKnowledge() {
     m_restoringKnowledge = false;
 }
 
-void ChatPanel::setBlueprintChat(BlueprintChatPanel *panel) {
-    m_chatContents->addWidget(panel);
-    m_previewMode->show();
-    connect(m_previewMode, &QComboBox::activated, panel, [this, panel](int index) {
-        if (index == 0) return;
-        {
-            const QSignalBlocker block(m_previewMode);
-            m_previewMode->setCurrentIndex(0);
-        }
-        m_chatContents->setCurrentWidget(panel);
-        panel->setMode(index);
-    });
-    connect(panel, &BlueprintChatPanel::ordinaryChatRequested, this, [this] {
-        showOrdinaryChat();
-        m_input->setFocus();
-    });
+void ChatPanel::setRunPanels(ConversationRunPanel *tool, ConversationRunPanel *blueprint) {
+    m_toolMode = tool;
+    m_blueprintMode = blueprint;
+    m_chatContents->addWidget(tool);
+    m_chatContents->addWidget(blueprint);
+    m_modeBar->show();
+    connect(m_modes, &QButtonGroup::idClicked, this, [this](int mode) { showMode(mode); });
+    connect(tool, &ConversationRunPanel::activityChanged, this, &ChatPanel::updateActions);
 }
 
-void ChatPanel::showOrdinaryChat() {
-    m_chatContents->setCurrentIndex(0);
+void ChatPanel::showMode(int mode, const QString &blueprint) {
+    if (mode >= m_chatContents->count()) return;
+    m_modes->button(mode)->setChecked(true);
+    m_chatContents->setCurrentIndex(mode);
+    m_modelToolbar->setVisible(mode != 2);
+    m_toolModelStatus->setVisible(mode == 1 && !m_toolModelStatus->text().isEmpty());
+    m_chatAdapter->setVisible(mode == 0 && m_modelLoaded && !m_chatAdapter->text().isEmpty());
+    m_knowledgeToggle->setVisible(mode == 0 && m_knowledge);
+    if (mode != 0) m_knowledgeToggle->setChecked(false);
+    if (mode == 2) m_settingsToggle->setChecked(false);
+    if (mode == 1) {
+        m_toolMode->activate();
+    } else if (mode == 2) {
+        m_blueprintMode->activate(blueprint);
+    } else {
+        m_input->setFocus();
+    }
 }
+
+void ChatPanel::showOrdinaryChat() { showMode(0); }
+
+void ChatPanel::showBlueprint(const QString &id) { showMode(2, id); }
 
 void ChatPanel::showKnowledge() {
     showOrdinaryChat();
@@ -1407,16 +1460,17 @@ void ChatPanel::scrollToBottom() {
 void ChatPanel::updateActions() {
     const bool busy = isBusy();
     const bool ready = m_client && m_client->isReady();
-    m_previewMode->setEnabled(!busy);
-    m_sendButton->setEnabled(m_modelLoaded && !busy && !m_input->toPlainText().trimmed().isEmpty());
-    m_modelButton->setEnabled(ready && !busy);
+    const bool toolBusy = m_toolMode && m_toolMode->hasActiveTask();
+    for (auto *button : m_modes->buttons()) button->setEnabled(!busy);
+    m_sendButton->setEnabled(m_modelLoaded && !busy && !toolBusy && !m_input->toPlainText().trimmed().isEmpty());
+    m_modelButton->setEnabled(ready && !busy && !toolBusy);
     switch (m_modelOperation) {
     case ModelOperation::Loading: m_modelButton->setText("Loading…"); break;
     case ModelOperation::Unloading: m_modelButton->setText("Unloading…"); break;
     case ModelOperation::Idle: m_modelButton->setText(m_modelLoaded ? "Unload model" : "Load model"); break;
     }
-    m_modelCombo->setEnabled(!busy);
-    m_engineCombo->setEnabled(!busy);
+    m_modelCombo->setEnabled(!busy && !toolBusy);
+    m_engineCombo->setEnabled(!busy && !toolBusy);
     m_input->setReadOnly(m_preparing);
     refreshRows();
     if (busy != m_busyReported) {
@@ -1428,6 +1482,9 @@ void ChatPanel::updateActions() {
 void ChatPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
     applyStatusTone(m_statusLabel, tone);
+    m_toolModelStatus->setText(tone == "error" ? text : QString{});
+    m_toolModelStatus->setVisible(m_chatContents->currentIndex() == 1 && !m_toolModelStatus->text().isEmpty());
+    applyStatusTone(m_toolModelStatus, tone);
 }
 
 QString ChatPanel::settingsJson() const {
@@ -1457,7 +1514,8 @@ void ChatPanel::applySettingsJson(const QString &json) {
     }
 }
 void ChatPanel::loadModel(const QString &id) {
-    if (isBusy()) return;
+    if (isBusy() || (m_toolMode && m_toolMode->hasActiveTask())) return;
+    if (m_chatContents->currentIndex() == 2) showOrdinaryChat();
     m_modelCombo->setCurrentText(id);
     onLoadModel();
 }

@@ -8,8 +8,8 @@ from backend.adapters.store import AdapterStore
 from backend.adapters.validation import validate_weights
 from backend.blueprints.graph import Graph, validate_value
 from backend.blueprints.schemas import (
-    AdapterSnapshot, Bindings, DatasetNode, DatasetSnapshot, Issue, LocalRows,
-    ModelNode, ModelSnapshot, Problems, ReasoningNode, checked_json,
+    AdapterNode, AdapterSnapshot, Bindings, DatasetNode, DatasetSnapshot, GenerationNode, Issue,
+    LocalRows, ModelSnapshot, Problems, checked_json,
 )
 from backend.models.registry import ModelRegistry
 from backend.models.resolution import has_transformer_weights
@@ -30,7 +30,8 @@ class BindingResolver:
         adapters: dict[str, AdapterSnapshot] = {}
         remaining_bytes = MAX_DATASET_BYTES
         issues = []
-        for node in graph.nodes.values():
+        for node_id in graph.order:
+            node = graph.nodes[node_id]
             path = "binding"
             try:
                 if isinstance(node, DatasetNode) and isinstance(node.binding, LocalRows):
@@ -42,7 +43,12 @@ class BindingResolver:
                         remaining_bytes -= size
                     validate_value(snapshot.datasets[dataset_id].rows, node.outputs["rows"],
                                    node.id, "binding.rows")
-                elif isinstance(node, (ModelNode, ReasoningNode)):
+                elif isinstance(node, AdapterNode):
+                    path = "adapter_id"
+                    if node.adapter_id not in adapters:
+                        adapters[node.adapter_id] = self.adapter(node.adapter_id)
+                    snapshot.adapters[node.id] = adapters[node.adapter_id]
+                elif isinstance(node, GenerationNode):
                     model_id = node.binding.model_id
                     path = "binding.model_id"
                     if model_id not in models:
@@ -50,6 +56,12 @@ class BindingResolver:
                     model = models[model_id]
                     snapshot.models[node.id] = model
                     adapter_id = node.binding.adapter_id
+                    if "adapter" not in node.inputs and "adapter" in graph.sources[node.id]:
+                        source_id, _ = graph.sources[node.id]["adapter"]
+                        linked = graph.nodes[source_id]
+                        if linked.id not in snapshot.adapters:
+                            continue  # The source node already reported its invalid binding.
+                        adapter_id = snapshot.adapters[source_id].id
                     if adapter_id is not None:
                         path = "binding.adapter_id"
                         if adapter_id not in adapters:

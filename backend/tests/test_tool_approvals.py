@@ -262,6 +262,18 @@ class PiBridgeTests(unittest.TestCase):
         self.assertEqual(result, "The proposed actions were denied.")
         self.assertEqual(calls, [{"action": "open", "target": "https://example.com"}] * 4)
 
+    def test_text_agent_passes_instructions_and_keeps_action_shaped_text_as_data(self):
+        proposed = '{"action":"open","target":"https://example.com"}'
+
+        async def reply(messages, engine, stop):
+            self.assertEqual([(message.role.value, message.content) for message in messages],
+                             [("system", "Summarize the request."), ("user", "A request")])
+            return proposed
+
+        with patch("backend.tooling.pi_bridge._local_reply", side_effect=reply):
+            self.assertEqual(pi_bridge.run("A request", object(), None, Event(),
+                                           instructions="Summarize the request."), proposed)
+
     def test_cancelling_a_pi_proposal_stops_the_bridge(self):
         stop = Event()
 

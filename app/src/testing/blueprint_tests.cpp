@@ -4,6 +4,7 @@
 #include "backend_manager.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
+#include "panels/chatpanel.h"
 #include "theme.h"
 #include "widgets/blueprintcanvas.h"
 
@@ -23,14 +24,20 @@
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScreen>
+#include <QScrollArea>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTimer>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 #include <QWheelEvent>
+#include <QtMath>
+#include <algorithm>
 #include <cstdio>
 #include <memory>
+#include <optional>
 
 namespace {
 void pump(int ms = 15) {
@@ -108,7 +115,7 @@ QJsonObject edge(const QString &from, const QString &out, const QString &to, con
     return {{"from", from}, {"out", out}, {"to", to}, {"in", in}};
 }
 
-bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &panel, BlueprintChatPanel &chat,
+bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &panel, ChatPanel &chat,
     const QString &model, const QString &reasoningModel, const QString &captures) {
     const auto check = [](bool passed, const char *step) {
         fprintf(stderr, "[blueprints-model] %s %s\n", passed ? "ok:" : "FAIL:", step);
@@ -125,10 +132,6 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
         if (auto *button = visibleNamed<QPushButton>(panel, "Blueprint library")) button->click();
         pump();
     };
-    back();
-    if (auto *starter = visibleButton(panel, "Order intake example")) starter->click();
-    if (!check(waitFor([&] { return visibleText(panel, "Order intake") && panel.findChild<BlueprintCanvas *>()->isVisible(); }),
-               "the order starter opens as an editable draft from the library")) return false;
     back();
     if (auto *create = visibleButton(panel, "Create new")) create->click();
     pump();
@@ -162,11 +165,10 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     };
     back();
     if (!check(open(), "the draft reopens from the native library")) return false;
-    auto *node = visibleNamed<QComboBox>(panel, "Select node");
-    if (!node || node->findData("answer") < 0) return check(false, "the Model node appears in the inspector");
-    const int modelIndex = node->findData("answer");
-    node->setCurrentIndex(modelIndex);
-    QMetaObject::invokeMethod(node, "activated", Q_ARG(int, modelIndex));
+    auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+    if (!tree || tree->topLevelItemCount() != 3)
+        return check(false, "the Model node appears in the workflow tree");
+    tree->setCurrentItem(tree->topLevelItem(1));
     pump();
 
     // Enter the actual modal selector and wait for the checkpoint options request.
@@ -176,15 +178,23 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     auto bindingDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
         if (!dialog) return;
-        if (dialogTime.elapsed() > 20000) { dialog->reject(); return; }
-        auto *checkpoints = visibleNamed<QComboBox>(*dialog, "Base checkpoint");
+        auto *checkpoints = visibleNamed<QComboBox>(*dialog, "Local checkpoint");
+        if (dialogTime.elapsed() > 20000) {
+            fprintf(stderr, "[blueprints-model] Checkpoint picker entries: %d\n", checkpoints ? checkpoints->count() : 0);
+            for (const auto *error : dialog->findChildren<QLabel *>("blueprintError"))
+                if (error->isVisible()) fprintf(stderr, "[blueprints-model] %s\n", qUtf8Printable(error->text()));
+            if (!captures.isEmpty()) dialog->grab().save(QDir(captures).filePath("model-checkpoint-picker.png"));
+            dialog->reject();
+            return;
+        }
         if (!checkpoints || checkpoints->findData(modelId(model)) < 0) return;
         checkpoints->setCurrentIndex(checkpoints->findData(modelId(model)));
-        if (auto *save = visibleButton(*dialog, "Save binding"); save && save->isEnabled()) save->click();
+        if (auto *save = visibleButton(*dialog, "Save changes"); save && save->isEnabled()) save->click();
     });
     dialogTime.start();
     driver.start();
-    if (auto *bind = visibleButton(panel, "Change binding")) bind->click();
+    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+    else fprintf(stderr, "[blueprints-model] Configure button unavailable after selecting the model\n");
     driver.stop();
     QObject::disconnect(bindingDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(1).toObject()["model"] == modelId(model),
@@ -279,10 +289,11 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (!captures.isEmpty()) panel.grab().save(QDir(captures).filePath("trained-blueprint-run.png"));
     back();
     if (!check(open() && visibleText(panel, "Revision 2"), "the trained revision reopens from the native library")) return false;
-    chat.setMode(1);
-    if (auto *picker = visibleNamed<QComboBox>(chat, "Saved blueprint")) picker->setCurrentIndex(picker->findData(id));
-    if (auto *input = visibleNamed<QPlainTextEdit>(chat, "Blueprint or tool message")) input->setPlainText(question);
-    const auto send = [&] { return visibleButton(chat, "Send ↑"); };
+    chat.showBlueprint(id);
+    if (!check(waitFor([&] { return visibleNamed<QPlainTextEdit>(chat, "Workflow inputs"); }),
+               "Conversation loads inputs from the saved trained revision")) return false;
+    visibleNamed<QPlainTextEdit>(chat, "Workflow inputs")->setPlainText(question);
+    const auto send = [&] { return visibleButton(chat, "Run workflow"); };
     if (waitFor([&] { return send() && send()->isEnabled(); })) send()->click();
     const bool chatFinished = waitFor([&] {
         const auto run = latest();
@@ -291,6 +302,55 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (!check(chatFinished && latest()["status"] == "passed" && latest()["revision"].toInt() == 2 &&
                latest()["result"] == editorRun["result"], "chat runs the same saved revision and returns the same result")) return false;
     if (!captures.isEmpty()) chat.grab().save(QDir(captures).filePath("trained-blueprint-chat.png"));
+
+    auto linked = trained;
+    auto linkedNodes = linked["nodes"].toArray();
+    auto linkedModel = linkedNodes.at(1).toObject();
+    linkedModel.remove("adapter");
+    linkedNodes.replace(1, linkedModel);
+    linkedNodes.append(session.makeNode("lora", "lora", 230, 180));
+    auto linkedEdges = linked["edges"].toArray();
+    linkedEdges.append(edge("lora", "adapter", "answer", "adapter"));
+    linked["nodes"] = linkedNodes;
+    linked["edges"] = linkedEdges;
+    linked["dirty"] = true;
+    if (!session.saveBlueprint(linked)) return false;
+    back();
+    if (!open()) return false;
+    tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+    if (!check(tree && tree->topLevelItemCount() == 4 && tree->topLevelItem(3)->childCount() == 1,
+               "the workflow tree shows the Adapter node and its outgoing link")) return false;
+    tree->setCurrentItem(tree->topLevelItem(3));
+    pump();
+    const auto adapterDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) return;
+        if (dialogTime.elapsed() > 20000) { dialog->reject(); return; }
+        auto *adapters = visibleNamed<QComboBox>(*dialog, "Trained adapter");
+        if (!adapters || adapters->findData(adapter) < 0) return;
+        adapters->setCurrentIndex(adapters->findData(adapter));
+        if (auto *save = visibleButton(*dialog, "Save changes")) save->click();
+    });
+    dialogTime.restart();
+    driver.start();
+    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+    driver.stop();
+    QObject::disconnect(adapterDriver);
+    if (!check(session.blueprint(id)["nodes"].toArray().at(3).toObject()["adapter"] == adapter,
+               "the Adapter node can select the real trained weights")) return false;
+    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (!check(waitFor([&] { return publishedRevision(id) == 3 && visibleText(panel, "Revision 3"); }),
+               "the LoRA link persists on a new revision")) return false;
+    pump();
+    if (!captures.isEmpty()) panel.grab().save(QDir(captures).filePath("linked-adapter-graph.png"));
+    tree->setCurrentItem(tree->topLevelItem(1));
+    pump();
+    if (auto *testLinked = visibleButton(panel, "Test this node")) testLinked->click();
+    if (!check(runInEditor("Test node") && latest()["target"] == "answer",
+               "an isolated checkpoint test resolves the linked LoRA adapter")) return false;
+    if (auto *target = visibleNamed<QComboBox>(panel, "Run target")) target->setCurrentIndex(0);
+    if (!check(runInEditor("Start run") && latest()["revision"].toInt() == 3 &&
+               latest()["result"] == editorRun["result"], "local generation uses the linked adapter")) return false;
 
     if (reasoningModel.isEmpty()) return true;
     const QJsonObject integer{{"type", "integer"}};
@@ -306,7 +366,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
         reason["model"] = modelId(repo);
         auto response = std::make_shared<QJsonObject>();
         const QJsonObject graph{{"id", BlueprintPreview::id()}, {"name", "Check typed reasoning"}, {"nodes", QJsonArray{reason}}};
-        session.runLive(graph, QJsonObject{{"index", 2}}, "reason", false, false,
+        session.runLive(graph, QJsonObject{{"index", 2}}, "reason", false,
             [response](const auto &run, const auto &error) { *response = {{"run", run}, {"error", error}}; });
         waitFor([&] { return !response->isEmpty(); }, 20000);
         return *response;
@@ -334,6 +394,29 @@ int runBlueprintChecks(const QString &captures) {
     const bool original = Theme::isDark();
     Theme::setDark(true);
     BlueprintPreview preview(nullptr, false);
+    {
+        BlueprintCanvas cable;
+        cable.resize(600, 250);
+        auto graph = QJsonObject{{"nodes", QJsonArray{
+            preview.makeNode("input", "first", 0, 0), preview.makeNode("output", "second", 203, 0)}}};
+        cable.setGraph(graph, preview.fixtures());
+        const auto before = cable.grab().toImage();
+        graph["edges"] = QJsonArray{edge("first", "text", "second", "value")};
+        cable.setGraph(graph, preview.fixtures());
+        const auto after = cable.grab().toImage();
+        QRect difference;
+        for (int y = 0; y < before.height(); ++y)
+            for (int x = 0; x < before.width(); ++x)
+                if (before.pixel(x, y) != after.pixel(x, y))
+                    difference = difference.united(QRect(x, y, 1, 1));
+        check(!difference.isEmpty() && difference.height() <= qCeil(4 * after.devicePixelRatio()),
+              "a short link between aligned ports stays straight");
+        bool gridVisible = false;
+        for (int y = 0; y < qCeil(30 * after.devicePixelRatio()); ++y)
+            for (int x = 0; x < qCeil(30 * after.devicePixelRatio()); ++x)
+                gridVisible |= after.pixelColor(x, y) != QColor(Theme::canvasBackground());
+        check(gridVisible, "canvas dots remain visible when the canvas contains nodes");
+    }
     BlueprintPanel panel(&preview);
     panel.resize(1120, 720);
     panel.show();
@@ -362,13 +445,25 @@ int runBlueprintChecks(const QString &captures) {
     auto *canvas = panel.findChild<BlueprintCanvas *>();
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    check(visibleNamed<QWidget>(panel, "Add node panel"), "Add node opens a docked palette");
-    capture(panel, "blueprints-palette-dark");
+    auto *picker = visibleNamed<QDialog>(panel, "Add node picker");
+    check(picker, "Add node opens a separate themed dialog");
+    if (picker) {
+        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
+        check(cards.size() == 6 && !picker->findChild<QScrollArea *>() &&
+              cards[0]->y() == cards[1]->y() && cards[0]->x() < cards[1]->x() && cards[3]->y() > cards[0]->y(),
+              "the node picker lays out built-in cards across columns without scrolling");
+        capture(*picker, "blueprints-palette-dark");
+        Theme::setDark(false);
+        pump();
+        capture(*picker, "blueprints-palette-light");
+        Theme::setDark(true);
+        pump();
+    }
     panel.resize(782, 628);
     pump();
     check(panel.width() == 782 && visibleNamed<QPushButton>(panel, "Add Input")
               && visibleNamed<QPushButton>(panel, "Add Dataset") && visibleNamed<QPushButton>(panel, "Add Transform"),
-          "the compact palette lists general node kinds");
+          "the node picker lists general node kinds in the compact workspace");
     if (auto *addInput = visibleNamed<QPushButton>(panel, "Add Input")) {
         QTimer::singleShot(0, &panel, [&] {
             if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
@@ -382,7 +477,6 @@ int runBlueprintChecks(const QString &captures) {
         });
         addInput->click();
     }
-    if (auto *close = visibleNamed<QPushButton>(panel, "Close node palette")) close->click();
     pump();
     check(canvas->isVisible() && preview.blueprint(blankId)["nodes"].toArray().size() == 1,
           "choosing a palette item inserts and selects a node");
@@ -392,6 +486,9 @@ int runBlueprintChecks(const QString &captures) {
         const auto node = initialNodes.first().toObject();
         firstNodeId = node["id"].toString();
         const auto port = node["out"].toArray().first().toObject();
+        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        check(tree && tree->topLevelItemCount() == 1 && tree->currentItem() == tree->topLevelItem(0),
+              "the new node appears selected in the workflow tree");
         check(node["name"].toString() == "Input" && port["name"].toString() == "Payload"
                   && port["type"].toString() == "object",
               "a generic Input accepts a named and typed output without requiring a node name");
@@ -424,8 +521,7 @@ int runBlueprintChecks(const QString &captures) {
             save->click();
             pump();
         }
-        check(preview.nodeLibrary().size() == 1 && visibleNamed<QPushButton>(panel, "Add saved node Object input"),
-              "saving a configured node adds a reusable copy to the palette");
+        check(preview.nodeLibrary().size() == 1, "saving a configured node adds a reusable copy to the library");
         if (auto *remove = visibleNamed<QPushButton>(panel, "Delete node")) {
             confirmDelete(&panel);
             remove->click();
@@ -441,8 +537,22 @@ int runBlueprintChecks(const QString &captures) {
     if (auto *name = visibleNamed<QLineEdit>(panel, "Name")) name->setText("Reuse test");
     if (auto *submit = visibleButton(panel, "Create blueprint")) submit->click();
     pump();
+    for (int i = 0; i < 9; ++i)
+        preview.saveNodeTemplate(QString("Saved input %1").arg(i + 1), preview.makeNode("input", "input", 0, 0));
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
+    if (auto *savedPicker = visibleNamed<QDialog>(panel, "Add node picker")) {
+        if (auto *tabs = savedPicker->findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
+        pump();
+        auto *next = visibleButton(*savedPicker, "Next");
+        check(next && next->isEnabled() && visibleText(*savedPicker, "Page 1 of 2") &&
+              !visibleNamed<QPushButton>(*savedPicker, "Add saved node Object input") &&
+              !savedPicker->findChild<QScrollArea *>(), "the saved-node grid pages through larger libraries");
+        if (next) next->click();
+        pump();
+        check(visibleText(*savedPicker, "Page 2 of 2") && next && !next->isEnabled(),
+              "the next page shows the remaining cards and stops at the end");
+    }
     if (auto *savedNode = visibleNamed<QPushButton>(panel, "Add saved node Object input")) savedNode->click();
     pump();
     const auto savedGraphs = preview.saved();
@@ -492,16 +602,21 @@ int runBlueprintChecks(const QString &captures) {
     }
 
     panel.resize(1120, 720);
-    auto showExample = [&] {
-        if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
-        if (auto *example = visibleButton(panel, "Order intake example")) example->click();
-        pump();
-    };
-    showExample();
+    preview.saveBlueprint(preview.example());
+    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    for (auto *button : panel.findChildren<QPushButton *>()) {
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Order intake")) {
+            button->click();
+            break;
+        }
+    }
+    if (auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections"))
+        tree->setCurrentItem(tree->topLevelItem(1));
+    pump();
     auto *adapter = visibleNamed<QComboBox>(panel, "Node adapter");
     check(canvas->isVisible() && visibleText(panel, "Node inspector") && adapter &&
               adapter->currentText() == "order-selector-v2" && adapter->findData("extractor") < 0,
-          "starter example opens the graph and selected-node inspector");
+          "a saved legacy graph opens and shows its model inspector");
     capture(panel, "blueprints-canvas-dark");
     panel.resize(782, 628);
     pump();
@@ -517,14 +632,30 @@ int runBlueprintChecks(const QString &captures) {
         const QPointF point = canvas->rect().center();
         int percent = 0;
         const auto observation = QObject::connect(canvas, &BlueprintCanvas::zoomChanged, &panel, [&](int value) { percent = value; });
+        canvas->fit();
+        const int fitted = percent;
         QWheelEvent wheel(point, canvas->mapToGlobal(point.toPoint()), {}, QPoint(0, 120),
             Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
         QCoreApplication::sendEvent(canvas, &wheel);
-        check(wheel.isAccepted() && percent > 100, "wheel zooms the fullscreen canvas");
-        const auto before = canvas->grab().toImage();
-        const QPointF background(27, 24);
-        drag(canvas, background, background + QPointF(63, 29));
-        check(before != canvas->grab().toImage() && preview.saved().size() == 1,
+        check(wheel.isAccepted() && percent > fitted, "wheel zooms the fullscreen canvas");
+        const auto before = canvas->centerInGraph();
+        const auto savedBeforePan = preview.saved();
+        const auto nodes = preview.example()["nodes"].toArray();
+        std::optional<QPointF> background;
+        for (int y = 4; y < canvas->height() && !background; y += 12) {
+            for (int x = 4; x < canvas->width(); x += 12) {
+                const QPointF candidate(x, y);
+                const auto position = before + (candidate - QRectF(canvas->rect()).center()) / (percent / 100.0);
+                if (std::none_of(nodes.cbegin(), nodes.cend(), [&](const auto &node) {
+                    return BlueprintCanvas::nodeRect(node.toObject()).adjusted(-16, -8, 16, 8).contains(position);
+                })) {
+                    background = candidate;
+                    break;
+                }
+            }
+        }
+        if (background) drag(canvas, *background, *background + QPointF(63, 29));
+        check(background && before != canvas->centerInGraph() && savedBeforePan == preview.saved(),
               "left-dragging the background moves the camera without editing node positions");
         QObject::disconnect(observation);
         if (auto *exit = visibleNamed<QPushButton>(*canvas->window(), "Exit fullscreen")) exit->click();
@@ -563,20 +694,22 @@ int runBlueprintChecks(const QString &captures) {
         capture(panel, "blueprints-run-light");
     }
 
-    BlueprintChatPanel chat(&preview);
+    ConversationRunPanel chat(&preview, ConversationRunPanel::Mode::Tool);
     chat.resize(900, 650);
     chat.show();
-    chat.setMode(2);
-    auto *message = visibleNamed<QPlainTextEdit>(chat, "Blueprint or tool message");
+    chat.activate();
+    auto *message = visibleNamed<QPlainTextEdit>(chat, "Task message");
     if (message) message->setPlainText("Show the Python version.");
     if (auto *send = visibleButton(chat, "Send ↑")) send->click();
     const auto chats = preview.chatRuns();
     const auto toolId = chats.isEmpty() ? QString{} : chats.last().toObject()["id"].toString();
     check(!toolId.isEmpty() && waitForState(preview, toolId, "waiting") && visibleText(chat, "--version"),
           "tool chat pauses at an exact command fixture");
+    check(chat.findChild<QFrame *>("runToolCall"), "Tool mode shows an inline tool activity block");
+    capture(chat, "tool-task-approval");
     panel.openRun(toolId);
     pump();
-    check(visibleText(panel, "Working directory") && visibleButton(panel, "Back to chat"),
+    check(visibleText(panel, "Working directory") && visibleButton(panel, "Back to Conversation"),
           "the exact chat run shares the approval view in Blueprints");
     if (auto *deny = visibleButton(panel, "Deny")) deny->click();
     pump();
@@ -584,10 +717,13 @@ int runBlueprintChecks(const QString &captures) {
           "denial updates the shared run and the chat result");
     if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
     pump();
-    if (auto *remove = visibleNamed<QPushButton>(panel, "Delete blueprint")) {
+    for (auto *remove : panel.findChildren<QPushButton *>()) {
+        if (!remove->isVisible() || remove->accessibleName() != "Delete blueprint" ||
+            !visibleText(*remove->parentWidget(), "Blank workflow")) continue;
         confirmDelete(&panel);
         remove->click();
         pump();
+        break;
     }
     check(preview.blueprint(blankId).isEmpty() && visibleButton(panel, "Create new"),
           "deleting a blueprint removes it from the library");
@@ -627,17 +763,22 @@ int runLiveBlueprintChecks(const QString &captures) {
     });
     BlueprintPreview session(client, nullptr);
     BlueprintPanel panel(&session);
-    BlueprintChatPanel chat(&session);
-    QObject::connect(&chat, &BlueprintChatPanel::runRequested, &panel, &BlueprintPanel::openRun);
+    ChatPanel chat;
+    auto *tasks = new ConversationRunPanel(&session, ConversationRunPanel::Mode::Tool);
+    auto *workflows = new ConversationRunPanel(&session, ConversationRunPanel::Mode::Blueprint);
+    chat.setRunPanels(tasks, workflows);
+    QObject::connect(workflows, &ConversationRunPanel::runRequested, &panel, &BlueprintPanel::openRun);
+    QObject::connect(&panel, &BlueprintPanel::conversationRequested, &chat, &ChatPanel::showBlueprint);
     Theme::setDark(true);
     panel.resize(1000, 680);
     panel.show();
     manager.start();
-    if (!check(until([&] { return client.isReady() && !session.orderSamples().isEmpty(); }, 35000),
+    if (!check(until([&] { return client.isReady(); }, 35000),
                "native session is connected to the authenticated backend")) {
         fprintf(stderr, "%s\n", qUtf8Printable(manager.recentLogs()));
         return failures;
     }
+    chat.setBackendClient(&client);
     capture(panel, "live-library-dark");
     // Seed an editor draft with a deterministic Tool node. Run admission and
     // decisions still go through the real broker; denial executes no command.
@@ -660,11 +801,39 @@ int runLiveBlueprintChecks(const QString &captures) {
             QJsonObject{{"from", "request"}, {"out", "value"}, {"to", "approve"}, {"in", "value"}},
             QJsonObject{{"from", "approve"}, {"out", "receipt"}, {"to", "result"}, {"in", "value"}}}}};
     check(session.saveBlueprint(draft) && session.published().isEmpty(), "draft is visible only in the editor");
+    chat.resize(740, 660);
+    chat.show();
+    check(visibleNamed<QComboBox>(chat, "Model") && visibleNamed<QPlainTextEdit>(chat, "Chat message"),
+          "Chat opens with the local model controls and model test composer");
+    capture(chat, "live-conversation-chat-dark");
+    if (auto *mode = visibleButton(chat, "Blueprint")) mode->click();
+    check(visibleText(chat, "Open your draft in Blueprints") &&
+          visibleButton(chat, "Open Blueprints") && !visibleNamed<QComboBox>(chat, "Model"),
+          "the Workflow view explains unpublished drafts and links to the library");
+
     pump();
     if (auto *open = visibleButton(panel, "Open")) open->click();
     pump();
     check(panel.findChild<BlueprintCanvas *>()->isVisible() && visibleText(panel, "Draft"),
           "canvas distinguishes an unpublished draft");
+    if (auto *add = visibleButton(panel, "Add node")) add->click();
+    pump();
+    if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
+        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
+        check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
+              picker->height() <= picker->screen()->availableGeometry().height() &&
+              std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
+                  const auto *title = card->template findChild<QLabel *>("headingLabel");
+                  const auto *caption = card->template findChild<QLabel *>("cardMeta");
+                  return card->isVisible() && picker->rect().contains(card->mapTo(picker, QPoint())) &&
+                         picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
+                         title && card->accessibleName() == "Add " + title->text() &&
+                         caption && caption->height() >= caption->heightForWidth(caption->width());
+              }), "all nine live cards and their text fit without scrolling");
+        capture(*picker, "live-add-node-cards");
+        picker->reject();
+        pump();
+    } else check(false, "the live node picker opens");
     capture(panel, "live-canvas-dark");
     QSettings().setValue("appearance/studio3ReducedMotion", true);
     panel.resize(740, 620);
@@ -675,33 +844,45 @@ int runLiveBlueprintChecks(const QString &captures) {
     capture(panel, "live-canvas-compact-light");
 
     if (auto *test = visibleButton(panel, "Test this node")) test->click();
-    pump();
-    if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
+    if (check(until([&] {
+        const auto *start = visibleButton(panel, "Test node");
+        return start && start->isEnabled() && visibleNamed<QPlainTextEdit>(panel, "Run input");
+    }), "the isolated draft test exposes a typed input editor")) {
+        auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input");
         message->setPlainText(R"({"value":{"message":"isolated test"}})");
-    if (auto *start = visibleButton(panel, "Test node")) start->click();
-    check(until([&] { return visibleText(panel, "isolated test"); }), "isolated draft node returns the supplied typed input");
+        visibleButton(panel, "Test node")->click();
+        check(until([&] { return visibleText(panel, "isolated test"); }, 15000),
+              "isolated draft node returns the supplied typed input");
+    }
 
     if (auto *save = visibleButton(panel, "Save revision")) save->click();
     if (!check(until([&] { return !session.published().isEmpty() && visibleText(panel, "Revision 1"); }),
                "saving publishes a backend revision from the native editor")) return failures;
-    chat.resize(740, 660);
-    chat.show();
-    chat.setMode(2);
-    auto *send = visibleButton(chat, "Send ↑");
-    check(until([&] { return visibleText(chat, "Switch to Chat to load"); }) && send && !send->isEnabled(),
-          "Tool mode explains unavailability and disables sending without a loaded model");
-    chat.setMode(1);
+    check(until([&] {
+        const auto *picker = visibleNamed<QComboBox>(chat, "Saved blueprint");
+        return picker && picker->currentData().toString() == graphId && visibleNamed<QPlainTextEdit>(chat, "Workflow inputs");
+    }), "the open Conversation picker updates when the draft is published");
+    if (auto *mode = visibleButton(chat, "Tool mode")) mode->click();
+    auto *taskSend = visibleButton(chat, "Send ↑");
+    if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Task message")) message->setPlainText("Help with a task.");
+    check(until([&] { return visibleText(chat, "Load a model first"); }) &&
+          visibleNamed<QComboBox>(chat, "Model") && taskSend && !taskSend->isEnabled(),
+          "Tool mode offers a model picker and disables sending without a loaded model");
+    capture(chat, "live-conversation-tool-light");
+    if (auto *open = visibleButton(panel, "Open in Conversation")) open->click();
     auto *picker = visibleNamed<QComboBox>(chat, "Saved blueprint");
-    if (picker) picker->setCurrentIndex(picker->findData(graphId));
-    check(picker && picker->currentText().contains("Rev 1") && until([&] { return send && send->isEnabled(); }),
-          "chat picker loads the saved revision and collects typed input");
+    auto *send = visibleButton(chat, "Run workflow");
+    check(picker && picker->currentData().toString() == graphId && picker->currentText().contains("Rev 1") &&
+          until([&] { return visibleNamed<QPlainTextEdit>(chat, "Workflow inputs"); }) &&
+          !visibleNamed<QPlainTextEdit>(chat, "Task message"),
+          "opening in Conversation selects the saved revision and its Workflow inputs");
     // Dirty edits to the editor must not change what runs from chat.
     auto changed = draft;
     changed["revision"] = 1;
     changed["name"] = "Unpublished edits";
     session.saveBlueprint(changed);
     const auto openRequest = QString::fromUtf8(R"({"request":{"action":"open","target":"https://example.com/blueprint-check"}})");
-    if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Blueprint or tool message")) message->setPlainText(openRequest);
+    if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Workflow inputs")) message->setPlainText(openRequest);
     if (until([&] { return send && send->isEnabled(); })) {
         send->setFocus();
         QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
@@ -733,6 +914,9 @@ int runLiveBlueprintChecks(const QString &captures) {
     if (auto *deny = visibleButton(panel, "Deny")) deny->click();
     check(waitForState(session, runId, "failed") && visibleText(chat, "Denied") && visibleText(panel, "Tool action ended"),
           "denial updates the same durable run on both surfaces");
+    if (auto *details = visibleButton(chat, "Show action details")) details->click();
+    check(visibleText(chat, "https://example.com/blueprint-check"),
+          "a settled activity block can reopen the action details reviewed in this session");
     Theme::setDark(true);
     pump();
     capture(panel, "live-run-failure-dark");
@@ -777,15 +961,59 @@ int runLiveBlueprintChecks(const QString &captures) {
             [loadStatus](int status, const QJsonDocument &) { *loadStatus = status ? status : -1; });
         if (check(until([&] { return *loadStatus != 0; }, 30000) && *loadStatus == 200,
                   "loaded an offline local model for the native tool mode check")) {
-            chat.setMode(2);
-            if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Blueprint or tool message"))
+            chat.refreshEngineStatus();
+            if (auto *mode = visibleButton(chat, "Tool mode")) mode->click();
+            if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Task message"))
                 message->setPlainText("Reply with the word ready. No external actions are needed.");
-            if (until([&] { return send && send->isEnabled(); })) send->click();
+            if (until([&] { return taskSend && taskSend->isEnabled(); })) taskSend->click();
             check(until([&] {
                 const auto runs = session.chatRuns();
                 const auto last = runs.last().toObject();
                 return last["toolChat"].toBool() && last["status"] == "passed" && last["result"].isString();
             }, 30000), "native Tool mode sends an ad hoc task through Pi and displays its answer");
+            capture(chat, "live-conversation-tool-reply");
+            if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Task message"))
+                message->setPlainText("Say ready again.");
+            if (until([&] { return taskSend && taskSend->isEnabled(); })) taskSend->click();
+            check(until([&] {
+                const auto runs = session.chatRuns();
+                if (runs.isEmpty()) return false;
+                const auto last = runs.last().toObject();
+                const auto messages = last["messages"].toArray();
+                return last["toolChat"].toBool() && last["status"] == "passed" && messages.size() == 3 &&
+                    messages.at(1).toObject()["role"] == "assistant" &&
+                    messages.at(2).toObject()["content"] == "Say ready again.";
+            }, 30000), "a Pi follow-up sends the previous prompt and answer as context");
+
+
+            if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+            if (auto *triage = visibleButton(panel, "Request triage example")) triage->click();
+            const auto triageDraft = [&] {
+                for (const auto &value : session.saved())
+                    if (value.toObject()["name"] == "Request triage") return value.toObject()["id"].toString();
+                return QString{};
+            }();
+            if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Save revision"); }),
+                      "the desktop opens the editable request triage example")) {
+                pump();
+                capture(panel, "live-pi-triage-graph");
+                visibleButton(panel, "Save revision")->click();
+                if (check(until([&] { return visibleText(panel, "Revision 1"); }),
+                          "the Pi Agent, constant, and object builder publish together")) {
+                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
+                    if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
+                        message->setPlainText("Please send replacement labels for order 245.");
+                    if (auto *start = visibleButton(panel, "Start run")) start->click();
+                    check(until([&] {
+                        const auto runs = session.runs(triageDraft);
+                        const auto run = runs.isEmpty() ? QJsonObject{} : runs.first().toObject();
+                        const auto record = run["result"].toObject()["result"].toObject();
+                        return run["status"] == "passed" && record["status"] == "Needs review" &&
+                               !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
+                    }, 40000), "the local Pi Agent returns text and builds the review record");
+                    capture(panel, "live-pi-triage-result");
+                }
+            }
         }
     }
 

@@ -104,16 +104,22 @@ function response(raw, allowActions) {
 try {
   const start = await read()
   if (start.type !== "start") throw new Error("Invalid Pi start frame")
+  const actions = start.actions !== false
   let turns = 0
   const agent = new Agent({
-    initialState: { model, tools },
+    initialState: { model, tools: actions ? tools : [] },
     toolExecution: "sequential",
     async streamFn(_model, context) {
       turns += 1
       if (turns > 5) throw new Error("Pi reached the turn limit")
       const allowed = turns < 5
-      const reply = await exchange({ type: "generate", messages: asTranscript(context.messages, allowed) }, "generation")
-      const output = response(reply.text, allowed)
+      const messages = actions ? asTranscript(context.messages, allowed) : context.messages.map(message => ({
+        role: message.role, content: flatten(message),
+      }))
+      if (!actions && start.instructions)
+        messages.unshift({ role: "system", content: start.instructions })
+      const reply = await exchange({ type: "generate", messages }, "generation")
+      const output = actions ? response(reply.text, allowed) : assistant([{ type: "text", text: reply.text }], "stop")
       const stream = createAssistantMessageEventStream()
       stream.push({ type: "start", partial: { ...output, content: [] } })
       stream.push({ type: "done", reason: output.stopReason, message: output })

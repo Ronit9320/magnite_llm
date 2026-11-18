@@ -20,8 +20,8 @@ MAGNITE_BLUEPRINTS_LIVE_MODEL=Qwen/Qwen3-0.6B \
 ./build/magnite-app --ui-check design/blueprints-preview/native-acceptance
 ```
 
-On Linux CPU, the check opened the order starter from the library and created
-a separate draft. It bound SmolLM2, queued real LoRA training in the node dialog,
+On Linux CPU, the original check opened the then-available order starter and created
+a separate draft. The current check starts with the blank draft. It binds SmolLM2, queued real LoRA training in the node dialog,
 and bound the completed job as revision 2. The trained node passed its
 isolated test. The editor and chat reopened and ran revision 2 with identical
 results. A Reasoning test rejected SmolLM2 with the explicit thinking
@@ -85,3 +85,13 @@ and close the mocked vLLM log before leaving the temporary test directory.
 The three-platform artifact gate needs a completed macOS job and a successful
 Windows installer test.
 [Windows failure details](https://github.com/Ronit9320/magnite_llm/actions/runs/44175410782/job/134365565656)
+
+## Workflow editor follow-up
+
+The Linux source acceptance also exercised checkpoint selection in
+**Configure**, real trained LoRA selected through an Adapter node, and an
+isolated Model test that resolves the link. The directly bound and linked
+revisions produced the same result. With Qwen3 loaded in Chat, the request
+triage example published and returned a review record containing a Pi summary
+and the configured status. These checks used the complete local snapshots
+from the earlier acceptance run.

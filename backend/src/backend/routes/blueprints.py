@@ -14,7 +14,6 @@ from fastapi.routing import APIRoute
 
 from backend.blueprints.bindings import BindingResolver
 from backend.blueprints.graph import graph_for
-from backend.blueprints.order import order_blueprint, order_samples, training_examples
 from backend.blueprints.runner import BlueprintRunner, RunnerUnavailable
 from backend.blueprints.runtime import check_adapter, read_checkpoint
 from backend.blueprints.schemas import (
@@ -135,13 +134,6 @@ def blueprint_capabilities(body: Blueprint):
         return blueprint_runner().capabilities(body)
     except Problems as exc:
         raise _invalid(exc) from exc
-
-
-@router.get("/starters/order")
-def order_starter(model_id: RegistryId = "huggingface:HuggingFaceTB--SmolLM2-135M-Instruct"):
-    document = Blueprint.model_validate(order_blueprint(model_id))
-    return {"blueprint": document.model_dump(exclude_none=True), "samples": order_samples(),
-            "training_examples": training_examples()}
 
 
 @router.get("/checkpoints")
@@ -329,6 +321,10 @@ def bind_node_adapter(blueprint_id: str, node_id: str, body: NodeAdapterRequest)
     if revision.revision != body.revision:
         raise HTTPException(409, detail="The blueprint was edited. Reload its latest revision and retry.")
     node = _generation_node(revision, node_id)
+    if "adapter" not in node.inputs and any(
+        edge.target.node == node_id and edge.target.port == "adapter" for edge in revision.blueprint.edges
+    ):
+        raise HTTPException(409, detail="Select the adapter on the connected Adapter node")
     adapter_id = body.adapter_id
     if body.training_job_id:
         job = _get_manager().get(body.training_job_id)

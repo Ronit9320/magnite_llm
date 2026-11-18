@@ -57,7 +57,7 @@ The benchmark used the historical weights described above.
 
 ## Fixture verification
 
-The two bundled starter samples passed with their declared expected outputs.
+The two order fixtures passed with their declared expected outputs.
 The offline suite also verified a fixture with an out-of-range clause index
 that stopped at lookup. These fixture cases are independent of the 80 real
 generations per variant.
@@ -76,5 +76,4 @@ OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 PYTHONPATH=backend/src \
   --cases /path/to/test.jsonl --output /path/to/report.json
 ```
 
-The [order starter API](../../LOCAL_API.md#blueprints) supplies its own document,
-samples, and training examples.
+The archived graph, sample inputs, and training examples are available in the backend test fixture.

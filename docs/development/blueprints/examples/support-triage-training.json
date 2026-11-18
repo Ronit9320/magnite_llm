@@ -1,0 +1,14 @@
+[
+  {"ticket": "I was billed for twelve seats even though we only use ten. Please correct invoice INV-101.", "record": {"category": "billing", "blocked": false, "reference": "INV-101"}, "queue": "finance", "priority": "normal"},
+  {"ticket": "Our paid service is suspended over a charge we already settled on invoice INV-102. We cannot process any work.", "record": {"category": "billing", "blocked": true, "reference": "INV-102"}, "queue": "finance", "priority": "high"},
+  {"ticket": "Could I get a PDF copy of the last invoice for accounting?", "record": {"category": "billing", "blocked": false, "reference": ""}, "queue": "finance", "priority": "normal"},
+  {"ticket": "The billing page will not accept our renewal payment. The service is disabled and our team cannot operate.", "record": {"category": "billing", "blocked": true, "reference": ""}, "queue": "finance", "priority": "high"},
+  {"ticket": "The password reset link expired. Please send a new one when you can. My current session still works.", "record": {"category": "access", "blocked": false, "reference": ""}, "queue": "identity", "priority": "normal"},
+  {"ticket": "All of our agents are stuck in an SSO redirect loop. Nobody can get in, so our service desk cannot operate.", "record": {"category": "access", "blocked": true, "reference": ""}, "queue": "identity", "priority": "high"},
+  {"ticket": "How can I add a security key as a second sign-in method? I can already log in.", "record": {"category": "access", "blocked": false, "reference": ""}, "queue": "identity", "priority": "normal"},
+  {"ticket": "My authenticator no longer gives working codes. I cannot access the portal or continue my shift.", "record": {"category": "access", "blocked": true, "reference": ""}, "queue": "identity", "priority": "high"},
+  {"ticket": "The courier still has order ORD-802. Please update the ETA. We have enough spare stock to keep going.", "record": {"category": "delivery", "blocked": false, "reference": "ORD-802"}, "queue": "fulfillment", "priority": "normal"},
+  {"ticket": "The carrier lost shipment SHP-505. We cannot reopen the lab until the replacement arrives.", "record": {"category": "delivery", "blocked": true, "reference": "SHP-505"}, "queue": "fulfillment", "priority": "high"},
+  {"ticket": "Two cartons in the parcel arrived wet, but the goods are fine and work can continue. How do we report it?", "record": {"category": "delivery", "blocked": false, "reference": ""}, "queue": "fulfillment", "priority": "normal"},
+  {"ticket": "A broken component arrived in order ORD-125 and we cannot restart the assembly line until it is replaced.", "record": {"category": "delivery", "blocked": true, "reference": "ORD-125"}, "queue": "fulfillment", "priority": "high"}
+]

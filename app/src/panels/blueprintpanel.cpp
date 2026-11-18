@@ -2,6 +2,7 @@
 
 #include "panels/blueprintpreview.h"
 #include "panels/blueprintnodedialog.h"
+#include "panels/chatbubble.h"
 #include "theme.h"
 #include "widgets/blueprintcanvas.h"
 #include "widgets/button.h"
@@ -9,6 +10,7 @@
 #include "widgets/confirmation.h"
 #include "widgets/edgescrollbar.h"
 #include "widgets/settingswindow.h"
+#include "widgets/spinbox.h"
 #include "widgets/surface.h"
 #include "widgets/tabwidget.h"
 
@@ -16,9 +18,11 @@
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QKeyEvent>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,12 +33,15 @@
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QScreen>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QShortcut>
 #include <QStackedWidget>
-#include <QSpinBox>
 #include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -110,6 +117,16 @@ QJsonObject findById(const QJsonArray &array, const QString &id) {
     return {};
 }
 
+QJsonObject adapterSource(const QJsonObject &graph, const QJsonObject &node) {
+    if (findById(node["in"].toArray(), "adapter")["type"] != "adapter-ref") return {};
+    for (const auto &value : graph["edges"].toArray()) {
+        const auto edge = value.toObject();
+        if (edge["to"] == node["id"] && edge["in"] == "adapter")
+            return findById(graph["nodes"].toArray(), edge["from"].toString());
+    }
+    return {};
+}
+
 QString sampleText(const QJsonObject &sample) {
     QStringList lines;
     for (const auto &line : sample["lines"].toArray()) lines.append(line.toString());
@@ -170,21 +187,50 @@ QJsonArray decisionsFor(const QJsonObject &run) {
 }
 
 QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const QJsonObject &decision) {
-    auto *pane = new QWidget;
+    auto *pane = new QFrame;
+    pane->setObjectName("runToolCall");
     auto *body = new QVBoxLayout(pane);
-    body->setContentsMargins(0, 0, 0, 4);
+    body->setContentsMargins(12, 8, 12, 8);
+    body->setSpacing(6);
     const auto status = decision["status"].toString();
+    const auto outcome = decision["outcome"].toString();
     auto *header = new QHBoxLayout;
+    auto *icon = label({});
+    icon->setPixmap(Theme::coloredIcon(decision.contains("target") || decision["type"] == "Open target" ? "folder" : "play",
+        statusTone(status), 16).pixmap(16, 16));
+    header->addWidget(icon);
     header->addWidget(label(decision["type"].toString(), "headingLabel"));
     header->addStretch();
     header->addWidget(statusLabel(status));
     body->addLayout(header);
+    auto *fields = new QWidget(pane);
+    auto *fieldLayout = new QVBoxLayout(fields);
+    fieldLayout->setContentsMargins(0, 0, 0, 0);
+    fieldLayout->setSpacing(4);
+    const auto detail = [fieldLayout](const QString &name, const QJsonValue &value) {
+        auto *line = wrapped(name + "  " + BlueprintPreview::jsonText(value), "blueprintCode");
+        line->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+        fieldLayout->addWidget(line);
+    };
     if (decision.contains("executable")) {
-        body->addWidget(wrapped("Executable  " + BlueprintPreview::jsonText(decision["executable"]), "blueprintCode"));
-        body->addWidget(wrapped("Arguments  " + BlueprintPreview::jsonText(decision["args"]), "blueprintCode"));
-        body->addWidget(wrapped("Working directory  " + BlueprintPreview::jsonText(decision["cwd"]), "blueprintCode"));
-    } else if (decision.contains("target"))
-        body->addWidget(wrapped("Target  " + BlueprintPreview::jsonText(decision["target"]), "blueprintCode"));
+        detail("Executable", decision["executable"]);
+        detail("Arguments", decision["args"]);
+        detail("Working directory", decision["cwd"]);
+    } else if (decision.contains("target")) {
+        detail("Target", decision["target"]);
+    }
+    if (fieldLayout->count() && status != "waiting") {
+        auto *toggle = action("Show action details", false, true);
+        toggle->setCheckable(true);
+        body->addWidget(toggle, 0, Qt::AlignLeft);
+        fields->hide();
+        QObject::connect(toggle, &Button::toggled, fields, [fields, toggle](bool open) {
+            toggle->setText(open ? "Hide action details" : "Show action details");
+            fields->setVisible(open);
+        });
+    }
+    if (fieldLayout->count()) body->addWidget(fields);
+    else delete fields;
     if (status == "waiting") {
         const auto expiry = decision["expires"].toInteger();
         auto *actions = new QHBoxLayout;
@@ -212,6 +258,16 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
         actions->addWidget(deny);
         actions->addWidget(approve);
         body->addLayout(actions);
+    } else if (preview->live()) {
+        static const QHash<QString, QString> outcomes{
+            {"dispatched", "Passed to the desktop handler."},
+            {"handler_unavailable", "No desktop handler was available."},
+            {"dispatch_failed", "The action could not be started."},
+            {"nonzero_exit", "The process exited with an error."},
+            {"timed_out", "The command timed out."},
+            {"backend_interrupted", "The local service was interrupted."}
+        };
+        if (outcomes.contains(outcome)) body->addWidget(wrapped(outcomes.value(outcome)));
     } else {
         static const QHash<QString, QString> notes{{"approved", "The preview recorded a simulated approval."},
             {"denied", "The action was denied and the run stopped."}, {"expired", "The approval window expired and the run stopped."},
@@ -270,11 +326,10 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     library->setContentsMargins(0, 0, 0, 0);
     auto *exampleRow = new QHBoxLayout;
     exampleRow->addStretch();
-    auto *example = action("Order intake example", false, true);
-    example->setObjectName("blueprintExample");
-    exampleRow->addWidget(example);
-    connect(example, &Button::clicked, this, [this] { openBlueprint("order-intake"); });
     if (m_preview->live()) {
+        auto *triage = action("Request triage example", false, true);
+        exampleRow->addWidget(triage);
+        connect(triage, &Button::clicked, this, &BlueprintPanel::createTriageExample);
         auto *recent = action("Recent runs", false, true);
         exampleRow->addWidget(recent);
         connect(recent, &Button::clicked, this, [this] {
@@ -317,13 +372,19 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     back->setAccessibleName("Blueprint library");
     crumb->addWidget(back);
     crumb->addStretch();
-    m_backToChat = action("Back to chat", false, true);
+    m_backToChat = action("Back to Conversation", false, true);
     m_backToChat->hide();
     crumb->addWidget(m_backToChat);
     connect(m_backToChat, &Button::clicked, this, &BlueprintPanel::chatRequested);
     if (!m_preview->live()) crumb->addWidget(label("Fixture data", "cardMeta"));
     m_publish = action("Save revision", false, true);
     m_reload = action("Reload saved revision", false, true);
+    m_openInConversation = action("Open in Conversation", false, true);
+    m_openInConversation->hide();
+    crumb->addWidget(m_openInConversation);
+    connect(m_openInConversation, &Button::clicked, this, [this] {
+        emit conversationRequested(m_graph["id"].toString());
+    });
     m_publish->hide();
     m_reload->hide();
     crumb->addWidget(m_reload);
@@ -379,7 +440,6 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
         }
     });
     connect(m_preview, &BlueprintPreview::savedChanged, this, &BlueprintPanel::refreshLibrary);
-    connect(m_preview, &BlueprintPreview::nodeLibraryChanged, this, &BlueprintPanel::refreshNodePalette);
     connect(m_preview, &BlueprintPreview::runChanged, this, [this](const QString &id) {
         if (id == m_runId) refreshRun();
         if (m_tabs->currentIndex() == 2) refreshHistory();
@@ -396,7 +456,10 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
         }
     });
     connect(m_preview, &BlueprintPreview::optionsChanged, this, [this] {
-        if (!m_graph.isEmpty()) refreshRunOptions();
+        if (!m_graph.isEmpty()) {
+            m_canvas->setGraph(m_graph, m_preview->fixtures());
+            refreshRunOptions();
+        }
     });
     if (m_preview->live()) {
         m_service->setText(m_preview->serviceError());
@@ -414,13 +477,11 @@ void BlueprintPanel::showLibrary() {
 void BlueprintPanel::refreshLibrary() {
     clear(m_libraryBody);
     const auto saved = m_preview->saved();
-    bool empty = true;
-    for (const auto &value : saved) empty &= value.toObject()["id"].toString() == "order-intake";
     auto *create = action("Create new", true);
     create->setObjectName("blueprintCreate");
     create->setIcon(Theme::coloredIcon("plus", QColor(Theme::accentText()), 16));
     connect(create, &Button::clicked, this, &BlueprintPanel::showCreatePage);
-    if (empty) {
+    if (saved.isEmpty()) {
         m_libraryBody->addStretch();
         m_libraryBody->addWidget(label("Blueprints", "blueprintTitle"), 0, Qt::AlignHCenter);
         m_libraryBody->addSpacing(14);
@@ -437,7 +498,6 @@ void BlueprintPanel::refreshLibrary() {
     for (const auto &value : saved) {
         const auto graph = value.toObject();
         const auto id = graph["id"].toString();
-        if (id == "order-intake") continue;
         auto *card = Surface::card(m_library);
         auto *row = new QHBoxLayout;
         auto *text = new QVBoxLayout;
@@ -494,7 +554,7 @@ void BlueprintPanel::setupCreatePage() {
     form->addSpacing(5);
     m_newName = new QLineEdit;
     m_newName->setMaxLength(60);
-    m_newName->setPlaceholderText("e.g. Order intake");
+    m_newName->setPlaceholderText("e.g. Request triage");
     Surface::field(form, "Name", m_newName);
     m_newDescription = new QPlainTextEdit;
     m_newDescription->setPlaceholderText("What will this blueprint do?");
@@ -549,6 +609,39 @@ void BlueprintPanel::createBlueprint() {
     openBlueprint(id);
 }
 
+void BlueprintPanel::createTriageExample() {
+    auto request = m_preview->makeNode("input", "request", 0, 0);
+    request["name"] = "Incoming request";
+    auto agent = m_preview->makeNode("pi-reply", "triage", 245, 0);
+    agent["name"] = "Summarize request";
+    agent["setting"] = "Summarize the request in one sentence. Include what the requester needs. Use only the request as evidence.";
+    auto status = m_preview->makeNode("constant", "status", 245, 175);
+    status["name"] = "Review status";
+    status["setting"] = "\"Needs review\"";
+    auto record = m_preview->makeNode("build-object", "record", 490, 0);
+    record["name"] = "Build triage record";
+    const QJsonObject text{{"type", "string"}};
+    record["in"] = QJsonArray{
+        QJsonObject{{"id", "summary"}, {"name", "Summary"}, {"type", "text"}, {"schema", text}},
+        QJsonObject{{"id", "status"}, {"name", "Status"}, {"type", "text"}, {"schema", text}}};
+    auto output = m_preview->makeNode("output", "result", 735, 0);
+    output["name"] = "Triage record";
+    for (const auto &side : {"in", "out"}) {
+        output[side] = QJsonArray{QJsonObject{{"id", "value"}, {"name", "Record"}, {"type", "object"},
+                                             {"schema", QJsonObject{{"type", "object"}}}}};
+    }
+    const auto id = BlueprintPreview::id();
+    const QJsonObject graph{{"id", id}, {"revision", 0}, {"dirty", true}, {"name", "Request triage"},
+        {"description", "Summarize an incoming request with Pi and return a review record."},
+        {"nodes", QJsonArray{request, agent, status, record, output}},
+        {"edges", QJsonArray{
+            QJsonObject{{"from", "request"}, {"out", "value"}, {"to", "triage"}, {"in", "task"}},
+            QJsonObject{{"from", "triage"}, {"out", "reply"}, {"to", "record"}, {"in", "summary"}},
+            QJsonObject{{"from", "status"}, {"out", "value"}, {"to", "record"}, {"in", "status"}},
+            QJsonObject{{"from", "record"}, {"out", "value"}, {"to", "result"}, {"in", "value"}}}}};
+    if (saveGraph(graph, false)) openBlueprint(id);
+}
+
 void BlueprintPanel::editDetails() {
     SettingsDetailDialog dialog(this);
     dialog.setWindowTitle("Edit blueprint details");
@@ -576,7 +669,7 @@ void BlueprintPanel::editDetails() {
 
 void BlueprintPanel::deleteBlueprint(const QString &id) {
     const auto graph = findById(m_preview->saved(), id);
-    if (id == "order-intake" || graph.isEmpty()) return;
+    if (graph.isEmpty()) return;
     if (!Ui::confirmRemoval(this, "Delete blueprint", QString("Delete “%1” from the library?").arg(graph["name"].toString()), "Delete")) return;
     if (m_preview->live()) {
         m_preview->removeBlueprint(id, [self = QPointer(this), id](const auto &, const auto &error) {
@@ -626,10 +719,9 @@ bool BlueprintPanel::saveGraph(QJsonObject graph, bool revision) {
 void BlueprintPanel::openBlueprint(const QString &id) {
     if (m_preview->live()) {
         const auto nav = ++m_navigation;
-        m_preview->getBlueprint(id, false, [self = QPointer(this), nav, id](const QJsonObject &graph, const QString &error) {
+        m_preview->getBlueprint(id, false, [self = QPointer(this), nav](const QJsonObject &graph, const QString &error) {
             if (!self || nav != self->m_navigation) return;
             if (!error.isEmpty()) { Ui::showNotice(self, "Blueprints", error); return; }
-            if (id == "order-intake" && !self->saveGraph(graph, false)) return;
             self->showBlueprint(graph);
         });
         return;
@@ -643,8 +735,7 @@ void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     m_graph = graph;
     if (m_graph.isEmpty()) return;
     const auto nodes = m_graph["nodes"].toArray();
-    m_selected = id == "order-intake" && !findById(nodes, "selector").isEmpty()
-        ? QString("selector") : nodes.isEmpty() ? QString{} : nodes.first().toObject()["id"].toString();
+    m_selected = nodes.isEmpty() ? QString{} : nodes.first().toObject()["id"].toString();
     m_outputNode.clear();
     m_outputPort.clear();
     const auto recent = m_preview->runs(id);
@@ -656,8 +747,7 @@ void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     m_runSetup->show();
     findChild<Button *>("blueprintEdit")->show();
     findChild<Button *>("blueprintDuplicate")->show();
-    findChild<Button *>("blueprintDelete")->setVisible(id != "order-intake");
-    showNodePalette(false);
+    findChild<Button *>("blueprintDelete")->show();
     m_pages->setCurrentWidget(m_workspace);
     refreshEditor(true);
     showTest();
@@ -718,7 +808,6 @@ void BlueprintPanel::setupEditor() {
     toolbar->addStretch();
     m_connect = action("Connect", false, true);
     m_addNode = action("Add node");
-    m_addNode->setCheckable(true);
     m_fullscreen = action({}, false, true);
     m_fullscreen->setObjectName("blueprintFullscreen");
     m_fullscreen->setFixedSize(32, 32);
@@ -728,16 +817,11 @@ void BlueprintPanel::setupEditor() {
     toolbar->addWidget(m_fullscreen);
     body->addLayout(toolbar);
     connect(m_connect, &Button::clicked, this, [this] { connectPorts(); });
-    connect(m_addNode, &Button::clicked, this, [this](bool checked) { showNodePalette(checked); });
+    connect(m_addNode, &Button::clicked, this, [this] { openNodePicker(); });
     connect(m_fullscreen, &Button::clicked, this, &BlueprintPanel::toggleFullscreen);
 
-    auto *canvasRow = new QHBoxLayout;
-    canvasRow->setSpacing(0);
-    setupNodePalette();
-    canvasRow->addWidget(m_palette);
     m_canvasPages = new QStackedWidget;
-    canvasRow->addWidget(m_canvasPages, 1);
-    body->addLayout(canvasRow, 1);
+    body->addWidget(m_canvasPages, 1);
     m_canvas = new BlueprintCanvas;
     m_canvasPages->addWidget(m_canvas);
     auto *empty = new QWidget;
@@ -749,11 +833,12 @@ void BlueprintPanel::setupEditor() {
     startIcon->setPixmap(Theme::coloredIcon("message-circle", QColor(Theme::textSecondary()), 20).pixmap(20, 20));
     center->addWidget(startIcon, 0, Qt::AlignHCenter);
     center->addWidget(label("Start with a node", "headingLabel"), 0, Qt::AlignHCenter);
-    auto *emptyHint = wrapped("Use an Input or Dataset node to supply values.");
+    auto *emptyHint = wrapped(m_preview->live() ? "Start with a run input, dataset, or constant."
+                                               : "Use an Input or Dataset node to supply values.");
     emptyHint->setAlignment(Qt::AlignCenter);
     center->addWidget(emptyHint);
     m_emptyAdd = action("Add node");
-    connect(m_emptyAdd, &Button::clicked, this, [this] { showNodePalette(true); });
+    connect(m_emptyAdd, &Button::clicked, this, [this] { openNodePicker(); });
     center->addWidget(m_emptyAdd, 0, Qt::AlignHCenter);
     center->addStretch();
     m_canvasPages->addWidget(empty);
@@ -790,10 +875,25 @@ void BlueprintPanel::setupEditor() {
     inspector->setFixedWidth(243);
     auto *inspectorLayout = new QVBoxLayout(inspector);
     inspectorLayout->setContentsMargins(10, 10, 6, 6);
+    inspectorLayout->addWidget(label("Workflow nodes", "headingLabel"));
+    m_nodeTree = new QTreeWidget;
+    m_nodeTree->setObjectName("blueprintNodeTree");
+    m_nodeTree->setAccessibleName("Workflow nodes and connections");
+    m_nodeTree->setHeaderHidden(true);
+    m_nodeTree->setUniformRowHeights(true);
+    m_nodeTree->setMaximumHeight(142);
+    m_nodeTree->setMinimumHeight(60);
+    inspectorLayout->addWidget(m_nodeTree, 1);
     auto *inspectorScroll = scroller(&m_inspector);
     m_inspector->setSpacing(6);
-    inspectorLayout->addWidget(inspectorScroll);
+    inspectorLayout->addWidget(inspectorScroll, 3);
     editor->addWidget(inspector);
+    connect(m_nodeTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+        if (!item) return;
+        m_selected = item->data(0, Qt::UserRole).toString();
+        m_canvas->revealNode(m_selected);
+        refreshInspector();
+    });
 
     connect(m_canvas, &BlueprintCanvas::zoomChanged, this, [this](int percent) { m_zoom->setText(QString("%1%").arg(percent)); });
     connect(minus, &Button::clicked, this, [this] { m_canvas->zoomBy(1 / 1.2); });
@@ -873,10 +973,6 @@ void BlueprintPanel::refreshCanvasActions() {
     m_fullscreen->setIcon(Theme::coloredIcon(full ? "shrink" : "expand", QColor(Theme::textSecondary()), 16));
     m_fullscreen->setAccessibleName(title);
     m_fullscreen->setToolTip(title);
-    for (auto *row : m_palette->findChildren<QPushButton *>("blueprintPaletteItem")) {
-        const auto kind = row->property("blueprintKind").toString();
-        row->setIcon(Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind), 16));
-    }
 }
 
 void BlueprintPanel::refreshEditor(bool fit) {
@@ -888,6 +984,8 @@ void BlueprintPanel::refreshEditor(bool fit) {
     m_publish->setVisible(m_preview->live() && dirty);
     m_publish->setEnabled(m_preview->connected());
     m_reload->setVisible(m_preview->live() && dirty && revision);
+    m_openInConversation->setVisible(m_preview->live() && revision > 0);
+    m_openInConversation->setToolTip("Run the latest saved revision in Conversation.");
     m_reload->setEnabled(m_preview->connected());
     m_description->setText(m_graph["description"].toString("Connect steps and define input and output contracts."));
     if (m_description->text().isEmpty()) m_description->setText("Connect steps and define input and output contracts.");
@@ -898,7 +996,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
     if (fit) m_canvas->fit();
     m_connect->setVisible(!nodes.isEmpty());
     m_connect->setEnabled(nodes.size() > 1);
-    m_addNode->setVisible(!nodes.isEmpty() || m_addNode->isChecked());
+    m_addNode->setVisible(!nodes.isEmpty());
     m_zoomControls->setVisible(!nodes.isEmpty());
     m_gestureHint->setVisible(!nodes.isEmpty());
     const auto issues = m_preview->issues(m_graph);
@@ -919,6 +1017,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
         m_target->addItem("Node only · " + node["name"].toString(), node["id"].toString());
     }
     m_target->setCurrentIndex(qMax(0, m_target->findData(target)));
+    refreshNodeTree();
     refreshInspector();
     if (m_preview->live()) refreshRunOptions();
 }
@@ -937,28 +1036,18 @@ void BlueprintPanel::refreshInspector() {
     m_inspector->addLayout(header);
     m_inspector->addWidget(rule());
     const auto nodes = m_graph["nodes"].toArray();
-    auto *picker = new ComboBox;
-    picker->setAccessibleName("Select node");
-    picker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    picker->addItem("Select a node", "");
-    for (const auto &value : nodes) {
-        const auto entry = value.toObject();
-        picker->addItem(entry["name"].toString(), entry["id"].toString());
-    }
-    picker->setCurrentIndex(qMax(0, picker->findData(m_selected)));
-    if (!nodes.isEmpty()) m_inspector->addWidget(picker);
-    else delete picker;
-    if (!nodes.isEmpty()) connect(picker, &ComboBox::activated, this, [this, picker] {
-        m_selected = picker->currentData().toString();
-        m_canvas->revealNode(m_selected);
-        refreshInspector();
-        QTimer::singleShot(0, this, [this] {
-            for (int i = 0; i < m_inspector->count(); ++i) {
-                if (auto *widget = m_inspector->itemAt(i)->widget(); widget && widget->accessibleName() == "Select node")
-                    widget->setFocus();
+    const auto *current = m_nodeTree->currentItem();
+    if (!current || current->data(0, Qt::UserRole).toString() != m_selected) {
+        const QSignalBlocker blocked(m_nodeTree);
+        m_nodeTree->setCurrentItem(nullptr);
+        for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
+            auto *item = m_nodeTree->topLevelItem(i);
+            if (item->data(0, Qt::UserRole).toString() == m_selected) {
+                m_nodeTree->setCurrentItem(item);
+                break;
             }
-        });
-    });
+        }
+    }
     if (!m_outputNode.isEmpty()) m_inspector->addWidget(wrapped("Select a matching input port."));
     const auto node = findById(nodes, m_selected);
     if (node.isEmpty()) {
@@ -1000,9 +1089,12 @@ void BlueprintPanel::refreshInspector() {
         m_inspector->addWidget(label("Checkpoint & adapter", "headingLabel"));
         const auto checkpoint = node["model"].toString();
         const auto adapter = node["adapter"].toString();
+        const auto linked = adapterSource(m_graph, node);
         m_inspector->addWidget(wrapped(checkpoint.isEmpty() ? "Choose a checkpoint from the local model library."
             : findById(fixtures["models"].toArray(), checkpoint)["name"].toString(checkpoint)));
-        m_inspector->addWidget(wrapped(adapter.isEmpty() ? "No adapter" : "Adapter · " + adapter));
+        m_inspector->addWidget(wrapped(!linked.isEmpty() ? "Adapter node · " + linked["name"].toString()
+            : adapter.isEmpty() ? "No adapter" : "Adapter · " +
+              findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
         m_inspector->addWidget(wrapped(QString("Output budget · %1 tokens")
             .arg(node["maxTokens"].toInt(kind == "reasoning" ? 1024 : 256))));
         auto *binding = action("Change binding");
@@ -1013,6 +1105,10 @@ void BlueprintPanel::refreshInspector() {
         if (!train->isEnabled()) train->setToolTip("Save a complete revision before training or binding a job.");
         connect(binding, &Button::clicked, this, &BlueprintPanel::editBinding);
         connect(train, &Button::clicked, this, &BlueprintPanel::liveTraining);
+    } else if (kind == "adapter") {
+        const auto adapter = node["adapter"].toString();
+        m_inspector->addWidget(wrapped(adapter.isEmpty() ? "Choose a trained LoRA adapter in Configure."
+            : findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
     } else if (m_preview->live() && kind == "dataset") {
         m_inspector->addWidget(rule());
         m_inspector->addWidget(label("Dataset", "headingLabel"));
@@ -1076,6 +1172,10 @@ void BlueprintPanel::refreshInspector() {
             const auto name = m_preview->portLabel(port);
             const auto type = contracts.value(port["type"].toString()).toObject()["label"].toString();
             const bool input = side == "in";
+            if (port["type"] == "adapter-ref") {
+                m_inspector->addWidget(wrapped(input ? "In    LoRA adapter · Optional" : "Out   LoRA adapter"));
+                continue;
+            }
             const auto text = name == type ? name : QString("%1 · %2").arg(name, type);
             auto *edit = new QPushButton(literalButtonText((input ? "In    " : "Out   ") + text + "  ›"));
             edit->setObjectName("blueprintPortContract");
@@ -1130,90 +1230,220 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
     }
 }
 
-void BlueprintPanel::setupNodePalette() {
-    m_palette = new QFrame;
-    m_palette->setObjectName("blueprintPalette");
-    m_palette->setAccessibleName("Add node panel");
-    m_palette->setFixedWidth(194);
-    auto *body = new QVBoxLayout(m_palette);
-    body->setContentsMargins(10, 8, 10, 8);
-    body->setSpacing(5);
-    auto *header = new QHBoxLayout;
-    header->addWidget(label("Add node", "headingLabel"), 1);
-    auto *close = iconAction("window-close", "Close node palette");
-    header->addWidget(close);
-    body->addLayout(header);
-    connect(close, &Button::clicked, this, [this] { showNodePalette(false); });
-
-    body->addWidget(scroller(&m_paletteEntries), 1);
-    m_paletteEntries->setSpacing(3);
-    refreshNodePalette();
-    m_palette->hide();
+void BlueprintPanel::refreshNodeTree() {
+    const QSignalBlocker blocked(m_nodeTree);
+    QSet<QString> expanded;
+    for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
+        const auto *item = m_nodeTree->topLevelItem(i);
+        if (item->isExpanded()) expanded.insert(item->data(0, Qt::UserRole).toString());
+    }
+    m_nodeTree->clear();
+    QHash<QString, QJsonObject> nodes;
+    QHash<QString, QTreeWidgetItem *> items;
+    for (const auto &value : m_graph["nodes"].toArray()) {
+        const auto node = value.toObject();
+        const auto id = node["id"].toString();
+        const auto kind = node["kind"].toString();
+        auto *item = new QTreeWidgetItem(m_nodeTree, {node["name"].toString()});
+        item->setData(0, Qt::UserRole, id);
+        item->setIcon(0, Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind), 15));
+        nodes.insert(id, node);
+        items.insert(id, item);
+    }
+    for (const auto &value : m_graph["edges"].toArray()) {
+        const auto edge = value.toObject();
+        const auto from = edge["from"].toString();
+        const auto to = edge["to"].toString();
+        if (!items.contains(from) || !items.contains(to)) continue;
+        const auto source = nodes.value(from);
+        const auto target = nodes.value(to);
+        const auto out = m_preview->portLabel(findById(source["out"].toArray(), edge["out"].toString()));
+        const auto in = m_preview->portLabel(findById(target["in"].toArray(), edge["in"].toString()));
+        const auto downstream = QString("%1 → %2 · %3").arg(out, target["name"].toString(), in);
+        const auto upstream = QString("%1 ← %2 · %3").arg(in, source["name"].toString(), out);
+        auto *outgoing = new QTreeWidgetItem(items.value(from), {downstream});
+        outgoing->setData(0, Qt::UserRole, to);
+        outgoing->setToolTip(0, downstream);
+        auto *incoming = new QTreeWidgetItem(items.value(to), {upstream});
+        incoming->setData(0, Qt::UserRole, from);
+        incoming->setToolTip(0, upstream);
+    }
+    for (const auto &id : expanded)
+        if (auto *item = items.value(id)) item->setExpanded(true);
+    if (auto *selected = items.value(m_selected)) m_nodeTree->setCurrentItem(selected);
 }
 
-void BlueprintPanel::refreshNodePalette() {
-    clear(m_paletteEntries);
-    auto row = [this](const QString &title, const QString &detail, const QString &kind, const QString &actionName) {
-        auto *button = new QPushButton(literalButtonText(title));
-        button->setObjectName("blueprintPaletteItem");
+void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
+    auto *dialog = new SettingsDetailDialog(m_canvasPanel);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle("Add node");
+    dialog->setAccessibleName("Add node picker");
+    const auto screen = m_canvasPanel->screen()->availableGeometry();
+    const int width = qMin(650, screen.width() - 16);
+    const bool compact = width < 500 || screen.height() < 420;
+    const int horizontalMargin = compact ? 12 : 16;
+    const int gridGap = compact ? 6 : 8;
+    auto *body = new QVBoxLayout(dialog);
+    body->setContentsMargins(horizontalMargin, compact ? 10 : 14, horizontalMargin, compact ? 10 : 14);
+    body->setSpacing(compact ? 8 : 10);
+    titleBar(body, dialog->windowTitle());
+    auto *footer = new QHBoxLayout;
+    constexpr int columns = 3;
+    constexpr int perPage = 9;
+    auto gridPage = [gridGap](QWidget *page) {
+        auto *grid = new QGridLayout(page);
+        grid->setContentsMargins(0, 4, 0, 0);
+        grid->setSpacing(gridGap);
+        for (int column = 0; column < columns; ++column)
+            grid->setColumnStretch(column, 1);
+        return grid;
+    };
+    const int cardWidth = (width - 2 * horizontalMargin - (columns - 1) * gridGap - 4) / columns;
+    auto addCard = [compact, cardWidth](QGridLayout *grid, int index, const QString &title, const QString &detail,
+                                       const QString &kind, const QString &actionName) {
+        auto *button = new Button;
+        button->setObjectName("blueprintNodeCard");
+        button->setAutoDefault(false);
         button->setAccessibleName(actionName);
-        button->setToolTip(detail);
-        button->setProperty("blueprintKind", kind);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setIconSize(QSize(16, 16));
-        button->setIcon(Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind), 16));
-        m_paletteEntries->addWidget(button);
+        button->setAccessibleDescription(detail);
+        button->setToolTip("<qt>" + title.toHtmlEscaped() + "<br>" + detail.toHtmlEscaped() + "</qt>");
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setFixedHeight(compact ? 78 : 82);
+        const int inset = compact ? 8 : 10;
+        const int iconSize = compact ? 14 : 16;
+        const int iconGap = compact ? 4 : 6;
+        auto *contents = new QVBoxLayout(button);
+        contents->setContentsMargins(inset, 9, inset, 9);
+        contents->setSpacing(5);
+        auto *header = new QHBoxLayout;
+        header->setSpacing(iconGap);
+        auto *icon = label({});
+        icon->setFixedSize(iconSize, iconSize);
+        icon->setPixmap(Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind),
+                                           iconSize).pixmap(iconSize, iconSize));
+        auto *name = label(title, "headingLabel");
+        name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        name->ensurePolished();
+        const int titleWidth = cardWidth - 2 * inset - iconSize - iconGap;
+        name->setText(name->fontMetrics().elidedText(title, Qt::ElideRight, titleWidth));
+        auto *caption = wrapped(detail);
+        for (auto *child : {icon, name, caption}) child->setAttribute(Qt::WA_TransparentForMouseEvents);
+        header->addWidget(icon, 0, Qt::AlignTop);
+        header->addWidget(name, 1);
+        contents->addLayout(header);
+        contents->addWidget(caption);
+        contents->addStretch();
+        grid->addWidget(button, index / columns, index % columns);
         return button;
     };
-    for (const auto &value : m_preview->fixtures()["nodeTypes"].toArray()) {
-        const auto type = value.toObject();
+
+    const auto saved = m_preview->nodeLibrary();
+    auto *builtInPage = new QWidget;
+    auto *builtInGrid = gridPage(builtInPage);
+    const auto types = m_preview->fixtures()["nodeTypes"].toArray();
+    for (int i = 0; i < types.size(); ++i) {
+        const auto type = types.at(i).toObject();
         const auto kind = type["id"].toString();
         const auto title = type["label"].toString();
-        auto *button = row(title, type["detail"].toString(), kind, "Add " + title);
-        connect(button, &QPushButton::clicked, this, [this, kind] {
+        auto *button = addCard(builtInGrid, i, title, type["detail"].toString(), kind, "Add " + title);
+        connect(button, &Button::clicked, dialog, [dialog, kind] {
+            dialog->setProperty("nodeKind", kind);
+            dialog->accept();
+        });
+    }
+    if (saved.isEmpty()) {
+        body->addWidget(builtInPage, 1);
+    } else {
+        auto *tabs = new TabWidget;
+        tabs->addTab(builtInPage, "Built-in nodes");
+        auto *savedPage = new QWidget;
+        auto *savedLayout = new QVBoxLayout(savedPage);
+        savedLayout->setContentsMargins(0, 0, 0, 0);
+        auto *pages = new QStackedWidget;
+        savedLayout->addWidget(pages, 1);
+        tabs->addTab(savedPage, "Saved nodes");
+        body->addWidget(tabs, 1);
+
+        for (int start = 0; start < saved.size(); start += perPage) {
+            auto *page = new QWidget;
+            auto *grid = gridPage(page);
+            const auto end = qMin(qsizetype(start + perPage), saved.size());
+            for (int i = start; i < end; ++i) {
+                const auto entry = saved.at(i).toObject();
+                const auto design = entry["node"].toObject();
+                const auto spec = m_preview->operation(BlueprintPreview::operationId(design));
+                const auto title = entry["name"].toString();
+                auto *button = addCard(grid, i - start, title, spec["label"].toString(),
+                                       spec["kind"].toString(), "Add saved node " + title);
+                connect(button, &Button::clicked, dialog, [dialog, design] {
+                    dialog->setProperty("savedNode", QVariant::fromValue(design));
+                    dialog->accept();
+                });
+                button->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(button, &QWidget::customContextMenuRequested, dialog, [this, button, dialog, entry](const QPoint &point) {
+                    QMenu menu(dialog);
+                    menu.addAction("Remove from node library…", this, [this, dialog, entry] {
+                        if (!Ui::confirmRemoval(dialog, "Remove saved node",
+                                QString("Remove “%1” from the node library?").arg(entry["name"].toString()), "Remove")) return;
+                        if (m_preview->removeNodeTemplate(entry["id"].toString())) dialog->reject();
+                        else Ui::showNotice(dialog, "Saved nodes", "The saved node could not be removed.");
+                    });
+                    menu.exec(button->mapToGlobal(point));
+                });
+            }
+            grid->setRowStretch((end - start + columns - 1) / columns, 1);
+            pages->addWidget(page);
+        }
+        if (pages->count() > 1) {
+            auto *navigationBar = new QWidget;
+            auto *navigation = new QHBoxLayout(navigationBar);
+            navigation->setContentsMargins(0, 0, 0, 0);
+            auto *previous = action("Previous");
+            auto *next = action("Next");
+            auto *pageNumber = label({}, "cardMeta");
+            navigation->addWidget(previous);
+            navigation->addWidget(pageNumber, 1, Qt::AlignCenter);
+            navigation->addWidget(next);
+            footer->addWidget(navigationBar);
+            navigationBar->hide();
+            connect(tabs, &TabWidget::currentChanged, navigationBar, [navigationBar](int index) {
+                navigationBar->setVisible(index == 1);
+            });
+            auto updateNavigation = [pages, previous, next, pageNumber](int index) {
+                previous->setEnabled(index > 0);
+                next->setEnabled(index + 1 < pages->count());
+                pageNumber->setText(QString("Page %1 of %2").arg(index + 1).arg(pages->count()));
+            };
+            connect(pages, &QStackedWidget::currentChanged, dialog, updateNavigation);
+            connect(previous, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() - 1); });
+            connect(next, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() + 1); });
+            updateNavigation(0);
+        }
+    }
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    footer->addStretch();
+    footer->addWidget(buttons);
+    body->addLayout(footer);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, dialog, position] {
+        auto node = dialog->property("savedNode").toJsonObject();
+        if (node.isEmpty()) {
+            const auto kind = dialog->property("nodeKind").toString();
             const auto configured = configureBlueprintNode(*m_preview, m_canvasPanel, kind);
             if (!configured) return;
-            auto node = *configured;
-            const auto point = m_addAt.value_or(m_canvas->centerInGraph()).toPoint() - QPoint(95, 70);
-            node["x"] = point.x();
-            node["y"] = point.y();
-            addNode(node);
-            m_addAt.reset();
-        });
-    }
-    const auto saved = m_preview->nodeLibrary();
-    if (!saved.isEmpty()) {
-        m_paletteEntries->addSpacing(9);
-        m_paletteEntries->addWidget(label("Saved nodes", "headingLabel"));
-    }
-    for (const auto &value : saved) {
-        const auto entry = value.toObject();
-        const auto design = entry["node"].toObject();
-        const auto spec = m_preview->operation(BlueprintPreview::operationId(design));
-        const auto title = entry["name"].toString();
-        auto *button = row(title, spec["label"].toString(), spec["kind"].toString(), "Add saved node " + title);
-        connect(button, &QPushButton::clicked, this, [this, design] {
-            auto node = design;
-            const auto point = m_addAt.value_or(m_canvas->centerInGraph()).toPoint() - QPoint(95, 70);
+            node = *configured;
+        } else {
             node["id"] = BlueprintPreview::id();
-            node["x"] = point.x();
-            node["y"] = point.y();
-            addNode(node);
-            m_addAt.reset();
-        });
-        button->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(button, &QWidget::customContextMenuRequested, this, [this, button, entry](const QPoint &position) {
-            QMenu menu(m_canvasPanel);
-            menu.addAction("Remove from node library…", this, [this, entry] {
-                if (!Ui::confirmRemoval(m_canvasPanel, "Remove saved node",
-                        QString("Remove “%1” from the node library?").arg(entry["name"].toString()), "Remove")) return;
-                if (!m_preview->removeNodeTemplate(entry["id"].toString()))
-                    Ui::showNotice(m_canvasPanel, "Saved nodes", "The saved node could not be removed.");
-            });
-            menu.exec(button->mapToGlobal(position));
-        });
-    }
-    m_paletteEntries->addStretch();
+        }
+        const auto size = BlueprintCanvas::nodeRect(node).size();
+        const auto point = (position.value_or(m_canvas->centerInGraph()) - QPointF(size.width(), size.height()) / 2).toPoint();
+        node["x"] = point.x();
+        node["y"] = point.y();
+        addNode(node);
+    });
+    dialog->setFixedWidth(width);
+    dialog->resize(width, dialog->sizeHint().height());
+    dialog->open();
 }
 
 void BlueprintPanel::configureNode(const QString &id) {
@@ -1235,41 +1465,28 @@ void BlueprintPanel::saveNodeTemplate(const QString &id) {
         Ui::showNotice(m_canvasPanel, "Saved nodes", "The node could not be saved.");
         return;
     }
-    showNodePalette(true);
-}
-
-void BlueprintPanel::showNodePalette(bool open, std::optional<QPointF> position) {
-    m_addAt = position;
-    m_palette->setVisible(open);
-    m_emptyAdd->setVisible(!open);
-    m_addNode->setChecked(open);
-    m_addNode->setVisible(open || !m_graph["nodes"].toArray().isEmpty());
-    if (open) {
-        if (auto *first = m_palette->findChild<QPushButton *>("blueprintPaletteItem")) first->setFocus();
-    } else if (m_addNode->isVisible()) {
-        m_addNode->setFocus();
-    }
 }
 
 void BlueprintPanel::addNode(const QJsonObject &source) {
     auto graph = m_graph;
     auto nodes = graph["nodes"].toArray();
     auto node = source;
-    const QPoint start(node["x"].toInt(), node["y"].toInt());
-    // Place the node near the requested location and keep its ports clear of the adjacent cards.
-    QPoint position = start;
-    for (int slot = 0; slot <= nodes.size(); ++slot) {
-        position = start + QPoint((slot % 3) * 219, (slot / 3) * 174);
-        bool occupied = false;
-        for (const auto &value : nodes) {
-            const auto other = value.toObject();
-            occupied |= qAbs(other["x"].toInt() - position.x()) < 196 &&
-                        qAbs(other["y"].toInt() - position.y()) < 162;
-        }
-        if (!occupied) break;
+    auto bounds = BlueprintCanvas::nodeRect(node);
+    const auto start = bounds.topLeft();
+    qreal rowHeight = bounds.height();
+    QList<QRectF> occupied;
+    for (const auto &value : nodes) {
+        const auto box = BlueprintCanvas::nodeRect(value.toObject());
+        rowHeight = qMax(rowHeight, box.height());
+        occupied.append(box.adjusted(-18, -18, 18, 18));
     }
-    node["x"] = position.x();
-    node["y"] = position.y();
+    for (int slot = 1; std::any_of(occupied.cbegin(), occupied.cend(), [&](const auto &box) {
+        return box.intersects(bounds);
+    }); ++slot) {
+        bounds.moveTopLeft(start + QPointF((slot % 3) * (bounds.width() + 28), (slot / 3) * (rowHeight + 32)));
+    }
+    node["x"] = qRound(bounds.x());
+    node["y"] = qRound(bounds.y());
     nodes.append(node);
     graph["nodes"] = nodes;
     const auto previous = m_selected;
@@ -1318,7 +1535,7 @@ void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPositio
     const auto node = findById(m_graph["nodes"].toArray(), id);
     QMenu menu(m_canvasPanel);
     if (node.isEmpty()) {
-        menu.addAction("Add node…", this, [this, graphPosition] { showNodePalette(true, graphPosition); });
+        menu.addAction("Add node…", this, [this, graphPosition] { openNodePicker(graphPosition); });
         menu.addAction("Fit canvas", m_canvas, &BlueprintCanvas::fit);
         menu.exec(screenPosition);
         return;
@@ -1502,6 +1719,7 @@ void BlueprintPanel::editLiveBinding() {
     auto node = findById(m_graph["nodes"].toArray(), m_selected);
     if (node.isEmpty()) return;
     const bool reasoning = node["kind"] == "reasoning";
+    const auto linked = adapterSource(m_graph, node);
     SettingsDetailDialog dialog(this);
     dialog.setWindowTitle(reasoning ? "Reasoning checkpoint" : "Model & adapter");
     auto *body = new QVBoxLayout(&dialog);
@@ -1513,10 +1731,10 @@ void BlueprintPanel::editLiveBinding() {
         combo->setMinimumContentsLength(22);
     }
     Surface::field(body, "Base checkpoint", models);
-    Surface::field(body, "Compatible LoRA adapter", adapters);
+    Surface::field(body, "Direct LoRA adapter", adapters);
     auto *note = wrapped({});
     body->addWidget(note);
-    auto *budget = new QSpinBox;
+    auto *budget = new SpinBox;
     budget->setRange(1, 32768);
     budget->setValue(node["maxTokens"].toInt(reasoning ? 1024 : 256));
     Surface::field(body, "Maximum output tokens", budget);
@@ -1544,7 +1762,7 @@ void BlueprintPanel::editLiveBinding() {
             return;
         }
         note->setText("Checking this checkpoint…");
-        m_preview->checkpoint(model, [guard = QPointer(&dialog), models, adapters, note, budget, save, reasoning, node, model]
+        m_preview->checkpoint(model, [guard = QPointer(&dialog), models, adapters, note, budget, save, reasoning, node, model, linked]
             (const auto &info, const auto &error) {
             if (!guard || models->currentData().toString() != model) return;
             if (!error.isEmpty()) { note->setText(error); return; }
@@ -1553,12 +1771,14 @@ void BlueprintPanel::editLiveBinding() {
             const int context = info["context_tokens"].toInt();
             note->setText(QString("%1 context tokens%2").arg(context).arg(supported ? " · Explicit thinking available" : ""));
             budget->setMaximum(qBound(1, context - 1, 32768));
+            adapters->clear();
+            adapters->addItem("No adapter", "");
             for (const auto &value : info["adapters"].toArray()) {
                 const auto adapter = value.toObject();
                 adapters->addItem(adapter["name"].toString(), adapter["id"].toString());
             }
             adapters->setCurrentIndex(qMax(0, adapters->findData(node["adapter"].toString())));
-            adapters->setEnabled(true);
+            adapters->setEnabled(linked.isEmpty());
             save->setEnabled(true);
         });
     };
@@ -1672,13 +1892,10 @@ void BlueprintPanel::liveTraining() {
     examples->setTabChangesFocus(true);
     examples->setPlaceholderText("[{\"inputs\": {\"port\": \"value\"}, \"outputs\": {\"port\": \"answer\"}}]");
     Surface::field(body, "Typed examples (JSON array)", examples);
-    const auto sample = m_preview->orderExamples(node);
-    if (!sample.isEmpty()) {
-        auto *use = action("Use order training examples", false, true);
-        body->addWidget(use, 0, Qt::AlignLeft);
-        connect(use, &Button::clicked, examples, [examples, sample] { examples->setPlainText(BlueprintPreview::jsonText(sample)); });
-    }
     auto *note = wrapped("Provide examples matching the named input and output ports. Follow queued jobs in Training.");
+    const bool usesAdapterNode = !adapterSource(graph, findById(graph["nodes"].toArray(), node)).isEmpty();
+    if (usesAdapterNode)
+        note->setText("Select completed adapter weights on the connected Adapter node.");
     body->addWidget(note);
     auto *buttons = dialogButtons(&dialog, body, "Queue training");
     const auto pending = [buttons, bind](bool busy) {
@@ -1711,8 +1928,8 @@ void BlueprintPanel::liveTraining() {
             jobs->setCurrentIndex(qMax(0, jobs->findData(selected)));
         });
     };
-    connect(jobs, &ComboBox::currentIndexChanged, &dialog, [jobs, bind] {
-        bind->setEnabled(!bind->property("busy").toBool() && jobs->currentData(Qt::UserRole + 1).toBool());
+    connect(jobs, &ComboBox::currentIndexChanged, &dialog, [jobs, bind, usesAdapterNode] {
+        bind->setEnabled(!usesAdapterNode && !bind->property("busy").toBool() && jobs->currentData(Qt::UserRole + 1).toBool());
     });
     connect(timer, &QTimer::timeout, &dialog, refresh);
     timer->start(2500);
@@ -1722,10 +1939,10 @@ void BlueprintPanel::liveTraining() {
         if (!parsed.isArray() || parsed.array().isEmpty()) { note->setText("Enter at least one typed example as a JSON array."); return; }
         pending(true);
         m_preview->train(graph, node, parsed.array(), QJsonObject{{"name", name->text().trimmed()}, {"target_modules", "all-linear"}},
-            [guard, note, jobs, bind, refresh, pending](const auto &job, const auto &error) {
+            [guard, note, jobs, bind, refresh, pending, usesAdapterNode](const auto &job, const auto &error) {
                 if (!guard) return;
                 pending(false);
-                bind->setEnabled(jobs->currentData(Qt::UserRole + 1).toBool());
+                bind->setEnabled(!usesAdapterNode && jobs->currentData(Qt::UserRole + 1).toBool());
                 note->setText(error.isEmpty() ? "Queued " + job["name"].toString() + ". Select the job when it is done." : error);
                 refresh();
             });
@@ -1762,7 +1979,7 @@ void BlueprintPanel::saveTrainingRecipe() {
     auto *name = new QLineEdit(existing["name"].toString(BlueprintPreview::operationId(node) == "selector" ? "new-order-selector" : "new-order-fields"));
     name->setMaxLength(48);
     auto *dataset = new ComboBox;
-    dataset->addItems({"Order intake examples · fixture", "Small smoke-test dataset · fixture"});
+    dataset->addItems({"Training examples · fixture", "Small smoke-test dataset · fixture"});
     if (!existing.isEmpty()) dataset->setCurrentText(existing["dataset"].toString());
     Surface::field(body, "Adapter name", name);
     Surface::field(body, "Dataset", dataset);
@@ -1924,19 +2141,7 @@ void BlueprintPanel::refreshRunOptions() {
     const bool nodeOnly = !target.isEmpty();
     if (m_preview->live()) {
         const auto contracts = BlueprintPreview::inputContracts(m_graph, target);
-        const auto samples = m_preview->orderSamples();
-        const bool order = target.isEmpty() && contracts.size() == 1 && contracts.contains("message")
-            && !findById(m_graph["nodes"].toArray(), "price").isEmpty() && !samples.isEmpty();
-        if (order && m_sample->count() != samples.size() + 1) {
-            const QSignalBlocker blocked(m_sample);
-            m_sample->clear();
-            m_sample->addItem("Edited input");
-            for (int i = 0; i < samples.size(); ++i) {
-                const auto inputs = samples.at(i).toObject()["request"].toObject()["inputs"].toObject();
-                m_sample->addItem(QString("Order example %1").arg(i + 1), inputs["message"].toString());
-            }
-        }
-        m_sampleField->setVisible(order);
+        m_sampleField->hide();
         m_scenarioField->hide();
         m_input->setVisible(!contracts.isEmpty());
         m_input->setPlaceholderText(inputHint(contracts, nodeOnly));
@@ -2003,7 +2208,7 @@ void BlueprintPanel::startRun() {
         m_starting = true;
         m_start->setEnabled(false);
         const auto nav = m_navigation;
-        m_preview->runLive(m_graph, input, target, false, false,
+        m_preview->runLive(m_graph, input, target, false,
             [self = QPointer(this), nav](const auto &run, const auto &error) {
                 if (!self) return;
                 self->m_starting = false;
@@ -2067,6 +2272,7 @@ void BlueprintPanel::showRun(const QString &id, const QJsonObject &run) {
             : "This run was recorded before its blueprint was deleted.");
         m_publish->hide();
         m_reload->hide();
+        m_openInConversation->hide();
         m_tabs->setTabEnabled(0, false);
         m_tabs->setTabEnabled(2, false);
         m_runSetup->hide();
@@ -2149,7 +2355,8 @@ void BlueprintPanel::refreshRun() {
     }
     const auto elapsed = run.contains("ended") ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger())
                                                : QString("In progress");
-    const auto source = run["source"].toString();
+    auto source = run["source"].toString();
+    if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
     const auto revision = run["revision"].toInt() > 0 ? QString(" · Rev %1").arg(run["revision"].toInt()) : QString{};
     auto *summary = new QHBoxLayout;
     summary->setContentsMargins(0, 4, 0, 4);
@@ -2341,333 +2548,526 @@ void BlueprintPanel::changeEvent(QEvent *event) {
     });
 }
 
-BlueprintChatPanel::BlueprintChatPanel(BlueprintPreview *preview, QWidget *parent)
-    : QWidget(parent), m_preview(preview), m_dark(Theme::isDark()) {
-    setObjectName("blueprintChat");
-    setAttribute(Qt::WA_StyledBackground, true);
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(12, 0, 12, 8);
+namespace {
+bool isToolTask(const QJsonObject &run) {
+    return run["toolChat"].toBool(!run["details"].toBool() && run["name"] == "Tool chat");
+}
+
+QLabel *resultText(const QJsonValue &value) {
+    auto *text = wrapped(value.isString() ? value.toString() : BlueprintPreview::jsonText(value),
+        value.isString() ? "blueprintMessage" : "blueprintCode");
+    text->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    return text;
+}
+
+void addChatBubble(QVBoxLayout *layout, ChatBubble::Role role, const QString &text) {
+    auto *bubble = new ChatBubble(role, text, layout->parentWidget());
+    bubble->setWidthReference(layout->parentWidget());
+    layout->addWidget(bubble, 0, role == ChatBubble::User ? Qt::AlignRight : Qt::AlignLeft);
+}
+
+QJsonArray taskMessages(const QJsonObject &previous, const QString &input) {
+    auto messages = previous["messages"].toArray();
+    if (!messages.isEmpty()) {
+        if (previous["status"] == "passed" && previous["result"].isString())
+            messages.append(QJsonObject{{"role", "assistant"}, {"content", previous["result"]}});
+        else
+            messages.removeLast();
+    }
+    qsizetype length = input.size();
+    for (const auto &message : messages) length += message.toObject()["content"].toString().size();
+    while (!messages.isEmpty() && (messages.size() >= 64 || length > 128000))
+        length -= messages.takeAt(0).toObject()["content"].toString().size();
+    while (!messages.isEmpty() && messages.first().toObject()["role"] != "user") messages.removeFirst();
+    messages.append(QJsonObject{{"role", "user"}, {"content", input}});
+    return messages;
+}
+}
+
+ConversationRunPanel::ConversationRunPanel(BlueprintPreview *preview, Mode mode, QWidget *parent)
+    : QWidget(parent), m_preview(preview), m_mode(mode), m_dark(Theme::isDark()) {
+    const bool tool = mode == Mode::Tool;
+    setObjectName(tool ? "conversationToolMode" : "conversationBlueprintMode");
+    auto *outer = new QHBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto *column = new QWidget(this);
+    column->setMaximumWidth(840);
+    outer->addStretch();
+    outer->addWidget(column, 1);
+    outer->addStretch();
+    auto *layout = new QVBoxLayout(column);
+    layout->setContentsMargins(12, 4, 12, 4);
+    layout->setSpacing(10);
+
     auto *header = new QHBoxLayout;
-    header->addWidget(label("Local chat", "blueprintTitle"), 1);
-    if (!m_preview->live()) header->addWidget(label("Fixture data", "cardMeta"));
+    if (tool) {
+        header->addWidget(label("Task conversation", "headingLabel"), 1);
+        auto *history = action("Task history", false, true);
+        m_newTask = action("New task");
+        m_newTask->setIcon(Theme::coloredIcon("plus", QColor(Theme::textSecondary()), 16));
+        m_newTask->setProperty("themeIcon", "plus");
+        header->addWidget(history);
+        header->addWidget(m_newTask);
+        connect(history, &Button::clicked, this, &ConversationRunPanel::openTaskHistory);
+        connect(this, &ConversationRunPanel::activityChanged, history, [this, history] {
+            history->setEnabled(!hasActiveTask());
+        });
+        connect(m_newTask, &Button::clicked, this, [this] {
+            m_taskRuns.clear();
+            m_input->clear();
+            m_error->hide();
+            rebuildTranscript();
+            updateActions();
+            m_input->setFocus();
+        });
+    } else {
+        header->addWidget(label("Workflow", "headingLabel"));
+        m_blueprint = new ComboBox;
+        m_blueprint->setAccessibleName("Saved blueprint");
+        m_blueprint->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_blueprint->setMinimumContentsLength(16);
+        header->addWidget(m_blueprint, 1);
+        auto *library = action("Open Blueprints");
+        header->addWidget(library);
+        connect(library, &Button::clicked, this, &ConversationRunPanel::libraryRequested);
+        connect(m_blueprint, &ComboBox::currentIndexChanged, this, [this] {
+            m_preferredBlueprint.clear();
+            m_error->hide();
+            refreshComposer();
+        });
+        connect(m_preview, &BlueprintPreview::savedChanged, this, &ConversationRunPanel::refreshPicker);
+    }
     layout->addLayout(header);
     layout->addWidget(rule());
+
     m_scroll = scroller(&m_messages);
-    m_messages->setContentsMargins(8, 8, 12, 8);
-    m_messages->setSpacing(9);
+    m_messages->setContentsMargins(0, 8, 6, 8);
+    m_messages->setSpacing(12);
     layout->addWidget(m_scroll, 1);
     auto *composer = Surface::card(this);
-    composer->parentWidget()->setObjectName("blueprintChatComposer");
+    composer->parentWidget()->setObjectName(tool ? "toolTaskComposer" : "workflowComposer");
     m_input = new QPlainTextEdit;
-    m_input->setObjectName("blueprintChatInput");
-    m_input->setAccessibleName("Blueprint or tool message");
+    m_input->setObjectName(tool ? "toolTaskInput" : "workflowInput");
+    m_input->setAccessibleName(tool ? "Task message" : "Workflow inputs");
     m_input->setTabChangesFocus(true);
-    m_input->setMaximumHeight(78);
+    m_input->setFixedHeight(tool ? 74 : 86);
+    if (tool) m_input->installEventFilter(this);
     composer->addWidget(m_input);
-    m_inputHint = wrapped({});
-    m_inputHint->hide();
-    composer->addWidget(m_inputHint);
     m_error = wrapped({}, "blueprintError");
     m_error->hide();
     composer->addWidget(m_error);
     auto *actions = new QHBoxLayout;
-    m_mode = new ComboBox;
-    m_mode->setAccessibleName("Chat mode");
-    m_mode->addItems({"Chat", "Blueprint", "Tool mode"});
-    m_blueprint = new ComboBox;
-    m_blueprint->setAccessibleName("Saved blueprint");
-    m_blueprint->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    m_blueprint->setMinimumContentsLength(16);
-    auto *toolNote = label("Actions require approval", "cardMeta");
-    m_send = action("Send ↑", true);
-    actions->addWidget(m_mode);
-    actions->addWidget(m_blueprint);
-    actions->addWidget(toolNote);
-    actions->addStretch();
+    m_inputHint = wrapped({});
+    actions->addWidget(m_inputHint, 1);
+    if (tool) {
+        m_stop = action("Stop");
+        m_stop->hide();
+        actions->addWidget(m_stop);
+        connect(m_stop, &Button::clicked, this, [this] {
+            if (!m_taskRuns.isEmpty()) m_preview->cancel(m_taskRuns.last());
+        });
+    }
+    m_send = action(tool ? "Send ↑" : "Run workflow", true);
     actions->addWidget(m_send);
     composer->addLayout(actions);
     layout->addWidget(composer->parentWidget());
-    connect(m_send, &Button::clicked, this, &BlueprintChatPanel::send);
-    auto *sendKey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), m_input);
-    sendKey->setContext(Qt::WidgetShortcut);
-    connect(sendKey, &QShortcut::activated, this, &BlueprintChatPanel::send);
-    connect(m_mode, &ComboBox::currentIndexChanged, this, [this, toolNote](int index) {
-        if (index == 0) {
-            emit ordinaryChatRequested();
-            return;
+
+    connect(m_send, &Button::clicked, this, &ConversationRunPanel::send);
+    connect(m_input, &QPlainTextEdit::textChanged, this, &ConversationRunPanel::updateActions);
+    if (!tool) {
+        auto *sendKey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), m_input);
+        sendKey->setContext(Qt::WidgetShortcut);
+        connect(sendKey, &QShortcut::activated, this, &ConversationRunPanel::send);
+    }
+    connect(m_preview, &BlueprintPreview::runChanged, this, [this, tool](const QString &id) {
+        const auto run = m_preview->run(id);
+        if (run["source"] != "Local chat" || tool != isToolTask(run)) return;
+        if (tool && m_taskRuns.isEmpty() && !m_starting && running(run)) m_taskRuns.append(id);
+        if (!tool || m_taskRuns.contains(id)) {
+            rebuildTranscript();
+            updateActions();
+            if (tool) emit activityChanged();
         }
-        m_error->hide();
-        m_blueprint->setVisible(index == 1);
-        toolNote->setVisible(index == 2);
-        m_input->setPlaceholderText(index == 1 ? "Enter an order message…" : "Message the local model…");
-        refreshComposer();
     });
-    connect(m_preview, &BlueprintPreview::savedChanged, this, &BlueprintChatPanel::refreshPicker);
-    connect(m_preview, &BlueprintPreview::runChanged, this, [this](const QString &id) {
-        if (m_preview->run(id)["source"].toString() == "Local chat") rebuildTranscript();
-    });
-    connect(m_blueprint, &ComboBox::currentIndexChanged, this, &BlueprintChatPanel::refreshComposer);
-    connect(m_preview, &BlueprintPreview::serviceChanged, this, [this] {
-        refreshComposer();
+    connect(m_preview, &BlueprintPreview::serviceChanged, this, [this, tool] {
+        const bool connected = m_preview->connected();
+        if (connected != m_connected || !tool) refreshComposer();
+        m_connected = connected;
         rebuildTranscript();
+        updateActions();
     });
-    refreshPicker();
+    m_connected = m_preview->connected();
+    if (tool) refreshComposer();
+    else refreshPicker();
     rebuildTranscript();
 }
 
-void BlueprintChatPanel::setMode(int index) {
-    m_mode->setCurrentIndex(index);
-    m_input->setFocus();
+bool ConversationRunPanel::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_input && event->type() == QEvent::KeyPress) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+            && !(key->modifiers() & Qt::ShiftModifier)
+            && (QSettings().value("chat/sendKey", "enter").toString() != "modified"
+                || (key->modifiers() & Qt::ControlModifier))) {
+            if (!key->isAutoRepeat()) send();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
-void BlueprintChatPanel::refreshPicker() {
-    const auto selected = m_blueprint->currentData().toString();
+void ConversationRunPanel::activate(const QString &blueprint) {
+    if (m_mode == Mode::Blueprint) {
+        if (!blueprint.isEmpty()) m_preferredBlueprint = blueprint;
+        refreshPicker();
+        m_preview->refreshSaved();
+        m_blueprint->setFocus();
+    } else {
+        refreshComposer();
+        m_input->setFocus();
+    }
+}
+
+void ConversationRunPanel::modelChanged(bool changing) {
+    m_modelChanging = changing;
+    if (isVisible()) refreshComposer();
+}
+
+bool ConversationRunPanel::hasActiveTask() const {
+    return m_mode == Mode::Tool && (m_starting ||
+        (!m_taskRuns.isEmpty() && running(m_preview->run(m_taskRuns.last()))));
+}
+
+void ConversationRunPanel::refreshPicker() {
+    if (!m_blueprint) return;
+    const auto selected = m_preferredBlueprint.isEmpty() ? m_blueprint->currentData().toString() : m_preferredBlueprint;
+    const auto choices = m_preview->live() ? m_preview->published() : m_preview->saved();
     {
         const QSignalBlocker block(m_blueprint);
         m_blueprint->clear();
-        m_blueprint->addItem("Choose a blueprint");
-        const auto choices = m_preview->live() ? m_preview->published() : m_preview->saved();
+        m_blueprint->addItem(choices.isEmpty() ? "No saved revisions" : "Choose a blueprint");
         for (const auto &value : choices) {
             const auto graph = value.toObject();
-            if (graph["id"].toString() == "order-intake") continue;
             const auto revision = graph["revision"].toInteger();
             const auto name = graph["name"].toString();
-            m_blueprint->addItem(m_preview->live() ? QString("%1 · Rev %2").arg(name).arg(revision) : name,
-                graph["id"].toString());
+            m_blueprint->addItem(QString("%1 · Rev %2").arg(name).arg(revision), graph["id"].toString());
             m_blueprint->setItemData(m_blueprint->count() - 1, revision, Qt::UserRole + 1);
         }
-        if (!m_preview->live()) m_blueprint->addItem("Order intake example", "order-intake");
-        m_blueprint->setCurrentIndex(qMax(0, m_blueprint->findData(selected)));
+        const int match = m_blueprint->findData(selected);
+        if (match > 0) m_preferredBlueprint.clear();
+        m_blueprint->setCurrentIndex(match > 0 ? match : choices.size() == 1 && m_preferredBlueprint.isEmpty() ? 1 : 0);
+        m_blueprint->setEnabled(!choices.isEmpty());
+        m_blueprint->setToolTip(m_blueprint->currentText());
     }
-    if (m_preview->live() && m_mode->currentIndex() == 1) refreshComposer();
+    refreshComposer();
 }
 
-void BlueprintChatPanel::refreshComposer() {
-    if (!m_preview->live() || m_mode->currentIndex() == 0) return;
+void ConversationRunPanel::refreshComposer() {
     const auto request = ++m_selection;
-    m_send->setEnabled(false);
-    m_inputHint->show();
-    if (!m_preview->connected()) {
+    m_readyToSend = false;
+    const bool tool = m_mode == Mode::Tool;
+    if (m_preview->live() && !m_preview->connected()) {
+        m_chatGraph = {};
         m_inputHint->setText("Waiting for the local service.");
+        updateActions();
         return;
     }
-    if (m_mode->currentIndex() == 1) {
-        m_chatGraph = {};
+    if (!tool) {
         const auto id = m_blueprint->currentData().toString();
-        if (id.isEmpty()) {
-            m_input->show();
-            m_input->setPlaceholderText("Choose a saved blueprint…");
-            m_inputHint->setText("Save a revision in Blueprints to run it here.");
+        const auto revision = m_blueprint->currentData(Qt::UserRole + 1).toLongLong();
+        if (!id.isEmpty() && m_chatGraph["id"] == id && m_chatGraph["revision"].toInteger() == revision) {
+            m_readyToSend = true;
+            updateActions();
             return;
         }
-        m_input->show();
-        m_input->setPlaceholderText("Enter workflow inputs…");
-        m_inputHint->setText("Reading the saved revision…");
-        const auto revision = m_blueprint->currentData(Qt::UserRole + 1).toLongLong();
-        m_preview->getBlueprint(id, true, [self = QPointer(this), request](const auto &graph, const auto &error) {
-            if (!self || self->m_selection != request || self->m_mode->currentIndex() != 1) return;
+        m_chatGraph = {};
+        m_blueprint->setToolTip(m_blueprint->currentText());
+        m_input->hide();
+        updateActions();
+        if (id.isEmpty()) {
+            QString hint = "Choose a saved workflow to see its inputs.";
+            if (!m_preview->serviceError().isEmpty()) hint = m_preview->serviceError();
+            else if (m_blueprint->count() == 1) hint = m_preview->saved().isEmpty()
+                ? "Create a workflow in Blueprints, then choose Save revision."
+                : "Open your draft in Blueprints and choose Save revision to make it available here.";
+            m_inputHint->setText(hint);
+            return;
+        }
+        const auto apply = [self = QPointer(this), request](const QJsonObject &graph, const QString &error) {
+            if (!self || self->m_selection != request) return;
             self->m_chatGraph = graph;
             const auto contracts = BlueprintPreview::inputContracts(graph, {});
-            self->m_input->setVisible(!contracts.isEmpty() || !error.isEmpty());
+            self->m_input->setVisible(error.isEmpty() && !contracts.isEmpty());
+            const bool text = contracts.size() == 1 && contracts.begin().value().toObject()["type"] == "string";
+            self->m_input->setPlaceholderText(text ? "Enter text…" : "Enter JSON…");
             self->m_inputHint->setText(error.isEmpty() ? inputHint(contracts, false) : error);
-            self->m_send->setEnabled(error.isEmpty() && !self->m_starting);
-        }, revision);
+            self->m_readyToSend = error.isEmpty();
+            self->updateActions();
+        };
+        if (!m_preview->live()) {
+            apply(m_preview->blueprint(id), {});
+            return;
+        }
+        m_inputHint->setText("Reading the saved revision…");
+        m_preview->getBlueprint(id, true, apply, revision);
         return;
     }
-    m_input->show();
-    m_inputHint->setText("Checking the loaded model…");
-    m_toolAvailable = false;
+    updateActions();
+    if (m_modelChanging) {
+        m_inputHint->setText("Updating the loaded model…");
+        return;
+    }
+    if (!m_preview->live()) {
+        m_inputHint->setText("Fixture data · Actions require approval");
+        m_readyToSend = true;
+        updateActions();
+        return;
+    }
+    m_inputHint->setText("Checking the local model and Pi harness…");
     m_preview->toolCapability([self = QPointer(this), request](const auto &capability, const auto &error) {
-        if (!self || self->m_selection != request || self->m_mode->currentIndex() != 2) return;
-        self->m_toolAvailable = error.isEmpty();
+        if (!self || self->m_selection != request) return;
+        self->m_readyToSend = error.isEmpty();
         self->m_inputHint->setText(error.isEmpty()
-            ? "Model: " + capability["model"].toString() + " · External actions need approval."
-            : error + " Switch to Chat to load a supported local model.");
-        self->m_send->setEnabled(self->m_toolAvailable && !self->m_starting);
+            ? capability["model"].toString() + " · Pi · Actions require approval"
+            : error);
+        self->updateActions();
     });
 }
 
-void BlueprintChatPanel::send() {
-    const auto text = m_input->toPlainText().trimmed();
-    const bool tool = m_mode->currentIndex() == 2;
-    if (m_preview->live()) {
-        if (!m_send->isEnabled() || m_starting || (tool && text.isEmpty())) return;
-        QString error;
-        const auto original = m_input->toPlainText();
-        const auto graph = m_chatGraph;
-        const auto contracts = BlueprintPreview::inputContracts(graph, {});
-        const QJsonValue input = tool ? QJsonValue(original) : QJsonValue(collectInput(contracts, original, &error));
-        m_error->setText(error);
-        m_error->setVisible(!error.isEmpty());
-        if (!error.isEmpty()) return;
-        m_starting = true;
-        m_send->setEnabled(false);
-        const auto selection = m_selection;
-        m_preview->runLive(graph, input, {}, true, tool, [self = QPointer(this), original, selection, tool]
-            (const auto &run, const auto &error) {
-            if (!self) return;
-            self->m_starting = false;
-            if (self->m_selection != selection) { self->refreshComposer(); return; }
-            if (tool && !error.isEmpty()) self->refreshComposer();
-            else self->m_send->setEnabled(self->m_preview->connected());
-            self->m_error->setText(error);
-            self->m_error->setVisible(!error.isEmpty());
-            if (run.isEmpty()) return;
-            if (self->m_input->toPlainText() == original) self->m_input->clear();
-            auto *bar = self->m_scroll->verticalScrollBar();
-            bar->setValue(bar->maximum());
-        });
-        return;
-    }
-    if (text.isEmpty()) return;
-    if (!tool && m_blueprint->currentData().toString().isEmpty()) {
-        m_error->setText("Choose a saved blueprint.");
-        m_error->show();
-        m_blueprint->setFocus();
-        return;
-    }
-    QString error;
-    const auto graph = tool ? QJsonObject{} : m_preview->blueprint(m_blueprint->currentData().toString());
-    const QString scenario = !tool ? "normal"
-        : text.contains("version", Qt::CaseInsensitive) || text.contains("command", Qt::CaseInsensitive) ? "command" : "approval";
-    m_preview->start(graph, text, {}, scenario, "Local chat", &error);
-    m_error->setText(error);
-    m_error->setVisible(!error.isEmpty());
-    if (error.isEmpty()) {
-        m_input->clear();
-        auto *bar = m_scroll->verticalScrollBar();
-        bar->setValue(bar->maximum());
+void ConversationRunPanel::updateActions() {
+    const bool text = !m_input->toPlainText().trimmed().isEmpty();
+    const bool tool = m_mode == Mode::Tool;
+    const bool active = hasActiveTask();
+    const bool needsInput = tool || !BlueprintPreview::inputContracts(m_chatGraph, {}).isEmpty();
+    m_send->setEnabled(m_readyToSend && !m_starting && !active && (!needsInput || text));
+    if (tool) {
+        m_stop->setVisible(active && !m_starting);
+        m_stop->setEnabled(!m_preview->live() || m_preview->connected());
+        m_newTask->setEnabled(!active && (!m_taskRuns.isEmpty() || text));
+        m_input->setPlaceholderText(m_taskRuns.isEmpty() ? "Describe a task for your local model…" : "Ask a follow-up…");
     }
 }
 
-void BlueprintChatPanel::rebuildTranscript() {
-    auto *scrollbar = m_scroll->verticalScrollBar();
-    const bool follow = scrollbar->value() >= scrollbar->maximum() - 20;
+void ConversationRunPanel::send() {
+    if (!m_send->isEnabled()) return;
+    const bool tool = m_mode == Mode::Tool;
+    const auto original = m_input->toPlainText();
+    QString error;
+    m_error->hide();
+    if (!m_preview->live()) {
+        const auto scenario = !tool ? "normal" :
+            original.contains("version", Qt::CaseInsensitive) ? "command" : "approval";
+        const auto id = m_preview->start(m_chatGraph, original, {}, scenario, "Local chat", &error);
+        if (tool && !id.isEmpty() && !m_taskRuns.contains(id)) m_taskRuns.append(id);
+        if (error.isEmpty()) m_input->clear();
+        m_error->setText(error);
+        m_error->setVisible(!error.isEmpty());
+        rebuildTranscript();
+        updateActions();
+        return;
+    }
+
+    const auto input = tool ? QJsonObject{} :
+        collectInput(BlueprintPreview::inputContracts(m_chatGraph, {}), original, &error);
+    if (tool && original.size() > 128000) error = "A task message can contain up to 128,000 characters.";
+    if (!error.isEmpty()) {
+        m_error->setText(error);
+        m_error->show();
+        return;
+    }
+
+    m_starting = true;
+    updateActions();
+    if (tool) emit activityChanged();
+    const auto done = [self = QPointer(this), original, tool](const auto &run, const auto &error) {
+        if (!self) return;
+        self->m_starting = false;
+        if (tool && !run.isEmpty()) self->m_taskRuns.append(run["id"].toString());
+        if (error.isEmpty() && self->m_input->toPlainText() == original) self->m_input->clear();
+        self->m_error->setText(error);
+        self->m_error->setVisible(!error.isEmpty());
+        self->rebuildTranscript();
+        self->updateActions();
+        if (tool) emit self->activityChanged();
+        if (!run.isEmpty()) QTimer::singleShot(0, self, [self] {
+            auto *bar = self->m_scroll->verticalScrollBar();
+            bar->setValue(bar->maximum());
+        });
+    };
+    if (tool) {
+        const auto previous = m_taskRuns.isEmpty() ? QJsonObject{} : m_preview->run(m_taskRuns.last());
+        m_preview->runToolTask(taskMessages(previous, original), done);
+    } else {
+        m_preview->runLive(m_chatGraph, input, {}, true, done);
+    }
+}
+
+void ConversationRunPanel::openTaskHistory() {
+    SettingsDetailDialog dialog(this);
+    dialog.setWindowTitle("Task history");
+    auto *body = new QVBoxLayout(&dialog);
+    titleBar(body, dialog.windowTitle());
+    auto *items = new QListWidget;
+    items->setAccessibleName("Recent tool tasks");
+    const auto runs = m_preview->chatRuns();
+    for (auto it = runs.constEnd(); it != runs.constBegin();) {
+        const auto run = (*--it).toObject();
+        if (!isToolTask(run)) continue;
+        const auto prompt = run["input"].toString().simplified();
+        const auto summary = prompt.isEmpty() ? run["name"].toString() : prompt.left(85);
+        auto *item = new QListWidgetItem(summary + " · " + BlueprintPreview::statusLabel(run["status"].toString()), items);
+        item->setData(Qt::UserRole, run["id"]);
+    }
+    if (!items->count()) body->addWidget(wrapped("Your recent tasks will appear here."));
+    body->addWidget(items);
+    items->setCurrentRow(0);
+    const auto buttons = dialogButtons(&dialog, body, "Open task");
+    for (auto *button : buttons->buttons())
+        if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) button->setEnabled(items->count() > 0);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(items, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
+    dialog.resize(500, 340);
+    if (dialog.exec() != QDialog::Accepted || !items->currentItem()) return;
+    const auto id = items->currentItem()->data(Qt::UserRole).toString();
+    if (m_taskRuns.contains(id) && m_taskRuns.last() == id) return;
+    m_taskRuns = {id};
+    m_input->clear();
+    m_error->hide();
+    rebuildTranscript();
+    updateActions();
+    emit activityChanged();
+    if (m_preview->live() && !m_preview->run(id)["details"].toBool()) m_preview->loadRun(id);
+}
+
+void ConversationRunPanel::rebuildTranscript() {
+    auto *bar = m_scroll->verticalScrollBar();
+    const bool follow = bar->value() >= bar->maximum() - 20;
     const auto *focus = QApplication::focusWidget();
     const auto focusedApproval = focus ? focus->property("approvalFocus").toString() : QString{};
     clear(m_messages);
-    const auto runs = m_preview->chatRuns();
+    const bool tool = m_mode == Mode::Tool;
+    QJsonArray runs;
+    if (tool) {
+        for (const auto &id : std::as_const(m_taskRuns)) runs.append(m_preview->run(id));
+    } else {
+        for (const auto &value : m_preview->chatRuns())
+            if (!isToolTask(value.toObject())) runs.append(value);
+    }
     if (runs.isEmpty()) {
         m_messages->addStretch();
-        m_messages->addWidget(label("What are you working on?", "blueprintTitle"), 0, Qt::AlignHCenter);
-        if (m_preview->live()) {
-            m_messages->addWidget(wrapped("Choose a saved blueprint, or use Tool mode to ask the loaded local model."), 0, Qt::AlignHCenter);
-        } else {
-        auto *prompts = new QHBoxLayout;
-        prompts->addStretch();
-        auto *order = action("Try order intake");
-        auto *tool = action("Try a tool request");
-        prompts->addWidget(order);
-        prompts->addWidget(tool);
-        prompts->addStretch();
-        m_messages->addLayout(prompts);
-        connect(order, &Button::clicked, this, [this] {
-            setMode(1);
-            m_blueprint->setCurrentIndex(m_blueprint->findData("order-intake"));
-            m_input->setPlainText(sampleText(m_preview->fixtures()["samples"].toArray().first().toObject()));
-        });
-        connect(tool, &Button::clicked, this, [this] {
-            setMode(2);
-            m_input->setPlainText("Open the sample order preview.");
-        });
+        auto *title = wrapped(tool ? "What would you like to do?" : "Run a saved workflow", "blueprintTitle");
+        title->setAlignment(Qt::AlignCenter);
+        m_messages->addWidget(title);
+        auto *hint = wrapped(tool ? "Choose a local model and describe the task. You can review each action before it runs."
+            : "Choose a blueprint above to see its inputs. Results and tool approvals appear here.");
+        hint->setAlignment(Qt::AlignCenter);
+        m_messages->addWidget(hint);
+        m_messages->addStretch();
+        return;
+    }
+
+    if (tool) {
+        const auto first = runs.first().toObject()["messages"].toArray();
+        for (int index = 0; index + 1 < first.size(); ++index) {
+            const auto message = first.at(index).toObject();
+            if (message["role"] == "user" || message["role"] == "assistant")
+                addChatBubble(m_messages, message["role"] == "user" ? ChatBubble::User : ChatBubble::Assistant,
+                    message["content"].toString());
         }
     }
     for (const auto &value : runs) {
         const auto run = value.toObject();
-        if (!m_preview->live() || run["input"].isString()) {
-            auto *input = Surface::card(this, "You");
-            auto *message = wrapped(run["input"].toString(), "blueprintMessage");
-            message->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-            input->addWidget(message);
-            m_messages->addWidget(input->parentWidget());
-        }
-        m_messages->addWidget(label("Magnite", "cardMeta"));
-        auto *body = Surface::card(this);
-        auto *head = new QHBoxLayout;
-        head->addWidget(label(run["name"].toString(), "headingLabel"), 1);
         const auto status = run["status"].toString();
-        head->addWidget(statusLabel(status));
-        body->addLayout(head);
-        const auto steps = run["steps"].toArray();
-        if (running(run)) {
-            int count = 0;
-            for (const auto &step : steps) count += step.toObject()["status"].toString() == "passed";
-            auto *progress = new QProgressBar;
-            progress->setAccessibleName("Workflow progress");
-            progress->setRange(0, qMax(1, int(steps.size())));
-            progress->setValue(count);
-            body->addWidget(progress);
-            const auto cursor = run["cursor"].toInt(-1);
-            if (cursor >= 0 && cursor < steps.size())
-                body->addWidget(wrapped(steps.at(cursor).toObject()["name"].toString()));
-        } else if (status == "passed") {
-            if (m_preview->live()) {
-                const auto result = run["result"];
-                if (!result.isUndefined()) {
-                    auto *output = wrapped(result.isString() ? result.toString() : BlueprintPreview::jsonText(result),
-                        result.isString() ? "blueprintMessage" : "blueprintCode");
-                    output->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-                    body->addWidget(output);
-                }
-            } else {
-            bool displayed = false;
-            for (const auto &step : steps) {
-                const auto entry = step.toObject();
-                const auto operation = BlueprintPreview::operationId(entry);
-                if (operation == "output") {
-                    const auto port = entry["out"].toArray().first().toObject();
-                    body->addWidget(wrapped(m_preview->portLabel(port), "blueprintSection"));
-                    body->addWidget(wrapped(BlueprintPreview::jsonText(entry["output"]), "blueprintCode"));
-                    displayed = true;
-                    continue;
-                }
-                if (operation != "pricing") continue;
-                const auto output = entry["output"].toObject();
-                displayed = true;
-                body->addWidget(wrapped(QString("%1 × %2 to %3").arg(output["quantity"].toInt())
-                    .arg(output["item"].toString(), output["city"].toString()), "blueprintSection"));
-                body->addWidget(wrapped(QString("$%1 total · $%2 shipping").arg(output["total"].toDouble(), 0, 'f', 2)
-                    .arg(output["shipping"].toDouble(), 0, 'f', 2)));
+        const auto id = run["id"].toString();
+        QVBoxLayout *body = m_messages;
+        if (tool) {
+            if (run["input"].isString()) addChatBubble(body, ChatBubble::User, run["input"].toString());
+        } else {
+            body = Surface::card(this);
+            body->parentWidget()->setObjectName("conversationWorkflowRun");
+            auto *head = new QHBoxLayout;
+            head->addWidget(wrapped(run["name"].toString(), "headingLabel"), 1);
+            head->addWidget(label(QString("Rev %1").arg(run["revision"].toInteger()), "cardMeta"));
+            head->addWidget(statusLabel(status));
+            body->addLayout(head);
+            if (run["input"].isString()) {
+                body->addWidget(label("Submitted inputs", "cardMeta"));
+                const auto supplied = run["supplied"].toObject();
+                const auto single = supplied.size() == 1 ? supplied.begin().value() : QJsonValue{};
+                body->addWidget(resultText(supplied.isEmpty() || single.isString() ? run["input"] : run["supplied"]));
             }
-            if (!displayed && !steps.isEmpty() && run["decision"].isUndefined())
-                body->addWidget(wrapped(BlueprintPreview::jsonText(steps.last().toObject()["output"]), "blueprintCode"));
+        }
+
+        const auto steps = run["steps"].toArray();
+        const auto cursor = run["cursor"].toInt(-1);
+        const auto step = cursor >= 0 && cursor < steps.size() ? steps.at(cursor).toObject() : QJsonObject{};
+        if (running(run)) {
+            if (tool && status != "waiting") {
+                body->addWidget(label(status == "queued" ? "Task queued" : "Pi is working…", "blueprintRunning"));
+            } else if (!tool && !steps.isEmpty()) {
+                const auto passed = std::count_if(steps.cbegin(), steps.cend(),
+                    [](const auto &value) { return value.toObject()["status"] == "passed"; });
+                auto *progress = new QProgressBar;
+                progress->setObjectName("conversationWorkflowProgress");
+                progress->setAccessibleName("Workflow progress");
+                progress->setRange(0, steps.size());
+                progress->setValue(passed);
+                progress->setTextVisible(false);
+                progress->setFixedHeight(6);
+                const auto count = QString("%1 of %2 steps completed").arg(passed).arg(steps.size());
+                const auto stepName = step["name"].toString();
+                body->addWidget(wrapped(stepName.isEmpty() ? count : count + " · " + stepName));
+                body->addWidget(progress);
+            }
+        }
+        const auto decisions = decisionsFor(run);
+        for (const auto &decision : decisions) body->addWidget(approvalView(m_preview, run, decision.toObject()));
+
+        if (status == "passed") {
+            if (tool && run["result"].isString()) {
+                const auto model = run["model"].toString();
+                body->addWidget(wrapped(model.isEmpty() ? "Pi" : model, "cardMeta"));
+                addChatBubble(body, ChatBubble::Assistant, run["result"].toString());
+            } else if (!run["result"].isUndefined()) {
+                body->addWidget(label("Result", "headingLabel"));
+                body->addWidget(resultText(run["result"]));
+            } else if (!m_preview->live() && !steps.isEmpty() && !tool) {
+                body->addWidget(resultText(steps.last().toObject()["output"]));
             }
         } else if (status == "failed") {
-            const auto cursor = run["cursor"].toInt(-1);
-            const auto step = cursor >= 0 && cursor < steps.size() ? steps.at(cursor).toObject() : QJsonObject{};
-            const auto error = run["error"].toString(step["error"].toString("The run failed."));
-            body->addWidget(wrapped(error, "blueprintError"));
+            body->addWidget(wrapped(run["error"].toString(step["error"].toString("The run failed.")), "blueprintError"));
+        } else if (tool && status == "cancelled") {
+            body->addWidget(label("Task stopped", "cardMeta"));
         }
         if (run["actionError"].isString()) body->addWidget(wrapped(run["actionError"].toString(), "blueprintError"));
-        for (const auto &value : decisionsFor(run)) {
-            body->addWidget(rule());
-            body->addWidget(approvalView(m_preview, run, value.toObject()));
+        if (!tool || !decisions.isEmpty() || status == "failed") {
+            auto *actions = new QHBoxLayout;
+            auto *open = action(tool ? "View trace" : "Open full run", false, true);
+            connect(open, &Button::clicked, this, [this, id] { emit runRequested(id); });
+            actions->addWidget(open);
+            if (!tool && running(run)) {
+                auto *cancel = action("Cancel run", false, true);
+                cancel->setEnabled(!m_preview->live() || m_preview->connected());
+                connect(cancel, &Button::clicked, this, [this, id] { m_preview->cancel(id); });
+                actions->addWidget(cancel);
+            }
+            actions->addStretch();
+            body->addLayout(actions);
         }
-        auto *actions = new QHBoxLayout;
-        auto *open = action("Open full run", false, true);
-        const auto id = run["id"].toString();
-        connect(open, &Button::clicked, this, [this, id] { emit runRequested(id); });
-        actions->addWidget(open);
-        if (running(run)) {
-            auto *cancel = action("Cancel run", false, true);
-            cancel->setEnabled(!m_preview->live() || m_preview->connected());
-            connect(cancel, &Button::clicked, this, [this, id] { m_preview->cancel(id); });
-            actions->addWidget(cancel);
-        }
-        actions->addStretch();
-        body->addLayout(actions);
-        m_messages->addWidget(body->parentWidget());
+        if (!tool) m_messages->addWidget(body->parentWidget());
     }
+
     m_messages->addStretch();
-    if (!focusedApproval.isEmpty())
+    if (!focusedApproval.isEmpty()) {
         for (auto *button : m_messages->parentWidget()->findChildren<Button *>())
             if (button->isVisible() && button->property("approvalFocus").toString() == focusedApproval) button->setFocus();
-    if (follow) QTimer::singleShot(0, m_scroll, [scrollbar] { scrollbar->setValue(scrollbar->maximum()); });
+    }
+    if (follow) QTimer::singleShot(0, m_scroll, [bar] { bar->setValue(bar->maximum()); });
 }
 
-void BlueprintChatPanel::changeEvent(QEvent *event) {
+void ConversationRunPanel::changeEvent(QEvent *event) {
     QWidget::changeEvent(event);
     if (m_dark == Theme::isDark()) return;
     m_dark = Theme::isDark();
-    QTimer::singleShot(0, this, &BlueprintChatPanel::rebuildTranscript);
+    QTimer::singleShot(0, this, &ConversationRunPanel::rebuildTranscript);
 }

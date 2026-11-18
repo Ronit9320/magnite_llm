@@ -22,6 +22,7 @@ constexpr int portSpacing = 22;
 constexpr int firstPort = 102;
 constexpr qreal minZoom = .01;
 QColor portColor(const QString &type) {
+    if (type == "adapter-ref") return QColor(Theme::statusWarning());
     if (type == "index" || type == "integer" || type == "number") return QColor(Theme::accentLabel());
     if (type == "fields" || type == "order" || type == "receipt" || type == "object" || type == "array") return QColor(Theme::statusSuccess());
     if (type == "boolean") return QColor(Theme::statusWarning());
@@ -53,6 +54,8 @@ QString BlueprintCanvas::nodeIcon(const QString &kind) {
     if (kind == "input") return "message-circle";
     if (kind == "dataset") return "database";
     if (kind == "model") return "layers";
+    if (kind == "adapter") return "box";
+    if (kind == "agent") return "message-circle";
     if (kind == "output") return "file-down";
     if (kind == "selector") return "search";
     if (kind == "extractor") return "layers";
@@ -63,7 +66,7 @@ QString BlueprintCanvas::nodeIcon(const QString &kind) {
 
 QColor BlueprintCanvas::nodeAccent(const QString &kind) {
     if (kind == "selector") return QColor(Theme::accentLabel());
-    if (kind == "extractor") return QColor(Theme::statusWarning());
+    if (kind == "extractor" || kind == "adapter") return QColor(Theme::statusWarning());
     if (kind == "pricing" || kind == "dataset" || kind == "output") return QColor(Theme::statusSuccess());
     if (kind == "tool") return QColor(Theme::textSecondary());
     return QColor(Theme::comparisonSeries());
@@ -103,7 +106,7 @@ void BlueprintCanvas::setSelection(const QString &node, const QString &outputNod
     update();
 }
 
-QRectF BlueprintCanvas::nodeRect(const QJsonObject &node) const {
+QRectF BlueprintCanvas::nodeRect(const QJsonObject &node) {
     return {node["x"].toDouble(), node["y"].toDouble(), nodeWidth,
             qreal(116 + portSpacing * qMax(node["in"].toArray().size(), node["out"].toArray().size()))};
 }
@@ -291,17 +294,19 @@ void BlueprintCanvas::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     const QColor background(Theme::canvasBackground());
     painter.fillRect(rect(), background);
+    painter.setRenderHint(QPainter::Antialiasing);
     QColor dot(Theme::textMuted());
-    dot.setAlphaF(.24);
-    painter.setPen(QPen(dot, 1));
-    const qreal spacing = qMax(7.0, 17 * m_zoom);
+    dot.setAlphaF(.55);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(dot);
+    const qreal spacing = qMax(12.0, 20 * m_zoom);
     auto mod = [spacing](qreal offset) { return std::fmod(std::fmod(offset, spacing) + spacing, spacing); };
     for (qreal y = mod(m_origin.y()); y < height(); y += spacing)
         for (qreal x = mod(m_origin.x()); x < width(); x += spacing)
-            painter.drawPoint(QPointF(x, y));
-    painter.setRenderHint(QPainter::Antialiasing);
+            painter.drawEllipse(QPointF(x, y), .85, .85);
     painter.translate(m_origin);
     painter.scale(m_zoom, m_zoom);
+    painter.setBrush(Qt::NoBrush);
     drawConnections(painter);
     for (const auto &id : m_order) drawNode(painter, m_nodes.value(id));
 }
@@ -325,18 +330,21 @@ void BlueprintCanvas::drawConnections(QPainter &painter) const {
         color.setAlphaF(highlighted ? .9 : .62);
         painter.setPen(QPen(color, highlighted ? 2 : 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         QPainterPath path(a);
-        if (std::abs(a.y() - b.y()) < 65 && b.x() > a.x() + 120) {
-            const qreal rail = qMin(nodeRect(from).top(), nodeRect(to).top()) - 22;
-            const qreal exitX = a.x() + 15;
-            const qreal entryX = b.x() - 15;
-            path = roundedCable({a, {exitX, a.y()}, {exitX, rail}, {entryX, rail}, {entryX, b.y()}, b});
-        } else if (b.x() <= a.x() + 14) {
-            const qreal rail = b.y() > a.y() + 68 ? (a.y() + b.y()) / 2 : qMax(a.y(), b.y()) + 70;
+        if (b.x() < a.x()) {
+            const auto sourceBox = nodeRect(from);
+            const auto targetBox = nodeRect(to);
+            const qreal above = qMin(sourceBox.top(), targetBox.top()) - 20;
+            const qreal below = qMax(sourceBox.bottom(), targetBox.bottom()) + 20;
+            qreal rail = a.y() + b.y() < above + below ? above : below;
+            if (targetBox.top() - sourceBox.bottom() >= 6)
+                rail = (sourceBox.bottom() + targetBox.top()) / 2;
+            else if (sourceBox.top() - targetBox.bottom() >= 6)
+                rail = (targetBox.bottom() + sourceBox.top()) / 2;
             const qreal exitX = a.x() + 19;
             const qreal entryX = b.x() - 19;
             path = roundedCable({a, {exitX, a.y()}, {exitX, rail}, {entryX, rail}, {entryX, b.y()}, b});
         } else {
-            const qreal tangent = qMin(160.0, (b.x() - a.x()) * .65);
+            const qreal tangent = qMin(120.0, (b.x() - a.x()) * .5);
             path.cubicTo(a.x() + tangent, a.y(), b.x() - tangent, b.y(), b.x(), b.y());
         }
         painter.drawPath(path);
@@ -367,10 +375,10 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
     const auto iconKind = code == "selector" || code == "extractor" ? code : kind;
     const auto contracts = m_fixtures["contracts"].toObject();
     const auto fill = QColor(Theme::surfaceFill());
-    painter.setPen(Qt::NoPen);
     const QColor ink = nodeAccent(iconKind);
     const auto surface = id == m_selected ? QColor(Theme::surfaceFillHover()) : fill;
     painter.setBrush(surface);
+    painter.setPen(QPen(id == m_selected ? ink : QColor(Theme::surfaceBorder()), 1));
     painter.drawRoundedRect(box, 9, 9);
     if (id == m_selected) {
         painter.setBrush(QColor(Theme::textSecondary()));
@@ -403,6 +411,13 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
             const auto adapter = value.toObject();
             if (adapter["id"] == node["adapter"]) detail = adapter["name"].toString();
         }
+    } else if (kind == "model" || kind == "reasoning" || kind == "adapter") {
+        const auto binding = node[kind == "adapter" ? "adapter" : "model"].toString();
+        detail = binding.isEmpty() ? (kind == "adapter" ? "Choose a trained adapter" : "Choose a local checkpoint") : binding;
+        for (const auto &value : m_fixtures[kind == "adapter" ? "adapters" : "models"].toArray()) {
+            const auto record = value.toObject();
+            if (record["id"].toString() == binding) detail = record["name"].toString(binding);
+        }
     } else {
         detail = operation["label"].toString();
         const QString exampleSuffix = " (order example)";
@@ -422,9 +437,10 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
             const QPointF center = portCenter(node, output, index);
             const auto type = port["type"].toString();
             const auto tone = portColor(type);
-            painter.setPen(QPen(tone, 1));
-            painter.setBrush(output && id == m_armedNode && port["id"].toString() == m_armedPort ? tone : surface);
-            painter.drawEllipse(center, 3.6, 3.6);
+            const bool armed = output && id == m_armedNode && port["id"] == m_armedPort;
+            painter.setPen(QPen(surface, 1.25));
+            painter.setBrush(tone);
+            painter.drawEllipse(center, armed ? 6 : 4.7, armed ? 6 : 4.7);
             painter.setPen(QColor(Theme::textSecondary()));
             const auto label = port["name"].toString(contracts.value(type).toObject()["label"].toString());
             const auto visibleLabel = QFontMetrics(mono).elidedText(label, Qt::ElideRight, 84);

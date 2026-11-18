@@ -323,15 +323,27 @@ void MainWindow::setupUi() {
     m_libraryPanel = new LibraryPanel(m_modelsPanel, m_adaptersPanel);
     m_chatPanel = new ChatPanel();
     m_chatPanel->setKnowledgePanel(m_ragPanel);
+    connect(m_chatPanel, &ChatPanel::adaptersRequested, this, [this] { switchPanel(PanelAdapters); });
     auto *blueprintPreview = new BlueprintPreview(*m_backendClient, this);
     m_blueprintPanel = new BlueprintPanel(blueprintPreview);
-    auto *blueprintChat = new BlueprintChatPanel(blueprintPreview);
-    m_chatPanel->setBlueprintChat(blueprintChat);
+    auto *toolMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Tool);
+    auto *blueprintMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Blueprint);
+    m_chatPanel->setRunPanels(toolMode, blueprintMode);
     connect(m_modelsPanel, &ModelsPanel::modelsChanged, blueprintPreview, &BlueprintPreview::refreshOptions);
     connect(m_blueprintPanel, &BlueprintPanel::chatRequested, this, [this] { switchPanel(PanelChat); });
-    connect(blueprintChat, &BlueprintChatPanel::runRequested, this, [this](const QString &id) {
-        m_blueprintPanel->openRun(id);
+    for (auto *mode : {toolMode, blueprintMode}) {
+        connect(mode, &ConversationRunPanel::runRequested, this, [this](const QString &id) {
+            m_blueprintPanel->openRun(id);
+            switchPanel(PanelBlueprints);
+        });
+    }
+    connect(blueprintMode, &ConversationRunPanel::libraryRequested, this, [this] {
+        m_blueprintPanel->showLibrary();
         switchPanel(PanelBlueprints);
+    });
+    connect(m_blueprintPanel, &BlueprintPanel::conversationRequested, this, [this](const QString &id) {
+        switchPanel(PanelChat);
+        m_chatPanel->showBlueprint(id);
     });
     // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
     m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;

@@ -3,7 +3,7 @@ import re
 
 RELEASE_VERSION = "v0.1-preview"
 UPDATE_SEQUENCE = 1
-DATA_SCHEMA = 1
+DATA_SCHEMA = 2
 
 # Python distribution metadata requires PEP 440; derive its spelling rather
 # than maintaining another independent application version.

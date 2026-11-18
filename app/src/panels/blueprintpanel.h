@@ -6,6 +6,7 @@
 #include <optional>
 
 class BlueprintCanvas;
+class QTreeWidget;
 class BlueprintPreview;
 class Button;
 class ComboBox;
@@ -24,15 +25,16 @@ class BlueprintPanel : public QWidget {
 public:
     explicit BlueprintPanel(BlueprintPreview *preview, QWidget *parent = nullptr);
     void openRun(const QString &id);
+    void showLibrary();
 
 signals:
     void chatRequested();
+    void conversationRequested(const QString &id);
 
 protected:
     void changeEvent(QEvent *event) override;
 
 private:
-    void showLibrary();
     void refreshLibrary();
     void openBlueprint(const QString &id);
     void showBlueprint(const QJsonObject &graph);
@@ -40,6 +42,7 @@ private:
     void setupCreatePage();
     void showCreatePage();
     void createBlueprint();
+    void createTriageExample();
     void editDetails();
     void deleteBlueprint(const QString &id);
     void duplicate(const QJsonObject &graph);
@@ -47,11 +50,10 @@ private:
     void setupEditor();
     void refreshEditor(bool fit = false);
     void refreshInspector();
-    void setupNodePalette();
-    void refreshNodePalette();
+    void refreshNodeTree();
+    void openNodePicker(std::optional<QPointF> position = {});
     void configureNode(const QString &id);
     void saveNodeTemplate(const QString &id);
-    void showNodePalette(bool open, std::optional<QPointF> position = {});
     void addNode(const QJsonObject &node);
     void removeNode(const QString &id);
     void showNodeMenu(const QString &id, const QPoint &screenPosition, const QPointF &graphPosition);
@@ -104,13 +106,12 @@ private:
     QLabel *m_service;
     Button *m_publish;
     Button *m_reload;
+    Button *m_openInConversation;
     Button *m_backToChat;
     TabWidget *m_tabs;
     QVBoxLayout *m_canvasHome;
     QWidget *m_canvasPanel;
-    QWidget *m_palette;
-    QVBoxLayout *m_paletteEntries;
-    std::optional<QPointF> m_addAt;
+    QTreeWidget *m_nodeTree;
     QStackedWidget *m_canvasPages;
     BlueprintCanvas *m_canvas;
     Button *m_connect;
@@ -142,37 +143,49 @@ private:
     QVBoxLayout *m_history;
 };
 
-class BlueprintChatPanel : public QWidget {
+class ConversationRunPanel : public QWidget {
     Q_OBJECT
 public:
-    explicit BlueprintChatPanel(BlueprintPreview *preview, QWidget *parent = nullptr);
-    void setMode(int index);
+    enum class Mode { Tool, Blueprint };
+    explicit ConversationRunPanel(BlueprintPreview *preview, Mode mode, QWidget *parent = nullptr);
+    void activate(const QString &blueprint = {});
+    void modelChanged(bool changing);
+    bool hasActiveTask() const;
 
 signals:
-    void ordinaryChatRequested();
     void runRequested(const QString &id);
+    void libraryRequested();
+    void activityChanged();
 
 protected:
     void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void refreshPicker();
     void send();
+    void updateActions();
     void rebuildTranscript();
     void refreshComposer();
+    void openTaskHistory();
     BlueprintPreview *m_preview;
-    ComboBox *m_mode;
-    ComboBox *m_blueprint;
+    const Mode m_mode;
+    ComboBox *m_blueprint = nullptr;
     QPlainTextEdit *m_input;
     QScrollArea *m_scroll;
     QVBoxLayout *m_messages;
     QLabel *m_error;
     QLabel *m_inputHint;
     Button *m_send;
+    Button *m_stop = nullptr;
+    Button *m_newTask = nullptr;
     QJsonObject m_chatGraph;
-    QString m_toolError;
+    QString m_preferredBlueprint;
+    QStringList m_taskRuns;
     quint64 m_selection = 0;
     bool m_starting = false;
-    bool m_toolAvailable = false;
+    bool m_readyToSend = false;
+    bool m_modelChanging = false;
+    bool m_connected = false;
     bool m_dark;
 };

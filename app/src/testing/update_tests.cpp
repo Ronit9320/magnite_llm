@@ -1,4 +1,5 @@
 #include "update_manager.h"
+#include "update_config.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -35,7 +36,7 @@ int main(int argc, char **argv) {
     };
     const QString version = "v0.1-preview";
     const QString base = "https://github.com/test/magnite/releases/";
-    QJsonObject manifest{{"format", 1}, {"version", version}, {"sequence", 1}, {"data_schema", 1},
+    QJsonObject manifest{{"format", 1}, {"version", version}, {"sequence", 1}, {"data_schema", MAGNITE_DATA_SCHEMA},
         {"channel", "preview"}, {"platform", "linux"}, {"architecture", "x86_64"}, {"variant", "cpu"},
         {"size", 100}, {"sha256", QString(64, 'a')}, {"commit", QString(40, 'b')}, {"minimum_glibc", "2.35"},
         {"url", base + "download/" + version + "/Magnite-" + version + "-linux-x86_64.AppImage"},
@@ -53,7 +54,7 @@ int main(int argc, char **argv) {
     check(!UpdateManager::verifyManifest(payload, signature, publicKey, "test/magnite", nullptr, &error), "tampered manifest rejected");
     check(!UpdateManager::verifyManifest(payload, QByteArray(64, 'x'), publicKey, "test/magnite", nullptr, &error), "untrusted signature rejected");
     for (const auto &change : QList<QPair<QString, QJsonValue>>{
-        {"url", "https://attacker.invalid/update"}, {"data_schema", 2}, {"architecture", "aarch64"},
+        {"url", "https://attacker.invalid/update"}, {"data_schema", MAGNITE_DATA_SCHEMA + 1}, {"architecture", "aarch64"},
         {"channel", "stable"}, {"variant", "cuda"}, {"size", -1}, {"size", 1e20},
         {"sequence", 0}, {"sequence", 1.5}, {"version", "../evil"}, {"sha256", "bad"},
 #ifdef Q_OS_LINUX

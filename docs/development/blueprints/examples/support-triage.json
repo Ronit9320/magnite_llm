@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "name": "Support ticket routing",
+  "nodes": [
+    {
+      "id": "ticket", "name": "Read support ticket", "kind": "input", "operation": "input",
+      "outputs": {"value": {"type": "string", "minLength": 1}}
+    },
+    {
+      "id": "extract-lora", "name": "Extraction LoRA", "kind": "adapter", "operation": "lora",
+      "adapter_id": "extractor-adapter", "outputs": {"adapter": {"type": "string"}}
+    },
+    {
+      "id": "extract", "name": "Extract ticket fields", "kind": "model", "operation": "generate",
+      "inputs": {"ticket": {"type": "string", "minLength": 1}},
+      "outputs": {"raw_json": {"type": "string", "minLength": 1}},
+      "binding": {"model_id": "huggingface:Qwen--Qwen3-0.6B"},
+      "response": "text",
+      "system_prompt": "Extract a support ticket as one raw JSON object with exactly category, blocked, and reference. Choose category billing for charges, invoices or refunds; access for login or account access; delivery for missing, late or damaged shipments. Set blocked to true only if the message explicitly says work or service cannot continue. Copy the order, invoice or shipment ID verbatim, or use an empty string if there is no such ID. Return only JSON, with no markdown or explanation.",
+      "max_tokens": 128
+    },
+    {
+      "id": "parse", "name": "Parse ticket JSON", "kind": "transform", "operation": "parse-json",
+      "inputs": {"value": {"type": "string", "minLength": 1}},
+      "outputs": {
+        "value": {
+          "type": "object", "required": ["category", "blocked", "reference"], "additionalProperties": false,
+          "properties": {"category": {"type": "string"}, "blocked": {"type": "boolean"}, "reference": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "id": "route-lora", "name": "Routing LoRA", "kind": "adapter", "operation": "lora",
+      "adapter_id": "router-adapter", "outputs": {"adapter": {"type": "string"}}
+    },
+    {
+      "id": "route", "name": "Assign queue and priority", "kind": "model", "operation": "generate",
+      "inputs": {
+        "record": {
+          "type": "object", "required": ["category", "blocked", "reference"], "additionalProperties": false,
+          "properties": {"category": {"type": "string"}, "blocked": {"type": "boolean"}, "reference": {"type": "string"}}
+        }
+      },
+      "outputs": {"queue": {"type": "string"}, "priority": {"type": "string"}},
+      "binding": {"model_id": "huggingface:Qwen--Qwen3-0.6B"},
+      "response": "json",
+      "system_prompt": "Route this support record. Map category billing to queue finance, access to identity, and delivery to fulfillment. Set priority high when blocked is true and normal when blocked is false. Return only a JSON object with the two keys queue and priority, with no other keys or markdown.",
+      "max_tokens": 96
+    },
+    {
+      "id": "pack", "name": "Build routing record", "kind": "transform", "operation": "build-object",
+      "inputs": {
+        "ticket": {
+          "type": "object", "required": ["category", "blocked", "reference"], "additionalProperties": false,
+          "properties": {"category": {"type": "string"}, "blocked": {"type": "boolean"}, "reference": {"type": "string"}}
+        },
+        "queue": {"type": "string"}, "priority": {"type": "string"}
+      },
+      "outputs": {"value": {"type": "object"}}
+    },
+    {
+      "id": "result", "name": "Return routing record", "kind": "output", "operation": "output",
+      "inputs": {"value": {"type": "object"}}, "outputs": {"value": {"type": "object"}}
+    }
+  ],
+  "edges": [
+    {"source": {"node": "ticket", "port": "value"}, "target": {"node": "extract", "port": "ticket"}},
+    {"source": {"node": "extract-lora", "port": "adapter"}, "target": {"node": "extract", "port": "adapter"}},
+    {"source": {"node": "extract", "port": "raw_json"}, "target": {"node": "parse", "port": "value"}},
+    {"source": {"node": "parse", "port": "value"}, "target": {"node": "route", "port": "record"}},
+    {"source": {"node": "route-lora", "port": "adapter"}, "target": {"node": "route", "port": "adapter"}},
+    {"source": {"node": "parse", "port": "value"}, "target": {"node": "pack", "port": "ticket"}},
+    {"source": {"node": "route", "port": "queue"}, "target": {"node": "pack", "port": "queue"}},
+    {"source": {"node": "route", "port": "priority"}, "target": {"node": "pack", "port": "priority"}},
+    {"source": {"node": "pack", "port": "value"}, "target": {"node": "result", "port": "value"}}
+  ]
+}

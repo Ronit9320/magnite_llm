@@ -18,6 +18,7 @@ public:
     void zoomBy(qreal factor);
     void revealNode(const QString &id);
     QPointF centerInGraph() const;
+    static QRectF nodeRect(const QJsonObject &node);
     static QString nodeIcon(const QString &kind);
     static QColor nodeAccent(const QString &kind);
 
@@ -40,7 +41,6 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private:
-    QRectF nodeRect(const QJsonObject &node) const;
     QPointF portCenter(const QJsonObject &node, bool output, int index) const;
     int portIndex(const QJsonObject &node, bool output, const QString &id) const;
     void drawConnections(QPainter &painter) const;
