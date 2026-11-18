@@ -167,10 +167,10 @@ Paths below are relative to the dynamically discovered loopback base URL. `{id}`
 | Training | `POST /training/start`, `GET /training/jobs`, `GET /training/status/{id}`, `POST /training/cancel/{id}` | Submit with HTTP 202, inspect, cooperatively cancel |
 | Adapter registry | `GET /adapters`, `GET /adapters/{id}`, `DELETE /adapters/{id}` | List/filter, inspect, remove weights/metadata |
 | Adapter archives | `POST /adapters/export/{id}`, `GET /adapters/export/{filename}`, `POST /adapters/import` | Create ZIP, download ZIP, import a local ZIP path |
-| RAG configuration | `GET /rag/status`, `GET /rag/config`, `POST /rag/config`, `GET /rag/embedders` | Capability/counts, effective embedder and chunking, persisted configuration, supported embedding models |
+| RAG configuration | `GET /rag/status`, `GET /rag/config`, `POST /rag/config`, `GET /rag/embedders` | Capability/counts, effective embedder, chunking and search mode, persisted configuration (including `search_mode`), supported embedding models |
 | RAG documents | `GET /rag/documents`, `POST /rag/documents`, `DELETE /rag/documents/{id}`, `POST /rag/clear` | Manage the indexed collection |
 | RAG reindex and progress | `POST /rag/reindex`, `GET /rag/activity` | Switch the whole library to another embedding model; poll the running ingest/reindex |
-| Retrieval | `POST /rag/query` | Return ranked chunks and similarity scores |
+| Retrieval | `POST /rag/query` | Return ranked chunks with their cosine similarity, which search found them (`match`) and the fused rank value (`fused_score`) |
 
 Dataset and document ingestion accept local filesystem paths or inline content. Adapter import accepts a local archive path. These are local-service operations, not multipart upload endpoints. FastAPI also provides its standard generated OpenAPI/docs endpoints.
 
@@ -369,11 +369,25 @@ An unguarded embedding run once exhausted an 8 GB Mac and caused a kernel panic,
 4. Embed in batches (16 chunks, `MAGNITE_RAG_BATCH`) into one preallocated float32 matrix, checking cancellation and memory before each batch and reporting progress. Memory is the matrix plus one batch; at the 16M-character content limit with the smallest chunks this is on the order of 100 to 200 MB.
 5. Check cancellation and store document metadata, chunk text and vectors in one SQLite transaction. Cancelling stops within one batch and stores nothing.
 
-The document index lives in `rag/rag.db`, with `rag_documents`, `rag_chunks`, and `rag_config` tables. Vectors are float32 BLOBs, the source of truth. Original documents are not copied into a separate managed document repository; extracted chunks are persisted and source paths are recorded.
+The document index lives in `rag/rag.db`, with `rag_documents`, `rag_chunks`, and `rag_config` tables, plus the derived keyword index (`rag_chunks_fts`, `rag_fts_state`; see Hybrid search). Vectors are float32 BLOBs, the source of truth. Original documents are not copied into a separate managed document repository; extracted chunks are persisted and source paths are recorded.
 
 ### Retrieval and chat augmentation
 
 A query is embedded with the configured model's query prompt. `RagStore.search()` keeps a derived in-memory index per model: float16 vectors by default (`MAGNITE_RAG_INDEX_DTYPE` selects `int8` or `float32`), built lazily and dropped on every add, delete, clear or reindex, so there is no durable index to synchronize. It scores in blocks, takes the best `max(2 * top_k, top_k + 16)` candidates, rescores them exactly from the stored float32 vectors, applies the threshold and loads chunk text only for the hits. L2 normalization makes the dot product equivalent to cosine similarity. Defaults are `top_k=4` and threshold `0`, with zero disabling score filtering. At 50,000 chunks of 1,024 dimensions a search took 17 ms with a 98 MB index (float16), against 240 ms before.
+
+#### Hybrid search (keyword + vector)
+
+By default (`search_mode = "hybrid"`, `vector` turns it off; a query can override it with its own `search_mode`) retrieval runs two legs and merges them with Reciprocal Rank Fusion, `1/(60 + rank)` per leg with rank starting at 1. The vector leg is the one above. The keyword leg is an SQLite FTS5 query over the chunk text (`rag_chunks_fts`, an external-content table over `rag_chunks.text`, tokenizer `unicode61 remove_diacritics 2`), restricted to the same model and documents and returning the best `max(2 * top_k, top_k + 16)` chunks by bm25. This finds IDs, error codes, names and other rare terms that embeddings blur. Chunks are ordered by fused score, ties going to the higher cosine and then the lower chunk id, so a keyword-only hit that is rank 1 in its leg ties a vector-only rank 1 and comes second.
+
+`score` stays the exact cosine similarity of every returned chunk, including chunks found only by keyword, so `min_score` is still a cosine floor (an exact-term hit with low cosine is dropped when a threshold is set). Each chunk also carries `match` (`vector`, `keyword` or `both`) and `fused_score` (`null` when the keyword leg did not run).
+
+Query text is never passed to FTS5 as syntax: it is split on whitespace, every piece becomes a quoted string (so `AND`, `NEAR`, `:`, `-`, `*` and parentheses are literal), pieces without a letter or digit and repeats are dropped, and at most 32 are kept. Nothing searchable means no keyword leg. Any SQLite error in the keyword leg is logged and the search continues as vector only.
+
+The FTS table is derived data and there are no triggers. Ingest writes its rows in the same transaction as the chunks, delete issues the FTS5 `delete` command with the stored text first, clear uses `delete-all`, and reindex (embeddings only) leaves it alone. A state row `(chunks, max_id)` in `rag_fts_state` records the chunks table the index matches; every search and every write compares it with the actual table first and runs `rebuild` on a mismatch. That is how a library from before this change, or one written by an older build or by a runtime without FTS5, is brought up to date on first use (about 1 s per 50,000 chunks). `DATA_SCHEMA` is therefore not bumped: older builds never read the new tables, and an FTS5-less runtime still ingests, deletes and searches (vector only, `GET /rag/status` `search.mode` says `vector` and `keyword_available` is false). If a rebuild fails, keyword search is off for the rest of the process.
+
+Measured on the development Apple M1 (8 GB, Python 3.13, SQLite with FTS5) with 50,000 synthetic chunks of 150 words from a Zipf-like vocabulary (`backend/tests/test_rag_hybrid_scale.py`, `MAGNITE_SLOW_TESTS=1`): rebuild from scratch 0.9 s; keyword leg 0.3 ms for an ID query and 73 ms for `the system data`, which matches nearly every chunk; Python heap peak 24 MB over five hybrid searches; `rag.db` 229 MB with the FTS tables against 206 MB without (+22 MB). The bounds enforced by the test are rebuild under 10 s, keyword leg under 250 ms and heap peak under 50 MB. The bundled macOS runtime (python-build-standalone, SQLite 3.50.4) has FTS5; `backend/tests/live_workflow.py`, which runs in the packaged smoke checks, asserts `search.keyword_available`.
+
+On MiniLM (`rag_eval.py --search both`, 287 chunks, float32) hybrid raised recall@1 from 0.60 to 0.72 and MRR from 0.71 to 0.81 on 47 ordinary questions, and recall@1 from 0.17 to 0.67 on 12 exact-term questions (env var names, status codes, ports, handbook amounts). Results come from a small synthetic corpus and a small question set; see `backend/evals/README.md` to repeat it on your own documents.
 
 The index is capped by `MAGNITE_RAG_INDEX_MB` (default 512). A model whose vectors exceed it is searched by streaming them from SQLite in batches instead, with the same results. There is still no FAISS dependency, vector server or approximate-nearest-neighbor index; the scan is exact, and memory, not time, is the limit.
 
@@ -387,6 +401,7 @@ Whichever embedding model is configured, or whenever it is changed (config, rein
 
 - `embedder`: the configured model's `label`, `max_seq_tokens`, `dim`, `loaded`, `device` and `dtype`.
 - `chunking`: the **effective** `chunk_size` and `chunk_overlap` (what ingest will really use after clamping to the model's token limit) and `clamped`. The stored values in `config` are not changed by clamping, so `config.chunk_size` can differ from `chunking.chunk_size`.
+- `search`: `mode` (effective: `hybrid`, or `vector` when FTS5 is unavailable or vector was chosen), `requested_mode`, `keyword_available` and `rrf_k`. The panel shows one line from it (`ragSearchInfo`): "Search: keyword + vector (hybrid)", "Search: vector only" or "Search: vector only (keyword index unavailable)"; nothing is shown when a backend reports no `search` block. There is no control for it; `search_mode` is changed through `POST /rag/config`.
 - `config` always equals `GET /rag/config`; `GET /rag/embedders` lists every preset with the same limits and dimensions that `status` reports.
 
 The panel follows these rules (`app/src/panels/ragpanel.cpp`, with the parsing and the indexing-time estimate in `ragparams.cpp`; covered by `--ui-check` and `--selftest`). Time estimates use `embedder.measured_chunks_per_s` for the configured model, otherwise the preset's `reference_chunks_per_s` for the loaded or `expected_device`, applied to the library's chunk count or a 1,000-page (3,000-chunk) document; above about 10 minutes it shows a warning and suggests the Light model, without blocking. Presets heavier than the `recommended` one get a memory warning.

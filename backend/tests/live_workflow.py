@@ -63,6 +63,12 @@ def main():
             'content':'The Eiffel Tower is a wrought-iron lattice tower in Paris, France.'}),201)
         result=checked(client.post('/rag/query',json={'query':'What is the Eiffel Tower made of?'}))
         assert result['results'][0]['document_id']==document['id']
+        search=checked(client.get('/rag/status'))['search']
+        assert search['keyword_available'] is True and search['mode']=='hybrid', search     # SQLite in this runtime has FTS5
+        assert all(c['match'] in ('vector','keyword','both') for c in result['results']), result
+        exact=checked(client.post('/rag/query',json={'query':'wrought-iron'}))['results'][0]
+        assert exact['document_id']==document['id'] and exact['match'] in ('keyword','both'), exact
+        print('PASS hybrid search: FTS5 keyword index available, exact term found, chunks carry match',flush=True)
         checked(client.post('/inference/adapter', json={'adapter_id':job['adapter_id']}))
         result=checked(client.post('/inference/chat',json={'messages':[{'role':'user',
             'content':'What is the Eiffel Tower made of?'}], 'rag':{'enabled':True},

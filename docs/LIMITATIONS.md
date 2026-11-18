@@ -52,8 +52,13 @@ and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance wo
 - RAG: scanned/image-only PDFs have no OCR, and `pypdf` extraction can mangle tables and
   multi-column layouts. Retrieval is exact and in memory (float16 index capped at 512 MB,
   about 250,000 chunks at 1,024 dimensions; larger libraries are streamed from disk and
-  slow down); there is no approximate index, hybrid keyword search or reranker, and
-  collections beyond roughly 300,000 chunks need a different design.
+  slow down); there is no approximate index or reranker, and collections beyond roughly
+  300,000 chunks need a different design. Retrieval is hybrid (SQLite FTS5 keyword plus
+  vector, fused with Reciprocal Rank Fusion) and falls back to vector only when the SQLite
+  build lacks FTS5. Keyword matching is weak for Chinese, Japanese and Korean text, which
+  the tokenizer indexes as whole runs; the vector search still covers it. `min_score` is a
+  cosine-similarity floor, so an exact-term match with a low similarity is dropped when a
+  threshold is set (the default, 0, keeps everything).
 - RAG embedding models: the long-context presets (BGE-M3, Qwen3-Embedding) need about
   3 GB of RAM and index only about 2 chunks per second on an 8 GB Apple M1, so 8 GB
   machines default to the 256-token MiniLM with ~150-word chunks, which finds long-document

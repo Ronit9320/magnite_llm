@@ -8,7 +8,7 @@
 | Saved data-directory preference | Applied on next desktop start; MAGNITE_HOME takes precedence; does not move existing data |
 | Registry and datasets | SQLite databases and normalized dataset files under application data |
 | Training jobs and adapters | Durable job history and adapter files under application data |
-| RAG | SQLite/NumPy index under the application data `rag/` directory |
+| RAG | SQLite/NumPy index under the application data `rag/` directory; `rag.db` also holds a keyword (full-text) index of the chunk text |
 | Adapter imports/exports | Application data `adapters/imports/` and `adapters/exports/` |
 | vLLM logs | Application data `vllm.log` when that engine is used |
 | Hugging Face weights | huggingface_hub cache, separate from MAGNITE_HOME |
