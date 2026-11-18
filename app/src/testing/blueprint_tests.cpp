@@ -55,7 +55,8 @@ Widget *visibleNamed(QWidget &parent, const QString &name) {
 
 QPushButton *visibleButton(QWidget &parent, const QString &text) {
     for (auto *button : parent.findChildren<QPushButton *>())
-        if (button->isVisible() && button->text() == text) return button;
+        if (button->isVisible() && (button->text() == text || (button->text().isEmpty() && button->accessibleName() == text)))
+            return button;
     return nullptr;
 }
 

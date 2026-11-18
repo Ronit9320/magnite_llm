@@ -56,6 +56,7 @@ QString BlueprintCanvas::nodeIcon(const QString &kind) {
     if (kind == "model") return "layers";
     if (kind == "adapter") return "box";
     if (kind == "knowledge") return "search";
+    if (kind == "reasoning") return "brain";
     if (kind == "agent") return "message-circle";
     if (kind == "output") return "file-down";
     if (kind == "selector") return "search";
@@ -328,8 +329,8 @@ void BlueprintCanvas::drawConnections(QPainter &painter) const {
         const auto port = from["out"].toArray().at(outIndex).toObject();
         const bool highlighted = m_selected == fromId || m_selected == toId;
         auto color = portColor(port["type"].toString());
-        color.setAlphaF(highlighted ? .9 : .62);
-        painter.setPen(QPen(color, highlighted ? 2 : 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        color.setAlphaF(highlighted ? 1.0 : .85);
+        painter.setPen(QPen(color, highlighted ? 2.6 : 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         QPainterPath path(a);
         if (b.x() < a.x()) {
             const auto sourceBox = nodeRect(from);
@@ -428,8 +429,9 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
     painter.setPen(QColor(Theme::textMuted()));
     painter.drawText(QRectF(box.x() + 11, box.y() + 63, box.width() - 22, 17), Qt::AlignVCenter,
                      QFontMetrics(meta).elidedText(detail, Qt::ElideRight, nodeWidth - 22));
-    QFont mono(Theme::monoFont());
-    mono.setPixelSize(10);
+    // Port names use the body face so they read as labels, not code.
+    QFont mono(Theme::bodyFont());
+    mono.setPixelSize(11);
     painter.setFont(mono);
     for (const bool output : {false, true}) {
         const auto ports = node[output ? "out" : "in"].toArray();

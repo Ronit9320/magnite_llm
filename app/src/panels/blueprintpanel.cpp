@@ -326,42 +326,6 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     setupCreatePage();
     auto *library = new QVBoxLayout(m_library);
     library->setContentsMargins(0, 0, 0, 0);
-    auto *exampleRow = new QHBoxLayout;
-    exampleRow->addStretch();
-    if (m_preview->live()) {
-        auto *triage = action("Request triage example", false, true);
-        exampleRow->addWidget(triage);
-        connect(triage, &Button::clicked, this, &BlueprintPanel::createTriageExample);
-        auto *recent = action("Recent runs", false, true);
-        exampleRow->addWidget(recent);
-        connect(recent, &Button::clicked, this, [this] {
-            SettingsDetailDialog dialog(this);
-            dialog.setWindowTitle("Recent runs");
-            auto *body = new QVBoxLayout(&dialog);
-            titleBar(body, dialog.windowTitle());
-            auto *runs = new QListWidget;
-            runs->setAccessibleName("Recent Blueprint and chat runs");
-            for (const auto &value : m_preview->recentRuns()) {
-                const auto run = value.toObject();
-                const auto time = QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP");
-                auto *item = new QListWidgetItem(run["name"].toString() + " · " +
-                    BlueprintPreview::statusLabel(run["status"].toString()) + " · " + time, runs);
-                item->setData(Qt::UserRole, run["id"].toString());
-            }
-            if (!runs->count()) body->addWidget(wrapped("Start a run to see it here."));
-            runs->setCurrentRow(0);
-            body->addWidget(runs);
-            const auto buttons = dialogButtons(&dialog, body, "Inspect run");
-            for (auto *button : buttons->buttons())
-                if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) button->setEnabled(runs->count() > 0);
-            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-            connect(runs, &QListWidget::itemActivated, &dialog, &QDialog::accept);
-            dialog.resize(480, 330);
-            if (dialog.exec() == QDialog::Accepted && runs->currentItem())
-                openRun(runs->currentItem()->data(Qt::UserRole).toString());
-        });
-    }
-    library->addLayout(exampleRow);
     m_service = wrapped({}, "blueprintWarning");
     m_service->hide();
     library->addWidget(m_service);
@@ -379,18 +343,18 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     crumb->addWidget(m_backToChat);
     connect(m_backToChat, &Button::clicked, this, &BlueprintPanel::chatRequested);
     if (!m_preview->live()) crumb->addWidget(label("Fixture data", "cardMeta"));
-    m_publish = action("Save revision", false, true);
-    m_reload = action("Reload saved revision", false, true);
+    // Revision actions sit beside Run in the heading; the crumb is only for navigation.
+    m_publish = action("Save revision");
+    m_publish->setToolTip("Publish this draft as a new revision that Conversation and runs can use.");
+    m_reload = action("Discard draft edits", false, true);
+    m_reload->setToolTip("Reload the last saved revision.");
     m_openInConversation = action("Open in Conversation", false, true);
     m_openInConversation->hide();
-    crumb->addWidget(m_openInConversation);
     connect(m_openInConversation, &Button::clicked, this, [this] {
         emit conversationRequested(m_graph["id"].toString());
     });
     m_publish->hide();
     m_reload->hide();
-    crumb->addWidget(m_reload);
-    crumb->addWidget(m_publish);
     connect(m_publish, &Button::clicked, this, &BlueprintPanel::publish);
     connect(m_reload, &Button::clicked, this, &BlueprintPanel::reloadRevision);
     workspace->addLayout(crumb);
@@ -421,6 +385,10 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     head->addWidget(edit);
     head->addWidget(copy);
     head->addWidget(remove);
+    head->addSpacing(6);
+    head->addWidget(m_openInConversation);
+    head->addWidget(m_reload);
+    head->addWidget(m_publish);
     head->addWidget(run);
     workspace->addLayout(head);
     connect(edit, &Button::clicked, this, &BlueprintPanel::editDetails);
@@ -476,26 +444,100 @@ void BlueprintPanel::showLibrary() {
     m_pages->setCurrentWidget(m_library);
 }
 
+void BlueprintPanel::showRecentRuns() {
+    SettingsDetailDialog dialog(this);
+    dialog.setWindowTitle("Recent runs");
+    auto *body = new QVBoxLayout(&dialog);
+    titleBar(body, dialog.windowTitle());
+    auto *runs = new QListWidget;
+    runs->setAccessibleName("Recent Blueprint and chat runs");
+    for (const auto &value : m_preview->recentRuns()) {
+        const auto run = value.toObject();
+        const auto time = QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP");
+        auto *item = new QListWidgetItem(run["name"].toString() + " · " +
+            BlueprintPreview::statusLabel(run["status"].toString()) + " · " + time, runs);
+        item->setData(Qt::UserRole, run["id"].toString());
+    }
+    if (!runs->count()) body->addWidget(wrapped("Start a run to see it here."));
+    runs->setCurrentRow(0);
+    body->addWidget(runs);
+    const auto buttons = dialogButtons(&dialog, body, "Inspect run");
+    for (auto *button : buttons->buttons())
+        if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) button->setEnabled(runs->count() > 0);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(runs, &QListWidget::itemActivated, &dialog, &QDialog::accept);
+    dialog.resize(480, 330);
+    if (dialog.exec() == QDialog::Accepted && runs->currentItem())
+        openRun(runs->currentItem()->data(Qt::UserRole).toString());
+}
+
 void BlueprintPanel::refreshLibrary() {
     clear(m_libraryBody);
     const auto saved = m_preview->saved();
+    auto *header = new QHBoxLayout;
+    auto *titles = new QVBoxLayout;
+    titles->setSpacing(4);
+    titles->addWidget(label("Blueprints", "blueprintTitle"));
+    titles->addWidget(wrapped("Chain local models, rules and tools into workflows you can test, rerun and run from Conversation.",
+                              "cardMeta"));
+    header->addLayout(titles, 1);
     auto *create = action("Create new", true);
     create->setObjectName("blueprintCreate");
     create->setIcon(Theme::coloredIcon("plus", QColor(Theme::accentText()), 16));
     connect(create, &Button::clicked, this, &BlueprintPanel::showCreatePage);
+    if (m_preview->live()) {
+        auto *recent = action("Recent runs");
+        connect(recent, &Button::clicked, this, &BlueprintPanel::showRecentRuns);
+        header->addWidget(recent, 0, Qt::AlignTop);
+        header->addSpacing(8);
+    }
+    header->addWidget(create, 0, Qt::AlignTop);
+    m_libraryBody->addLayout(header);
+    m_libraryBody->addSpacing(18);
+
+    // Ways to start: prominent in an empty library, below the list otherwise.
+    auto *starts = new QHBoxLayout;
+    starts->setSpacing(10);
+    const auto startCard = [this, starts](const QString &icon, const QString &title, const QString &detail,
+                                          auto slot) {
+        auto *card = new Button;
+        card->setObjectName("blueprintStartCard");
+        card->setAccessibleName(title);
+        card->setAccessibleDescription(detail);
+        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        card->setFixedHeight(82);
+        auto *body = new QVBoxLayout(card);
+        body->setContentsMargins(14, 11, 14, 11);
+        body->setSpacing(4);
+        auto *top = new QHBoxLayout;
+        top->setSpacing(7);
+        auto *glyph = label({});
+        glyph->setFixedSize(16, 16);
+        glyph->setPixmap(Theme::coloredIcon(icon, QColor(Theme::accentLabel()), 16).pixmap(16, 16));
+        top->addWidget(glyph);
+        top->addWidget(label(title, "headingLabel"), 1);
+        body->addLayout(top);
+        auto *caption = wrapped(detail, "cardMeta");
+        caption->setAttribute(Qt::WA_TransparentForMouseEvents);
+        body->addWidget(caption);
+        for (auto *child : card->findChildren<QLabel *>()) child->setAttribute(Qt::WA_TransparentForMouseEvents);
+        connect(card, &Button::clicked, this, slot);
+        starts->addWidget(card, 1);
+    };
+    startCard("plus", "Blank workflow", "Start with an empty canvas and add the steps you need.",
+              &BlueprintPanel::showCreatePage);
+    if (m_preview->live())
+        startCard("file-text", "Request triage example",
+                  "Summarize an incoming request with a local model and return a review record.",
+                  &BlueprintPanel::createTriageExample);
+
     if (saved.isEmpty()) {
-        m_libraryBody->addStretch();
-        m_libraryBody->addWidget(label("Blueprints", "blueprintTitle"), 0, Qt::AlignHCenter);
-        m_libraryBody->addSpacing(14);
-        m_libraryBody->addWidget(create, 0, Qt::AlignHCenter);
+        m_libraryBody->addWidget(label("Start a workflow", "headingLabel"));
+        m_libraryBody->addSpacing(6);
+        m_libraryBody->addLayout(starts);
         m_libraryBody->addStretch();
         return;
     }
-    auto *header = new QHBoxLayout;
-    header->addWidget(label("Blueprints", "blueprintTitle"), 1);
-    header->addWidget(create);
-    m_libraryBody->addLayout(header);
-    m_libraryBody->addSpacing(16);
     m_libraryBody->addWidget(label(m_preview->live() ? "Drafts and saved blueprints" : "Saved blueprints", "headingLabel"));
     for (const auto &value : saved) {
         const auto graph = value.toObject();
@@ -503,22 +545,30 @@ void BlueprintPanel::refreshLibrary() {
         auto *card = Surface::card(m_library);
         auto *row = new QHBoxLayout;
         auto *text = new QVBoxLayout;
-        text->addWidget(label(graph["name"].toString(), "headingLabel"));
-        text->addWidget(wrapped(graph["description"].toString()));
-        const auto recent = m_preview->runs(id);
+        text->setSpacing(3);
+        auto *name = new QHBoxLayout;
+        name->addWidget(label(graph["name"].toString(), "headingLabel"));
         const auto revision = graph["revision"].toInt();
-        auto detail = revision ? QString("Revision %1").arg(revision) : QString("Draft");
-        if (revision && graph["dirty"].toBool()) detail += " · Draft edits";
-        if (graph["nodes"].isArray()) detail += QString(" · %1 nodes").arg(graph["nodes"].toArray().size());
-        if (!recent.isEmpty()) detail += " · " + BlueprintPreview::statusLabel(recent.first().toObject()["status"].toString());
-        text->addWidget(wrapped(detail));
+        auto *badge = label(revision ? QString("Revision %1").arg(revision) : QString("Draft"), "blueprintRevision");
+        name->addWidget(badge, 0, Qt::AlignVCenter);
+        if (revision && graph["dirty"].toBool()) name->addWidget(label("Unsaved edits", "blueprintRevision"), 0, Qt::AlignVCenter);
+        name->addStretch();
+        text->addLayout(name);
+        const auto description = graph["description"].toString().trimmed();
+        if (!description.isEmpty()) text->addWidget(wrapped(description));
+        QStringList detail;
+        if (graph["nodes"].isArray()) detail << QString("%1 nodes").arg(graph["nodes"].toArray().size());
+        const auto recent = m_preview->runs(id);
+        if (!recent.isEmpty())
+            detail << "Last run " + BlueprintPreview::statusLabel(recent.first().toObject()["status"].toString()).toLower();
+        if (!detail.isEmpty()) text->addWidget(wrapped(detail.join(" · "), "cardMeta"));
         row->addLayout(text, 1);
         auto *duplicateButton = iconAction("copy", "Duplicate blueprint");
         auto *remove = iconAction("trash", "Delete blueprint");
         auto *open = action("Open");
-        row->addWidget(duplicateButton);
-        row->addWidget(remove);
-        row->addWidget(open);
+        row->addWidget(duplicateButton, 0, Qt::AlignVCenter);
+        row->addWidget(remove, 0, Qt::AlignVCenter);
+        row->addWidget(open, 0, Qt::AlignVCenter);
         connect(remove, &Button::clicked, this, [this, id] { deleteBlueprint(id); });
         card->addLayout(row);
         m_libraryBody->addSpacing(7);
@@ -533,6 +583,10 @@ void BlueprintPanel::refreshLibrary() {
             });
         });
     }
+    m_libraryBody->addSpacing(22);
+    m_libraryBody->addWidget(label("Start something new", "headingLabel"));
+    m_libraryBody->addSpacing(6);
+    m_libraryBody->addLayout(starts);
     m_libraryBody->addStretch();
 }
 
@@ -802,6 +856,7 @@ void BlueprintPanel::setupEditor() {
     panel->setObjectName("blueprintCanvasPanel");
     panel->setFrameShape(QFrame::NoFrame);
     m_canvasPanel = panel;
+    m_canvasPanel->installEventFilter(this);
     auto *body = new QVBoxLayout(panel);
     body->setContentsMargins(0, 0, 0, 0);
     body->setSpacing(0);
@@ -850,12 +905,13 @@ void BlueprintPanel::setupEditor() {
     auto *footer = new QHBoxLayout;
     footer->setContentsMargins(7, 4, 7, 4);
     m_validation = action({}, false, true);
-    m_canvasCount = wrapped({});
+    m_canvasCount = label({}, "cardMeta");
     footer->addWidget(m_validation);
-    footer->addWidget(m_canvasCount, 1);
-    m_gestureHint = wrapped("Drag to pan · Scroll to zoom");
+    footer->addWidget(m_canvasCount);
+    m_gestureHint = label("Drag to pan · Scroll to zoom", "cardMeta");
     m_gestureHint->setAlignment(Qt::AlignCenter);
-    footer->addWidget(m_gestureHint, 2);
+    m_gestureHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    footer->addWidget(m_gestureHint, 1);
     m_zoomControls = new QWidget;
     auto *zoomRow = new QHBoxLayout(m_zoomControls);
     zoomRow->setContentsMargins(0, 0, 0, 0);
@@ -991,8 +1047,8 @@ void BlueprintPanel::refreshEditor(bool fit) {
     m_openInConversation->setVisible(m_preview->live() && revision > 0);
     m_openInConversation->setToolTip("Run the latest saved revision in Conversation.");
     m_reload->setEnabled(m_preview->connected());
-    m_description->setText(m_graph["description"].toString("Connect steps and define input and output contracts."));
-    if (m_description->text().isEmpty()) m_description->setText("Connect steps and define input and output contracts.");
+    m_description->setText(m_graph["description"].toString().trimmed());
+    m_description->setVisible(!m_description->text().isEmpty());
     const auto fixtures = m_preview->fixtures();
     const auto nodes = m_graph["nodes"].toArray();
     m_canvasPages->setCurrentIndex(nodes.isEmpty() ? 1 : 0);
@@ -1002,7 +1058,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
     m_connect->setEnabled(nodes.size() > 1);
     m_addNode->setVisible(!nodes.isEmpty());
     m_zoomControls->setVisible(!nodes.isEmpty());
-    m_gestureHint->setVisible(!nodes.isEmpty());
+    updateCanvasFooter();
     const auto issues = m_preview->issues(m_graph);
     m_validation->setText(issues.isEmpty() ? (m_preview->live() ? "Check readiness" : "Ready to run")
         : QString("%1 validation issue%2").arg(issues.size()).arg(issues.size() == 1 ? "" : "s"));
@@ -2290,6 +2346,8 @@ void BlueprintPanel::showRun(const QString &id, const QJsonObject &run) {
     m_tabs->setCurrentIndex(1);
     m_runId = id;
     m_backToChat->setVisible(run["source"].toString() == "Local chat");
+    // One way back to Conversation is enough.
+    if (m_backToChat->isVisible()) m_openInConversation->hide();
     m_comparison = false;
     refreshRun();
     m_traceScroll->verticalScrollBar()->setValue(0);
@@ -2316,12 +2374,6 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(head);
-    if (!run.isEmpty()) {
-        auto *id = wrapped(m_runId, "blueprintCode");
-        id->setAccessibleName("Run ID: " + m_runId);
-        id->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-        m_trace->addWidget(id);
-    }
     m_trace->addWidget(rule());
     if (run.isEmpty()) {
         m_trace->addSpacing(14);
@@ -2335,7 +2387,11 @@ void BlueprintPanel::refreshRun() {
     const auto decision = run["decision"].toObject();
     const auto decisions = decisionsFor(run);
     const auto runError = run["error"].toString();
-    if (!runError.isEmpty()) m_trace->addWidget(wrapped(runError, "blueprintError"));
+    // A step error is shown on its step; repeat it here only when no step carries it.
+    const bool stepError = std::any_of(steps.begin(), steps.end(), [](const auto &value) {
+        return !value.toObject()["error"].toString().isEmpty();
+    });
+    if (!runError.isEmpty() && !stepError) m_trace->addWidget(wrapped(runError, "blueprintError"));
     const auto actionError = run["actionError"].toString();
     if (!actionError.isEmpty()) m_trace->addWidget(wrapped(actionError, "blueprintError"));
     if (m_traceId != m_runId || m_traceStatus != state) {
@@ -2417,6 +2473,10 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(summary);
+    auto *runId = wrapped("Run ID  " + m_runId, "cardMeta");
+    runId->setAccessibleName("Run ID: " + m_runId);
+    runId->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    m_trace->addWidget(runId);
     if (!m_baseline.isEmpty()) {
         m_trace->addWidget(rule());
         m_trace->addWidget(label("Run comparison", "blueprintSection"));
@@ -2493,7 +2553,17 @@ void BlueprintPanel::refreshRun() {
         const auto outPorts = step["out"].toArray();
         const auto outputTitle = step.contains("operation") && !outPorts.isEmpty()
             ? "Output · " + m_preview->portLabel(outPorts.first().toObject()) : QString("Output");
-        fillCode(output, outputTitle, step["output"]);
+        const auto produced = step["output"];
+        const bool empty = produced.isUndefined() || produced.isNull()
+            || (produced.isObject() && produced.toObject().isEmpty());
+        if (empty && status != "passed") {
+            output->addWidget(label(outputTitle, "headingLabel"));
+            output->addWidget(wrapped(status == "skipped" || status == "pending" ? "Not run"
+                                      : "No output because the step did not finish.", "cardMeta"));
+            output->addStretch();
+        } else {
+            fillCode(output, outputTitle, produced);
+        }
         io->addLayout(input, 1);
         io->addLayout(output, 1);
         details->addLayout(io);
@@ -2526,7 +2596,9 @@ void BlueprintPanel::refreshHistory() {
         auto *title = new QVBoxLayout;
         title->addWidget(label(run["target"].toString().isEmpty() ? "Full blueprint" : "Node test", "headingLabel"));
         const auto rev = run["revision"].toInt();
-        title->addWidget(wrapped(id + (rev ? QString(" · Rev %1").arg(rev) : " · Draft node"), "blueprintCode"));
+        auto *meta = wrapped((rev ? QString("Revision %1").arg(rev) : QString("Draft node")) + " · " + id.left(8), "cardMeta");
+        meta->setToolTip("Run ID " + id);
+        title->addWidget(meta);
         row->addLayout(title, 1);
         row->addWidget(statusLabel(run["status"].toString()));
         row->addWidget(label(run["source"].toString(), "cardMeta"));
@@ -2540,6 +2612,17 @@ void BlueprintPanel::refreshHistory() {
         m_history->addWidget(rule());
     }
     m_history->addStretch();
+}
+
+void BlueprintPanel::updateCanvasFooter() {
+    // The hint is the first thing to go in a narrow canvas so the counts and zoom stay on one line.
+    const bool hasNodes = !m_graph["nodes"].toArray().isEmpty();
+    m_gestureHint->setVisible(hasNodes && m_canvasPanel->width() >= 600);
+}
+
+bool BlueprintPanel::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_canvasPanel && event->type() == QEvent::Resize) updateCanvasFooter();
+    return QWidget::eventFilter(watched, event);
 }
 
 void BlueprintPanel::changeEvent(QEvent *event) {

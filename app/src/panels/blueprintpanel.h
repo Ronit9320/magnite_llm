@@ -33,8 +33,11 @@ signals:
 
 protected:
     void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    void updateCanvasFooter();
+    void showRecentRuns();
     void refreshLibrary();
     void openBlueprint(const QString &id);
     void showBlueprint(const QJsonObject &graph);

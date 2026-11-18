@@ -38,6 +38,7 @@
         <file alias="icons/folder.svg">resources/icons/folder.svg</file>
         <file alias="icons/graduation-cap.svg">resources/icons/graduation-cap.svg</file>
         <file alias="icons/layers.svg">resources/icons/layers.svg</file>
+        <file alias="icons/brain.svg">resources/icons/brain.svg</file>
         <file alias="icons/message-circle.svg">resources/icons/message-circle.svg</file>
         <file alias="icons/play.svg">resources/icons/play.svg</file>
         <file alias="icons/plus.svg">resources/icons/plus.svg</file>
