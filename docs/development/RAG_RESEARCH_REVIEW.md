@@ -128,6 +128,7 @@ The current plan is still right about search, packing, chunking and reindex. Res
 2. Default embedder: Qwen3-Embedding-0.6B (my pick) or BGE-M3? Or let the evaluation in Task 0 decide?
 3. OK to run Task 0 first? It downloads about 1.2 GB for Qwen3 and about 2.3 GB for BGE-M3, and it needs a handful of real documents with questions you know the answers to.
 4. Hybrid search adds an FTS5 table to `rag.db`. It is derived data that can be rebuilt, but AGENTS.md says to bump `DATA_SCHEMA` when persistent formats change and the updater rejects schema changes. Bump or treat as derived?
+   **Answer (2026-11-18, owner): treat as derived, no `DATA_SCHEMA` bump.** The updater only rejects a different `data_schema`, so updates keep working. Older builds never touch the new tables, and a state row `(chunks, max_id)` makes the store rebuild the index when an older build changed `rag_chunks`. See architecture.md, Hybrid search.
 5. Should the in-memory index default be a hard 512 MB cap (about 125k chunks at 1024 dims in float32, about 250k in float16)?
 
 ## Sources

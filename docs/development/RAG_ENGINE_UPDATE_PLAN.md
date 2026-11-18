@@ -242,4 +242,16 @@ All of Phase A shipped on branch `rag-engine-update`, one commit per task. Devia
 - **Reindex** takes `truncate_dim: int = 0` and refuses unsupported truncation with 400; staging is an on-disk memmap.
 - **Ingest/reindex are serialized** (queued, cancellable while queued) and `GET /rag/activity` reports progress.
 - **UI contract (requirement, 2026-11-18):** whatever model is used, the Knowledge panel must display the parameters the backend is using (`GET /rag/status` `embedder` and effective `chunking`). Documented in architecture.md, guarded by `test_rag_ui_contract.py`; the Knowledge panel now follows it (branch `rag-knowledge-ui`), with a model picker, reindex, progress and speed hints.
-- **Not done (Phase B/C):** hybrid FTS5 search, reranker, GGUF embedding backend, Docling.
+- **Not done (Phase B/C):** reranker, GGUF embedding backend, Docling. (Hybrid FTS5 search was built afterwards, see below.)
+
+## As built: hybrid search (2026-11-18)
+
+Branch `rag-hybrid-search`, one commit per task (plan: `docs/superpowers/plans/2026-11-18-rag-hybrid-search.md`).
+
+- **Retrieval:** FTS5 keyword leg (external-content table over `rag_chunks.text`, `unicode61 remove_diacritics 2`) plus the vector leg, merged by Reciprocal Rank Fusion (k = 60). Default `search_mode = "hybrid"`; `vector` and a per-query override exist. `score` stays cosine, `min_score` a cosine floor; chunks gain `match` and `fused_score`.
+- **No `DATA_SCHEMA` bump.** The FTS table is derived data, kept in sync inside each write transaction and rebuilt when its `(chunks, max_id)` state row does not match `rag_chunks` (older builds, FTS5-less runtimes, errors). No triggers.
+- **Tie rule consequence:** a keyword-only rank 1 ties a vector-only rank 1 and loses on cosine, so an exact-term chunk is usually result 2 (still inside the default top 4) rather than 1.
+- **Measured (50,000 chunks, M1 8 GB):** rebuild 0.9 s; keyword leg 0.3 ms (ID) and 73 ms (3 near-universal words); Python heap peak 24 MB; `rag.db` +22 MB (206 to 229 MB).
+- **Eval (MiniLM, 287 chunks, float32; `rag_eval.py --search both`):** 47 questions: recall@1/4/10 and MRR vector 0.60/0.81/0.91/0.71, hybrid 0.72/0.89/0.96/0.81. 12 exact-term questions: vector 0.17/0.67/0.67/0.36, hybrid 0.67/0.75/0.92/0.73. The vector baseline differs from the earlier 0.51/0.87/0.91/0.67 because the chunker and corpus changed since that run (280 vs 287 chunks).
+- **UI:** one status line in the Knowledge panel from `GET /rag/status` `search`; no control.
+- **Not done:** reranker, GGUF embedding backend, Docling, CJK-aware keyword tokenizer.
