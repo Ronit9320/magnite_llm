@@ -47,3 +47,12 @@ class BaseEngine(ABC):
 
     def count_messages(self, messages) -> int:
         return 128 + sum(self.count_tokens(m.content) + 32 for m in messages)
+
+    def render_tool_prompt(self, messages: list[dict], tools: list[dict]) -> str | None:
+        """Render a tool turn with the model's own chat template and thinking off.
+
+        ``messages`` use the OpenAI/Hugging Face shape, including assistant
+        ``tool_calls`` and ``tool`` results. Return None when the engine cannot
+        render the model's native tool format; callers then use a plain JSON protocol.
+        """
+        return None

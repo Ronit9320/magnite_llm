@@ -196,7 +196,9 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
     const auto outcome = decision["outcome"].toString();
     auto *header = new QHBoxLayout;
     auto *icon = label({});
-    icon->setPixmap(Theme::coloredIcon(decision.contains("target") || decision["type"] == "Open target" ? "folder" : "play",
+    const auto kind = decision["type"].toString();
+    icon->setPixmap(Theme::coloredIcon(kind == "Read file or folder" ? "file-text"
+        : decision.contains("target") || kind == "Open target" ? "folder" : "play",
         statusTone(status), 16).pixmap(16, 16));
     header->addWidget(icon);
     header->addWidget(label(decision["type"].toString(), "headingLabel"));
@@ -2828,7 +2830,8 @@ void ConversationRunPanel::refreshComposer() {
         if (!self || self->m_selection != request) return;
         self->m_readyToSend = error.isEmpty();
         self->m_inputHint->setText(error.isEmpty()
-            ? capability["model"].toString() + " · Pi · Actions require approval"
+            ? capability["label"].toString(BlueprintPreview::modelLabel(capability["model"].toString()))
+                + " · You approve each action before it runs"
             : error);
         self->updateActions();
     });
@@ -3003,7 +3006,7 @@ void ConversationRunPanel::rebuildTranscript() {
         const auto step = cursor >= 0 && cursor < steps.size() ? steps.at(cursor).toObject() : QJsonObject{};
         if (running(run)) {
             if (tool && status != "waiting") {
-                body->addWidget(label(status == "queued" ? "Task queued" : "Pi is working…", "blueprintRunning"));
+                body->addWidget(label(status == "queued" ? "Task queued" : "Working on it…", "blueprintRunning"));
             } else if (!tool && !steps.isEmpty()) {
                 const auto passed = std::count_if(steps.cbegin(), steps.cend(),
                     [](const auto &value) { return value.toObject()["status"] == "passed"; });
@@ -3026,7 +3029,7 @@ void ConversationRunPanel::rebuildTranscript() {
         if (status == "passed") {
             if (tool && run["result"].isString()) {
                 const auto model = run["model"].toString();
-                body->addWidget(wrapped(model.isEmpty() ? "Pi" : model, "cardMeta"));
+                body->addWidget(wrapped(model.isEmpty() ? "Local model" : model, "cardMeta"));
                 addChatBubble(body, ChatBubble::Assistant, run["result"].toString());
             } else if (!run["result"].isUndefined()) {
                 body->addWidget(label("Result", "headingLabel"));

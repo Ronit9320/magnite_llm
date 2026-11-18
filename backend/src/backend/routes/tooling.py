@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import PurePath
+import re
 from typing import Annotated
 from uuid import uuid4
 
@@ -47,7 +49,16 @@ def tool_chat_capabilities():
         engine = pi_bridge.loaded_engine()
     except (OSError, ValueError, RuntimeError) as exc:
         return {"available": False, "detail": str(exc)}
-    return {"available": True, "harness": "pi", "engine": engine.name, "model": engine.model_ref}
+    return {"available": True, "harness": "pi", "engine": engine.name, "model": engine.model_ref,
+            "label": model_label(engine.model_ref), "native_tools": pi_bridge.native_tools(engine)}
+
+
+def model_label(reference: str) -> str:
+    """A short name for a repo ID, Hugging Face cache snapshot, or local file."""
+    cached = re.search(r"models--[^/\\]*?--([^/\\]+)[/\\]snapshots", reference)
+    if cached:
+        return cached.group(1)
+    return PurePath(reference).stem if reference.lower().endswith(".gguf") else PurePath(reference).name or reference
 
 
 @router.post("/inference/tool-runs", response_model=RunSummary, status_code=202)

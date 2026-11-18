@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QUrl>
 
@@ -237,7 +238,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
     if (toolChat && !prompt.isEmpty()) {
         record["input"] = prompt.last().toObject()["content"].toString();
         record["messages"] = prompt;
-        record["model"] = snapshot["tool_model"].toObject()["model"];
+        record["model"] = BlueprintPreview::modelLabel(snapshot["tool_model"].toObject()["model"].toString());
     } else {
         const auto single = supplied.size() == 1 ? supplied.begin().value() : QJsonValue();
         if (single.isString()) record["input"] = single.toString();
@@ -251,7 +252,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         const bool pending = item["status"] == "pending" && !action.isEmpty() && active(record);
         const auto status = item["status"].toString();
         QJsonObject decision{{"id", item["id"]}, {"fingerprint", item["fingerprint"]}, {"stepId", item["node_id"]},
-            {"type", item["kind"] == "command" ? "Run command" : "Open target"},
+            {"type", item["kind"] == "command" ? "Run command" : item["kind"] == "read" ? "Read file or folder" : "Open target"},
             {"status", pending ? QString("waiting") : status == "pending" ? QString("unavailable") : status},
             {"expires", timestamp(item["expires_at"])}, {"outcome", item["outcome"]}};
         if (action.contains("executable")) {
@@ -668,6 +669,14 @@ void BlueprintPreview::checkpoint(const QString &model, Result done) {
     request("GET", "/blueprints/checkpoints/" + segment(model), {}, [done](int status, const QJsonDocument &doc) {
         done(doc.object(), status == 200 ? QString{} : errorText(status, doc));
     });
+}
+
+QString BlueprintPreview::modelLabel(const QString &reference) {
+    // Mirrors the backend's label: a Hugging Face cache snapshot, GGUF file, or repo ID.
+    static const QRegularExpression cached(R"(models--[^/\\]*?--([^/\\]+)[/\\]snapshots)");
+    if (const auto match = cached.match(reference); match.hasMatch()) return match.captured(1);
+    const auto name = reference.section(QRegularExpression(R"([/\\])"), -1);
+    return name.endsWith(".gguf", Qt::CaseInsensitive) ? name.chopped(5) : name.isEmpty() ? reference : name;
 }
 
 void BlueprintPreview::toolCapability(Result done) {

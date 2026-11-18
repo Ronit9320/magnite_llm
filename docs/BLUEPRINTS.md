@@ -124,11 +124,13 @@ same action, needs a separate decision. The run can be cancelled while waiting.
 You can switch between chat and **Open full run** while a decision is pending.
 
 Opening a target uses the operating system's file, folder, or HTTP(S) handler.
-Approved commands run with your desktop account's permissions, with a direct
-argument list and a 30-second time limit. A command can change files or start
-other programs. Review all its arguments and deny requests you don't intend to
-run. The default working directory is `tool-workspace/` inside the app data
-folder. Pi has at most five model turns and four proposals per agent node.
+Reading returns a file's text or a folder listing to the run. Approved commands
+run with your desktop account's permissions, with a direct argument list and a
+30-second time limit. Their output returns to the run and the model. A command
+can change files or start other programs. Review all its arguments and deny
+requests you don't intend to run. The default working directory is
+`tool-workspace/` inside the app data folder. A task has at most six model
+turns and four actions.
 
 Run history keeps input values, output values, revisions, and a redacted
 decision record. Treat it as local user data when you move, back up, or share

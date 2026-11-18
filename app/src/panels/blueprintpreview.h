@@ -62,6 +62,7 @@ public:
     void loadRun(const QString &id, Result done = {});
     void refreshHistory(const QString &id);
     void toolCapability(Result done);
+    static QString modelLabel(const QString &reference);
     void train(const QJsonObject &graph, const QString &node, const QJsonArray &examples,
                const QJsonObject &settings, Result done);
     void jobs(const QString &blueprint, const QString &node, Result done);

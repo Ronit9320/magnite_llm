@@ -109,6 +109,9 @@ class VllmEngine(BaseEngine):
             "top_p": kwargs.get("top_p", 0.95),
             "stream": True,
         }
+        if kwargs.get("tool_mode"):
+            # Templates without a thinking switch ignore the extra variable.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
             async with client.stream(
                 "POST", f"{self._base_url}/chat/completions", json=payload

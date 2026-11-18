@@ -209,7 +209,7 @@ local vLLM chat engine. Install the locked Pi dependencies with Node 22.19 or la
 
 | Operation | Route |
 | --- | --- |
-| Check Pi and the loaded model | `GET /inference/tool-runs/capabilities` reports availability and engine |
+| Check Pi and the loaded model | `GET /inference/tool-runs/capabilities` reports availability, engine, `label`, and `native_tools` |
 | Start tool chat | `POST /inference/tool-runs` with `messages` and optional absolute `working_directory` |
 | Inspect pending actions or review audit history | `GET /blueprints/runs/{run_id}/approvals` |
 | Decide once | `POST /blueprints/runs/{run_id}/approvals/{approval_id}/decision` with the displayed `fingerprint` and `decision` of `approve_once` or `deny` |
@@ -219,13 +219,17 @@ or cancel using the Blueprint run routes above. Read the completed answer at
 `results.reply.text`. The usual `/inference/chat` endpoint continues to
 serve ordinary chat.
 
-A local Blueprint can pass `{"action":"open","target":"..."}` or
+A local Blueprint can pass `{"action":"open","target":"..."}`,
+`{"action":"read","target":"..."}`, or
 `{"action":"command","executable":"...","arguments":["..."]}` to its
 `approval` node. The run request may specify an absolute `working_directory`
 for either surface. Its default is `tool-workspace/` under `MAGNITE_HOME`.
-Open accepts a regular file, folder, or HTTP(S) URL. Commands run directly with
-the displayed executable, argument array, and working directory. They return
-an outcome code. Open reports dispatch to the operating system.
+Open accepts a regular file, folder, or HTTP(S) URL. Read accepts a file or
+folder and returns its text or listing in the receipt's `output`. Commands run
+directly with the displayed executable, argument array, and working directory.
+Their receipt has `outcome`, `exit_code`, and combined `output` capped at
+16,000 bytes. Open reports dispatch to the operating system. Output stays in
+the run's step history and is never written to the approval audit.
 
 SSE emits `approval` events containing the proposal ID, status, and
 fingerprint. Fetch approval details to show the exact pending action. The

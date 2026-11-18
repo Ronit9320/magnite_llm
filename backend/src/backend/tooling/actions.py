@@ -35,6 +35,12 @@ class OpenAction(BaseModel):
     target: Target
 
 
+class ReadAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    action: Literal["read"]
+    target: Target
+
+
 class CommandAction(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     action: Literal["command"]
@@ -42,7 +48,7 @@ class CommandAction(BaseModel):
     arguments: list[Argument] = Field(max_length=32)
 
 
-PROPOSAL = TypeAdapter(Annotated[OpenAction | CommandAction, Field(discriminator="action")])
+PROPOSAL = TypeAdapter(Annotated[OpenAction | ReadAction | CommandAction, Field(discriminator="action")])
 
 
 @dataclass(frozen=True)
@@ -65,15 +71,15 @@ class PathIdentity:
 
 @dataclass(frozen=True)
 class PreparedAction:
-    action: Literal["open", "command"]
+    action: Literal["open", "read", "command"]
     target: str
     arguments: tuple[str, ...]
     directory: Path
     paths: tuple[PathIdentity, ...]
 
     def display(self) -> dict:
-        if self.action == "open":
-            return {"action": "open", "target": self.target}
+        if self.action in ("open", "read"):
+            return {"action": self.action, "target": self.target}
         return {"action": "command", "executable": self.target, "arguments": list(self.arguments),
                 "working_directory": str(self.directory)}
 
@@ -94,6 +100,11 @@ def _resolve_path(value: str, directory: Path) -> Path:
 
 def prepare(proposal, directory: Path) -> PreparedAction:
     action = PROPOSAL.validate_python(proposal)
+    if isinstance(action, ReadAction):
+        path = _resolve_path(action.target, directory)
+        if not (path.is_file() or path.is_dir()):
+            raise ValueError("Read requires a regular file or folder")
+        return PreparedAction("read", str(path), (), directory, (PathIdentity.read(path),))
     if isinstance(action, OpenAction):
         value = action.target
         path = Path(value)
@@ -147,12 +158,69 @@ def _kill_command(process: subprocess.Popen) -> None:
     process.wait(timeout=5)
 
 
-def execute(action: PreparedAction, stop: Event) -> str:
-    """Return a receipt code. Keep command output outside transcripts and receipts."""
+OUTPUT_LIMIT = 16_000
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    outcome: str
+    exit_code: int | None = None
+    output: str | None = None
+
+
+def _collect(stream, chunks: list[bytes]) -> None:
+    """Keep the first and last parts of combined output and drain the rest."""
+    head = tail = b""
+    dropped = 0
+    half = OUTPUT_LIMIT // 2
+    while block := stream.read(8192):
+        if len(head) < half:
+            take = half - len(head)
+            head, block = head + block[:take], block[take:]
+        tail += block
+        if len(tail) > half:
+            dropped += len(tail) - half
+            tail = tail[-half:]
+    chunks.extend([head, tail, str(dropped).encode()])
+
+
+def _decode(chunks: list[bytes]) -> str:
+    if not chunks:
+        return ""
+    head, tail, dropped = chunks
+    text = head.decode("utf-8", "replace")
+    if int(dropped):
+        text += f"\n[... {int(dropped)} bytes omitted ...]\n"
+    return text + tail.decode("utf-8", "replace")
+
+
+LIST_LIMIT = 500
+
+
+def _read(path: Path) -> str:
+    if path.is_dir():
+        entries = sorted(path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+        lines = [item.name + ("/" if item.is_dir() else f"  ({item.stat().st_size} bytes)")
+                 for item in entries[:LIST_LIMIT]]
+        if len(entries) > LIST_LIMIT:
+            lines.append(f"[... {len(entries) - LIST_LIMIT} more entries ...]")
+        return "\n".join(lines) or "(empty folder)"
+    with path.open("rb") as handle:
+        data = handle.read(OUTPUT_LIMIT + 1)
+    if b"\0" in data[:4096]:
+        return f"(binary file, {path.stat().st_size} bytes)"
+    text = data[:OUTPUT_LIMIT].decode("utf-8", "replace")
+    return text + (f"\n[... truncated at {OUTPUT_LIMIT} bytes ...]" if len(data) > OUTPUT_LIMIT else "")
+
+
+def execute(action: PreparedAction, stop: Event) -> ActionResult:
+    """Dispatch an approved action. Command output goes only to the caller, not to audit records."""
     for identity in action.paths:
         identity.verify()
     if stop.is_set():
-        return "cancelled"
+        return ActionResult("cancelled")
+    if action.action == "read":
+        return ActionResult("completed", output=_read(Path(action.target)))
     if action.action == "open":
         if os.name == "nt":
             os.startfile(action.target)
@@ -161,26 +229,36 @@ def execute(action: PreparedAction, stop: Event) -> str:
 
             launcher = shutil.which("open" if sys.platform == "darwin" else "xdg-open")
             if launcher is None:
-                return "handler_unavailable"
+                return ActionResult("handler_unavailable")
             # The normalized target starts with an absolute path or HTTP(S).
             process = subprocess.Popen([launcher, action.target], stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 if process.wait(timeout=0.5) != 0:
-                    return "nonzero_exit"
+                    return ActionResult("nonzero_exit")
             except subprocess.TimeoutExpired:
                 Thread(target=process.wait, name="desktop-opener", daemon=True).start()
-        return "dispatched"
+        return ActionResult("dispatched")
 
     process = subprocess.Popen([action.target, *action.arguments], cwd=action.directory, shell=False,
-                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                start_new_session=os.name != "nt")
+    chunks: list[bytes] = []
+    reader = Thread(target=_collect, args=(process.stdout, chunks), name="command-output", daemon=True)
+    reader.start()
     deadline = monotonic() + 30
-    while (code := process.poll()) is None:
-        if stop.wait(0.05):
-            _kill_command(process)
-            return "cancelled"
-        if monotonic() >= deadline:
-            _kill_command(process)
-            return "timed_out"
-    return "completed" if code == 0 else "nonzero_exit"
+    try:
+        while (code := process.poll()) is None:
+            if stop.wait(0.05):
+                _kill_command(process)
+                return ActionResult("cancelled")
+            if monotonic() >= deadline:
+                _kill_command(process)
+                reader.join(timeout=2)
+                return ActionResult("timed_out", output=_decode(chunks))
+        reader.join(timeout=5)
+        return ActionResult("completed" if code == 0 else "nonzero_exit", code, _decode(chunks))
+    finally:
+        reader.join(timeout=2)
+        if not reader.is_alive():
+            process.stdout.close()

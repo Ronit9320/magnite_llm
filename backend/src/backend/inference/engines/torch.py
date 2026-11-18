@@ -25,6 +25,11 @@ def messages_to_prompt(tokenizer, messages, thinking: bool | None = None) -> str
         return "\n".join(lines) + "\nassistant:"
 
 
+def tools_rendered(prompt: str, tools: list[dict]) -> bool:
+    """A template that ignores ``tools`` has no native tool format."""
+    return all(tool["function"]["name"] in prompt for tool in tools)
+
+
 class TorchPeftEngine(BaseEngine):
     """In-process transformers + PEFT inference for LoRA/QLoRA adapters.
 
@@ -150,7 +155,9 @@ class TorchPeftEngine(BaseEngine):
 
         streamer = TextIteratorStreamer(self._tokenizer, skip_prompt=True,
                                        skip_special_tokens=True, timeout=60.0)
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+        # A prompt rendered by the chat template already carries its special tokens.
+        inputs = self._tokenizer(prompt, return_tensors="pt",
+                                 add_special_tokens=not kwargs.get("templated", False)).to(self._model.device)
         temperature = float(kwargs.get("temperature", 0.7))
         gen_kwargs = dict(max_new_tokens=int(kwargs.get("max_tokens", 256)),
                           do_sample=temperature > 0, streamer=streamer,
@@ -214,6 +221,17 @@ class TorchPeftEngine(BaseEngine):
 
     def count_messages(self, messages):
         return self.count_tokens(self._messages_to_prompt(messages))
+
+    def render_tool_prompt(self, messages, tools):
+        tokenizer = self._tokenizer
+        if tokenizer is None:
+            raise EngineUnloaded("The model was unloaded")
+        try:
+            prompt = tokenizer.apply_chat_template(messages, tools=tools, tokenize=False,
+                                                   add_generation_prompt=True, enable_thinking=False)
+        except Exception:
+            return None
+        return prompt if tools_rendered(prompt, tools) else None
 
     def context_size(self):
         model = self._model
