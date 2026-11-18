@@ -332,12 +332,12 @@ class RagStore:
             fts = self._ensure_keyword_index()
             with self._conn() as conn:
                 if fts:
-                    self._fts_apply(conn, (
+                    fts = self._fts_apply(conn, (
                         (f"INSERT INTO {keyword.FTS_TABLE} ({keyword.FTS_TABLE}, rowid, text) "
                          "SELECT 'delete', id, text FROM rag_chunks WHERE doc_id = ?", (doc_id,)),))
                 cur = conn.execute("DELETE FROM rag_documents WHERE id = ?", (doc_id,))
                 conn.execute("DELETE FROM rag_chunks WHERE doc_id = ?", (doc_id,))
-                if fts:
+                if fts:                           # a failed FTS step must not be hidden by a fresh state row
                     self._fts_apply(conn, ())
                 conn.commit()
                 self._invalidate()
@@ -349,7 +349,7 @@ class RagStore:
             fts = self._ensure_keyword_index()
             with self._conn() as conn:
                 if fts:
-                    self._fts_apply(conn, (
+                    fts = self._fts_apply(conn, (
                         (f"INSERT INTO {keyword.FTS_TABLE} ({keyword.FTS_TABLE}) VALUES ('delete-all')", ()),))
                 conn.execute("DELETE FROM rag_chunks")
                 conn.execute("DELETE FROM rag_documents")
@@ -486,18 +486,21 @@ class RagStore:
         except sqlite3.Error as exc:
             log.warning("Could not reset the keyword index state: %s", exc)
 
-    def _fts_apply(self, conn, statements) -> None:
+    def _fts_apply(self, conn, statements) -> bool:
         """Run FTS statements inside the caller's transaction, then record the new sync state.
 
-        An FTS failure never fails the write: the state row is dropped so the next use rebuilds.
+        An FTS failure never fails the write: the state row is dropped so the next use rebuilds, and
+        False is returned so the caller does not write a fresh state row over the failure.
         """
         try:
             for sql, params in statements:
                 conn.execute(sql, params)
             self._write_fts_state(conn)
+            return True
         except sqlite3.Error as exc:
             log.warning("Keyword index update failed, it will be rebuilt: %s", exc)
             self._mark_keyword_stale(conn)
+            return False
 
     def _ensure_keyword_index(self) -> bool:
         """True when the keyword index exists and matches rag_chunks; rebuilds it when it does not.

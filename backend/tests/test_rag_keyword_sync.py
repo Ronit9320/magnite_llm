@@ -144,6 +144,23 @@ class SyncTests(KeywordSyncCase):
         self.assertEqual(len(self.find("ZX-9000")), 1)         # next use rebuilds
         self.assertTrue(self.store.keyword_available)
 
+    def test_failed_fts_delete_is_not_hidden_by_a_fresh_state(self):
+        keep = self.add("keep", ["serial ZX-9000 here"])
+        gone = self.add("gone", ["another QQ-1 chunk"])
+        self.store._ensure_keyword_index()
+        self.raw().execute(f"DROP TABLE {keyword.FTS_TABLE}")      # the 'delete' command will fail
+        self.assertTrue(self.store.delete_document(gone.id))
+        self.assertEqual(len(self.find("ZX-9000")), 1)                # recreated table must be rebuilt
+        self.assertTrue(self.store.get_document(keep.id))
+
+    def test_failed_fts_clear_is_not_hidden_by_a_fresh_state(self):
+        self.add("a", ["serial ZX-9000 here"])
+        self.store._ensure_keyword_index()
+        self.raw().execute(f"DROP TABLE {keyword.FTS_TABLE}")
+        self.store.clear()
+        self.add("b", ["fresh QQ-1 chunk"])
+        self.assertEqual(len(self.find("QQ-1")), 1)
+
     def test_allowed_documents_filter(self):
         a = self.add("a", ["shared SHARED-1"])
         b = self.add("b", ["shared SHARED-1"])
