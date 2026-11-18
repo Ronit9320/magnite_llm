@@ -88,6 +88,28 @@ void ragParamsChecks(const std::function<void(bool, const char *)> &check) {
     check(ramIsHigh(quality, presets) && !ramIsHigh(light, presets) && !ramIsHigh(cudaPresets[1], cudaPresets),
           "rag params: presets heavier than this machine's default are flagged for RAM");
 
+    // Search mode (GET /rag/status "search"): hybrid, vector only, vector only because FTS5 is missing, or absent.
+    const auto searchStatus = [](const QString &mode, const QString &requested, bool keyword) {
+        QJsonObject s = status("all-MiniLM-L6-v2", 3);
+        s["search"] = QJsonObject{{"mode", mode}, {"requested_mode", requested}, {"keyword_available", keyword}, {"rrf_k", 60}};
+        return parseStatus(s);
+    };
+    const auto hybrid = searchStatus("hybrid", "hybrid", true);
+    const auto vectorChosen = searchStatus("vector", "vector", true);
+    const auto vectorForced = searchStatus("vector", "hybrid", false);
+    check(hybrid && hybrid->searchMode == "hybrid" && hybrid->keywordAvailable && vectorForced &&
+              vectorForced->searchMode == "vector" && !vectorForced->keywordAvailable &&
+              vectorForced->searchRequested == "hybrid",
+          "rag params: status gives the effective search mode and whether the keyword index is available");
+    check(hybrid && searchSummary(*hybrid) == "Search: keyword + vector (hybrid)",
+          "rag params: hybrid search is summarized as keyword + vector");
+    check(vectorChosen && searchSummary(*vectorChosen) == "Search: vector only",
+          "rag params: a vector-only choice is summarized without a reason");
+    check(vectorForced && searchSummary(*vectorForced) == "Search: vector only (keyword index unavailable)",
+          "rag params: hybrid requested but no FTS5 says why search is vector only");
+    check(active->searchMode.isEmpty() && searchSummary(*active).isEmpty(),
+          "rag params: a status without a search block keeps an empty mode and shows no line");
+
     check(formatDuration(30) == "under a minute" && formatDuration(25 * 60) == "about 25 minutes" &&
               formatDuration(3700) == "about an hour" && formatDuration(15000) == "about 4 hours",
           "rag params: durations read in plain language");

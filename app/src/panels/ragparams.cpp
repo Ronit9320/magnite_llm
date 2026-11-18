@@ -49,7 +49,21 @@ std::optional<Active> parseStatus(const QJsonObject &status) {
     a.documents = status["documents"].toInt();
     a.topK = status["config"].toObject()["top_k"].toInt();
     a.engineReady = status["engine_ready"].toBool();
+    if (status["search"].isObject()) {                       // absent on backends without hybrid search
+        const QJsonObject search = status["search"].toObject();
+        a.searchMode = search["mode"].toString();
+        a.searchRequested = search["requested_mode"].toString(a.searchMode);
+        a.keywordAvailable = search["keyword_available"].toBool();
+    }
     return a;
+}
+
+QString searchSummary(const Active &a) {
+    if (a.searchMode == "hybrid") return QStringLiteral("Search: keyword + vector (hybrid)");
+    if (a.searchMode != "vector") return QString();
+    if (a.searchRequested == "hybrid" && !a.keywordAvailable)
+        return QStringLiteral("Search: vector only (keyword index unavailable)");
+    return QStringLiteral("Search: vector only");
 }
 
 bool sameModel(const QString &a, const QString &b) {

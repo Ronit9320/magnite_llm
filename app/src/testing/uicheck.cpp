@@ -244,16 +244,19 @@ struct Fixture : QTcpServer {
     QStringList ragConfigRequests, ragReindexRequests;
     int ragReindexStatus = 200, ragIngests = 0, ragActivityRequests = 0, ragStatusRequests = 0;
     QString ragReindexDetail;
+    bool ragSearchBlock = true, ragKeywordAvailable = true;   // GET /rag/status "search" (absent from older backends)
     bool holdRagWork = false;                      // keep ingest/reindex requests open until the client aborts
     QList<QPointer<QTcpSocket>> heldRagWork;
     QJsonObject ragActivity{{"active",false},{"kind",QJsonValue()},{"name",""},{"phase",""},{"done",0},{"total",0},{"waiting",0}};
     QByteArray ragStatusJson() const {
         const bool bge = ragModel == "BAAI/bge-m3";
-        return QJsonDocument(QJsonObject{{"engine_ready",true},{"model",ragModel},{"documents",ragDocuments},{"chunks",ragChunks},
+        QJsonObject status{{"engine_ready",true},{"model",ragModel},{"documents",ragDocuments},{"chunks",ragChunks},
             {"config",QJsonObject{{"chunk_size",bge?320:512},{"chunk_overlap",bge?40:64},{"top_k",4},{"min_score",0.0},{"model",ragModel},{"truncate_dim",0}}},
             {"embedder",QJsonObject{{"model",ragModel},{"label",bge?"Quality":"Light"},{"max_seq_tokens",bge?1024:256},{"dim",bge?1024:384},
                 {"loaded",!bge},{"device",bge?QJsonValue():QJsonValue("cpu")},{"dtype",bge?QJsonValue():QJsonValue("float32")},{"measured_chunks_per_s",QJsonValue()}}},
-            {"chunking",QJsonObject{{"chunk_size",bge?320:149},{"chunk_overlap",bge?40:37},{"clamped",!bge},{"max_chunk_size",bge?601:149}}}}).toJson(QJsonDocument::Compact);
+            {"chunking",QJsonObject{{"chunk_size",bge?320:149},{"chunk_overlap",bge?40:37},{"clamped",!bge},{"max_chunk_size",bge?601:149}}}};
+        if (ragSearchBlock) status["search"]=QJsonObject{{"mode",ragKeywordAvailable?"hybrid":"vector"},{"requested_mode","hybrid"},{"keyword_available",ragKeywordAvailable},{"rrf_k",60}};
+        return QJsonDocument(status).toJson(QJsonDocument::Compact);
     }
     static QByteArray ragEmbeddersJson() {
         return R"([{"model_id":"sentence-transformers/all-MiniLM-L6-v2","label":"Light","max_seq_tokens":256,"dim":384,"approx_ram_mb":450,"recommended":true,"expected_device":"cpu","reference_hardware":"Apple M1, 8 GB","reference_chunks_per_s":{"cpu":40.0}},)"
@@ -1578,6 +1581,22 @@ int runUiCheck(const QString &captures) {
                   "chunk settings show the effective values and the model's limits");
             check(chunkInfo->text().contains("149") && chunkInfo->text().contains("37") && clampHint->isVisibleTo(&knowledge) && clampHint->text().contains("256"),
                   "clamped chunking is explained for this model");
+            // Search mode line: shown from status.search, narrow-drawer safe, hidden when the backend does not report it.
+            auto *searchInfo=knowledge.findChild<QLabel *>("ragSearchInfo");
+            check(searchInfo && searchInfo->isVisibleTo(&knowledge) && searchInfo->text()=="Search: keyword + vector (hybrid)",
+                  "knowledge shows that search is hybrid (keyword + vector)");
+            if (searchInfo) {
+                const int narrow=260;
+                check(searchInfo->wordWrap() && searchInfo->heightForWidth(narrow)>=searchInfo->fontMetrics().height(),
+                      "the search mode line wraps instead of clipping in the narrow drawer");
+                fixture.ragKeywordAvailable=false; knowledge.refresh(); waitUntil([&]() { return searchInfo->text().contains("unavailable"); },2000);
+                check(searchInfo->text()=="Search: vector only (keyword index unavailable)" && TextFit::clippedText(&knowledge).isEmpty(),
+                      "knowledge says why search is vector only when the keyword index is unavailable");
+                fixture.ragSearchBlock=false; knowledge.refresh(); waitUntil([&]() { return !searchInfo->isVisibleTo(&knowledge); },2000);
+                check(!searchInfo->isVisibleTo(&knowledge),"an older backend without a search block shows no search line");
+                fixture.ragSearchBlock=true; fixture.ragKeywordAvailable=true; knowledge.refresh();
+                waitUntil([&]() { return searchInfo->isVisibleTo(&knowledge); },2000);
+            }
             bool stale=false; for (auto *label:knowledge.findChildren<QLabel *>()) stale=stale||label->text().contains("512");
             check(!stale && sizeSpin->value()!=512 && overlapSpin->value()!=64,"no hardcoded 512/64 chunk values are shown");
 

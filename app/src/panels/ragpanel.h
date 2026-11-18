@@ -102,6 +102,7 @@ private:
     bool m_cancelRequested = false;
     QLabel *m_modelInfo = nullptr;
     QLabel *m_chunkingInfo = nullptr;
+    QLabel *m_searchInfo = nullptr;
     QLabel *m_clampHint = nullptr;
     QList<RagParams::Preset> m_presets;
     std::optional<RagParams::Active> m_active;   // what GET /rag/status last reported

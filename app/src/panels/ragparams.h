@@ -29,6 +29,8 @@ struct Active {
     int chunks = 0, documents = 0, topK = 0;
     bool loaded = false, clamped = false, engineReady = false;
     double measuredSpeed = 0;               // 0 = not measured yet
+    QString searchMode, searchRequested;    // status.search: effective and configured ("hybrid"|"vector"); empty = not reported
+    bool keywordAvailable = false;          // the FTS5 keyword index can be used
 };
 
 // Pages in the "typical document" the estimate falls back to when the library is empty.
@@ -44,6 +46,7 @@ int indexOf(const QList<Preset> &presets, const QString &model);
 bool ramIsHigh(const Preset &preset, const QList<Preset> &all);  // heavier than this machine's default
 double speedFor(const Preset &preset, const Active &active);    // chunks/s, 0 = unknown
 QString formatDuration(double seconds);
+QString searchSummary(const Active &active);                    // the one-line search mode text; empty = nothing to show
 QString speedWarning(const Preset &preset, const Active &active);  // empty unless slow
 
 }  // namespace RagParams

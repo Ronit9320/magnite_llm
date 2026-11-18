@@ -153,6 +153,12 @@ void RagPanel::setupUi() {
     m_chunkingInfo->setTextFormat(Qt::PlainText);
     m_chunkingInfo->setWordWrap(true);
     modelCard->addWidget(m_chunkingInfo);
+    m_searchInfo = new QLabel(this);
+    m_searchInfo->setObjectName("ragSearchInfo");
+    m_searchInfo->setTextFormat(Qt::PlainText);
+    m_searchInfo->setWordWrap(true);
+    m_searchInfo->hide();
+    modelCard->addWidget(m_searchInfo);
     m_clampHint = new QLabel(this);
     m_clampHint->setObjectName("ragClampHint");
     m_clampHint->setTextFormat(Qt::PlainText);
@@ -640,6 +646,9 @@ void RagPanel::applyStatus() {
     const QString tokens = a.maxTokens > 0 ? QString("%1 tokens").arg(a.maxTokens) : QStringLiteral("token limit known after first use");
     m_modelInfo->setText(QString("%1 · %2\n%3 · %4 · %5").arg(a.label, a.model, dims, tokens, device));
     m_chunkingInfo->setText(QString("Chunks of %1 words with %2 words of overlap").arg(a.chunkSize).arg(a.chunkOverlap));
+    const QString search = RagParams::searchSummary(a);
+    m_searchInfo->setText(search);
+    m_searchInfo->setVisible(!search.isEmpty());
     m_clampHint->setText(QString("Clamped for this model: its %1-token limit fits about %2 words per chunk.")
                              .arg(a.maxTokens).arg(a.maxChunkSize));
     m_clampHint->setVisible(a.clamped);
