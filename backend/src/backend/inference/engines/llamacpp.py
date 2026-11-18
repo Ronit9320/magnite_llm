@@ -10,6 +10,7 @@ from backend.inference.engines.base import BaseEngine, EngineUnloaded
 from backend.inference.engines.streaming import threaded_stream
 
 _GUARD = threading.Lock()
+_TURN_ENDS = ("<|im_end|>", "<|eot_id|>", "<|end|>", "<end_of_turn>", "<|endoftext|>")
 
 # HF repos known to host a GGUF we can pull by convention.
 # Fallback filename patterns used if repo listing is unavailable.
@@ -89,9 +90,43 @@ class LlamaCppEngine(BaseEngine):
             self.load()
         return self._llm
 
+    def _render(self, messages: list[dict], **options) -> str | None:
+        """Render the GGUF's embedded chat template, or None when it has none."""
+        llm = self._llm
+        if llm is None:
+            raise EngineUnloaded("The model was unloaded")
+        template = llm.metadata.get("tokenizer.chat_template")
+        if not template:
+            return None
+        from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+
+        model = llm._model
+        eos, bos = llm.token_eos(), llm.token_bos()
+        bos_text = model.token_get_text(bos) if bos != -1 else ""
+        formatter = Jinja2ChatFormatter(template=template, bos_token=bos_text,
+                                        eos_token=model.token_get_text(eos) if eos != -1 else "")
+        try:
+            prompt = formatter(messages=messages, **options).prompt
+        except Exception:
+            return None
+        # create_completion adds BOS itself.
+        return prompt[len(bos_text):] if bos_text and prompt.startswith(bos_text) else prompt
+
+    def render_tool_prompt(self, messages, tools):
+        from backend.inference.engines.torch import tools_rendered
+
+        prompt = self._render(messages, tools=tools, enable_thinking=False)
+        return prompt if prompt is not None and tools_rendered(prompt, tools) else None
+
     def _chat(self, messages, stop, **kwargs) -> AsyncIterator[str]:
         llm = self._ensure()
         api_messages = [{"role": m.role.value, "content": m.content} for m in messages]
+        if kwargs.pop("tool_mode", False):
+            # The default chat handler cannot turn off a model's thinking mode.
+            prompt = self._render(api_messages, enable_thinking=False)
+            if prompt is not None:
+                yield from self._complete(prompt, stop, templated=True, **kwargs)
+                return
         stream = llm.create_chat_completion(
             messages=api_messages,
             max_tokens=kwargs.get("max_tokens", 256),
@@ -112,11 +147,14 @@ class LlamaCppEngine(BaseEngine):
 
     def _complete(self, prompt, stop, **kwargs) -> AsyncIterator[str]:
         llm = self._ensure()
+        # A chat-template prompt ends its turn with a marker that may differ from EOS.
+        ends = list(_TURN_ENDS) if kwargs.get("templated") else None
         stream = llm.create_completion(
             prompt=prompt,
             max_tokens=kwargs.get("max_tokens", 256),
             temperature=kwargs.get("temperature", 0.7),
             top_p=kwargs.get("top_p", 0.95),
+            stop=ends,
             stream=True,
         )
         for chunk in stream:

@@ -51,8 +51,9 @@ tests for trying linked LoRA adapters.
 
 ## Assemble a request-triage workflow
 
-Load a supported local model in Chat and choose **Request triage example** in
-Blueprints. Save the revision, open **Test & run**, and enter a request such as
+Choose **Request triage example** in Blueprints. Select **Summarize request**,
+choose a local Transformers checkpoint in **Configure**, then save the
+revision. Open **Test & run** and enter a request such as
 “Please send replacement labels for order 245.” The run returns a JSON object
 with a model-written `summary` and a fixed `status` of `Needs review`. Each
 step shows its inputs and outputs in the run trace. The saved revision can also
@@ -61,7 +62,7 @@ run from Blueprint mode in Conversation.
 | Step | Input | Output |
 | --- | --- | --- |
 | Incoming request | Text supplied at run time | Text on `value` |
-| Summarize request | The text on `task`, plus instructions saved on the Pi Agent | Text on `reply` |
+| Summarize request | The text on `value`, plus the system prompt saved on the Model node | Text on `value` (Plain text response) |
 | Review status | A JSON string saved on the Constant node | Text on `value` |
 | Build triage record | Text on `summary` and `status` | JSON object with those two keys |
 | Triage record | The assembled object | The workflow result |
@@ -74,10 +75,15 @@ schemas for arrays and objects, including item types and required properties.
 For a Model or Reasoning node with multiple outputs, ask for a JSON object
 keyed by those output keys. Plain-text response mode uses one text output.
 
-The **Pi Agent** node uses the local model currently loaded in Conversation. Set reusable
-instructions in the node, connect a text task, and route its reply to downstream
-nodes. Its scope is text processing. The existing Tool approval node handles
-explicit actions. Workflows run from **Test & run** or Blueprint mode in Conversation.
+A **Reasoning** node uses the same checkpoint picker as a Model node. Only
+checkpoints whose chat template supports explicit thinking can be selected;
+others are listed as “no thinking”.
+
+The Pi Agent node was removed. Older graphs that contain one still open, and
+the node shows a validation error until you replace it with a Model node that
+uses **Plain text** responses and holds the instructions in its system prompt.
+The Tool approval node handles explicit actions. Workflows run from
+**Test & run** or Blueprint mode in Conversation.
 
 ## Supported runtimes and checkpoints
 
@@ -93,7 +99,7 @@ format. Exact acceptance evidence and platform coverage are in the
 | llama.cpp with GGUF | Local chat and Playground | Use a Transformers checkpoint for Model and Reasoning nodes | Eligible when loaded and Pi is available |
 | Local vLLM | Local text | Use Torch/PEFT for Model and Reasoning nodes | Eligible when loaded and Pi is available |
 | Ollama | Local text | Use a Transformers checkpoint for Model and Reasoning nodes | Use a supported loaded engine for Pi |
-| Package without optional ML dependencies | GGUF with llama.cpp | Input, Dataset, Transform, Output, Pi Agent, and fixed approval steps are available. Use a package with ML support for Model, Reasoning, or adapter training. | Pi can use a supported loaded GGUF model |
+| Package without optional ML dependencies | GGUF with llama.cpp | Input, Dataset, Transform, Output, and fixed approval steps are available. Use a package with ML support for Model, Reasoning, or adapter training. | Pi can use a supported loaded GGUF model |
 
 Use a complete unquantized Safetensors checkpoint for a decoder-only
 Transformers model, including its local tokenizer files.
@@ -124,11 +130,13 @@ same action, needs a separate decision. The run can be cancelled while waiting.
 You can switch between chat and **Open full run** while a decision is pending.
 
 Opening a target uses the operating system's file, folder, or HTTP(S) handler.
-Approved commands run with your desktop account's permissions, with a direct
-argument list and a 30-second time limit. A command can change files or start
-other programs. Review all its arguments and deny requests you don't intend to
-run. The default working directory is `tool-workspace/` inside the app data
-folder. Pi has at most five model turns and four proposals per agent node.
+Reading returns a file's text or a folder listing to the run. Approved commands
+run with your desktop account's permissions, with a direct argument list and a
+30-second time limit. Their output returns to the run and the model. A command
+can change files or start other programs. Review all its arguments and deny
+requests you don't intend to run. The default working directory is
+`tool-workspace/` inside the app data folder. A task has at most six model
+turns and four actions.
 
 Run history keeps input values, output values, revisions, and a redacted
 decision record. Treat it as local user data when you move, back up, or share

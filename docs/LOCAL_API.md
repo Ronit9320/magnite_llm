@@ -91,7 +91,7 @@ provided responses. Existing requests default to fixture mode.
 | Export or import the portable document | `GET /blueprints/{id}/export` with optional `revision`, or `POST /blueprints/import` with the exported JSON |
 | Train an adapter for a node | `POST /blueprints/{id}/nodes/{node_id}/training` with typed `examples`, optional `revision`, and optional training `settings`. Returns an ordinary training job. |
 | Bind an existing or trained adapter | `PUT /blueprints/{id}/nodes/{node_id}/adapter` with the current `revision` and either `adapter_id` or a completed `training_job_id` for that node. Returns a new revision. |
-| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning, Tool and Pi Agent nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
+| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning and Tool nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
 | Queue an isolated node test | `POST /blueprints/{id}/node-tests` with the blueprint `name`, the full `node` contract, and named `inputs`. It runs locally without other nodes and returns HTTP 202. An Input node takes its test value under `inputs.value`. |
 | Read history or details | `GET /blueprints/runs` with optional `blueprint_id`, `surface`, `active`, `limit`, and `offset`. `GET /blueprints/runs/{run_id}` includes the snapshot, per-step trace, and results. |
 | Follow or replay events | `GET /blueprints/runs/{run_id}/events` |
@@ -132,10 +132,17 @@ and `additionalProperties` on the applicable types.
 | `transform` / `pass`, `parse-json`, `field`, `first`, `count`, `format` | `value` → `value`. `field` takes `parameters: {"field":"..."}`. |
 | `transform` / `constant` | `parameters: {"value": ...}` → `value`. The JSON literal must match the output contract. |
 | `transform` / `build-object` | One to sixteen named data inputs → object on `value`. Input keys become fields in the object. |
+| `transform` / `template` | Named data inputs plus `parameters: {"template": "..."}` → string on `value`. `{key}` must name an input; `{{`/`}}` are literal braces. |
+| `transform` / `compare` | `left`, `right` plus `parameters: {"operator": ...}` → boolean on `value`. Operators: `equals`, `not-equals`, `greater`, `greater-or-equal`, `less`, `less-or-equal` (numbers), `contains` (text in text, or value in array). |
+| `transform` / `choose` | `condition` (boolean), `if_true`, `if_false` → `value`. Both choices must be compatible with the output. |
+| `transform` / `filter` | `rows` (array of objects) plus `parameters: {"field", "operator", "value"}` → matching `rows`. Operators as for `compare`. Rows without the field are left out. |
+| `transform` / `sort` | `rows` plus `parameters: {"field", "descending"}` → sorted `rows`. Missing fields sort last; mixed value kinds fail. |
+| `knowledge` / `search` | `query` (string) → `results` (array) and `context` (string). Optional `top_k` (1–50) and `min_score` (0–1) override the Knowledge settings. Fails with `knowledge_unavailable` when embeddings or documents are missing. |
+| `transform` / `validate` | `value` plus `parameters: {"schema": {...}}` → the same `value`. Port types must match the schema type. A mismatch fails with `invalid_value` at the field path. |
 | `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
 | `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |
 | `adapter` / `lora` | Registered `adapter_id` → `adapter` (string resource reference). |
-| `agent` / `pi-reply` | `task` (string) → `reply` (string). Optional `instructions` set the Pi system message. Uses the loaded local chat model for text processing. |
+| `agent` / `pi-reply` | Retired. Graphs that contain it still parse, but validation reports `retired_node` until it is replaced with a Model node. |
 | `tool` / `approval` | In local mode, an action object on `value` requests approval and produces `receipt` after dispatch. In fixture mode, `receipt` uses the supplied decision. |
 | `tool` / `agent` | Text or a chat message array on `value` starts Pi. `receipt` contains the final `text`. |
 | `output` / `output` | `value` → `value` and run `results[node_id]` |
@@ -209,7 +216,7 @@ local vLLM chat engine. Install the locked Pi dependencies with Node 22.19 or la
 
 | Operation | Route |
 | --- | --- |
-| Check Pi and the loaded model | `GET /inference/tool-runs/capabilities` reports availability and engine |
+| Check Pi and the loaded model | `GET /inference/tool-runs/capabilities` reports availability, engine, `label`, and `native_tools` |
 | Start tool chat | `POST /inference/tool-runs` with `messages` and optional absolute `working_directory` |
 | Inspect pending actions or review audit history | `GET /blueprints/runs/{run_id}/approvals` |
 | Decide once | `POST /blueprints/runs/{run_id}/approvals/{approval_id}/decision` with the displayed `fingerprint` and `decision` of `approve_once` or `deny` |
@@ -219,13 +226,17 @@ or cancel using the Blueprint run routes above. Read the completed answer at
 `results.reply.text`. The usual `/inference/chat` endpoint continues to
 serve ordinary chat.
 
-A local Blueprint can pass `{"action":"open","target":"..."}` or
+A local Blueprint can pass `{"action":"open","target":"..."}`,
+`{"action":"read","target":"..."}`, or
 `{"action":"command","executable":"...","arguments":["..."]}` to its
 `approval` node. The run request may specify an absolute `working_directory`
 for either surface. Its default is `tool-workspace/` under `MAGNITE_HOME`.
-Open accepts a regular file, folder, or HTTP(S) URL. Commands run directly with
-the displayed executable, argument array, and working directory. They return
-an outcome code. Open reports dispatch to the operating system.
+Open accepts a regular file, folder, or HTTP(S) URL. Read accepts a file or
+folder and returns its text or listing in the receipt's `output`. Commands run
+directly with the displayed executable, argument array, and working directory.
+Their receipt has `outcome`, `exit_code`, and combined `output` capped at
+16,000 bytes. Open reports dispatch to the operating system. Output stays in
+the run's step history and is never written to the approval audit.
 
 SSE emits `approval` events containing the proposal ID, status, and
 fingerprint. Fetch approval details to show the exact pending action. The

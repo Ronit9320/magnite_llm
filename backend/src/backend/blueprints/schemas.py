@@ -111,7 +111,8 @@ class DatasetNode(Node):
 class TransformNode(Node):
     kind: Literal["transform"]
     operation: Literal["pass", "parse-json", "field", "first", "count", "format",
-                       "order-clause", "order-price", "constant", "build-object"]
+                       "order-clause", "order-price", "constant", "build-object",
+                       "template", "compare", "choose", "validate", "filter", "sort"]
     parameters: dict[Text, Value] = Field(default_factory=dict)
 
 
@@ -155,7 +156,16 @@ class ToolNode(Node):
     operation: Literal["approval", "agent"]
 
 
+class KnowledgeNode(Node):
+    """Search the local Knowledge collection with the panel's retrieval settings."""
+    kind: Literal["knowledge"]
+    operation: Literal["search"]
+    top_k: Annotated[int, Field(ge=1, le=50)] | None = None
+    min_score: Annotated[float, Field(ge=0, le=1)] | None = None
+
+
 class AgentNode(Node):
+    """Retired Pi Agent node. Graph validation rejects it with a repair message."""
     kind: Literal["agent"]
     operation: Literal["pi-reply"]
     instructions: Annotated[Text, Field(max_length=16000)] = ""
@@ -163,7 +173,7 @@ class AgentNode(Node):
 
 BlueprintNode = Annotated[
     InputNode | DatasetNode | TransformNode | ModelNode | ReasoningNode | OutputNode | ToolNode
-    | AdapterNode | AgentNode,
+    | AdapterNode | KnowledgeNode | AgentNode,
     Field(discriminator="kind"),
 ]
 

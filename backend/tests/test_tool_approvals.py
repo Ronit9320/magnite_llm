@@ -62,7 +62,7 @@ class ToolApprovalTests(unittest.TestCase):
         self.blueprint_id = response.json()["id"]
 
     @staticmethod
-    def fake_agent(value, engine, approve, stop):
+    def fake_agent(value, engine, approve, stop, **_options):
         proposals = json.loads(value[-1]["content"])
         receipt = None
         for proposal in proposals:
@@ -147,6 +147,36 @@ class ToolApprovalTests(unittest.TestCase):
                 self.assertIn("event: approval", events)
                 self.assertNotIn(self.marker.name, events)
                 old_path, old_item = path, pending
+
+    def test_command_output_reaches_the_run_but_not_the_audit(self):
+        proposal = {"action": "command", "executable": str(Path(sys.executable).resolve()),
+                    "arguments": ["-c", "print('output-marker'); raise SystemExit(3)"]}
+        path = self.start("blueprints", proposal)
+        self.assertEqual(self.decide(path, self.pending(path)).status_code, 200)
+        run = self.terminal(path)
+        self.assertEqual(run["status"], "failed")
+        audit = self.client.get(path + "/approvals").json()[0]
+        self.assertEqual((audit["status"], audit["outcome"]), ("failed", "nonzero_exit"))
+        self.assertNotIn("output-marker", json.dumps(audit))
+
+        path = self.start("blueprints", {**proposal, "arguments": ["-c", "print('x' * 40000)"]})
+        self.assertEqual(self.decide(path, self.pending(path)).status_code, 200)
+        receipt = self.terminal(path)["results"]["result"]
+        self.assertEqual((receipt["exit_code"], receipt["outcome"]), (0, "completed"))
+        self.assertIn("bytes omitted", receipt["output"])
+        self.assertLess(len(receipt["output"]), 17_000)
+
+    def test_read_returns_file_text_and_folder_listing_after_approval(self):
+        (self.home / "notes.md").write_text("todo: ship")
+        (self.home / "sub").mkdir()
+        for target, expected in (("notes.md", "todo: ship"), (".", "sub/")):
+            path = self.start("blueprints", {"action": "read", "target": target})
+            pending = self.pending(path)
+            self.assertEqual(pending["kind"], "read")
+            self.assertEqual(self.decide(path, pending).status_code, 200)
+            receipt = self.terminal(path)["results"]["result"]
+            self.assertIn(expected, receipt["output"])
+            self.assertNotIn(expected, json.dumps(self.client.get(path + "/approvals").json()))
 
     def test_denial_expiry_cancellation_and_malformed_actions_never_dispatch(self):
         for surface in ("blueprints", "chat"):
@@ -237,6 +267,66 @@ class ToolApprovalTests(unittest.TestCase):
                 prepare({"action": "open", "target": target}, self.home)
 
 
+class ReplyParsingTests(unittest.TestCase):
+    def test_native_tags_fences_legacy_json_and_thinking(self):
+        call = {"name": "run_command", "arguments": {"command": "ls -la"}}
+        cases = {
+            '<tool_call>\n{"name": "run_command", "arguments": {"executable": "ls", "arguments": ["-la"]}}\n</tool_call>':
+                ("", [call]),
+            '<think>\nI should list files.\n</think>\n\n<tool_call>{"name":"run_command","arguments":'
+            '{"executable":"ls","arguments":["-la"]}}</tool_call>': ("", [call]),
+            '```json\n{"name":"run_command","arguments":{"executable":"ls","arguments":["-la"]}}\n```': ("", [call]),
+            '{"action":"command","executable":"ls","arguments":["-la"]}': ("", [call]),
+            'Sure. {"name":"run_command","arguments":"{\\"executable\\":\\"ls\\",\\"arguments\\":[\\"-la\\"]}"}':
+                ("", [call]),
+            "[run_command(command='ls -la')]": ("", [call]),
+            "read_file(path='notes.md')": ("", [{"name": "read_file", "arguments": {"path": "notes.md"}}]),
+            "print(open('x').read())": ("print(open('x').read())", []),
+            "None of the tools are needed for this. 17 times 23 is 391.": ("17 times 23 is 391.", []),
+            '{"answer":"Paris"}': ("Paris", []),
+            "<think>hmm</think>Paris is the capital.": ("Paris is the capital.", []),
+            "<think>never finished": ("", []),
+            '{"name":"delete_everything","arguments":{}}': ('{"name":"delete_everything","arguments":{}}', []),
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(pi_bridge.parse_reply(raw, True), expected)
+
+    def test_tools_off_keeps_calls_as_data(self):
+        raw = '{"action":"open","target":"https://example.com"}'
+        self.assertEqual(pi_bridge.parse_reply(raw, False), (raw, []))
+        self.assertEqual(pi_bridge.parse_reply('Done.<tool_call>{"name":"open_target"}</tool_call>', False),
+                         ("Done.", []))
+
+    def test_tool_calls_become_exact_broker_actions(self):
+        cases = [
+            ({"name": "run_command", "arguments": {"command": "python3 -c 'print(1)'"}},
+             {"action": "command", "executable": "python3", "arguments": ["-c", "print(1)"]}),
+            ({"name": "run_command", "arguments": {"command": "ls | wc"}},
+             {"action": "command", "executable": "ls", "arguments": ["|", "wc"]}),
+            ({"name": "read_file", "arguments": {"path": "notes.md"}}, {"action": "read", "target": "notes.md"}),
+            ({"name": "list_folder", "arguments": {}}, {"action": "read", "target": "."}),
+            ({"name": "open_target", "arguments": {"target": "https://example.com"}},
+             {"action": "open", "target": "https://example.com"}),
+        ]
+        for call, expected in cases:
+            with self.subTest(call=call):
+                self.assertEqual(pi_bridge.proposal(call), expected)
+        for call in ({"name": "run_command", "arguments": {"command": "  "}},
+                     {"name": "run_command", "arguments": {"command": "echo 'open"}},
+                     {"name": "delete", "arguments": {}}):
+            with self.subTest(call=call), self.assertRaises(ValueError):
+                pi_bridge.proposal(call)
+
+    def test_receipts_describe_output_and_refusals(self):
+        text = pi_bridge.receipt_text({"status": "completed", "outcome": "completed", "exit_code": 0,
+                                       "output": "Python 3.13.1\n"})
+        self.assertIn("Exit code: 0", text)
+        self.assertIn("Python 3.13.1", text)
+        self.assertIn("denied", pi_bridge.receipt_text({"status": "denied"}))
+        self.assertIn("not run", pi_bridge.receipt_text({"status": "rejected", "outcome": "invalid_action"}))
+
+
 class PiBridgeTests(unittest.TestCase):
     def setUp(self):
         try:
@@ -244,46 +334,81 @@ class PiBridgeTests(unittest.TestCase):
         except (ValueError, OSError):
             self.skipTest("Install the optional pinned Pi runtime to exercise its subprocess")
 
-    def test_pinned_pi_issues_four_proposals_and_continues_with_receipts(self):
+    def test_native_tool_calls_round_trip_with_output_and_four_proposal_limit(self):
+        seen = []
+
+        def generate(messages, tools, engine, stop, native):
+            seen.append((messages, tools))
+            if len(seen) == 1:
+                self.assertEqual(messages[0]["role"], "system")
+                self.assertIn("/work", messages[0]["content"])
+                return ('<tool_call>{"name":"run_command","arguments":{"executable":"python3",'
+                        '"arguments":["--version"]}}</tool_call>')
+            if len(seen) == 2:
+                self.assertEqual(messages[-2]["tool_calls"][0]["function"],
+                                 {"name": "run_command", "arguments": {"command": "python3 --version"}})
+                self.assertEqual(messages[-1]["role"], "tool")
+                self.assertIn("Python 3.13.1", messages[-1]["content"])
+                return "You have Python 3.13.1."
+            raise AssertionError("unexpected turn")
+
         calls = []
 
-        async def reply(messages, engine, stop):
-            if len(calls) == 4:
-                self.assertIn("Magnite tool receipt", messages[-1].content)
-                return '{"answer":"The proposed actions were denied."}'
-            return '{"action":"open","target":"https://example.com"}'
+        def approve(proposal):
+            calls.append(proposal)
+            return {"status": "completed", "outcome": "completed", "exit_code": 0, "output": "Python 3.13.1"}
+
+        with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
+            result = pi_bridge.run("Which Python do I have?", object(), approve, Event(), working_directory="/work")
+        self.assertEqual(result, "You have Python 3.13.1.")
+        self.assertEqual(calls, [{"action": "command", "executable": "python3", "arguments": ["--version"]}])
+
+    def test_denials_continue_until_the_action_budget_and_then_answer(self):
+        turns = []
+
+        def generate(messages, tools, engine, stop, native):
+            turns.append(tools)
+            if len(turns) <= 5:
+                return '{"name":"open_target","arguments":{"target":"https://example.com"}}'
+            self.assertIn("action limit", messages[-1]["content"])
+            self.assertEqual(sum("denied" in m["content"] for m in messages if m["role"] == "tool"), 4)
+            return "The proposed actions were denied."
+
+        calls = []
 
         def deny(proposal):
             calls.append(proposal)
             return {"status": "denied"}
 
-        with patch("backend.tooling.pi_bridge._local_reply", side_effect=reply):
+        with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
             result = pi_bridge.run("Ask to open a website", object(), deny, Event())
-        self.assertEqual(result, "The proposed actions were denied.")
+        self.assertIn("denied", result)
         self.assertEqual(calls, [{"action": "open", "target": "https://example.com"}] * 4)
+        self.assertEqual(turns[-1], [])
 
     def test_text_agent_passes_instructions_and_keeps_action_shaped_text_as_data(self):
         proposed = '{"action":"open","target":"https://example.com"}'
 
-        async def reply(messages, engine, stop):
-            self.assertEqual([(message.role.value, message.content) for message in messages],
-                             [("system", "Summarize the request."), ("user", "A request")])
+        def generate(messages, tools, engine, stop, native):
+            self.assertEqual(messages, [{"role": "system", "content": "Summarize the request."},
+                                        {"role": "user", "content": "A request"}])
+            self.assertEqual((tools, native), ([], False))
             return proposed
 
-        with patch("backend.tooling.pi_bridge._local_reply", side_effect=reply):
+        with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
             self.assertEqual(pi_bridge.run("A request", object(), None, Event(),
                                            instructions="Summarize the request."), proposed)
 
     def test_cancelling_a_pi_proposal_stops_the_bridge(self):
         stop = Event()
 
-        async def reply(*args):
-            return '{"action":"open","target":"https://example.com"}'
+        def generate(*args):
+            return '{"name":"open_target","arguments":{"target":"https://example.com"}}'
 
         def cancel(_proposal):
             stop.set()
             return {"status": "cancelled"}
 
-        with patch("backend.tooling.pi_bridge._local_reply", side_effect=reply):
+        with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
             with self.assertRaisesRegex(RuntimeError, "cancelled"):
                 pi_bridge.run("Ask to open a website", object(), cancel, stop)

@@ -55,7 +55,8 @@ Widget *visibleNamed(QWidget &parent, const QString &name) {
 
 QPushButton *visibleButton(QWidget &parent, const QString &text) {
     for (auto *button : parent.findChildren<QPushButton *>())
-        if (button->isVisible() && button->text() == text) return button;
+        if (button->isVisible() && (button->text() == text || (button->text().isEmpty() && button->accessibleName() == text)))
+            return button;
     return nullptr;
 }
 
@@ -816,11 +817,90 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     check(panel.findChild<BlueprintCanvas *>()->isVisible() && visibleText(panel, "Draft"),
           "canvas distinguishes an unpublished draft");
+    {
+        // New transform nodes: built by the editor's factory, mapped by apiNode, run by the backend.
+        const auto runNode = [&](QJsonObject node, const QJsonObject &inputs, const QString &port = "value") -> QJsonValue {
+            auto response = std::make_shared<QJsonObject>();
+            const QJsonObject graph{{"id", BlueprintPreview::id()}, {"name", "Check new nodes"},
+                                    {"nodes", QJsonArray{node}}};
+            session.runLive(graph, inputs, node["id"].toString(), false,
+                [response](const auto &run, const auto &error) { *response = {{"run", run}, {"error", error}}; });
+            waitFor([&] { return !response->isEmpty(); }, 10000);
+            const auto id = (*response)["run"].toObject()["id"].toString();
+            if (id.isEmpty() || !waitForState(session, id, "passed", 10000)) return QJsonValue(QJsonValue::Undefined);
+            return QJsonValue(session.run(id)["result"].toObject()[node["id"].toString()].toObject()[port]);
+        };
+        auto templated = session.makeNode("template", "note", 0, 0);
+        templated["setting"] = "Hello {name}, {{ok}}";
+        auto compare = session.makeNode("compare", "large", 0, 0);
+        compare["setting"] = "greater";
+        auto choose = session.makeNode("choose", "pick", 0, 0);
+        auto validate = session.makeNode("validate", "check", 0, 0);
+        check(session.settingError(templated).isEmpty() && runNode(templated, {{"name", "Ada"}}).toString() == "Hello Ada, {ok}",
+              "Text template fills named inputs and keeps escaped braces");
+        templated["setting"] = "Hello {city}";
+        check(session.settingError(templated).contains("city"), "Text template names a missing input port");
+        check(runNode(compare, {{"left", 5}, {"right", 3}}) == QJsonValue(true)
+              && runNode(compare, {{"left", 1}, {"right", 3}}) == QJsonValue(false),
+              "Compare evaluates the saved operator");
+        check(runNode(choose, {{"condition", false}, {"if_true", "Review"}, {"if_false", "Approved"}}).toString() == "Approved",
+              "Choose a value returns the selected input");
+        const QJsonArray rows{QJsonObject{{"id", "a"}, {"amount", 150}}, QJsonObject{{"id", "b"}, {"amount", 20}},
+                              QJsonObject{{"id", "c"}, {"amount", 900}}, QJsonObject{{"id", "d"}, {"tag", "x"}}};
+        auto filter = session.makeNode("filter", "large", 0, 0);
+        auto sort = session.makeNode("sort", "ranked", 0, 0);
+        const auto ids = [](const QJsonValue &value) {
+            QStringList names;
+            for (const auto &row : value.toArray()) names << row.toObject()["id"].toString();
+            return names.join(",");
+        };
+        check(BlueprintPreview::parseRule("status = \"open\"")["value"] == "open"
+              && BlueprintPreview::parseRule("count != 3")["operator"] == "not-equals"
+              && BlueprintPreview::parseRule("tags contains urgent")["value"] == "urgent"
+              && BlueprintPreview::ruleText(BlueprintPreview::parseRule("note = \"say \\\"hi\\\"\"")) == "note = \"say \\\"hi\\\"\""
+              && session.settingError(filter).isEmpty()
+              && !session.settingError([&] { auto bad = filter; bad["setting"] = "amount about 5"; return bad; }()).isEmpty(),
+              "Filter rules parse comparisons, text, numbers, and quoted text and reject unknown comparisons");
+        check(ids(runNode(filter, {{"rows", rows}}, "rows")) == "a,c", "Filter rows keeps rows that pass the default rule");
+        check(ids(runNode(sort, {{"rows", rows}}, "rows")) == "c,a,b,d", "Sort rows orders by the field, largest first, missing last");
+        auto knowledge = session.makeNode("search", "docs", 0, 0);
+        knowledge["setting"] = "2";
+        check(runNode(knowledge, {{"query", "refund"}}, "context").isUndefined(),
+              "Knowledge search fails clearly when no documents are indexed");
+        // A clean profile picks its embedder by memory; use the small one the selftests cache.
+        auto configured = std::make_shared<int>(0);
+        client.post("/rag/config", {{"model", "all-MiniLM-L6-v2"}},
+            [configured](int status, const QJsonDocument &) { *configured = status ? status : -1; });
+        waitFor([&] { return *configured != 0; }, 10000);
+        auto ingested = std::make_shared<int>(0);
+        client.post("/rag/documents", {{"name", "policy.md"}, {"kind", "md"},
+            {"content", "# Refund policy\n\nRefunds are issued within five business days after the item arrives."
+                        "\n\n# Shipping\n\nStandard shipping takes three to seven days."}},
+            [ingested](int status, const QJsonDocument &) { *ingested = status ? status : -1; });
+        if (check(waitFor([&] { return *ingested != 0; }, 90000) && *ingested == 201,
+                  "the clean profile indexes a Knowledge document for search")) {
+            const auto context = runNode(knowledge, {{"query", "How long do refunds take?"}}, "context").toString();
+            check(context.startsWith("[1] policy.md: ") && context.contains("five business days"),
+                  "Knowledge search returns cited passages for a Model prompt");
+        }
+        check(session.settingError(validate).isEmpty(), "Validate data accepts its default rules");
+        const auto valid = runNode(validate, {{"value", QJsonObject{{"id", "INV-1"}}}});
+        check(valid == QJsonValue(QJsonObject{{"id", "INV-1"}}), "Validate data passes a matching value");
+        check(runNode(validate, {{"value", QJsonObject{{"id", ""}}}}).isUndefined(),
+              "Validate data fails a value that breaks its rules");
+    }
+
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
     if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
         const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
         check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
+              std::none_of(cards.begin(), cards.end(), [](const auto *card) {
+                  return card->accessibleName() == "Add Pi Agent";
+              }) &&
+              std::any_of(cards.begin(), cards.end(), [](const auto *card) {
+                  return card->accessibleName() == "Add Knowledge";
+              }) &&
               picker->height() <= picker->screen()->availableGeometry().height() &&
               std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
                   const auto *title = card->template findChild<QLabel *>("headingLabel");
@@ -829,7 +909,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                          picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
                          title && card->accessibleName() == "Add " + title->text() &&
                          caption && caption->height() >= caption->heightForWidth(caption->width());
-              }), "all nine live cards and their text fit without scrolling");
+              }), "all nine live cards fit without scrolling, with Knowledge and without Pi Agent");
         capture(*picker, "live-add-node-cards");
         picker->reject();
         pump();
@@ -995,11 +1075,33 @@ int runLiveBlueprintChecks(const QString &captures) {
             }();
             if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Save revision"); }),
                       "the desktop opens the editable request triage example")) {
+                // The example's Model node starts unbound; bind the cached checkpoint and reopen it.
+                QJsonObject draft;
+                for (const auto &value : session.saved())
+                    if (value.toObject()["id"] == triageDraft) draft = value.toObject();
+                auto nodes = draft["nodes"].toArray();
+                for (int i = 0; i < nodes.size(); ++i) {
+                    auto entry = nodes.at(i).toObject();
+                    if (entry["id"] == "triage") entry["model"] = modelId(testModel);
+                    nodes.replace(i, entry);
+                }
+                draft["nodes"] = nodes;
+                session.saveBlueprint(draft);
+                if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
                 pump();
-                capture(panel, "live-pi-triage-graph");
+                for (auto *button : panel.findChildren<QPushButton *>()) {
+                    if (button->isVisible() && button->text() == "Open"
+                        && visibleText(*button->parentWidget(), "Request triage")) {
+                        button->click();
+                        break;
+                    }
+                }
+                until([&] { return visibleButton(panel, "Save revision"); });
+                pump();
+                capture(panel, "live-triage-graph");
                 visibleButton(panel, "Save revision")->click();
                 if (check(until([&] { return visibleText(panel, "Revision 1"); }),
-                          "the Pi Agent, constant, and object builder publish together")) {
+                          "the Model node, constant, and object builder publish together")) {
                     if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
                     if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
                         message->setPlainText("Please send replacement labels for order 245.");
@@ -1010,11 +1112,85 @@ int runLiveBlueprintChecks(const QString &captures) {
                         const auto record = run["result"].toObject()["result"].toObject();
                         return run["status"] == "passed" && record["status"] == "Needs review" &&
                                !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
-                    }, 40000), "the local Pi Agent returns text and builds the review record");
-                    capture(panel, "live-pi-triage-result");
+                    }, 60000), "the triage Model node returns text and builds the review record");
+                    capture(panel, "live-triage-result");
+                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(2);
+                    pump(300);
+                    capture(panel, "live-run-history");
+                    if (auto *mode = visibleButton(chat, "Blueprint")) mode->click();
+                    pump(500);
+                    capture(chat, "live-conversation-blueprint");
                 }
             }
         }
+    }
+
+    {
+        // Dialog tour: open each editor dialog on a representative draft and capture it for review.
+        QJsonObject tour{{"id", BlueprintPreview::id()}, {"revision", 0}, {"dirty", true}, {"name", "Dialog tour"},
+                         {"description", ""}, {"edges", QJsonArray{}}};
+        const QStringList operations{"generate", "reason", "dataset-rows", "search", "filter", "compare", "template"};
+        QJsonArray nodes;
+        for (int i = 0; i < operations.size(); ++i)
+            nodes.append(session.makeNode(operations[i], QString("n%1").arg(i), (i % 3) * 230, (i / 3) * 170));
+        tour["nodes"] = nodes;
+        session.saveBlueprint(tour);
+        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        pump();
+        for (auto *button : panel.findChildren<QPushButton *>()) {
+            if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Dialog tour")) {
+                button->click();
+                break;
+            }
+        }
+        pump();
+        const auto captureDialog = [&](const QString &name, const std::function<void()> &trigger) {
+            bool seen = false;
+            QTimer poll;
+            poll.setInterval(150);
+            QElapsedTimer opened;
+            const auto connection = QObject::connect(&poll, &QTimer::timeout, &panel, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                if (!opened.isValid()) opened.start();
+                if (opened.elapsed() < 1200) return;  // Let live checkpoint and dataset options arrive.
+                capture(*dialog, name);
+                seen = true;
+                dialog->reject();
+            });
+            poll.start();
+            trigger();
+            poll.stop();
+            QObject::disconnect(connection);
+            return seen;
+        };
+        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        int captured = 0;
+        for (int i = 0; tree && i < operations.size(); ++i) {
+            tree->setCurrentItem(tree->topLevelItem(i));
+            pump();
+            captured += captureDialog("dialog-configure-" + operations[i], [&] {
+                if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+            });
+            if (operations[i] == "generate" || operations[i] == "reason")
+                captured += captureDialog("dialog-binding-" + operations[i], [&] {
+                    if (auto *binding = visibleButton(panel, "Change binding")) binding->click();
+                });
+            if (operations[i] == "dataset-rows") {
+                captured += captureDialog("dialog-dataset", [&] {
+                    if (auto *source = visibleButton(panel, "Choose dataset")) source->click();
+                });
+                captured += captureDialog("dialog-schema", [&] {
+                    for (auto *button : panel.findChildren<QPushButton *>("blueprintPortContract"))
+                        if (button->isVisible()) { button->click(); break; }
+                });
+            }
+        }
+        capture(panel, "dialog-tour-canvas");
+        check(captured == int(operations.size()) + 4, "every editor dialog opens and closes in the dialog tour");
+        session.deleteBlueprint(tour["id"].toString());
+        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        pump();
     }
 
     client.abortAll();

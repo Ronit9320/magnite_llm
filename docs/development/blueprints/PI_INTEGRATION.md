@@ -1,22 +1,30 @@
 # Pi tool runtime
 
-Magnite uses Pi Agent Core 1.5.2 for model-driven tool turns. A fixed Blueprint
+Magnite uses Pi Agent Core 1.5.2 for model-driven tool turns in Tool mode and
+in saved Tool nodes with the legacy `agent` operation. A fixed Blueprint
 continues to run through Magnite's graph executor. Its approval node can submit
-a fixed action directly. Pi Agent nodes use the model loaded in Chat and pass
-their saved instructions as the system message. Their `task` and `reply`
-ports carry text. Pi registers an empty tool list for these nodes and the
-Python bridge rejects proposal frames. Saved Tool nodes with the legacy
-`agent` operation continue to use the same approval flow as tool chat.
+a fixed action directly. The separate Pi Agent text node was retired; use a
+Model node with Plain text responses for text steps.
 
 Pi's custom `streamFn` exchanges newline-delimited JSON with the Python worker
-over stdin and stdout. Magnite calls its loaded local chat model directly and
-converts a structured proposal into a Pi tool call. This preserves Magnite's
-existing HTTP and SSE protocols. The pipe adapter handles one model response at
-a time, with at most five model turns and four proposed actions per agent node.
-For tool chat and legacy Tool agent nodes, Pi registers the open and command
-proposal tools. The Python broker
-controls execution and returns an outcome to Pi. The agent process uses the
-same saved run, replayable SSE, and cancel endpoint on both surfaces.
+over stdin and stdout. Pi sequences turns and tool executions. Magnite owns
+the prompt, each model turn, reply parsing, and dispatch. This preserves
+Magnite's existing HTTP and SSE protocols. A task has at most six model turns
+and four actions. On the last turn Pi withholds the tools so the model answers.
+
+For tool chat and legacy Tool agent nodes, the model sees four tools:
+`run_command` (one command line, split without a shell), `read_file`,
+`list_folder`, and `open_target`. Where the loaded model's chat template
+declares tools (Qwen, Llama 3.x, SmolLM3 and similar), the Torch and llama.cpp
+engines render each turn with that template and thinking disabled. Other
+models get the same tools as a JSON protocol in the system message, and vLLM
+receives `enable_thinking: false`. The parser accepts `<tool_call>` blocks,
+fenced or bare JSON calls, Python-style calls such as `read_file(path='a.txt')`,
+and the earlier `{"action": ...}` objects, and it removes `<think>` blocks.
+Each call becomes an exact broker action. The broker controls execution, and
+Pi receives a readable result: the outcome, the exit code, and the output.
+The agent process uses the same saved run, replayable SSE, and cancel endpoint
+on both surfaces.
 [Pi Agent Core documentation](https://github.com/earendil-works/pi/tree/main/packages/agent)
 
 OpenCode also supports bounded model steps, configured permissions, and session
@@ -57,10 +65,13 @@ settle the proposal without an external action. Repeating a proposal produces a
 fresh ID and requires a separate decision.
 
 Commands use a direct argument list with a 30-second limit. The handler
-terminates a running command on cancellation. Desktop open uses the platform
-handler and reports the dispatch outcome. The event and audit records omit raw
-arguments, paths and URLs. Current pending values are held in memory for exact
-review. Step inputs and the chat transcript are part of normal run history.
+terminates a running command on cancellation. Combined standard output and
+error, capped at 16,000 bytes, go back to the requesting run and model. Read
+returns a file's text with the same cap, or a folder listing of at most 500
+entries. Desktop open uses the platform handler and reports the dispatch
+outcome. The event and audit records omit raw arguments, paths, URLs, and
+output. Current pending values are held in memory for exact review. Step
+inputs, receipts, and the chat transcript are part of normal run history.
 A restart marks an active approval interrupted. If the action had been claimed,
 its outcome can be uncertain. The next backend process does not replay it.
 

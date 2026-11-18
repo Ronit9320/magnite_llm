@@ -18,15 +18,23 @@ of configured nodes and opens additional pages as the library grows.
 | Transform | Format as text | Takes a value and returns text. Structured values become JSON text. |
 | Transform | Provide a constant | Emits a fixed JSON value saved on the node. |
 | Transform | Build an object | Takes named, typed inputs and returns an object with those input keys. |
+| Transform | Fill a text template | Takes named inputs and returns text. `{key}` inserts an input (structured values as JSON); `{{` and `}}` are literal braces. Every placeholder needs an input port. |
+| Transform | Compare two values | Takes `left` and `right` and returns a boolean. Equals and Does not equal use JSON equality (`true` is not `1`). The four ordering comparisons take numbers. Contains looks for text in text or a value in an array. |
+| Transform | Choose a value | Takes a boolean `condition` and two values of the output type, and returns `if_true` or `if_false`. Both inputs are computed; this is not branching. |
+| Transform | Validate data | Takes a value and saved rules (the JSON Schema subset used by ports: `type`, `properties`, `required`, `additionalProperties`, `items`, `minimum`, `minLength`). Returns the value unchanged or fails the step at the field path, skipping later steps. |
+| Transform | Filter rows | Takes an array of objects and keeps rows whose field passes a one-line rule such as `amount >= 100`, `status = "open"`, or `tags contains "urgent"`. Comparisons: `=` `!=` `>` `>=` `<` `<=` `contains`. Rows without the field are left out. |
+| Transform | Sort rows | Takes an array of objects and orders it by one field, for example `amount desc` or `name`. Rows without the field go last. Mixed value kinds fail the step. |
+| Knowledge | Search documents | Takes a text `query` and searches the Knowledge panel's documents with its embedder and search mode. Returns `results` (document, chunk, text, score) and `context`, numbered passages ready for a Model prompt. An empty library fails the step; no match returns empty results. |
 | Model | Generate a response | Takes named inputs and produces typed JSON or a single text output using a local Transformers checkpoint. |
-| Reasoning | Reason through a task | Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support. |
+| Reasoning | Reason through a task | Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support. The checkpoint picker disables checkpoints without it. |
 | Adapter | Attach trained LoRA | Takes a binding to registered LoRA weights and provides a resource link to a compatible Model or Reasoning node. |
-| Pi Agent | Respond with Pi | Takes a text task and saved instructions and returns a text reply using the model loaded in Conversation. |
 | Tool | Request approval | Takes a structured action and emits a receipt after approval and execution. |
 | Output | Return value | Takes a typed value and exposes it in the run result. |
 
 Saved workflows from the retired Order intake starter can still run **Look up
-order clause** and **Validate and price order**. Older graphs may also contain
+order clause** and **Validate and price order**. The **Pi Agent** node was
+removed; older graphs containing it open with a `retired_node` validation error
+until it is replaced with a Model node using Plain text responses. Older graphs may also contain
 **Ask the local tool model**, a Tool operation that uses Pi with the approval flow.
 
 The [support ticket routing example](WORKFLOW_EXAMPLES.md) shows how Model,
@@ -37,18 +45,14 @@ cover typed handoffs and shared or separate adapters.
 
 | Priority | Node or operation | Contract and use |
 | --- | --- | --- |
-| First | Text template | Named values plus a saved template → text. Build prompts, titles, and report sections without model generation. |
-| First | Compare | Two compatible values → boolean. Start with equality and numeric comparisons for rules such as an order-total threshold. |
-| First | Choose value | A boolean and two already-computed values of the same type → the chosen value. Use it to produce a status or label. |
-| First | Validate data | A value and a saved schema → the validated value, or a failed step with the field path. Give the author an explicit validation point before downstream work. |
-| Next | Filter and sort rows | A typed array and a configured field rule → a typed array. Use these to prepare a dataset for a model or report. |
-| Next | Knowledge search | A text query and selected local knowledge collection → ranked excerpts with source references. Reuse Magnite’s existing retrieval settings. |
+| Next | Knowledge search filters | Limit a search to chosen documents. The node uses the whole library today. |
 | Later | Branch and merge | A boolean selects which path runs. Define skipped-step trace states and how downstream inputs resolve before adding this to the editor. |
 | Later | For each | A typed array and a reusable workflow → an array of results. Define iteration limits, cancellation, and per-item error reporting first. |
 | Later | Export result | A typed value → a JSON or text file and a receipt. Use a user-selected destination and the existing explicit approval model for external effects. |
 
-For request triage, the first additions would let a Blueprint validate the
-incoming record, template a Pi task from named fields, compare the result
-against a review rule, and choose the status in its final object. Scheduling
+Text template, Compare, Choose a value, and Validate data are available. A
+Blueprint can now validate an incoming record, template a model prompt from
+named fields, compare a value against a review rule, and choose the status in
+its final object without another generation. Scheduling
 and file-arrival triggers belong to workflow start settings and can be designed
 once a saved workflow's inputs and run behavior are stable.

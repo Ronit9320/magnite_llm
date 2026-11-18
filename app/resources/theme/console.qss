@@ -661,3 +661,10 @@ QPushButton#blueprintPortContract {
     border-radius: 6px; min-height: 20px; padding: 4px 8px; font-size: 12px;
 }
 QPushButton#blueprintPortContract:hover { background: @surfaceFillHover; }
+QPushButton#blueprintStartCard {
+    background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; text-align: left; padding: 0;
+}
+QPushButton#blueprintStartCard:hover { background: @surfaceFillHover; }
+QPushButton#blueprintStartCard:focus { border: 1px solid @accentLabel; }
+QTreeWidget#blueprintNodeTree::item { padding: 2px 0; }
+QTreeWidget#blueprintNodeTree::item:selected { background: @surfaceFillHover; color: @textPrimary; }

@@ -309,7 +309,7 @@ int Theme::selfCheck() {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
         "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
-        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink"};
+        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
@@ -360,7 +360,7 @@ int Theme::selfCheck() {
         const int logical = 18;
         const std::vector<const char *> kGlyphs = {
             "box", "graduation-cap", "folder", "layers", "message-circle",
-            "settings", "database", "download", "play", "circle-stop"};
+            "settings", "database", "download", "play", "circle-stop", "brain"};
         for (const char *glyph : kGlyphs) {
             const QString name = QString::fromLatin1(glyph);
             const QPixmap base = Theme::iconPixmap(name, QColor(Theme::accentPrimary()), logical, 1.0);

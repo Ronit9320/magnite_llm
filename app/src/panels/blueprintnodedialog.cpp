@@ -7,12 +7,14 @@
 #include "widgets/surface.h"
 
 #include <QDialogButtonBox>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
@@ -51,9 +53,13 @@ public:
         setObjectName("blueprintNodeDialog");
         setWindowTitle(existing.isEmpty() ? "Create node" : "Configure node");
         auto *body = new QVBoxLayout(this);
-        body->setContentsMargins(20, 18, 20, 18);
         body->setSpacing(7);
-        body->addWidget(caption(windowTitle(), "panelTitle"));
+        // Same title treatment as the other editor dialogs.
+        body->addWidget(caption(windowTitle(), "headingLabel"));
+        auto *divider = new QFrame;
+        divider->setObjectName("blueprintRule");
+        divider->setFixedHeight(1);
+        body->addWidget(divider);
         m_kind = new ComboBox;
         m_operation = new ComboBox;
         for (const auto &value : m_preview.fixtures()["nodeTypes"].toArray()) {
@@ -89,11 +95,18 @@ public:
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, this, [this] { commit(); });
         connect(m_kind, &QComboBox::currentIndexChanged, this, [this] { loadOperations(); });
-        connect(m_operation, &QComboBox::currentIndexChanged, this, [this] { loadOptions(); });
+        connect(m_operation, &QComboBox::currentIndexChanged, this, [this] {
+            // A name that was only the previous default follows the newly chosen operation.
+            if (m_name->text() == m_name->placeholderText()) m_name->clear();
+            m_name->setPlaceholderText(defaultName());
+            loadOptions();
+        });
         loadOperations(BlueprintPreview::operationId(existing));
         m_operation->setFocus();
-        setMinimumWidth(490);
-        resize(520, 470);
+        setMinimumWidth(500);
+        // Tall enough that ports and settings show without scrolling in most configurations.
+        const int available = parent && parent->screen() ? parent->screen()->availableGeometry().height() : 900;
+        resize(540, qMin(660, int(available * .9)));
         if (m_preview.live()) {
             connect(&m_preview, &BlueprintPreview::optionsChanged, this, [this] {
                 if (m_binding) refreshBindings(m_binding->currentData().toString());
@@ -116,7 +129,7 @@ private:
             m_operation->addItem(spec["label"].toString(), id);
         }
         m_operation->setCurrentIndex(qMax(0, m_operation->findData(preferred)));
-        m_name->setPlaceholderText(m_kind->currentText());
+        m_name->setPlaceholderText(defaultName());
         loadOptions();
     }
 
@@ -127,6 +140,7 @@ private:
         m_line = nullptr;
         m_binding = nullptr;
         m_text = nullptr;
+        m_choice = nullptr;
         m_error->hide();
         if (m_fields) {
             m_options->removeWidget(m_fields);
@@ -155,7 +169,14 @@ private:
         if (!config.isEmpty()) {
             const auto title = config["label"].toString();
             const auto initial = sameOperation ? m_original["setting"].toString() : config["default"].toString();
-            if (config["multiline"].toBool()) {
+            if (config["options"].isArray()) {
+                m_choice = new ComboBox;
+                m_choice->setAccessibleName(title);
+                for (const auto &value : config["options"].toArray())
+                    m_choice->addItem(value.toArray().at(1).toString(), value.toArray().at(0).toString());
+                m_choice->setCurrentIndex(qMax(0, m_choice->findData(initial)));
+                Surface::field(body, title, m_choice);
+            } else if (config["multiline"].toBool()) {
                 m_text = new QPlainTextEdit(initial);
                 m_text->setObjectName("blueprintCode");
                 m_text->setPlaceholderText(config["placeholder"].toString());
@@ -238,8 +259,14 @@ private:
         }
     }
 
+    QString defaultName() const {
+        const auto kind = m_kind->currentData().toString();
+        return kind == "transform" || kind == "knowledge" ? m_operation->currentText() : m_kind->currentText();
+    }
+
     static bool editableKeys(const QString &operation, const QString &side) {
-        return operation == "generate" || operation == "reason" || (operation == "build-object" && side == "in");
+        return operation == "generate" || operation == "reason"
+            || ((operation == "build-object" || operation == "template") && side == "in");
     }
 
     void refreshBindings(const QString &selection) {
@@ -247,11 +274,15 @@ private:
         const bool adapter = m_operation->currentData() == "lora";
         m_binding->clear();
         m_binding->addItem(adapter ? "Choose a trained adapter" : "Choose a local checkpoint", "");
+        const bool reasoning = m_operation->currentData() == "reason";
         for (const auto &value : m_preview.fixtures()[adapter ? "adapters" : "models"].toArray()) {
             const auto option = value.toObject();
             auto title = option["name"].toString();
             if (adapter && option["base_model"].isString()) title += " · " + option["base_model"].toString();
-            m_binding->addItem(title, option["id"].toString());
+            // Reasoning needs a checkpoint whose chat template can switch thinking on.
+            const bool unsupported = reasoning && option["thinking"] == false;
+            m_binding->addItem(unsupported ? title + " · no thinking" : title, option["id"].toString());
+            if (unsupported) BlueprintPreview::disableItem(m_binding, m_binding->count() - 1);
         }
         if (!selection.isEmpty() && m_binding->findData(selection) < 0)
             m_binding->addItem("Unavailable · " + selection, selection);
@@ -319,9 +350,10 @@ private:
         node["kind"] = m_kind->currentData().toString();
         node["operation"] = code;
         const auto name = m_name->text().trimmed();
-        node["name"] = name.isEmpty() ? m_kind->currentText() : name;
+        node["name"] = name.isEmpty() ? defaultName() : name;
         if (m_line) node["setting"] = m_line->text();
         if (m_text) node["setting"] = m_text->toPlainText();
+        if (m_choice) node["setting"] = m_choice->currentData().toString();
         if (m_binding) {
             const auto choice = m_binding->currentData().toString();
             if (code == "lora") node["adapter"] = choice;
@@ -372,6 +404,22 @@ private:
             if (direction == m_resourceSide && !m_resourcePort.isEmpty()) ports.append(m_resourcePort);
             node[direction] = ports;
         }
+        if (code == "validate") {
+            // The rules define both ports, so a connection shows the validated shape.
+            const auto rules = BlueprintPreview::parseJsonValue(node["setting"].toString()).toObject();
+            const auto type = rules["type"].toString();
+            if (!rules.isEmpty() && !type.isEmpty()) {
+                const auto editorType = type == "string" ? QString("text") : type;
+                for (const auto &direction : {QString("in"), QString("out")}) {
+                    auto ports = node[direction].toArray();
+                    auto port = ports.first().toObject();
+                    port["type"] = editorType;
+                    port["schema"] = direction == "out" ? rules : QJsonObject{{"type", type}};
+                    ports.replace(0, port);
+                    node[direction] = ports;
+                }
+            }
+        }
         if (node["response"] == "text") {
             const auto outputs = node["out"].toArray();
             if (outputs.size() != 1 || outputs.first().toObject()["type"] != "text") {
@@ -397,6 +445,7 @@ private:
     const QJsonObject m_original;
     QJsonObject m_result;
     ComboBox *m_kind;
+    ComboBox *m_choice = nullptr;
     ComboBox *m_operation;
     QLineEdit *m_name;
     QLabel *m_detail;

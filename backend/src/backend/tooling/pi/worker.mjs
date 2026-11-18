@@ -1,3 +1,5 @@
+// Pi agent loop over stdio. Magnite renders and parses every model turn and owns
+// tool execution; this worker sequences turns and tool calls with Pi's Agent.
 import { randomUUID } from "node:crypto"
 import { createInterface } from "node:readline"
 import { Agent } from "@earendil-works/pi-agent-core"
@@ -21,7 +23,7 @@ const exchange = async (frame, type) => {
 const model = {
   id: "magnite-local", name: "Magnite local model", api: "openai-completions",
   provider: "magnite", baseUrl: "", input: ["text"], reasoning: false,
-  contextWindow: 8192, maxTokens: 512,
+  contextWindow: 8192, maxTokens: 768,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 }
 const usage = {
@@ -34,92 +36,56 @@ function assistant(content, stopReason) {
     provider: model.provider, model: model.id, timestamp: Date.now() }
 }
 
-const instructions = [
-  "You are a local assistant. Answer directly unless the user asks you to take an action.",
-  'Reply with exactly one JSON object, using one of these forms:',
-  '{"answer":"your final answer"}',
-  '{"action":"open","target":"an absolute file path, folder path, or HTTP(S) URL"}',
-  '{"action":"command","executable":"program name or path","arguments":["one","argument"]}',
-  "Actions are proposals. Magnite will ask the user for an exact approval.",
-  "Report the actual tool receipt. If an action was denied, do not propose it again.",
-].join("\n")
+const text = (message) => typeof message.content === "string" ? message.content
+  : message.content.filter(block => block.type === "text").map(block => block.text).join("\n")
 
-const tools = [
-  {
-    name: "open", label: "Open target", description: "Request approval to open a file, folder or URL.",
-    parameters: { type: "object", required: ["target"], additionalProperties: false,
-      properties: { target: { type: "string", minLength: 1, maxLength: 4096 } } },
-  },
-  {
-    name: "command", label: "Run command", description: "Request approval to launch a command with an argument list.",
-    parameters: { type: "object", required: ["executable", "arguments"], additionalProperties: false,
-      properties: {
-        executable: { type: "string", minLength: 1, maxLength: 4096 },
-        arguments: { type: "array", maxItems: 32, items: { type: "string", maxLength: 4096 } },
-      } },
-  },
-].map(tool => ({
-  ...tool,
-  async execute(_id, args) {
-    const receipt = await exchange({ type: "proposal", proposal: { ...args, action: tool.name } }, "receipt")
-    return { content: [{ type: "text", text: JSON.stringify(receipt.result) }], details: {} }
-  },
-}))
-
-function flatten(message) {
-  if (typeof message.content === "string") return message.content
-  return message.content.map(block => {
-    if (block.type === "text") return block.text
-    if (block.type === "toolCall") return JSON.stringify({ ...block.arguments, action: block.name })
-    return ""
-  }).join("\n")
-}
-
-function asTranscript(messages, allowActions) {
-  const system = messages.filter(message => message.role === "system").map(flatten).filter(Boolean)
-  const turns = messages.filter(message => message.role !== "system").map(message => {
-    if (message.role === "toolResult")
-      return { role: "user", content: "Magnite tool receipt: " + flatten(message) }
-    return { role: message.role, content: flatten(message) }
-  })
-  return [{ role: "system", content: [
-    instructions, ...system,
-    allowActions ? "" : 'Action limit reached. Reply using only {"answer":"your final answer"}.',
-  ].filter(Boolean).join("\n\n") }, ...turns]
-}
-
-function response(raw, allowActions) {
-  const text = raw.trim()
-  let value
-  try { value = JSON.parse(text) } catch { return assistant([{ type: "text", text }], "stop") }
-  if (typeof value?.answer === "string" && Object.keys(value).length === 1)
-    return assistant([{ type: "text", text: value.answer }], "stop")
-  const tool = tools.find(tool => tool.name === value?.action)
-  if (!tool) return assistant([{ type: "text", text }], "stop")
-  if (!allowActions) throw new Error("Pi reached the action limit")
-  const { action, ...args } = value
-  return assistant([{ type: "toolCall", id: randomUUID(), name: tool.name, arguments: args }], "toolUse")
+// Pi context → OpenAI/Hugging Face chat messages with tool calls and tool results.
+function toChat(system, messages) {
+  const chat = system ? [{ role: "system", content: system }] : []
+  for (const message of messages) {
+    if (message.role === "toolResult") {
+      chat.push({ role: "tool", tool_call_id: message.toolCallId, name: message.toolName, content: text(message) })
+    } else if (message.role === "assistant" && Array.isArray(message.content)
+               && message.content.some(block => block.type === "toolCall")) {
+      chat.push({ role: "assistant", content: text(message), tool_calls: message.content
+        .filter(block => block.type === "toolCall")
+        .map(block => ({ id: block.id, type: "function", function: { name: block.name, arguments: block.arguments } })) })
+    } else {
+      chat.push({ role: message.role, content: text(message) })
+    }
+  }
+  return chat
 }
 
 try {
   const start = await read()
   if (start.type !== "start") throw new Error("Invalid Pi start frame")
-  const actions = start.actions !== false
+  const declared = Array.isArray(start.tools) ? start.tools : []
+  const maxTurns = Number.isInteger(start.maxTurns) ? start.maxTurns : 6
+  const system = start.messages.filter(message => message.role === "system").map(message => message.content).join("\n\n")
+  const tools = declared.map(({ function: spec }) => ({
+    name: spec.name, label: spec.name, description: spec.description, parameters: spec.parameters,
+    async execute(_id, args) {
+      const receipt = await exchange({ type: "proposal", proposal: { name: spec.name, arguments: args } }, "receipt")
+      return { content: [{ type: "text", text: receipt.text }], details: {}, isError: Boolean(receipt.error) }
+    },
+  }))
   let turns = 0
   const agent = new Agent({
-    initialState: { model, tools: actions ? tools : [] },
+    initialState: { model, tools },
     toolExecution: "sequential",
     async streamFn(_model, context) {
       turns += 1
-      if (turns > 5) throw new Error("Pi reached the turn limit")
-      const allowed = turns < 5
-      const messages = actions ? asTranscript(context.messages, allowed) : context.messages.map(message => ({
-        role: message.role, content: flatten(message),
-      }))
-      if (!actions && start.instructions)
-        messages.unshift({ role: "system", content: start.instructions })
-      const reply = await exchange({ type: "generate", messages }, "generation")
-      const output = actions ? response(reply.text, allowed) : assistant([{ type: "text", text: reply.text }], "stop")
+      if (turns > maxTurns) throw new Error("Pi reached the turn limit")
+      // On the last turn, withhold tools so the model has to answer.
+      const offered = turns < maxTurns ? declared : []
+      const reply = await exchange({ type: "generate", messages: toChat(system, context.messages), tools: offered },
+                                   "generation")
+      const calls = Array.isArray(reply.calls) ? reply.calls : []
+      const content = []
+      if (reply.text) content.push({ type: "text", text: reply.text })
+      for (const call of calls) content.push({ type: "toolCall", id: randomUUID(), name: call.name, arguments: call.arguments })
+      const output = assistant(content, calls.length ? "toolUse" : "stop")
       const stream = createAssistantMessageEventStream()
       stream.push({ type: "start", partial: { ...output, content: [] } })
       stream.push({ type: "done", reason: output.stopReason, message: output })
@@ -127,16 +93,16 @@ try {
       return stream
     },
   })
-  const messages = start.messages.map(message => message.role === "assistant"
-    ? assistant([{ type: "text", text: message.content }], "stop")
-    : { ...message, timestamp: Date.now() })
+  const messages = start.messages.filter(message => message.role !== "system").map(message =>
+    message.role === "assistant" ? assistant([{ type: "text", text: message.content }], "stop")
+      : { ...message, timestamp: Date.now() })
   await agent.prompt(messages)
   if (agent.state.errorMessage) throw new Error(agent.state.errorMessage)
   const final = agent.state.messages.at(-1)
   if (final?.role !== "assistant" || final.stopReason !== "stop") throw new Error("Pi did not return an answer")
-  send({ type: "result", text: flatten(final) })
+  send({ type: "result", text: text(final) })
 } catch (error) {
-  send({ type: "error", message: String(error.message).slice(0, 500) })
+  send({ type: "error", message: String(error?.message ?? error).slice(0, 500) })
   process.exitCode = 1
 } finally {
   input.close()

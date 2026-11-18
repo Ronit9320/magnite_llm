@@ -2,9 +2,12 @@
 
 #include "backend_client.h"
 
+#include <QComboBox>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QPointer>
+#include <QRegularExpression>
+#include <QStandardItemModel>
 #include <QTimer>
 #include <QUrl>
 
@@ -32,11 +35,13 @@ QString segment(const QString &id) { return QString::fromLatin1(QUrl::toPercentE
 QString blueprintPath(const QString &id) { return "/blueprints/" + segment(id); }
 QString runPath(const QString &id) { return blueprintPath("runs") + "/" + segment(id); }
 
-QString issuesText(const QJsonArray &issues) {
+// ``names`` maps node IDs to display names; a node mapped to "" is omitted (its step already says it).
+QString issuesText(const QJsonArray &issues, const QHash<QString, QString> &names = {}) {
     QStringList messages;
     for (const auto &value : issues) {
         const auto issue = value.toObject();
-        QString location = issue["node_id"].toString();
+        const auto node = issue["node_id"].toString();
+        QString location = names.value(node, node);
         const auto path = issue["path"].toString();
         if (!path.isEmpty()) location += (location.isEmpty() ? QString{} : QString(" · ")) + path;
         if (location.isEmpty()) {
@@ -113,6 +118,20 @@ QJsonObject apiNode(const QJsonObject &node) {
         body["parameters"] = QJsonObject{{"field", node["setting"].toString()}};
     } else if (op == "constant") {
         body["parameters"] = QJsonObject{{"value", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
+    } else if (op == "filter") {
+        body["parameters"] = BlueprintPreview::parseRule(node["setting"].toString());
+    } else if (op == "sort") {
+        body["parameters"] = BlueprintPreview::parseSort(node["setting"].toString());
+    } else if (kind == "knowledge") {
+        bool number = false;
+        const int count = node["setting"].toString().trimmed().toInt(&number);
+        if (number) body["top_k"] = count;
+    } else if (op == "template") {
+        body["parameters"] = QJsonObject{{"template", node["setting"].toString()}};
+    } else if (op == "compare") {
+        body["parameters"] = QJsonObject{{"operator", node["setting"].toString("equals")}};
+    } else if (op == "validate") {
+        body["parameters"] = QJsonObject{{"schema", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
     }
     return body;
 }
@@ -169,6 +188,17 @@ QJsonObject editorNode(const QJsonObject &node, const QJsonObject &layout, int i
         result["setting"] = BlueprintPreview::jsonText(binding["rows"]);
     }
     if (node["operation"] == "field") result["setting"] = node["parameters"].toObject()["field"];
+    if (node["operation"] == "template") result["setting"] = node["parameters"].toObject()["template"];
+    if (node["operation"] == "filter") result["setting"] = BlueprintPreview::ruleText(node["parameters"].toObject());
+    if (node["operation"] == "sort") {
+        const auto sort = node["parameters"].toObject();
+        result["setting"] = sort["field"].toString() + (sort["descending"].toBool() ? " desc" : "");
+    }
+    if (node["kind"] == "knowledge")
+        result["setting"] = node["top_k"].isDouble() ? QString::number(node["top_k"].toInt()) : QString{};
+    if (node["operation"] == "compare") result["setting"] = node["parameters"].toObject()["operator"];
+    if (node["operation"] == "validate")
+        result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["schema"]);
     if (node["operation"] == "constant")
         result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["value"]);
     if (node["kind"] == "agent") result["setting"] = node["instructions"].toString();
@@ -226,6 +256,12 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         !snapshot["tool_model"].toObject().isEmpty() && !findById(graph["nodes"].toArray(), "assistant").isEmpty() &&
         request["inputs"].toObject()["messages"].isArray();
     const bool toolChat = raw["tool_chat"].toBool(legacyToolChat);
+    QHash<QString, QString> names;
+    for (const auto &value : graph["nodes"].toArray()) {
+        const auto node = value.toObject();
+        names.insert(node["id"].toString(), node["name"].toString(node["id"].toString()));
+    }
+    if (raw["error"].isObject()) record["error"] = issuesText(QJsonArray{raw["error"]}, names);
     record["details"] = true;
     record["result"] = toolChat ? raw["results"].toObject()["reply"].toObject()["text"] : raw["results"];
     record["toolChat"] = toolChat;
@@ -237,7 +273,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
     if (toolChat && !prompt.isEmpty()) {
         record["input"] = prompt.last().toObject()["content"].toString();
         record["messages"] = prompt;
-        record["model"] = snapshot["tool_model"].toObject()["model"];
+        record["model"] = BlueprintPreview::modelLabel(snapshot["tool_model"].toObject()["model"].toString());
     } else {
         const auto single = supplied.size() == 1 ? supplied.begin().value() : QJsonValue();
         if (single.isString()) record["input"] = single.toString();
@@ -251,7 +287,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         const bool pending = item["status"] == "pending" && !action.isEmpty() && active(record);
         const auto status = item["status"].toString();
         QJsonObject decision{{"id", item["id"]}, {"fingerprint", item["fingerprint"]}, {"stepId", item["node_id"]},
-            {"type", item["kind"] == "command" ? "Run command" : "Open target"},
+            {"type", item["kind"] == "command" ? "Run command" : item["kind"] == "read" ? "Read file or folder" : "Open target"},
             {"status", pending ? QString("waiting") : status == "pending" ? QString("unavailable") : status},
             {"expires", timestamp(item["expires_at"])}, {"outcome", item["outcome"]}};
         if (action.contains("executable")) {
@@ -277,7 +313,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         entry["inputs"] = step["inputs"];
         entry["output"] = step["outputs"];
         if (step["duration_ms"].isDouble()) entry["duration"] = qRound64(step["duration_ms"].toDouble());
-        if (step["error"].isObject()) entry["error"] = issuesText(QJsonArray{step["error"]});
+        if (step["error"].isObject()) entry["error"] = issuesText(QJsonArray{step["error"]}, {{id, QString{}}});
         steps.append(entry);
     }
     record["steps"] = steps;
@@ -668,6 +704,20 @@ void BlueprintPreview::checkpoint(const QString &model, Result done) {
     request("GET", "/blueprints/checkpoints/" + segment(model), {}, [done](int status, const QJsonDocument &doc) {
         done(doc.object(), status == 200 ? QString{} : errorText(status, doc));
     });
+}
+
+void BlueprintPreview::disableItem(QComboBox *combo, int index) {
+    if (auto *model = qobject_cast<QStandardItemModel *>(combo->model())) {
+        if (auto *item = model->item(index)) item->setEnabled(false);
+    }
+}
+
+QString BlueprintPreview::modelLabel(const QString &reference) {
+    // Mirrors the backend's label: a Hugging Face cache snapshot, GGUF file, or repo ID.
+    static const QRegularExpression cached(R"(models--[^/\\]*?--([^/\\]+)[/\\]snapshots)");
+    if (const auto match = cached.match(reference); match.hasMatch()) return match.captured(1);
+    const auto name = reference.section(QRegularExpression(R"([/\\])"), -1);
+    return name.endsWith(".gguf", Qt::CaseInsensitive) ? name.chopped(5) : name.isEmpty() ? reference : name;
 }
 
 void BlueprintPreview::toolCapability(Result done) {

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import json
+import re
+
+from pydantic import ValidationError
 
 from backend.blueprints.schemas import (
-    AdapterNode, AgentNode, Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue,
+    AdapterNode, AgentNode, Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue, KnowledgeNode,
     Problems, RunRequest, ToolNode, TransformNode, ValueSchema,
 )
 
@@ -42,6 +46,26 @@ def _signature(issues, node, inputs, outputs):
                                     message=f"Port must have type '{expected_type}'"))
 
 
+COMPARISONS = ("equals", "not-equals", "greater", "greater-or-equal", "less", "less-or-equal", "contains")
+_ORDERED = {"greater", "greater-or-equal", "less", "less-or-equal"}
+_TEMPLATE_FIELD = re.compile(r"\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_-]{0,63})\}")
+
+
+def template_fields(template: str) -> set[str]:
+    return {match.group(1) for match in _TEMPLATE_FIELD.finditer(template) if match.group(1)}
+
+
+def render_template(template: str, values: dict) -> str:
+    """Fill ``{name}`` with the input value; ``{{`` and ``}}`` are literal braces."""
+    def fill(match):
+        name = match.group(1)
+        if name is None:
+            return match.group(0)[0]
+        value = values[name]
+        return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return _TEMPLATE_FIELD.sub(fill, template)
+
+
 _TRANSFORM_PORTS = {
     "pass": (None, None),
     "parse-json": ("string", None),
@@ -68,8 +92,13 @@ def _node_contract(node, issues):
                 validate_value(node.adapter_id, node.outputs["adapter"], node.id, "outputs.adapter")
             except Problems as exc:
                 issues.extend(exc.issues)
+    elif isinstance(node, KnowledgeNode):
+        _signature(issues, node, {"query": "string"}, {"results": "array", "context": "string"})
     elif isinstance(node, AgentNode):
-        _signature(issues, node, {"task": "string"}, {"reply": "string"})
+        # Kept parseable so older graphs open and can be repaired in the editor.
+        issues.append(Issue(code="retired_node", node_id=node.id,
+                            message="The Pi Agent node was removed. Replace it with a Model node that has "
+                                    "Plain text responses and put its instructions in the system prompt."))
     elif isinstance(node, TransformNode):
         if node.operation == "constant":
             _signature(issues, node, {}, {"value": None})
@@ -87,6 +116,84 @@ def _node_contract(node, issues):
             if not node.inputs or node.parameters:
                 issues.append(Issue(code="invalid_parameters", node_id=node.id, path="inputs",
                                     message="Build object requires one or more named input fields and no parameters"))
+            return
+        if node.operation == "template":
+            _signature(issues, node, dict.fromkeys(node.inputs), {"value": "string"})
+            template = node.parameters.get("template")
+            if node.parameters.keys() != {"template"} or not isinstance(template, str) or not template.strip():
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.template",
+                                    message="Text template requires nonempty template text"))
+            elif unknown := sorted(template_fields(template) - node.inputs.keys()):
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.template",
+                                    message="The template uses fields without an input port: "
+                                            + ", ".join("{" + name + "}" for name in unknown)))
+            return
+        if node.operation == "compare":
+            _signature(issues, node, {"left": None, "right": None}, {"value": "boolean"})
+            operator = node.parameters.get("operator")
+            if node.parameters.keys() != {"operator"} or operator not in COMPARISONS:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.operator",
+                                    message="Compare requires one of: " + ", ".join(COMPARISONS)))
+            elif {"left", "right"} <= node.inputs.keys():
+                left, right = node.inputs["left"], node.inputs["right"]
+                numeric = {"integer", "number"}
+                if operator in _ORDERED and not {left.type, right.type} <= numeric:
+                    issues.append(Issue(code="invalid_ports", node_id=node.id, path="inputs",
+                                        message=f"'{operator}' compares two numbers"))
+                elif operator == "contains" and left.type not in ("string", "array"):
+                    issues.append(Issue(code="invalid_ports", node_id=node.id, path="inputs.left",
+                                        message="'contains' looks inside text or an array"))
+                elif operator == "contains" and left.type == "string" and right.type != "string":
+                    issues.append(Issue(code="invalid_ports", node_id=node.id, path="inputs.right",
+                                        message="Text can only contain text"))
+            return
+        if node.operation == "choose":
+            _signature(issues, node, {"condition": "boolean", "if_true": None, "if_false": None}, {"value": None})
+            if node.parameters:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters",
+                                    message="Choose value takes no parameters"))
+            if {"if_true", "if_false"} <= node.inputs.keys() and "value" in node.outputs:
+                for name in ("if_true", "if_false"):
+                    if not _compatible(node.inputs[name], node.outputs["value"]):
+                        issues.append(Issue(code="incompatible_ports", node_id=node.id, path=f"inputs.{name}",
+                                            message="Both choices must match the output type"))
+            return
+        if node.operation == "validate":
+            _signature(issues, node, {"value": None}, {"value": None})
+            try:
+                rules = ValueSchema.model_validate(node.parameters.get("schema"))
+            except ValidationError as exc:
+                detail = exc.errors()[0]["msg"] if node.parameters.get("schema") is not None else "missing"
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.schema",
+                                    message=f"Validate data requires a valid schema ({detail})"))
+                return
+            if node.parameters.keys() != {"schema"}:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters",
+                                    message="Validate data takes only a schema"))
+            for direction in ("inputs", "outputs"):
+                port = getattr(node, direction).get("value")
+                if port is not None and port.type != rules.type:
+                    issues.append(Issue(code="invalid_ports", node_id=node.id, path=f"{direction}.value",
+                                        message=f"Port must have the schema's type '{rules.type}'"))
+            return
+        if node.operation in ("filter", "sort"):
+            _signature(issues, node, {"rows": "array"}, {"rows": "array"})
+            if "rows" in node.inputs and "rows" in node.outputs and not _compatible(node.inputs["rows"],
+                                                                                    node.outputs["rows"]):
+                issues.append(Issue(code="incompatible_ports", node_id=node.id, path="outputs.rows",
+                                    message="Filtered or sorted rows keep the input row type"))
+            field = node.parameters.get("field")
+            expected = {"field", "operator", "value"} if node.operation == "filter" else {"field", "descending"}
+            if node.parameters.keys() != expected or not isinstance(field, str) or not field.strip():
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters",
+                                    message="Filter rows needs a field, comparison, and value" if node.operation == "filter"
+                                    else "Sort rows needs a field and a direction"))
+            elif node.operation == "filter" and node.parameters["operator"] not in COMPARISONS:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.operator",
+                                    message="Filter rows requires one of: " + ", ".join(COMPARISONS)))
+            elif node.operation == "sort" and not isinstance(node.parameters["descending"], bool):
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.descending",
+                                    message="Sort direction must be true or false"))
             return
         if node.operation in ("order-clause", "order-price"):
             inputs = ({"message": "string", "index": "integer"} if node.operation == "order-clause"

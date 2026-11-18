@@ -394,30 +394,169 @@ class BlueprintApiTests(unittest.TestCase):
                                  ["passed", "failed", "skipped", "skipped", "skipped"])
                 self.assertEqual(run["results"], {})
 
-    def test_local_pi_agent_composes_a_typed_review_record(self):
+    def test_retired_pi_agent_node_parses_but_is_rejected_with_a_repair_message(self):
         agent = node("triage", "agent", "pi-reply", inputs={"task": STRING}, outputs={"reply": STRING},
                      instructions="Summarize the user's request.")
-        constant = node("status", "transform", "constant", outputs={"value": STRING},
-                        parameters={"value": "Needs review"})
-        compose = node("record", "transform", "build-object", inputs={"summary": STRING, "status": STRING},
-                       outputs={"value": OBJECT})
-        graph = blueprint(source(), agent, constant, compose, output(OBJECT), edges=[
-            edge("request", "triage", in_port="task"), edge("triage", "record", "reply", "summary"),
-            edge("status", "record", in_port="status"), edge("record", "result"),
-        ])
-        saved = self.save(graph)
-        with patch("backend.tooling.pi_bridge.loaded_engine", return_value=object()), patch(
-            "backend.tooling.pi_bridge.run", return_value="A request for more labels."
-        ) as pi:
-            result, _ = self.terminal(
-                self.start(saved, {"mode": "local", "inputs": {"request": "We need more labels."}})
-            )
-            self.assertEqual(pi.call_args.args[0], "We need more labels.")
-            self.assertIsNone(pi.call_args.args[2])
-            self.assertEqual(pi.call_args.kwargs["instructions"], agent["instructions"])
-        self.assertEqual(result["results"], {"result": {"status": "Needs review",
-                                                        "summary": "A request for more labels."}})
-        self.assertEqual(self.client.get(f"/blueprints/runs/{result['id']}/approvals").json(), [])
+        graph = blueprint(source(), agent, output(), edges=[
+            edge("request", "triage", in_port="task"), edge("triage", "result", "reply")])
+        validation = self.client.post("/blueprints/validate", json=graph).json()
+        self.assertFalse(validation["valid"])
+        issue = next(issue for issue in validation["issues"] if issue["code"] == "retired_node")
+        self.assertEqual(issue["node_id"], "triage")
+        self.assertIn("Model node", issue["message"])
+        self.assertEqual(self.client.post("/blueprints", json=graph).status_code, 422)
+
+    def test_checkpoint_list_reports_thinking_templates(self):
+        from backend.routes.blueprints import _template_thinks
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.assertFalse(_template_thinks(folder))
+            (root / "tokenizer_config.json").write_text('{"chat_template": "{{ messages }}"}')
+            self.assertFalse(_template_thinks(folder))
+            (root / "chat_template.jinja").write_text("{% if enable_thinking %}<think>{% endif %}")
+            self.assertTrue(_template_thinks(folder))
+
+    def test_template_compare_choose_and_validate_route_a_typed_record(self):
+        """Invoice review without a second generation: validate, compare, choose, and template."""
+        number = {"type": "number"}
+        invoice = {"type": "object", "properties": {"id": STRING, "amount": number, "po": STRING},
+                   "required": ["id", "amount", "po"]}
+        nodes = [
+            source(OBJECT),
+            node("check", "transform", "validate", inputs={"value": OBJECT}, outputs={"value": invoice},
+                 parameters={"schema": invoice}),
+            node("amount", "transform", "field", inputs={"value": invoice}, outputs={"value": number},
+                 parameters={"field": "amount"}),
+            node("limit", "transform", "constant", outputs={"value": number}, parameters={"value": 1000}),
+            node("large", "transform", "compare", inputs={"left": number, "right": number},
+                 outputs={"value": {"type": "boolean"}}, parameters={"operator": "greater"}),
+            node("review", "transform", "constant", outputs={"value": STRING}, parameters={"value": "Needs review"}),
+            node("auto", "transform", "constant", outputs={"value": STRING}, parameters={"value": "Approved"}),
+            node("status", "transform", "choose",
+                 inputs={"condition": {"type": "boolean"}, "if_true": STRING, "if_false": STRING},
+                 outputs={"value": STRING}),
+            node("note", "transform", "template", inputs={"invoice": invoice, "status": STRING},
+                 outputs={"value": STRING},
+                 parameters={"template": "{status}: {invoice} {{literal}}"}),
+            output(),
+        ]
+        edges = [edge("request", "check"), edge("check", "amount"), edge("amount", "large", in_port="left"),
+                 edge("limit", "large", in_port="right"), edge("large", "status", in_port="condition"),
+                 edge("review", "status", in_port="if_true"), edge("auto", "status", in_port="if_false"),
+                 edge("check", "note", in_port="invoice"), edge("status", "note", in_port="status"),
+                 edge("note", "result")]
+        saved = self.save(blueprint(*nodes, edges=edges, name="Invoice review"))
+        for amount, status in ((1500, "Needs review"), (40.5, "Approved")):
+            record = {"id": "INV-1", "amount": amount, "po": "PO-9"}
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": record}}))
+            self.assertEqual(result["status"], "passed", result.get("error"))
+            self.assertEqual(result["results"]["result"],
+                             f"{status}: {json.dumps(record, ensure_ascii=False)} {{literal}}")
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": {"id": "INV-2", "amount": 3}}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["code"], result["error"]["path"]),
+                         ("check", "invalid_value", "inputs.value.po"))
+        steps = {step["node_id"]: step["status"] for step in result["steps"]}
+        self.assertEqual((steps["check"], steps["note"]), ("failed", "skipped"))
+
+    def test_new_operations_reject_bad_configuration(self):
+        number, boolean = {"type": "number"}, {"type": "boolean"}
+        cases = [
+            node("t", "transform", "template", inputs={"name": STRING}, outputs={"value": STRING},
+                 parameters={"template": "Hello {name} from {city}"}),
+            node("t", "transform", "template", inputs={"name": STRING}, outputs={"value": STRING},
+                 parameters={"template": "   "}),
+            node("t", "transform", "compare", inputs={"left": STRING, "right": STRING},
+                 outputs={"value": boolean}, parameters={"operator": "greater"}),
+            node("t", "transform", "compare", inputs={"left": number, "right": number},
+                 outputs={"value": boolean}, parameters={"operator": "roughly"}),
+            node("t", "transform", "compare", inputs={"left": STRING, "right": number},
+                 outputs={"value": boolean}, parameters={"operator": "contains"}),
+            node("t", "transform", "choose", inputs={"condition": boolean, "if_true": STRING, "if_false": number},
+                 outputs={"value": STRING}),
+            node("t", "transform", "validate", inputs={"value": OBJECT}, outputs={"value": OBJECT},
+                 parameters={"schema": {"type": "object", "required": ["missing"]}}),
+            node("t", "transform", "validate", inputs={"value": STRING}, outputs={"value": STRING},
+                 parameters={"schema": {"type": "integer"}}),
+        ]
+        for case in cases:
+            with self.subTest(operation=case["operation"], parameters=case.get("parameters")):
+                validation = self.client.post("/blueprints/validate", json=blueprint(case)).json()
+                self.assertFalse(validation["valid"])
+                self.assertTrue(any(issue.get("node_id") == "t" and issue["code"] in
+                                    ("invalid_parameters", "invalid_ports", "incompatible_ports")
+                                    for issue in validation["issues"]), validation["issues"])
+
+    def test_compare_uses_json_equality_and_containment(self):
+        from backend.blueprints.runner import compare
+
+        self.assertTrue(compare("equals", 1, 1.0))
+        self.assertFalse(compare("equals", True, 1))
+        self.assertTrue(compare("not-equals", False, 0))
+        self.assertTrue(compare("equals", {"a": [1]}, {"a": [1]}))
+        self.assertTrue(compare("contains", "order 245", "245"))
+        self.assertTrue(compare("contains", ["a", "b"], "b"))
+        self.assertTrue(compare("less-or-equal", 2, 2))
+
+    def test_filter_and_sort_rows_prepare_a_dataset(self):
+        row = {"type": "object", "properties": {"id": STRING, "amount": {"type": "number"}}}
+        rows = {"type": "array", "items": row}
+        nodes = [
+            source(rows),
+            node("large", "transform", "filter", inputs={"rows": rows}, outputs={"rows": rows},
+                 parameters={"field": "amount", "operator": "greater-or-equal", "value": 100}),
+            node("ranked", "transform", "sort", inputs={"rows": rows}, outputs={"rows": rows},
+                 parameters={"field": "amount", "descending": True}),
+            output(rows),
+        ]
+        saved = self.save(blueprint(*nodes, edges=[edge("request", "large", in_port="rows"),
+                                                    edge("large", "ranked", "rows", "rows"),
+                                                    edge("ranked", "result", "rows")]))
+        data = [{"id": "a", "amount": 150}, {"id": "b", "amount": 20}, {"id": "c"},
+                {"id": "d", "amount": 900.5}, {"id": "e", "amount": 100}]
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": data}}))
+        self.assertEqual([item["id"] for item in result["results"]["result"]], ["d", "a", "e"])
+        bad = [{"id": "a", "amount": "lots"}]
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": bad}}))
+        self.assertEqual(result["error"]["node_id"], "request")  # The typed input port rejects it first.
+        loose = {"type": "array", "items": OBJECT}
+        filtered = node("large", "transform", "filter", inputs={"rows": loose}, outputs={"rows": loose},
+                        parameters={"field": "amount", "operator": "greater", "value": 100})
+        saved = self.save(blueprint(source(loose), filtered, output(loose), edges=[
+            edge("request", "large", in_port="rows"), edge("large", "result", "rows")]))
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": bad}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["path"]), ("large", "inputs.rows[0].amount"))
+
+    def test_sort_keeps_missing_fields_last_and_rejects_mixed_values(self):
+        from backend.blueprints.knowledge import sort_rows
+        from backend.blueprints.schemas import Problems
+
+        data = [{"n": "b"}, {}, {"n": "a"}, {"n": None}]
+        self.assertEqual(sort_rows(data, "n", False, "s"), [{"n": "a"}, {"n": "b"}, {}, {"n": None}])
+        self.assertEqual(sort_rows(data, "n", True, "s"), [{"n": "b"}, {"n": "a"}, {}, {"n": None}])
+        with self.assertRaises(Problems):
+            sort_rows([{"n": 1}, {"n": "x"}], "n", False, "s")
+        with self.assertRaises(Problems):
+            sort_rows([1, 2], "n", False, "s")
+
+    def test_knowledge_search_returns_excerpts_and_prompt_context(self):
+        results = {"type": "array", "items": OBJECT}
+        search = node("docs", "knowledge", "search", inputs={"query": STRING},
+                      outputs={"results": results, "context": STRING}, top_k=2)
+        saved = self.save(blueprint(source(), search, output(), edges=[
+            edge("request", "docs", in_port="query"), edge("docs", "result", "context")]))
+        found = [{"document": "policy.md", "document_id": "d1", "chunk": 0, "text": "Refunds take 5 days.",
+                  "score": 0.81}]
+        with patch("backend.blueprints.runner.search", return_value=(found, "[1] policy.md: Refunds take 5 days.")) as call:
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": "refund time"}}))
+        self.assertEqual(call.call_args.args, ("refund time", 2, None))
+        self.assertEqual(result["results"]["result"], "[1] policy.md: Refunds take 5 days.")
+        self.assertEqual(result["steps"][1]["outputs"]["results"], found)
+        with patch("backend.blueprints.runner.search", side_effect=ValueError("No documents are indexed.")):
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": "refund time"}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["code"]), ("docs", "knowledge_unavailable"))
+        bad = node("docs", "knowledge", "search", inputs={"query": STRING}, outputs={"results": results})
+        self.assertFalse(self.client.post("/blueprints/validate", json=blueprint(bad)).json()["valid"])
 
     def test_transform_failure_and_consumer_handoff_validation(self):
         parse = node("parse", "transform", "parse-json", inputs={"value": STRING}, outputs={"value": OBJECT})

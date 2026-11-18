@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 import re
 from typing import Annotated
 
@@ -146,8 +147,21 @@ def blueprint_checkpoints():
             resolver.model(record.id)
         except (ValueError, OSError):
             continue
-        models.append({"id": record.id, "name": record.name})
+        models.append({"id": record.id, "name": record.name, "thinking": _template_thinks(record.path)})
     return models
+
+
+def _template_thinks(path: str) -> bool:
+    """Cheap check for a chat template with a thinking switch; the detail route confirms it."""
+    root = Path(path)
+    for name in ("chat_template.jinja", "tokenizer_config.json"):
+        try:
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "enable_thinking" in text or "</think>" in text:
+            return True
+    return False
 
 
 @router.get("/checkpoints/{model_id}")

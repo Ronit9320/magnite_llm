@@ -10,13 +10,16 @@ from time import monotonic
 from uuid import uuid4
 
 from backend.blueprints.bindings import BindingResolver
-from backend.blueprints.graph import Graph, graph_for, node_test_graph, validate_ports, validate_request
+from backend.blueprints.graph import (
+    Graph, graph_for, node_test_graph, render_template, validate_ports, validate_request, validate_value,
+)
+from backend.blueprints.knowledge import filter_rows, search, sort_rows
 from backend.blueprints.order import order_clause, price_order
 from backend.blueprints.runtime import TorchBlueprintSession, check_runtime
 from backend.blueprints.schemas import (
-    AdapterNode, AgentNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, NodeTestRequest,
+    AdapterNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, KnowledgeNode, NodeTestRequest,
     Problems, Revision, RunRequest, RunSnapshot,
-    RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, checked_json,
+    RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, ValueSchema, checked_json,
 )
 from backend.blueprints.store import BlueprintStore, now
 from backend.inference.engines.base import BaseEngine
@@ -75,6 +78,26 @@ def _transform(node, value):
     raise RuntimeError(f"Unsupported transform '{node.operation}'")
 
 
+def compare(operator: str, left, right) -> bool:
+    match operator:
+        case "equals" | "not-equals":
+            # JSON equality: true is not 1, and 1 equals 1.0.
+            same = type(left) is bool or type(right) is bool
+            equal = left == right and (not same or type(left) is type(right))
+            return equal if operator == "equals" else not equal
+        case "greater":
+            return left > right
+        case "greater-or-equal":
+            return left >= right
+        case "less":
+            return left < right
+        case "less-or-equal":
+            return left <= right
+        case "contains":
+            return right in left
+    raise RuntimeError(f"Unsupported comparison '{operator}'")
+
+
 def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
     if node.kind == "input":
         return {"value": snapshot.request.inputs[node.id]}
@@ -86,11 +109,31 @@ def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
         return {"value": inputs["value"]}
     if isinstance(node, AdapterNode):
         return {"adapter": node.adapter_id}
+    if isinstance(node, KnowledgeNode):
+        try:
+            results, context = search(inputs["query"], node.top_k, node.min_score)
+        except (RuntimeError, ValueError) as exc:
+            raise Problems([Issue(code="knowledge_unavailable", node_id=node.id, message=str(exc))]) from exc
+        return {"results": results, "context": context}
     if node.kind == "transform":
         if node.operation == "constant":
             return {"value": node.parameters["value"]}
         if node.operation == "build-object":
             return {"value": inputs}
+        if node.operation == "template":
+            return {"value": render_template(node.parameters["template"], inputs)}
+        if node.operation == "compare":
+            return {"value": compare(node.parameters["operator"], inputs["left"], inputs["right"])}
+        if node.operation == "choose":
+            return {"value": inputs["if_true"] if inputs["condition"] else inputs["if_false"]}
+        if node.operation == "filter":
+            rules = node.parameters
+            return {"rows": filter_rows(inputs["rows"], rules["field"], rules["operator"], rules["value"], node.id)}
+        if node.operation == "sort":
+            return {"rows": sort_rows(inputs["rows"], node.parameters["field"], node.parameters["descending"], node.id)}
+        if node.operation == "validate":
+            validate_value(inputs["value"], ValueSchema.model_validate(node.parameters["schema"]), node.id, "inputs.value")
+            return {"value": inputs["value"]}
         if node.operation == "order-clause":
             return {"value": order_clause(inputs["message"], inputs["index"])}
         if node.operation == "order-price":
@@ -164,8 +207,7 @@ class BlueprintRunner:
             if node.operation == "agent" and kind not in ("string", "array"):
                 raise Problems([Issue(code="invalid_tool_input", node_id=node.id,
                                       message="A Pi agent node requires text or chat messages")])
-        agent = next((n for n in graph.nodes.values()
-                      if isinstance(n, AgentNode) or isinstance(n, ToolNode) and n.operation == "agent"), None)
+        agent = next((n for n in graph.nodes.values() if isinstance(n, ToolNode) and n.operation == "agent"), None)
         if agent is None:
             return None
         try:
@@ -304,7 +346,8 @@ class BlueprintRunner:
 
         if node.operation == "agent":
             try:
-                return {"receipt": {"text": pi_bridge.run(value, job.tool_engine, approve, job.stop)}}
+                return {"receipt": {"text": pi_bridge.run(value, job.tool_engine, approve, job.stop,
+                                                          working_directory=str(directory))}}
             except (ValueError, OSError, RuntimeError) as exc:
                 raise Problems([Issue(code="pi_failed", node_id=node.id, message=str(exc))]) from exc
         try:
@@ -316,13 +359,6 @@ class BlueprintRunner:
             raise Problems([Issue(code="tool_" + result["status"], node_id=node.id,
                                   message="Tool action ended with status " + result["status"])])
         return {"receipt": {"decision": "approved", **result}}
-
-    def _run_agent(self, node: AgentNode, task: str, job: _Job) -> dict:
-        try:
-            reply = pi_bridge.run(task, job.tool_engine, None, job.stop, instructions=node.instructions)
-            return {"reply": reply}
-        except (ValueError, OSError, RuntimeError) as exc:
-            raise Problems([Issue(code="pi_failed", node_id=node.id, message=str(exc))]) from exc
 
     def _run_graph(self, job: _Job, session: TorchBlueprintSession | None) -> None:
         with self._lock:
@@ -354,8 +390,6 @@ class BlueprintRunner:
                 validate_ports(inputs, node.inputs, node_id, "inputs")
                 if isinstance(node, ToolNode) and job.run.mode == "local":
                     outputs = self._run_tool(node, inputs["value"], job)
-                elif isinstance(node, AgentNode) and job.run.mode == "local":
-                    outputs = self._run_agent(node, inputs["task"], job)
                 else:
                     outputs = _execute(node, inputs, job.snapshot, job.stop, session)
                 if job.stop.is_set():

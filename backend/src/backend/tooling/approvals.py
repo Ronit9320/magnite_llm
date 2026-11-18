@@ -43,7 +43,7 @@ class Approval(BaseModel):
     id: str
     run_id: str
     node_id: str
-    kind: Literal["open", "command"]
+    kind: Literal["open", "read", "command"]
     fingerprint: str
     status: ApprovalStatus = "pending"
     created_at: datetime
@@ -154,9 +154,11 @@ class ToolBroker:
             self._pending[item.id] = pending
         try:
             item = self._await_claim(item, pending, stop)
+            result = None
             if item.status == "executing":
                 try:
-                    outcome = actions.execute(action, stop)
+                    result = actions.execute(action, stop)
+                    outcome = result.outcome
                 except (OSError, ValueError, RuntimeError):
                     outcome = "dispatch_failed"
                 with connection(self.db) as conn:
@@ -170,7 +172,13 @@ class ToolBroker:
                         current.outcome = outcome
                         _write(conn, current)
                     item = current
-            return {"status": item.status, "outcome": item.outcome, "approval_id": item.id}
+            receipt = {"status": item.status, "outcome": item.outcome, "approval_id": item.id}
+            if result is not None and result.exit_code is not None:
+                receipt["exit_code"] = result.exit_code
+            if result is not None and result.output is not None:
+                # Returned to the requesting run only; the audit record keeps the outcome code.
+                receipt["output"] = result.output
+            return receipt
         finally:
             with self._condition:
                 self._pending.pop(item.id, None)
