@@ -116,6 +116,12 @@ QJsonObject apiNode(const QJsonObject &node) {
         body["parameters"] = QJsonObject{{"field", node["setting"].toString()}};
     } else if (op == "constant") {
         body["parameters"] = QJsonObject{{"value", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
+    } else if (op == "template") {
+        body["parameters"] = QJsonObject{{"template", node["setting"].toString()}};
+    } else if (op == "compare") {
+        body["parameters"] = QJsonObject{{"operator", node["setting"].toString("equals")}};
+    } else if (op == "validate") {
+        body["parameters"] = QJsonObject{{"schema", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
     }
     return body;
 }
@@ -172,6 +178,10 @@ QJsonObject editorNode(const QJsonObject &node, const QJsonObject &layout, int i
         result["setting"] = BlueprintPreview::jsonText(binding["rows"]);
     }
     if (node["operation"] == "field") result["setting"] = node["parameters"].toObject()["field"];
+    if (node["operation"] == "template") result["setting"] = node["parameters"].toObject()["template"];
+    if (node["operation"] == "compare") result["setting"] = node["parameters"].toObject()["operator"];
+    if (node["operation"] == "validate")
+        result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["schema"]);
     if (node["operation"] == "constant")
         result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["value"]);
     if (node["kind"] == "agent") result["setting"] = node["instructions"].toString();

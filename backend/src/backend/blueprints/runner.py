@@ -10,13 +10,15 @@ from time import monotonic
 from uuid import uuid4
 
 from backend.blueprints.bindings import BindingResolver
-from backend.blueprints.graph import Graph, graph_for, node_test_graph, validate_ports, validate_request
+from backend.blueprints.graph import (
+    Graph, graph_for, node_test_graph, render_template, validate_ports, validate_request, validate_value,
+)
 from backend.blueprints.order import order_clause, price_order
 from backend.blueprints.runtime import TorchBlueprintSession, check_runtime
 from backend.blueprints.schemas import (
     AdapterNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, NodeTestRequest,
     Problems, Revision, RunRequest, RunSnapshot,
-    RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, checked_json,
+    RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, ValueSchema, checked_json,
 )
 from backend.blueprints.store import BlueprintStore, now
 from backend.inference.engines.base import BaseEngine
@@ -75,6 +77,26 @@ def _transform(node, value):
     raise RuntimeError(f"Unsupported transform '{node.operation}'")
 
 
+def compare(operator: str, left, right) -> bool:
+    match operator:
+        case "equals" | "not-equals":
+            # JSON equality: true is not 1, and 1 equals 1.0.
+            same = type(left) is bool or type(right) is bool
+            equal = left == right and (not same or type(left) is type(right))
+            return equal if operator == "equals" else not equal
+        case "greater":
+            return left > right
+        case "greater-or-equal":
+            return left >= right
+        case "less":
+            return left < right
+        case "less-or-equal":
+            return left <= right
+        case "contains":
+            return right in left
+    raise RuntimeError(f"Unsupported comparison '{operator}'")
+
+
 def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
     if node.kind == "input":
         return {"value": snapshot.request.inputs[node.id]}
@@ -91,6 +113,15 @@ def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
             return {"value": node.parameters["value"]}
         if node.operation == "build-object":
             return {"value": inputs}
+        if node.operation == "template":
+            return {"value": render_template(node.parameters["template"], inputs)}
+        if node.operation == "compare":
+            return {"value": compare(node.parameters["operator"], inputs["left"], inputs["right"])}
+        if node.operation == "choose":
+            return {"value": inputs["if_true"] if inputs["condition"] else inputs["if_false"]}
+        if node.operation == "validate":
+            validate_value(inputs["value"], ValueSchema.model_validate(node.parameters["schema"]), node.id, "inputs.value")
+            return {"value": inputs["value"]}
         if node.operation == "order-clause":
             return {"value": order_clause(inputs["message"], inputs["index"])}
         if node.operation == "order-price":

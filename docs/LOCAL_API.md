@@ -132,6 +132,10 @@ and `additionalProperties` on the applicable types.
 | `transform` / `pass`, `parse-json`, `field`, `first`, `count`, `format` | `value` → `value`. `field` takes `parameters: {"field":"..."}`. |
 | `transform` / `constant` | `parameters: {"value": ...}` → `value`. The JSON literal must match the output contract. |
 | `transform` / `build-object` | One to sixteen named data inputs → object on `value`. Input keys become fields in the object. |
+| `transform` / `template` | Named data inputs plus `parameters: {"template": "..."}` → string on `value`. `{key}` must name an input; `{{`/`}}` are literal braces. |
+| `transform` / `compare` | `left`, `right` plus `parameters: {"operator": ...}` → boolean on `value`. Operators: `equals`, `not-equals`, `greater`, `greater-or-equal`, `less`, `less-or-equal` (numbers), `contains` (text in text, or value in array). |
+| `transform` / `choose` | `condition` (boolean), `if_true`, `if_false` → `value`. Both choices must be compatible with the output. |
+| `transform` / `validate` | `value` plus `parameters: {"schema": {...}}` → the same `value`. Port types must match the schema type. A mismatch fails with `invalid_value` at the field path. |
 | `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
 | `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |
 | `adapter` / `lora` | Registered `adapter_id` → `adapter` (string resource reference). |

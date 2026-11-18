@@ -127,6 +127,7 @@ private:
         m_line = nullptr;
         m_binding = nullptr;
         m_text = nullptr;
+        m_choice = nullptr;
         m_error->hide();
         if (m_fields) {
             m_options->removeWidget(m_fields);
@@ -155,7 +156,14 @@ private:
         if (!config.isEmpty()) {
             const auto title = config["label"].toString();
             const auto initial = sameOperation ? m_original["setting"].toString() : config["default"].toString();
-            if (config["multiline"].toBool()) {
+            if (config["options"].isArray()) {
+                m_choice = new ComboBox;
+                m_choice->setAccessibleName(title);
+                for (const auto &value : config["options"].toArray())
+                    m_choice->addItem(value.toArray().at(1).toString(), value.toArray().at(0).toString());
+                m_choice->setCurrentIndex(qMax(0, m_choice->findData(initial)));
+                Surface::field(body, title, m_choice);
+            } else if (config["multiline"].toBool()) {
                 m_text = new QPlainTextEdit(initial);
                 m_text->setObjectName("blueprintCode");
                 m_text->setPlaceholderText(config["placeholder"].toString());
@@ -239,7 +247,8 @@ private:
     }
 
     static bool editableKeys(const QString &operation, const QString &side) {
-        return operation == "generate" || operation == "reason" || (operation == "build-object" && side == "in");
+        return operation == "generate" || operation == "reason"
+            || ((operation == "build-object" || operation == "template") && side == "in");
     }
 
     void refreshBindings(const QString &selection) {
@@ -326,6 +335,7 @@ private:
         node["name"] = name.isEmpty() ? m_kind->currentText() : name;
         if (m_line) node["setting"] = m_line->text();
         if (m_text) node["setting"] = m_text->toPlainText();
+        if (m_choice) node["setting"] = m_choice->currentData().toString();
         if (m_binding) {
             const auto choice = m_binding->currentData().toString();
             if (code == "lora") node["adapter"] = choice;
@@ -376,6 +386,22 @@ private:
             if (direction == m_resourceSide && !m_resourcePort.isEmpty()) ports.append(m_resourcePort);
             node[direction] = ports;
         }
+        if (code == "validate") {
+            // The rules define both ports, so a connection shows the validated shape.
+            const auto rules = BlueprintPreview::parseJsonValue(node["setting"].toString()).toObject();
+            const auto type = rules["type"].toString();
+            if (!rules.isEmpty() && !type.isEmpty()) {
+                const auto editorType = type == "string" ? QString("text") : type;
+                for (const auto &direction : {QString("in"), QString("out")}) {
+                    auto ports = node[direction].toArray();
+                    auto port = ports.first().toObject();
+                    port["type"] = editorType;
+                    port["schema"] = direction == "out" ? rules : QJsonObject{{"type", type}};
+                    ports.replace(0, port);
+                    node[direction] = ports;
+                }
+            }
+        }
         if (node["response"] == "text") {
             const auto outputs = node["out"].toArray();
             if (outputs.size() != 1 || outputs.first().toObject()["type"] != "text") {
@@ -401,6 +427,7 @@ private:
     const QJsonObject m_original;
     QJsonObject m_result;
     ComboBox *m_kind;
+    ComboBox *m_choice = nullptr;
     ComboBox *m_operation;
     QLineEdit *m_name;
     QLabel *m_detail;

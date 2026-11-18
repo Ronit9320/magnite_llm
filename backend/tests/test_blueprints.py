@@ -417,6 +417,87 @@ class BlueprintApiTests(unittest.TestCase):
             (root / "chat_template.jinja").write_text("{% if enable_thinking %}<think>{% endif %}")
             self.assertTrue(_template_thinks(folder))
 
+    def test_template_compare_choose_and_validate_route_a_typed_record(self):
+        """Invoice review without a second generation: validate, compare, choose, and template."""
+        number = {"type": "number"}
+        invoice = {"type": "object", "properties": {"id": STRING, "amount": number, "po": STRING},
+                   "required": ["id", "amount", "po"]}
+        nodes = [
+            source(OBJECT),
+            node("check", "transform", "validate", inputs={"value": OBJECT}, outputs={"value": invoice},
+                 parameters={"schema": invoice}),
+            node("amount", "transform", "field", inputs={"value": invoice}, outputs={"value": number},
+                 parameters={"field": "amount"}),
+            node("limit", "transform", "constant", outputs={"value": number}, parameters={"value": 1000}),
+            node("large", "transform", "compare", inputs={"left": number, "right": number},
+                 outputs={"value": {"type": "boolean"}}, parameters={"operator": "greater"}),
+            node("review", "transform", "constant", outputs={"value": STRING}, parameters={"value": "Needs review"}),
+            node("auto", "transform", "constant", outputs={"value": STRING}, parameters={"value": "Approved"}),
+            node("status", "transform", "choose",
+                 inputs={"condition": {"type": "boolean"}, "if_true": STRING, "if_false": STRING},
+                 outputs={"value": STRING}),
+            node("note", "transform", "template", inputs={"invoice": invoice, "status": STRING},
+                 outputs={"value": STRING},
+                 parameters={"template": "{status}: {invoice} {{literal}}"}),
+            output(),
+        ]
+        edges = [edge("request", "check"), edge("check", "amount"), edge("amount", "large", in_port="left"),
+                 edge("limit", "large", in_port="right"), edge("large", "status", in_port="condition"),
+                 edge("review", "status", in_port="if_true"), edge("auto", "status", in_port="if_false"),
+                 edge("check", "note", in_port="invoice"), edge("status", "note", in_port="status"),
+                 edge("note", "result")]
+        saved = self.save(blueprint(*nodes, edges=edges, name="Invoice review"))
+        for amount, status in ((1500, "Needs review"), (40.5, "Approved")):
+            record = {"id": "INV-1", "amount": amount, "po": "PO-9"}
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": record}}))
+            self.assertEqual(result["status"], "passed", result.get("error"))
+            self.assertEqual(result["results"]["result"],
+                             f"{status}: {json.dumps(record, ensure_ascii=False)} {{literal}}")
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": {"id": "INV-2", "amount": 3}}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["code"], result["error"]["path"]),
+                         ("check", "invalid_value", "inputs.value.po"))
+        steps = {step["node_id"]: step["status"] for step in result["steps"]}
+        self.assertEqual((steps["check"], steps["note"]), ("failed", "skipped"))
+
+    def test_new_operations_reject_bad_configuration(self):
+        number, boolean = {"type": "number"}, {"type": "boolean"}
+        cases = [
+            node("t", "transform", "template", inputs={"name": STRING}, outputs={"value": STRING},
+                 parameters={"template": "Hello {name} from {city}"}),
+            node("t", "transform", "template", inputs={"name": STRING}, outputs={"value": STRING},
+                 parameters={"template": "   "}),
+            node("t", "transform", "compare", inputs={"left": STRING, "right": STRING},
+                 outputs={"value": boolean}, parameters={"operator": "greater"}),
+            node("t", "transform", "compare", inputs={"left": number, "right": number},
+                 outputs={"value": boolean}, parameters={"operator": "roughly"}),
+            node("t", "transform", "compare", inputs={"left": STRING, "right": number},
+                 outputs={"value": boolean}, parameters={"operator": "contains"}),
+            node("t", "transform", "choose", inputs={"condition": boolean, "if_true": STRING, "if_false": number},
+                 outputs={"value": STRING}),
+            node("t", "transform", "validate", inputs={"value": OBJECT}, outputs={"value": OBJECT},
+                 parameters={"schema": {"type": "object", "required": ["missing"]}}),
+            node("t", "transform", "validate", inputs={"value": STRING}, outputs={"value": STRING},
+                 parameters={"schema": {"type": "integer"}}),
+        ]
+        for case in cases:
+            with self.subTest(operation=case["operation"], parameters=case.get("parameters")):
+                validation = self.client.post("/blueprints/validate", json=blueprint(case)).json()
+                self.assertFalse(validation["valid"])
+                self.assertTrue(any(issue.get("node_id") == "t" and issue["code"] in
+                                    ("invalid_parameters", "invalid_ports", "incompatible_ports")
+                                    for issue in validation["issues"]), validation["issues"])
+
+    def test_compare_uses_json_equality_and_containment(self):
+        from backend.blueprints.runner import compare
+
+        self.assertTrue(compare("equals", 1, 1.0))
+        self.assertFalse(compare("equals", True, 1))
+        self.assertTrue(compare("not-equals", False, 0))
+        self.assertTrue(compare("equals", {"a": [1]}, {"a": [1]}))
+        self.assertTrue(compare("contains", "order 245", "245"))
+        self.assertTrue(compare("contains", ["a", "b"], "b"))
+        self.assertTrue(compare("less-or-equal", 2, 2))
+
     def test_transform_failure_and_consumer_handoff_validation(self):
         parse = node("parse", "transform", "parse-json", inputs={"value": STRING}, outputs={"value": OBJECT})
         get = node("field", "transform", "field", inputs={"value": {"type": "object",

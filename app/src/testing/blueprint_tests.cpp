@@ -816,6 +816,41 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     check(panel.findChild<BlueprintCanvas *>()->isVisible() && visibleText(panel, "Draft"),
           "canvas distinguishes an unpublished draft");
+    {
+        // New transform nodes: built by the editor's factory, mapped by apiNode, run by the backend.
+        const auto runNode = [&](QJsonObject node, const QJsonObject &inputs) -> QJsonValue {
+            auto response = std::make_shared<QJsonObject>();
+            const QJsonObject graph{{"id", BlueprintPreview::id()}, {"name", "Check new nodes"},
+                                    {"nodes", QJsonArray{node}}};
+            session.runLive(graph, inputs, node["id"].toString(), false,
+                [response](const auto &run, const auto &error) { *response = {{"run", run}, {"error", error}}; });
+            waitFor([&] { return !response->isEmpty(); }, 10000);
+            const auto id = (*response)["run"].toObject()["id"].toString();
+            if (id.isEmpty() || !waitForState(session, id, "passed", 10000)) return QJsonValue(QJsonValue::Undefined);
+            return QJsonValue(session.run(id)["result"].toObject()[node["id"].toString()].toObject()["value"]);
+        };
+        auto templated = session.makeNode("template", "note", 0, 0);
+        templated["setting"] = "Hello {name}, {{ok}}";
+        auto compare = session.makeNode("compare", "large", 0, 0);
+        compare["setting"] = "greater";
+        auto choose = session.makeNode("choose", "pick", 0, 0);
+        auto validate = session.makeNode("validate", "check", 0, 0);
+        check(session.settingError(templated).isEmpty() && runNode(templated, {{"name", "Ada"}}).toString() == "Hello Ada, {ok}",
+              "Text template fills named inputs and keeps escaped braces");
+        templated["setting"] = "Hello {city}";
+        check(session.settingError(templated).contains("city"), "Text template names a missing input port");
+        check(runNode(compare, {{"left", 5}, {"right", 3}}) == QJsonValue(true)
+              && runNode(compare, {{"left", 1}, {"right", 3}}) == QJsonValue(false),
+              "Compare evaluates the saved operator");
+        check(runNode(choose, {{"condition", false}, {"if_true", "Review"}, {"if_false", "Approved"}}).toString() == "Approved",
+              "Choose a value returns the selected input");
+        check(session.settingError(validate).isEmpty(), "Validate data accepts its default rules");
+        const auto valid = runNode(validate, {{"value", QJsonObject{{"id", "INV-1"}}}});
+        check(valid == QJsonValue(QJsonObject{{"id", "INV-1"}}), "Validate data passes a matching value");
+        check(runNode(validate, {{"value", QJsonObject{{"id", ""}}}}).isUndefined(),
+              "Validate data fails a value that breaks its rules");
+    }
+
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
     if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {

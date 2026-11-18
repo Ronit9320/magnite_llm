@@ -247,6 +247,38 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
             {"detail", "Combine connected values into one JSON object. Input keys become its field names."},
             {"in", QJsonArray{QJsonObject{{"id", "field"}, {"name", "Field"}, {"type", "text"}, {"chooseType", true}}}},
             {"out", QJsonArray{QJsonObject{{"id", "value"}, {"name", "Object"}, {"type", "object"}}}}});
+        const auto port = [](const char *id, const char *name, const char *type, bool choose = false) {
+            QJsonObject entry{{"id", id}, {"name", name}, {"type", type}};
+            if (choose) entry["chooseType"] = true;
+            return entry;
+        };
+        catalog.append(QJsonObject{{"id", "template"}, {"kind", "transform"}, {"label", "Fill a text template"},
+            {"detail", "Insert named inputs into saved text. Write {key} for an input port; use {{ and }} for literal braces."},
+            {"setting", QJsonObject{{"label", "Template"}, {"multiline", true}, {"default", "Summary for {name}"},
+                                    {"placeholder", "Dear {name}, your order {order} is {status}."}}},
+            {"in", QJsonArray{port("name", "Name", "text", true)}},
+            {"out", QJsonArray{port("value", "Text", "text")}}});
+        QJsonArray comparisons;
+        for (const auto &[id, label] : {std::pair{"equals", "Equals"}, {"not-equals", "Does not equal"},
+                 {"greater", "Is greater than"}, {"greater-or-equal", "Is at least"}, {"less", "Is less than"},
+                 {"less-or-equal", "Is at most"}, {"contains", "Contains"}})
+            comparisons.append(QJsonArray{id, label});
+        catalog.append(QJsonObject{{"id", "compare"}, {"kind", "transform"}, {"label", "Compare two values"},
+            {"detail", "Return true or false. Ordering compares numbers; Contains looks inside text or an array."},
+            {"setting", QJsonObject{{"label", "Comparison"}, {"options", comparisons}, {"default", "equals"}}},
+            {"in", QJsonArray{port("left", "Value", "number", true), port("right", "Compared with", "number", true)}},
+            {"out", QJsonArray{port("value", "Result", "boolean")}}});
+        catalog.append(QJsonObject{{"id", "choose"}, {"kind", "transform"}, {"label", "Choose a value"},
+            {"detail", "Return one of two connected values based on a true or false condition. Both values are computed."},
+            {"in", QJsonArray{port("condition", "Condition", "boolean"), port("if_true", "If true", "text", true),
+                              port("if_false", "If false", "text", true)}},
+            {"out", QJsonArray{port("value", "Chosen value", "text", true)}}});
+        catalog.append(QJsonObject{{"id", "validate"}, {"kind", "transform"}, {"label", "Validate data"},
+            {"detail", "Check a value against saved rules. A mismatch fails this step with the field path, and later steps are skipped."},
+            {"setting", QJsonObject{{"label", "Rules (JSON Schema subset)"}, {"multiline", true},
+                {"default", "{\n  \"type\": \"object\",\n  \"properties\": {\"id\": {\"type\": \"string\", \"minLength\": 1}},\n  \"required\": [\"id\"]\n}"}}},
+            {"in", QJsonArray{port("value", "Value", "object")}},
+            {"out", QJsonArray{port("value", "Valid value", "object")}}});
         for (const auto &op : {QString("order-clause"), QString("order-price")})
             catalog.append(QJsonObject{{"id", op}, {"kind", "transform"}, {"label", op == "order-clause"
                 ? "Look up order clause" : "Validate and price order"}, {"legacyOnly", true}});
@@ -416,6 +448,22 @@ QString BlueprintPreview::settingError(const QJsonObject &node) const {
         if (!error.isEmpty()) return error;
     }
     if (code == "pi-reply" && value.size() > 16000) return "Use at most 16,000 characters for agent instructions.";
+    if (code == "template") {
+        if (value.trimmed().isEmpty()) return "Enter the template text.";
+        QSet<QString> keys;
+        for (const auto &port : node["in"].toArray()) keys.insert(port.toObject()["id"].toString());
+        static const QRegularExpression field(R"(\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_-]{0,63})\})");
+        for (auto it = field.globalMatch(value); it.hasNext();) {
+            const auto name = it.next().captured(1);
+            if (!name.isEmpty() && !keys.contains(name))
+                return QString("Add an input port with the key %1, or remove {%1} from the template.").arg(name);
+        }
+    }
+    if (code == "validate") {
+        const auto rules = parseJsonValue(value);
+        if (!rules.isObject() || !rules.toObject()["type"].isString())
+            return "Enter a JSON object with a \"type\", for example {\"type\": \"object\"}.";
+    }
     return {};
 }
 

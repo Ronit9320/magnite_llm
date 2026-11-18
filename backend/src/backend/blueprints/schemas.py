@@ -111,7 +111,8 @@ class DatasetNode(Node):
 class TransformNode(Node):
     kind: Literal["transform"]
     operation: Literal["pass", "parse-json", "field", "first", "count", "format",
-                       "order-clause", "order-price", "constant", "build-object"]
+                       "order-clause", "order-price", "constant", "build-object",
+                       "template", "compare", "choose", "validate"]
     parameters: dict[Text, Value] = Field(default_factory=dict)
 
 

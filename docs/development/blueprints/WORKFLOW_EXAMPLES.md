@@ -136,5 +136,8 @@ with status 1 when any final record differs from the expected value.
 - **Invoice review.** Reuse the two-model pattern with an email that includes
   invoice ID, amount, currency, and purchase-order reference. Give the second
   model the typed invoice and a prompt to flag missing references for review.
-  For a later rule-based version, Compare and Choose value would let the graph
-  route missing-reference cases without another generation.
+  For a rule-based version, Validate data checks the extracted invoice, Compare
+  tests the amount against a Constant limit, Choose a value picks
+  `Needs review` or `Approved`, and Fill a text template writes the review note
+  without another generation. The offline test
+  `test_template_compare_choose_and_validate_route_a_typed_record` runs this graph.
