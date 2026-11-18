@@ -498,6 +498,66 @@ class BlueprintApiTests(unittest.TestCase):
         self.assertTrue(compare("contains", ["a", "b"], "b"))
         self.assertTrue(compare("less-or-equal", 2, 2))
 
+    def test_filter_and_sort_rows_prepare_a_dataset(self):
+        row = {"type": "object", "properties": {"id": STRING, "amount": {"type": "number"}}}
+        rows = {"type": "array", "items": row}
+        nodes = [
+            source(rows),
+            node("large", "transform", "filter", inputs={"rows": rows}, outputs={"rows": rows},
+                 parameters={"field": "amount", "operator": "greater-or-equal", "value": 100}),
+            node("ranked", "transform", "sort", inputs={"rows": rows}, outputs={"rows": rows},
+                 parameters={"field": "amount", "descending": True}),
+            output(rows),
+        ]
+        saved = self.save(blueprint(*nodes, edges=[edge("request", "large", in_port="rows"),
+                                                    edge("large", "ranked", "rows", "rows"),
+                                                    edge("ranked", "result", "rows")]))
+        data = [{"id": "a", "amount": 150}, {"id": "b", "amount": 20}, {"id": "c"},
+                {"id": "d", "amount": 900.5}, {"id": "e", "amount": 100}]
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": data}}))
+        self.assertEqual([item["id"] for item in result["results"]["result"]], ["d", "a", "e"])
+        bad = [{"id": "a", "amount": "lots"}]
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": bad}}))
+        self.assertEqual(result["error"]["node_id"], "request")  # The typed input port rejects it first.
+        loose = {"type": "array", "items": OBJECT}
+        filtered = node("large", "transform", "filter", inputs={"rows": loose}, outputs={"rows": loose},
+                        parameters={"field": "amount", "operator": "greater", "value": 100})
+        saved = self.save(blueprint(source(loose), filtered, output(loose), edges=[
+            edge("request", "large", in_port="rows"), edge("large", "result", "rows")]))
+        result, _ = self.terminal(self.start(saved, {"inputs": {"request": bad}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["path"]), ("large", "inputs.rows[0].amount"))
+
+    def test_sort_keeps_missing_fields_last_and_rejects_mixed_values(self):
+        from backend.blueprints.knowledge import sort_rows
+        from backend.blueprints.schemas import Problems
+
+        data = [{"n": "b"}, {}, {"n": "a"}, {"n": None}]
+        self.assertEqual(sort_rows(data, "n", False, "s"), [{"n": "a"}, {"n": "b"}, {}, {"n": None}])
+        self.assertEqual(sort_rows(data, "n", True, "s"), [{"n": "b"}, {"n": "a"}, {}, {"n": None}])
+        with self.assertRaises(Problems):
+            sort_rows([{"n": 1}, {"n": "x"}], "n", False, "s")
+        with self.assertRaises(Problems):
+            sort_rows([1, 2], "n", False, "s")
+
+    def test_knowledge_search_returns_excerpts_and_prompt_context(self):
+        results = {"type": "array", "items": OBJECT}
+        search = node("docs", "knowledge", "search", inputs={"query": STRING},
+                      outputs={"results": results, "context": STRING}, top_k=2)
+        saved = self.save(blueprint(source(), search, output(), edges=[
+            edge("request", "docs", in_port="query"), edge("docs", "result", "context")]))
+        found = [{"document": "policy.md", "document_id": "d1", "chunk": 0, "text": "Refunds take 5 days.",
+                  "score": 0.81}]
+        with patch("backend.blueprints.runner.search", return_value=(found, "[1] policy.md: Refunds take 5 days.")) as call:
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": "refund time"}}))
+        self.assertEqual(call.call_args.args, ("refund time", 2, None))
+        self.assertEqual(result["results"]["result"], "[1] policy.md: Refunds take 5 days.")
+        self.assertEqual(result["steps"][1]["outputs"]["results"], found)
+        with patch("backend.blueprints.runner.search", side_effect=ValueError("No documents are indexed.")):
+            result, _ = self.terminal(self.start(saved, {"inputs": {"request": "refund time"}}))
+        self.assertEqual((result["error"]["node_id"], result["error"]["code"]), ("docs", "knowledge_unavailable"))
+        bad = node("docs", "knowledge", "search", inputs={"query": STRING}, outputs={"results": results})
+        self.assertFalse(self.client.post("/blueprints/validate", json=blueprint(bad)).json()["valid"])
+
     def test_transform_failure_and_consumer_handoff_validation(self):
         parse = node("parse", "transform", "parse-json", inputs={"value": STRING}, outputs={"value": OBJECT})
         get = node("field", "transform", "field", inputs={"value": {"type": "object",

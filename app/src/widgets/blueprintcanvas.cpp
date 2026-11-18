@@ -55,6 +55,7 @@ QString BlueprintCanvas::nodeIcon(const QString &kind) {
     if (kind == "dataset") return "database";
     if (kind == "model") return "layers";
     if (kind == "adapter") return "box";
+    if (kind == "knowledge") return "search";
     if (kind == "agent") return "message-circle";
     if (kind == "output") return "file-down";
     if (kind == "selector") return "search";

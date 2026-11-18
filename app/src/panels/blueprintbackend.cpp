@@ -116,6 +116,14 @@ QJsonObject apiNode(const QJsonObject &node) {
         body["parameters"] = QJsonObject{{"field", node["setting"].toString()}};
     } else if (op == "constant") {
         body["parameters"] = QJsonObject{{"value", BlueprintPreview::parseJsonValue(node["setting"].toString())}};
+    } else if (op == "filter") {
+        body["parameters"] = BlueprintPreview::parseRule(node["setting"].toString());
+    } else if (op == "sort") {
+        body["parameters"] = BlueprintPreview::parseSort(node["setting"].toString());
+    } else if (kind == "knowledge") {
+        bool number = false;
+        const int count = node["setting"].toString().trimmed().toInt(&number);
+        if (number) body["top_k"] = count;
     } else if (op == "template") {
         body["parameters"] = QJsonObject{{"template", node["setting"].toString()}};
     } else if (op == "compare") {
@@ -179,6 +187,13 @@ QJsonObject editorNode(const QJsonObject &node, const QJsonObject &layout, int i
     }
     if (node["operation"] == "field") result["setting"] = node["parameters"].toObject()["field"];
     if (node["operation"] == "template") result["setting"] = node["parameters"].toObject()["template"];
+    if (node["operation"] == "filter") result["setting"] = BlueprintPreview::ruleText(node["parameters"].toObject());
+    if (node["operation"] == "sort") {
+        const auto sort = node["parameters"].toObject();
+        result["setting"] = sort["field"].toString() + (sort["descending"].toBool() ? " desc" : "");
+    }
+    if (node["kind"] == "knowledge")
+        result["setting"] = node["top_k"].isDouble() ? QString::number(node["top_k"].toInt()) : QString{};
     if (node["operation"] == "compare") result["setting"] = node["parameters"].toObject()["operator"];
     if (node["operation"] == "validate")
         result["setting"] = BlueprintPreview::jsonText(node["parameters"].toObject()["schema"]);

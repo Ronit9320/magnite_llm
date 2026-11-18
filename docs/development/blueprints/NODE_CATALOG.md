@@ -1,6 +1,6 @@
 # Blueprint node catalog and next additions
 
-The **Add node** dialog shows eight built-in node cards. Choose a card, then
+The **Add node** dialog shows nine built-in node cards. Choose a card, then
 choose an operation in **Configure**. **Saved nodes** contains reusable copies
 of configured nodes and opens additional pages as the library grows.
 
@@ -22,6 +22,9 @@ of configured nodes and opens additional pages as the library grows.
 | Transform | Compare two values | Takes `left` and `right` and returns a boolean. Equals and Does not equal use JSON equality (`true` is not `1`). The four ordering comparisons take numbers. Contains looks for text in text or a value in an array. |
 | Transform | Choose a value | Takes a boolean `condition` and two values of the output type, and returns `if_true` or `if_false`. Both inputs are computed; this is not branching. |
 | Transform | Validate data | Takes a value and saved rules (the JSON Schema subset used by ports: `type`, `properties`, `required`, `additionalProperties`, `items`, `minimum`, `minLength`). Returns the value unchanged or fails the step at the field path, skipping later steps. |
+| Transform | Filter rows | Takes an array of objects and keeps rows whose field passes a one-line rule such as `amount >= 100`, `status = "open"`, or `tags contains "urgent"`. Comparisons: `=` `!=` `>` `>=` `<` `<=` `contains`. Rows without the field are left out. |
+| Transform | Sort rows | Takes an array of objects and orders it by one field, for example `amount desc` or `name`. Rows without the field go last. Mixed value kinds fail the step. |
+| Knowledge | Search documents | Takes a text `query` and searches the Knowledge panel's documents with its embedder and search mode. Returns `results` (document, chunk, text, score) and `context`, numbered passages ready for a Model prompt. An empty library fails the step; no match returns empty results. |
 | Model | Generate a response | Takes named inputs and produces typed JSON or a single text output using a local Transformers checkpoint. |
 | Reasoning | Reason through a task | Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support. The checkpoint picker disables checkpoints without it. |
 | Adapter | Attach trained LoRA | Takes a binding to registered LoRA weights and provides a resource link to a compatible Model or Reasoning node. |
@@ -42,8 +45,7 @@ cover typed handoffs and shared or separate adapters.
 
 | Priority | Node or operation | Contract and use |
 | --- | --- | --- |
-| Next | Filter and sort rows | A typed array and a configured field rule → a typed array. Use these to prepare a dataset for a model or report. |
-| Next | Knowledge search | A text query and selected local knowledge collection → ranked excerpts with source references. Reuse Magnite’s existing retrieval settings. |
+| Next | Knowledge search filters | Limit a search to chosen documents. The node uses the whole library today. |
 | Later | Branch and merge | A boolean selects which path runs. Define skipped-step trace states and how downstream inputs resolve before adding this to the editor. |
 | Later | For each | A typed array and a reusable workflow → an array of results. Define iteration limits, cancellation, and per-item error reporting first. |
 | Later | Export result | A typed value → a JSON or text file and a receipt. Use a user-selected destination and the existing explicit approval model for external effects. |

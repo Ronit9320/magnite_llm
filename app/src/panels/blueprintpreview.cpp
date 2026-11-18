@@ -190,6 +190,8 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
                 {"detail", "Run a thinking checkpoint."}});
             types.append(QJsonObject{{"id", "adapter"}, {"label", "Adapter"},
                 {"detail", "Attach trained LoRA weights."}});
+            types.append(QJsonObject{{"id", "knowledge"}, {"label", "Knowledge"},
+                {"detail", "Search your local documents."}});
         }
         m_fixtures["nodeTypes"] = types;
         contracts["null"] = QJsonObject{{"label", "Null"}, {"schema", QJsonObject{{"type", "null"}}}};
@@ -279,6 +281,22 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
                 {"default", "{\n  \"type\": \"object\",\n  \"properties\": {\"id\": {\"type\": \"string\", \"minLength\": 1}},\n  \"required\": [\"id\"]\n}"}}},
             {"in", QJsonArray{port("value", "Value", "object")}},
             {"out", QJsonArray{port("value", "Valid value", "object")}}});
+        catalog.append(QJsonObject{{"id", "filter"}, {"kind", "transform"}, {"label", "Filter rows"},
+            {"detail", "Keep the rows whose field passes a rule. Rows without the field are left out."},
+            {"setting", QJsonObject{{"label", "Rule"}, {"default", "amount >= 100"},
+                                    {"placeholder", "status = \"open\"   ·   tags contains \"urgent\""}}},
+            {"sameType", true},
+            {"in", QJsonArray{port("rows", "Rows", "array")}}, {"out", QJsonArray{port("rows", "Matching rows", "array")}}});
+        catalog.append(QJsonObject{{"id", "sort"}, {"kind", "transform"}, {"label", "Sort rows"},
+            {"detail", "Order rows by one field. Add desc for largest first. Rows without the field go last."},
+            {"setting", QJsonObject{{"label", "Sort by"}, {"default", "amount desc"}, {"placeholder", "name   ·   amount desc"}}},
+            {"sameType", true},
+            {"in", QJsonArray{port("rows", "Rows", "array")}}, {"out", QJsonArray{port("rows", "Sorted rows", "array")}}});
+        catalog.append(QJsonObject{{"id", "search"}, {"kind", "knowledge"}, {"label", "Search documents"},
+            {"detail", "Find passages in the Knowledge panel's documents. Connect Context to a Model prompt, or use Results for scores and sources."},
+            {"setting", QJsonObject{{"label", "Number of passages"}, {"placeholder", "Blank uses the Knowledge panel setting"}}},
+            {"in", QJsonArray{port("query", "Query", "text")}},
+            {"out", QJsonArray{port("results", "Results", "array"), port("context", "Context", "text")}}});
         for (const auto &op : {QString("order-clause"), QString("order-price")})
             catalog.append(QJsonObject{{"id", op}, {"kind", "transform"}, {"label", op == "order-clause"
                 ? "Look up order clause" : "Validate and price order"}, {"legacyOnly", true}});
@@ -459,12 +477,54 @@ QString BlueprintPreview::settingError(const QJsonObject &node) const {
                 return QString("Add an input port with the key %1, or remove {%1} from the template.").arg(name);
         }
     }
+    if (code == "filter" && parseRule(value).isEmpty())
+        return "Write the rule as field, comparison, value. Comparisons: = != > >= < <= contains.";
+    if (code == "sort" && parseSort(value).isEmpty()) return "Enter a field name, optionally followed by desc.";
+    if (code == "search" && !value.trimmed().isEmpty()) {
+        bool number = false;
+        const int count = value.trimmed().toInt(&number);
+        if (!number || count < 1 || count > 50) return "Enter a number of passages from 1 to 50, or leave it blank.";
+    }
     if (code == "validate") {
         const auto rules = parseJsonValue(value);
         if (!rules.isObject() || !rules.toObject()["type"].isString())
             return "Enter a JSON object with a \"type\", for example {\"type\": \"object\"}.";
     }
     return {};
+}
+
+namespace {
+const std::pair<const char *, const char *> kRuleOperators[] = {
+    {">=", "greater-or-equal"}, {"<=", "less-or-equal"}, {"!=", "not-equals"}, {"=", "equals"},
+    {">", "greater"}, {"<", "less"}, {"contains", "contains"}};
+}
+
+QJsonObject BlueprintPreview::parseRule(const QString &text) {
+    static const QRegularExpression rule(R"(^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*(>=|<=|!=|=|>|<|\bcontains\b)\s*(.+?)\s*$)");
+    const auto match = rule.match(text);
+    if (!match.hasMatch()) return {};
+    QString op;
+    for (const auto &[symbol, name] : kRuleOperators)
+        if (match.captured(2) == QLatin1String(symbol)) op = name;
+    // A bare word is text; anything that parses as JSON keeps its type.
+    auto value = parseJsonValue(match.captured(3));
+    if (value.isUndefined()) value = match.captured(3);
+    return {{"field", match.captured(1)}, {"operator", op}, {"value", value}};
+}
+
+QString BlueprintPreview::ruleText(const QJsonObject &rule) {
+    QString symbol = rule["operator"].toString();
+    for (const auto &[text, name] : kRuleOperators)
+        if (symbol == QLatin1String(name)) symbol = text;
+    return rule["field"].toString() + " " + symbol + " " + jsonText(rule["value"]);
+}
+
+QJsonObject BlueprintPreview::parseSort(const QString &text) {
+    static const QRegularExpression sort(R"(^\s*([A-Za-z_][A-Za-z0-9_.-]*)(?:\s+(asc|ascending|desc|descending))?\s*$)",
+                                         QRegularExpression::CaseInsensitiveOption);
+    const auto match = sort.match(text);
+    if (!match.hasMatch()) return {};
+    return {{"field", match.captured(1)}, {"descending", match.captured(2).startsWith("desc", Qt::CaseInsensitive)}};
 }
 
 QString BlueprintPreview::nodeKindLabel(const QString &id) const {

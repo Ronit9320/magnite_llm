@@ -8,7 +8,7 @@ import re
 from pydantic import ValidationError
 
 from backend.blueprints.schemas import (
-    AdapterNode, AgentNode, Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue,
+    AdapterNode, AgentNode, Blueprint, BlueprintNode, DatasetNode, GenerationNode, InlineRows, Issue, KnowledgeNode,
     Problems, RunRequest, ToolNode, TransformNode, ValueSchema,
 )
 
@@ -92,6 +92,8 @@ def _node_contract(node, issues):
                 validate_value(node.adapter_id, node.outputs["adapter"], node.id, "outputs.adapter")
             except Problems as exc:
                 issues.extend(exc.issues)
+    elif isinstance(node, KnowledgeNode):
+        _signature(issues, node, {"query": "string"}, {"results": "array", "context": "string"})
     elif isinstance(node, AgentNode):
         # Kept parseable so older graphs open and can be repaired in the editor.
         issues.append(Issue(code="retired_node", node_id=node.id,
@@ -173,6 +175,25 @@ def _node_contract(node, issues):
                 if port is not None and port.type != rules.type:
                     issues.append(Issue(code="invalid_ports", node_id=node.id, path=f"{direction}.value",
                                         message=f"Port must have the schema's type '{rules.type}'"))
+            return
+        if node.operation in ("filter", "sort"):
+            _signature(issues, node, {"rows": "array"}, {"rows": "array"})
+            if "rows" in node.inputs and "rows" in node.outputs and not _compatible(node.inputs["rows"],
+                                                                                    node.outputs["rows"]):
+                issues.append(Issue(code="incompatible_ports", node_id=node.id, path="outputs.rows",
+                                    message="Filtered or sorted rows keep the input row type"))
+            field = node.parameters.get("field")
+            expected = {"field", "operator", "value"} if node.operation == "filter" else {"field", "descending"}
+            if node.parameters.keys() != expected or not isinstance(field, str) or not field.strip():
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters",
+                                    message="Filter rows needs a field, comparison, and value" if node.operation == "filter"
+                                    else "Sort rows needs a field and a direction"))
+            elif node.operation == "filter" and node.parameters["operator"] not in COMPARISONS:
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.operator",
+                                    message="Filter rows requires one of: " + ", ".join(COMPARISONS)))
+            elif node.operation == "sort" and not isinstance(node.parameters["descending"], bool):
+                issues.append(Issue(code="invalid_parameters", node_id=node.id, path="parameters.descending",
+                                    message="Sort direction must be true or false"))
             return
         if node.operation in ("order-clause", "order-price"):
             inputs = ({"message": "string", "index": "integer"} if node.operation == "order-clause"

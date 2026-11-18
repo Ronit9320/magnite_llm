@@ -135,6 +135,9 @@ and `additionalProperties` on the applicable types.
 | `transform` / `template` | Named data inputs plus `parameters: {"template": "..."}` → string on `value`. `{key}` must name an input; `{{`/`}}` are literal braces. |
 | `transform` / `compare` | `left`, `right` plus `parameters: {"operator": ...}` → boolean on `value`. Operators: `equals`, `not-equals`, `greater`, `greater-or-equal`, `less`, `less-or-equal` (numbers), `contains` (text in text, or value in array). |
 | `transform` / `choose` | `condition` (boolean), `if_true`, `if_false` → `value`. Both choices must be compatible with the output. |
+| `transform` / `filter` | `rows` (array of objects) plus `parameters: {"field", "operator", "value"}` → matching `rows`. Operators as for `compare`. Rows without the field are left out. |
+| `transform` / `sort` | `rows` plus `parameters: {"field", "descending"}` → sorted `rows`. Missing fields sort last; mixed value kinds fail. |
+| `knowledge` / `search` | `query` (string) → `results` (array) and `context` (string). Optional `top_k` (1–50) and `min_score` (0–1) override the Knowledge settings. Fails with `knowledge_unavailable` when embeddings or documents are missing. |
 | `transform` / `validate` | `value` plus `parameters: {"schema": {...}}` → the same `value`. Port types must match the schema type. A mismatch fails with `invalid_value` at the field path. |
 | `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
 | `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |

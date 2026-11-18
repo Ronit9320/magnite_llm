@@ -13,10 +13,11 @@ from backend.blueprints.bindings import BindingResolver
 from backend.blueprints.graph import (
     Graph, graph_for, node_test_graph, render_template, validate_ports, validate_request, validate_value,
 )
+from backend.blueprints.knowledge import filter_rows, search, sort_rows
 from backend.blueprints.order import order_clause, price_order
 from backend.blueprints.runtime import TorchBlueprintSession, check_runtime
 from backend.blueprints.schemas import (
-    AdapterNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, NodeTestRequest,
+    AdapterNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, KnowledgeNode, NodeTestRequest,
     Problems, Revision, RunRequest, RunSnapshot,
     RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, ValueSchema, checked_json,
 )
@@ -108,6 +109,12 @@ def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
         return {"value": inputs["value"]}
     if isinstance(node, AdapterNode):
         return {"adapter": node.adapter_id}
+    if isinstance(node, KnowledgeNode):
+        try:
+            results, context = search(inputs["query"], node.top_k, node.min_score)
+        except (RuntimeError, ValueError) as exc:
+            raise Problems([Issue(code="knowledge_unavailable", node_id=node.id, message=str(exc))]) from exc
+        return {"results": results, "context": context}
     if node.kind == "transform":
         if node.operation == "constant":
             return {"value": node.parameters["value"]}
@@ -119,6 +126,11 @@ def _execute(node, inputs, snapshot: RunSnapshot, stop: Event, session):
             return {"value": compare(node.parameters["operator"], inputs["left"], inputs["right"])}
         if node.operation == "choose":
             return {"value": inputs["if_true"] if inputs["condition"] else inputs["if_false"]}
+        if node.operation == "filter":
+            rules = node.parameters
+            return {"rows": filter_rows(inputs["rows"], rules["field"], rules["operator"], rules["value"], node.id)}
+        if node.operation == "sort":
+            return {"rows": sort_rows(inputs["rows"], node.parameters["field"], node.parameters["descending"], node.id)}
         if node.operation == "validate":
             validate_value(inputs["value"], ValueSchema.model_validate(node.parameters["schema"]), node.id, "inputs.value")
             return {"value": inputs["value"]}

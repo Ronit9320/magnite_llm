@@ -818,7 +818,7 @@ int runLiveBlueprintChecks(const QString &captures) {
           "canvas distinguishes an unpublished draft");
     {
         // New transform nodes: built by the editor's factory, mapped by apiNode, run by the backend.
-        const auto runNode = [&](QJsonObject node, const QJsonObject &inputs) -> QJsonValue {
+        const auto runNode = [&](QJsonObject node, const QJsonObject &inputs, const QString &port = "value") -> QJsonValue {
             auto response = std::make_shared<QJsonObject>();
             const QJsonObject graph{{"id", BlueprintPreview::id()}, {"name", "Check new nodes"},
                                     {"nodes", QJsonArray{node}}};
@@ -827,7 +827,7 @@ int runLiveBlueprintChecks(const QString &captures) {
             waitFor([&] { return !response->isEmpty(); }, 10000);
             const auto id = (*response)["run"].toObject()["id"].toString();
             if (id.isEmpty() || !waitForState(session, id, "passed", 10000)) return QJsonValue(QJsonValue::Undefined);
-            return QJsonValue(session.run(id)["result"].toObject()[node["id"].toString()].toObject()["value"]);
+            return QJsonValue(session.run(id)["result"].toObject()[node["id"].toString()].toObject()[port]);
         };
         auto templated = session.makeNode("template", "note", 0, 0);
         templated["setting"] = "Hello {name}, {{ok}}";
@@ -844,6 +844,44 @@ int runLiveBlueprintChecks(const QString &captures) {
               "Compare evaluates the saved operator");
         check(runNode(choose, {{"condition", false}, {"if_true", "Review"}, {"if_false", "Approved"}}).toString() == "Approved",
               "Choose a value returns the selected input");
+        const QJsonArray rows{QJsonObject{{"id", "a"}, {"amount", 150}}, QJsonObject{{"id", "b"}, {"amount", 20}},
+                              QJsonObject{{"id", "c"}, {"amount", 900}}, QJsonObject{{"id", "d"}, {"tag", "x"}}};
+        auto filter = session.makeNode("filter", "large", 0, 0);
+        auto sort = session.makeNode("sort", "ranked", 0, 0);
+        const auto ids = [](const QJsonValue &value) {
+            QStringList names;
+            for (const auto &row : value.toArray()) names << row.toObject()["id"].toString();
+            return names.join(",");
+        };
+        check(BlueprintPreview::parseRule("status = \"open\"")["value"] == "open"
+              && BlueprintPreview::parseRule("count != 3")["operator"] == "not-equals"
+              && BlueprintPreview::parseRule("tags contains urgent")["value"] == "urgent"
+              && BlueprintPreview::ruleText(BlueprintPreview::parseRule("note = \"say \\\"hi\\\"\"")) == "note = \"say \\\"hi\\\"\""
+              && session.settingError(filter).isEmpty()
+              && !session.settingError([&] { auto bad = filter; bad["setting"] = "amount about 5"; return bad; }()).isEmpty(),
+              "Filter rules parse comparisons, text, numbers, and quoted text and reject unknown comparisons");
+        check(ids(runNode(filter, {{"rows", rows}}, "rows")) == "a,c", "Filter rows keeps rows that pass the default rule");
+        check(ids(runNode(sort, {{"rows", rows}}, "rows")) == "c,a,b,d", "Sort rows orders by the field, largest first, missing last");
+        auto knowledge = session.makeNode("search", "docs", 0, 0);
+        knowledge["setting"] = "2";
+        check(runNode(knowledge, {{"query", "refund"}}, "context").isUndefined(),
+              "Knowledge search fails clearly when no documents are indexed");
+        // A clean profile picks its embedder by memory; use the small one the selftests cache.
+        auto configured = std::make_shared<int>(0);
+        client.post("/rag/config", {{"model", "all-MiniLM-L6-v2"}},
+            [configured](int status, const QJsonDocument &) { *configured = status ? status : -1; });
+        waitFor([&] { return *configured != 0; }, 10000);
+        auto ingested = std::make_shared<int>(0);
+        client.post("/rag/documents", {{"name", "policy.md"}, {"kind", "md"},
+            {"content", "# Refund policy\n\nRefunds are issued within five business days after the item arrives."
+                        "\n\n# Shipping\n\nStandard shipping takes three to seven days."}},
+            [ingested](int status, const QJsonDocument &) { *ingested = status ? status : -1; });
+        if (check(waitFor([&] { return *ingested != 0; }, 90000) && *ingested == 201,
+                  "the clean profile indexes a Knowledge document for search")) {
+            const auto context = runNode(knowledge, {{"query", "How long do refunds take?"}}, "context").toString();
+            check(context.startsWith("[1] policy.md: ") && context.contains("five business days"),
+                  "Knowledge search returns cited passages for a Model prompt");
+        }
         check(session.settingError(validate).isEmpty(), "Validate data accepts its default rules");
         const auto valid = runNode(validate, {{"value", QJsonObject{{"id", "INV-1"}}}});
         check(valid == QJsonValue(QJsonObject{{"id", "INV-1"}}), "Validate data passes a matching value");
@@ -855,9 +893,12 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
         const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 8 && !picker->findChild<QScrollArea *>() &&
+        check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
               std::none_of(cards.begin(), cards.end(), [](const auto *card) {
                   return card->accessibleName() == "Add Pi Agent";
+              }) &&
+              std::any_of(cards.begin(), cards.end(), [](const auto *card) {
+                  return card->accessibleName() == "Add Knowledge";
               }) &&
               picker->height() <= picker->screen()->availableGeometry().height() &&
               std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
@@ -867,7 +908,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                          picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
                          title && card->accessibleName() == "Add " + title->text() &&
                          caption && caption->height() >= caption->heightForWidth(caption->width());
-              }), "all eight live cards fit without scrolling and Pi Agent is gone");
+              }), "all nine live cards fit without scrolling, with Knowledge and without Pi Agent");
         capture(*picker, "live-add-node-cards");
         picker->reject();
         pump();

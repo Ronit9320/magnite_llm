@@ -78,6 +78,9 @@ public:
     static QString duration(qint64 ms);
     static QString jsonText(const QJsonValue &value);
     static QJsonValue parseJsonValue(const QString &text);
+    static QJsonObject parseRule(const QString &text);
+    static QString ruleText(const QJsonObject &rule);
+    static QJsonObject parseSort(const QString &text);
     static bool supportedSchema(const QJsonObject &schema);
 
 signals:
