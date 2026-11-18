@@ -19,11 +19,8 @@ class DatasetRecord(BaseModel):
     created_at: str = ""
 
 
-class TrainingConfig(BaseModel):
-    """Hyperparameters and inputs for a LoRA/QLoRA training job."""
-
-    base_model: str = Field(description="Registered model id, HF repo id, or local dir")
-    dataset_id: str = Field(description="Must reference an ingested dataset")
+class TrainingOptions(BaseModel):
+    """Hyperparameters for a LoRA/QLoRA training job."""
     name: str = Field(default="", description="Adapter name; auto-generated when empty")
 
     rank: int = Field(8, ge=1, le=512)
@@ -41,6 +38,20 @@ class TrainingConfig(BaseModel):
     warmup_ratio: float = Field(0.03, ge=0.0, le=1.0)
     max_length: int = Field(512, ge=8, le=8192)
     seed: int = Field(42, ge=0, le=2**32 - 1)
+
+
+class BlueprintTrainingOrigin(BaseModel):
+    blueprint_id: str
+    revision: int
+    node_id: str
+    model_id: str
+    tokenizer_sha256: str
+
+
+class TrainingConfig(TrainingOptions):
+    base_model: str = Field(description="Registered model id, HF repo id, or local dir")
+    dataset_id: str = Field(description="Must reference an ingested dataset")
+    blueprint_node: BlueprintTrainingOrigin | None = None
 
 
 class TrainingJob(BaseModel):

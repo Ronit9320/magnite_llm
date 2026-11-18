@@ -5,11 +5,12 @@ after a Qt upgrade can silently combine a new client with incompatible old Qt.
 """
 from pathlib import Path
 import shutil
+import sys
 
 
 def main():
     repo = Path(__file__).resolve().parents[1]
-    stage = repo / "build/packaging/Magnite.AppDir"
+    stage = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / "build/packaging/Magnite.AppDir"
     if not stage.exists():
         return
     if stage.is_symlink() or not stage.resolve().is_relative_to(repo):

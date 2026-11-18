@@ -72,6 +72,16 @@ their selected distributions separately if they become bundled. Before binary
 distribution, enumerate transitive/native libraries and include their applicable
 license texts and notices. Do not copy this metadata table as a substitute.
 
+The optional Pi bridge uses `@earendil-works/pi-agent-core` and
+`@earendil-works/pi-ai` 1.5.2 under the MIT license.
+[Pi license](https://github.com/earendil-works/pi/blob/main/LICENSE)
+The [npm lockfile](backend/src/backend/tooling/pi/package-lock.json) records
+the transitive packages and their declared licenses.
+Native packages that include Pi bundle Node.js 22.23.5. The upstream Node
+license and third-party notices are included in `licenses/node/LICENSE`. The
+installed npm packages retain their own license files.
+[Node.js release and archive checksums](https://nodejs.org/en/blog/release/v22.23.5/)
+
 ## Models and example data
 
 The repo's new `examples/` files are synthetic, original demonstration inputs;

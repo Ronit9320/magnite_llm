@@ -29,6 +29,14 @@ run_clean() {
 if codesign --verify --deep --strict --verbose=4 "$app" 2>"$log_dir/codesign-before.log"; then pass "signature before run"
 else fail "signature before run (see $log_dir/codesign-before.log)"; fi
 
+pi_check="$script_dir/smoke_pi.py"
+[[ -f "$pi_check" ]] || pi_check="$script_dir/../smoke_pi.py"
+if run_clean "$app/Contents/Resources/runtime/python/bin/python3" -I -B "$pi_check" >"$log_dir/pi.log" 2>&1; then
+    pass "bundled Pi worker"
+else
+    fail "bundled Pi worker (see $log_dir/pi.log)"
+fi
+
 run_clean "$exe" --theme-check >"$log_dir/theme-check.log" 2>&1
 if grep -q '^\[theme-check\] 0 failure(s)' "$log_dir/theme-check.log"; then pass "--theme-check: 0 failure(s)"
 else fail "--theme-check (see $log_dir/theme-check.log)"; fi

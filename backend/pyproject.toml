@@ -38,6 +38,10 @@ magnite-backend = "backend.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"backend.tooling" = ["pi/*.mjs", "pi/package.json", "pi/package-lock.json"]
 
 [tool.setuptools.dynamic]
 version = {attr = "backend._version.PACKAGE_VERSION"}

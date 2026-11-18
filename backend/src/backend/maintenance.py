@@ -14,6 +14,7 @@ class UpdateGate:
         self.quiesced = False
 
     def background_busy(self):
+        from backend.routes.blueprints import blueprint_busy
         from backend.routes.training import _get_manager
         from backend.routes.models import _get_registry
 
@@ -21,6 +22,8 @@ class UpdateGate:
             return "Training is queued or running. Finish it before updating."
         if _get_registry().has_active_pulls():
             return "A model download is in progress. Finish it before updating."
+        if blueprint_busy():
+            return "A blueprint run is queued or running. Finish it before updating."
         return ""
 
     async def __call__(self, scope, receive, send):

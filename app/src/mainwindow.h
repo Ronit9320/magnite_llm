@@ -21,6 +21,7 @@ class BackendManager;
 class BackendClient;
 class LibraryPanel;
 class BasePanel;
+class BlueprintPanel;
 class ModelsPanel;
 class ModelHubPanel;
 class TrainingPanel;
@@ -109,6 +110,7 @@ private:
     RagPanel *m_ragPanel;
     AdaptersPanel *m_adaptersPanel;
     ChatPanel *m_chatPanel;
+    BlueprintPanel *m_blueprintPanel = nullptr;
     DocsPanel *m_docsPanel = nullptr;
     ChatStore *m_chatStore = nullptr;
     ChatHistoryList *m_history = nullptr;
@@ -130,5 +132,5 @@ private:
     QString m_shotDir;
 
     // Panel indices
-    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelDocs, PanelHub, PanelSettings, PanelCount };
+    enum Panel { PanelModels, PanelTraining, PanelRag, PanelAdapters, PanelChat, PanelDocs, PanelHub, PanelBlueprints, PanelSettings, PanelCount };
 };

@@ -309,7 +309,7 @@ int Theme::selfCheck() {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
         "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
-        "pencil", "chevron-left", "chevron-right", "copy", "check"};
+        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());

@@ -1,0 +1,592 @@
+{
+  "starter": {
+    "id": "order-intake",
+    "name": "Order intake",
+    "revision": 1,
+    "description": "Turn a message with competing order clauses into a validated, priced order.",
+    "nodes": [
+      {
+        "id": "input",
+        "kind": "input",
+        "name": "Order message",
+        "x": 26,
+        "y": 44,
+        "model": "",
+        "adapter": "",
+        "in": [],
+        "out": [
+          {
+            "id": "text",
+            "type": "text",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      {
+        "id": "selector",
+        "kind": "selector",
+        "name": "Select clause",
+        "x": 245,
+        "y": 44,
+        "model": "qwen",
+        "adapter": "selector",
+        "in": [
+          {
+            "id": "text",
+            "type": "text",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "out": [
+          {
+            "id": "index",
+            "type": "index",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "lookup",
+        "kind": "lookup",
+        "name": "Look up clause",
+        "x": 464,
+        "y": 44,
+        "model": "",
+        "adapter": "",
+        "in": [
+          {
+            "id": "text",
+            "type": "text",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "id": "index",
+            "type": "index",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "out": [
+          {
+            "id": "clause",
+            "type": "clause",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "extractor",
+        "kind": "extractor",
+        "name": "Extract fields",
+        "x": 245,
+        "y": 269,
+        "model": "qwen",
+        "adapter": "extractor",
+        "in": [
+          {
+            "id": "clause",
+            "type": "clause",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "out": [
+          {
+            "id": "fields",
+            "type": "fields",
+            "schema": {
+              "type": "object",
+              "required": [
+                "item",
+                "quantity",
+                "unit_price",
+                "city"
+              ],
+              "properties": {
+                "item": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unit_price": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "city": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "pricing",
+        "kind": "pricing",
+        "name": "Validate & price",
+        "x": 464,
+        "y": 269,
+        "model": "",
+        "adapter": "",
+        "in": [
+          {
+            "id": "fields",
+            "type": "fields",
+            "schema": {
+              "type": "object",
+              "required": [
+                "item",
+                "quantity",
+                "unit_price",
+                "city"
+              ],
+              "properties": {
+                "item": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unit_price": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "city": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
+        "out": [
+          {
+            "id": "order",
+            "type": "order",
+            "schema": {
+              "type": "object",
+              "required": [
+                "item",
+                "quantity",
+                "unit_price",
+                "city",
+                "subtotal",
+                "shipping",
+                "total"
+              ],
+              "properties": {
+                "item": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unit_price": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "city": {
+                  "type": "string"
+                },
+                "subtotal": {
+                  "type": "number"
+                },
+                "shipping": {
+                  "type": "number"
+                },
+                "total": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "input",
+        "out": "text",
+        "to": "selector",
+        "in": "text"
+      },
+      {
+        "from": "input",
+        "out": "text",
+        "to": "lookup",
+        "in": "text"
+      },
+      {
+        "from": "selector",
+        "out": "index",
+        "to": "lookup",
+        "in": "index"
+      },
+      {
+        "from": "lookup",
+        "out": "clause",
+        "to": "extractor",
+        "in": "clause"
+      },
+      {
+        "from": "extractor",
+        "out": "fields",
+        "to": "pricing",
+        "in": "fields"
+      }
+    ]
+  },
+  "adapters": [
+    {
+      "id": "selector",
+      "name": "order-selector-v2",
+      "model": "qwen",
+      "job": "train-024",
+      "detail": "Clause index · PEFT LoRA",
+      "kind": "selector"
+    },
+    {
+      "id": "extractor",
+      "name": "order-fields-v1",
+      "model": "qwen",
+      "job": "train-025",
+      "detail": "Order fields · PEFT LoRA",
+      "kind": "extractor"
+    },
+    {
+      "id": "smol-selector",
+      "name": "smol-order-selector",
+      "model": "smol",
+      "job": "train-019",
+      "detail": "Clause index · PEFT LoRA",
+      "kind": "selector"
+    }
+  ],
+  "approvalFixtures": {
+    "file": {
+      "type": "Open file",
+      "target": "/home/preview/magnite-demo/orders/order-preview.json"
+    },
+    "command": {
+      "type": "Run command",
+      "executable": "python3",
+      "args": [
+        "--version"
+      ],
+      "cwd": "/home/preview/magnite-demo"
+    }
+  },
+  "baseline": {
+    "name": "Single fields adapter + Python",
+    "duration": 1850,
+    "outputs": {
+      "active": {
+        "item": "desk lamps",
+        "quantity": 4,
+        "unit_price": 12,
+        "city": "Berlin",
+        "subtotal": 48,
+        "shipping": 5,
+        "total": 53
+      },
+      "shipping": {
+        "item": "cotton shirts",
+        "quantity": 2,
+        "unit_price": 19,
+        "city": "Madrid",
+        "subtotal": 38,
+        "shipping": 5,
+        "total": 43
+      },
+      "single": {
+        "item": "linen notebooks",
+        "quantity": 3,
+        "unit_price": 10,
+        "city": "Paris",
+        "subtotal": 30,
+        "shipping": 5,
+        "total": 35
+      }
+    }
+  },
+  "contracts": {
+    "text": {
+      "label": "Text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "index": {
+      "label": "Integer",
+      "schema": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "clause": {
+      "label": "Clause",
+      "schema": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "fields": {
+      "label": "Order fields",
+      "schema": {
+        "type": "object",
+        "required": [
+          "item",
+          "quantity",
+          "unit_price",
+          "city"
+        ],
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "unit_price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "city": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "order": {
+      "label": "Priced order",
+      "schema": {
+        "type": "object",
+        "required": [
+          "item",
+          "quantity",
+          "unit_price",
+          "city",
+          "subtotal",
+          "shipping",
+          "total"
+        ],
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "unit_price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "city": {
+            "type": "string"
+          },
+          "subtotal": {
+            "type": "number"
+          },
+          "shipping": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "receipt": {
+      "label": "Receipt",
+      "schema": {
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "kinds": {
+    "input": {
+      "label": "Input",
+      "name": "Order message",
+      "detail": "Workflow entry",
+      "icon": "message",
+      "in": [],
+      "out": [
+        "text"
+      ]
+    },
+    "selector": {
+      "label": "LoRA · Clause selector",
+      "name": "Select clause",
+      "detail": "Find the active order in a message and return its one-based clause index.",
+      "icon": "layers",
+      "in": [
+        "text"
+      ],
+      "out": [
+        "index"
+      ]
+    },
+    "lookup": {
+      "label": "Python transform",
+      "name": "Look up clause",
+      "detail": "Read the clause at the selected index from the original message.",
+      "icon": "code",
+      "in": [
+        "text",
+        "index"
+      ],
+      "out": [
+        "clause"
+      ]
+    },
+    "extractor": {
+      "label": "LoRA · Field extractor",
+      "name": "Extract fields",
+      "detail": "Read the item, quantity, unit price, and destination from the selected clause.",
+      "icon": "layers",
+      "in": [
+        "clause"
+      ],
+      "out": [
+        "fields"
+      ]
+    },
+    "pricing": {
+      "label": "Python transform",
+      "name": "Validate & price",
+      "detail": "Validate the four fields and calculate subtotal, shipping, and total.",
+      "icon": "check",
+      "in": [
+        "fields"
+      ],
+      "out": [
+        "order"
+      ]
+    },
+    "tool": {
+      "label": "Tool",
+      "name": "Open order preview",
+      "detail": "Propose opening the fixture receipt. The run waits for a decision.",
+      "icon": "external",
+      "in": [
+        "order"
+      ],
+      "out": [
+        "receipt"
+      ]
+    }
+  },
+  "models": [
+    {
+      "id": "qwen",
+      "name": "Qwen2.5-0.5B-Instruct",
+      "engine": "Torch / PEFT",
+      "supported": true
+    },
+    {
+      "id": "smol",
+      "name": "SmolLM2-360M-Instruct",
+      "engine": "Torch / PEFT",
+      "supported": true
+    },
+    {
+      "id": "gguf",
+      "name": "Qwen2.5-0.5B · GGUF",
+      "engine": "llama.cpp",
+      "supported": false
+    }
+  ],
+  "samples": [
+    {
+      "id": "active",
+      "label": "Cancelled order + replacement",
+      "lines": [
+        "Cancel the order for 4 desk lamps to Berlin at $12 each.",
+        "Ship 6 ceramic mugs to Lisbon at $14 each."
+      ],
+      "active": 2,
+      "fields": {
+        "item": "ceramic mugs",
+        "quantity": 6,
+        "unit_price": 14,
+        "city": "Lisbon"
+      }
+    },
+    {
+      "id": "shipping",
+      "label": "Order below free shipping",
+      "lines": [
+        "Ship 2 cotton shirts to Madrid at $19 each.",
+        "Ignore the earlier quote for 10 tote bags to Rome at $8 each."
+      ],
+      "active": 1,
+      "fields": {
+        "item": "cotton shirts",
+        "quantity": 2,
+        "unit_price": 19,
+        "city": "Madrid"
+      }
+    },
+    {
+      "id": "single",
+      "label": "Single order",
+      "lines": [
+        "Send 3 linen notebooks to Paris at $10 each."
+      ],
+      "active": 1,
+      "fields": {
+        "item": "linen notebooks",
+        "quantity": 3,
+        "unit_price": 10,
+        "city": "Paris"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "normal",
+      "label": "Successful run"
+    },
+    {
+      "id": "failure",
+      "label": "Invalid extractor output"
+    },
+    {
+      "id": "approval",
+      "label": "Approval · open file"
+    },
+    {
+      "id": "command",
+      "label": "Approval · run command"
+    }
+  ]
+}

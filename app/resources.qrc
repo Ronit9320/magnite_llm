@@ -1,5 +1,7 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="blueprints/node-catalog.json">resources/blueprints/node-catalog.json</file>
+        <file alias="blueprints/order-preview.json">resources/blueprints/order-preview.json</file>
         <file alias="docs/catalog.json">resources/docs/catalog.json</file>
         <file alias="docs/reference/WORKFLOWS.md">resources/docs/reference/WORKFLOWS.md</file>
         <file alias="docs/reference/LOCAL_API.md">resources/docs/reference/LOCAL_API.md</file>
@@ -55,6 +57,8 @@
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>
         <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+        <file alias="icons/expand.svg">resources/icons/expand.svg</file>
+        <file alias="icons/shrink.svg">resources/icons/shrink.svg</file>
         <file alias="icons/window-close.svg">resources/icons/window-close.svg</file>
         <file alias="icons/window-minimize.svg">resources/icons/window-minimize.svg</file>
         <file alias="icons/window-maximize.svg">resources/icons/window-maximize.svg</file>

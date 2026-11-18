@@ -11,6 +11,7 @@ import uvicorn
 from backend import local_access
 from backend.inference.engines.streaming import abort_all_streams
 from backend.paths import app_home
+from backend.routes.blueprints import stop_blueprint_runs
 from backend.server import app
 
 _PARENT_POLL_SECONDS = 1.0
@@ -50,16 +51,17 @@ def _enable_parent_death_signal() -> None:
 
 
 class MagniteServer(uvicorn.Server):
-    """uvicorn waits for open streaming responses before it runs shutdown hooks, so a long
-    generation would hold up quitting. Abort generations the moment shutdown is requested."""
+    """Stop streaming work before Uvicorn waits for responses to drain."""
 
     def handle_exit(self, sig, frame):
         abort_all_streams()
+        stop_blueprint_runs()
         super().handle_exit(sig, frame)
 
     def request_exit(self) -> None:
         """The authenticated /_desktop/shutdown path (Windows has no SIGTERM for console Python)."""
         abort_all_streams()
+        stop_blueprint_runs()
         self.should_exit = True
 
 

@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 #include <QTextCursor>
 #include "panels/chatpanel.h"
+#include "panels/blueprintpanel.h"
 #include "panels/chatstore.h"
 #include "panels/ragpanel.h"
 #include "theme.h"
@@ -43,6 +44,7 @@
 #include <QSignalBlocker>
 #include <QShowEvent>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -107,7 +109,13 @@ void ChatPanel::showBlankChat() {
 }
 
 void ChatPanel::setupUi() {
-    auto *layout = contentLayout();
+    m_chatContents = new QStackedWidget(this);
+    auto *regularChat = new QWidget;
+    m_chatContents->addWidget(regularChat);
+    contentLayout()->addWidget(m_chatContents, 1);
+    auto *layout = new QVBoxLayout(regularChat);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(contentLayout()->spacing());
     auto *toolbar = new QHBoxLayout();
     toolbar->setSpacing(6);
     m_modelCombo = new ComboBox(this);
@@ -302,6 +310,11 @@ void ChatPanel::setupUi() {
     m_input->installEventFilter(this);
     composer->addWidget(m_input);
     auto *actions = new QHBoxLayout();
+    m_previewMode = new ComboBox(this);
+    m_previewMode->setAccessibleName("Chat mode");
+    m_previewMode->addItems({"Chat", "Blueprint", "Tool mode"});
+    m_previewMode->hide();
+    actions->addWidget(m_previewMode);
     m_ragCheck = new ToggleSwitch("Your knowledge", this);
     m_ragCheck->setToolTip("Include matching passages from documents in your Knowledge workspace.");
     actions->addWidget(m_ragCheck);
@@ -1002,6 +1015,7 @@ void ChatPanel::stopActivity() {
 }
 
 void ChatPanel::onClearChat() {
+    showOrdinaryChat();
     // "New chat": the chat on screen stays saved, a blank one takes its place.
     stopActivity();
     flushSave();
@@ -1171,7 +1185,30 @@ void ChatPanel::restoreKnowledge() {
     m_restoringKnowledge = false;
 }
 
+void ChatPanel::setBlueprintChat(BlueprintChatPanel *panel) {
+    m_chatContents->addWidget(panel);
+    m_previewMode->show();
+    connect(m_previewMode, &QComboBox::activated, panel, [this, panel](int index) {
+        if (index == 0) return;
+        {
+            const QSignalBlocker block(m_previewMode);
+            m_previewMode->setCurrentIndex(0);
+        }
+        m_chatContents->setCurrentWidget(panel);
+        panel->setMode(index);
+    });
+    connect(panel, &BlueprintChatPanel::ordinaryChatRequested, this, [this] {
+        showOrdinaryChat();
+        m_input->setFocus();
+    });
+}
+
+void ChatPanel::showOrdinaryChat() {
+    m_chatContents->setCurrentIndex(0);
+}
+
 void ChatPanel::showKnowledge() {
+    showOrdinaryChat();
     if (m_knowledgeDrawer) m_knowledgeToggle->setChecked(true);
 }
 
@@ -1215,12 +1252,16 @@ bool ChatPanel::flushSave() {
 
 bool ChatPanel::openChat(const QString &id) {
     if (!m_store || isBusy()) return false;
-    if (id == m_chatId) return true;
+    if (id == m_chatId) {
+        showOrdinaryChat();
+        return true;
+    }
     const std::optional<ChatTree> loaded = m_store->load(id);
     if (!loaded) {
         setStatus("That chat could not be opened.", "error");
         return false;
     }
+    showOrdinaryChat();
     flushSave();
     resetConversation(false);
     m_tree = *loaded;
@@ -1366,6 +1407,7 @@ void ChatPanel::scrollToBottom() {
 void ChatPanel::updateActions() {
     const bool busy = isBusy();
     const bool ready = m_client && m_client->isReady();
+    m_previewMode->setEnabled(!busy);
     m_sendButton->setEnabled(m_modelLoaded && !busy && !m_input->toPlainText().trimmed().isEmpty());
     m_modelButton->setEnabled(ready && !busy);
     switch (m_modelOperation) {

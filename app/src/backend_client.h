@@ -24,7 +24,7 @@ public:
 
     explicit BackendClient(QObject *parent = nullptr);
 
-    void setBaseUrl(const QString &url) { m_baseUrl = url; }
+    void setBaseUrl(const QString &url);
     // Per-launch secret the backend requires on every request (empty: send none).
     void setAuthToken(const QString &token) { m_authToken = token; }
     QString baseUrl() const { return m_baseUrl; }
@@ -33,7 +33,10 @@ public:
     void get(const QString &path, Callback onDone);
     // Returns the in-flight reply so a caller can cancel just this request (null if not sent).
     QNetworkReply *post(const QString &path, const QJsonObject &body, Callback onDone);
+    void put(const QString &path, const QJsonObject &body, Callback onDone);
     void remove(const QString &path, Callback onDone);
+    QNetworkReply *streamGet(const QString &path, qint64 after, std::function<void(qint64)> onEvent,
+                             SseDone onDone);
 
     // Streaming POST that parses Server-Sent Events ("data: {...}" blocks).
     void streamPost(const QString &path, const QJsonObject &body,
@@ -45,6 +48,9 @@ public:
 
     void abortAll();
     void abortStream();
+
+signals:
+    void baseUrlChanged();
 
 private:
     QNetworkRequest request(const QString &path) const;

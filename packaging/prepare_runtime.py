@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from record_build import record_build
+from prepare_pi import prepare_pi
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -27,6 +28,8 @@ def main():
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--python-root", type=Path)
     parser.add_argument("--resume", action="store_true", help="Retry an interrupted dependency install")
+    parser.add_argument("--without-ml", action="store_true", default=os.environ.get("MAGNITE_PACKAGE_WITHOUT_ML") == "1",
+                        help="Stage base dependencies and GGUF support without the optional ML runtime")
     parser.add_argument("--requirements", type=Path, default=REPO / "packaging/requirements-cpu.txt",
                         help="Pinned requirements file (default: the Linux CPU set)")
     parser.add_argument("--constraints", type=Path,
@@ -49,9 +52,16 @@ def main():
         if len(candidates) != 1:
             parser.error(f"Expected one Python installation under {downloads}")
         source = candidates[0]
-    if not runtime.exists():
+    profile = "base" if args.without_ml else "ml"
+    profile_file = runtime.parent / "profile"
+    if runtime.exists():
+        previous = profile_file.read_text(encoding="utf-8").strip() if profile_file.is_file() else "ml"
+        if previous != profile:
+            parser.error("Use a separate destination when changing the runtime profile")
+    else:
         shutil.copytree(source, runtime, symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    profile_file.write_text(profile + "\n", encoding="utf-8")
     python = runtime / ("python.exe" if sys.platform == "win32" else "bin/python3")
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
@@ -83,21 +93,27 @@ def main():
         )
         env["CMAKE_BUILD_PARALLEL_LEVEL"] = "2"
     # macOS has no separate CPU torch build: the standard wheel provides CPU and MPS.
-    torch_backend = [] if macos else ["--torch-backend", "cpu"]
+    torch_backend = [] if macos or args.without_ml else ["--torch-backend", "cpu"]
     constraints = args.constraints or args.requirements.with_name(
         args.requirements.name.replace("requirements-", "constraints-", 1))
     if not constraints.is_file():
         parser.error(f"Required dependency lock is missing: {constraints}")
     lock = ["-c", constraints]
+    direct = [] if args.without_ml else ["-r", args.requirements]
     run(uv, "pip", "install", "--python", python, "--break-system-packages",
         *torch_backend, "--no-binary", "llama-cpp-python",
         "--reinstall-package", "magnite-backend",
-        "-r", args.requirements, *lock, REPO / "backend", env=env)
-    run(python, "-I", "-B", "-c",
-        "import backend.server, llama_cpp, torch, transformers, peft, "
-        "sentence_transformers, datasets; "
-        "assert not torch.version.cuda; print('" + ("runtime" if macos else "CPU runtime") + " imports OK')", env=env)
-    record_build(dest)
+        *direct, *lock, REPO / "backend", env=env)
+    smoke = "import backend.server, llama_cpp; "
+    if args.without_ml:
+        smoke += ("import importlib.util; "
+                  "assert all(importlib.util.find_spec(name) is None for name in ('torch', 'transformers', 'peft')); ")
+    else:
+        smoke += "import torch, transformers, peft, sentence_transformers, datasets; assert not torch.version.cuda; "
+    run(python, "-I", "-B", "-c", smoke + f"print('{profile} runtime imports OK')", env=env)
+    tooling = prepare_pi(dest, python, REPO / "build/packaging/node-cache")
+    run(python, "-I", "-B", REPO / "packaging/smoke_pi.py", env=env)
+    record_build(dest, profile=profile, tooling=tooling)
     notices = dest / "licenses"
     notices.mkdir(exist_ok=True)
     for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):

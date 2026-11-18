@@ -55,6 +55,11 @@ platform-specific `requirements-*.txt` and full `constraints-*.txt` locks under
 jobs installed and tested those locked runtimes. This does not lock an
 unconstrained editable install or establish every GPU configuration.
 
+For Tool mode in a source checkout, install Node 22.19 or later and run
+`npm ci --ignore-scripts --prefix backend/src/backend/tooling/pi`. Packaged
+builds made with the updated runtime recipe include their own Node and Pi.
+[Blueprints and Tool mode](BLUEPRINTS.md)
+
 Run from this layout: `<repo>/build/magnite-app` and `<repo>/.venv/bin/python`.
 The app looks for `backend/src` relative to the executable. On POSIX it prefers
 `.venv/bin/python`, with `python3` as fallback. Windows probes `.venv312` and

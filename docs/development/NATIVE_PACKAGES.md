@@ -99,6 +99,13 @@ require authentication to download full logs/artifacts. A failure in automation
 or absent native evidence leaves the relevant release-plan phase IN PROGRESS.
 Workflow files alone do not establish native acceptance or Phase 3 completion.
 
+The Blueprint integration stages the pinned Node executable and Pi dependencies
+in each native build. The platform smoke checks start Pi from the installed or
+relocated runtime with the host Node path removed. The Linux job also builds
+and checks a separate GGUF package without ML extras. Blueprint acceptance
+and exact platform results are tracked together in the
+[Blueprint acceptance record](blueprints/ACCEPTANCE.md).
+
 ## Integrating app work into dev
 
 Phases 0–3 provide the native build/test foundation. Once the current integration

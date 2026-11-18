@@ -23,6 +23,7 @@ cp "$dmg" "$kit/Magnite-download.dmg"
 xattr -w com.apple.quarantine "0181;$(printf %x "$(date +%s)");Safari;" "$kit/Magnite-download.dmg"
 cp "$repo_dir/packaging/macos/smoke_bundle.sh" "$repo_dir/docs/release/macos/CLEAN_INSTALL.md" "$kit/"
 cp "$repo_dir/packaging/macos/snapshot_bundle.py" "$kit/"
+cp "$repo_dir/packaging/smoke_pi.py" "$kit/"
 python3 - "$kit/CLEAN_INSTALL.md" "$version" "$kit" <<'PY'
 from pathlib import Path
 import sys

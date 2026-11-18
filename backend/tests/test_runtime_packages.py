@@ -240,9 +240,10 @@ class InstallJobTests(unittest.TestCase):
 
     def test_uv_command_targets_the_running_interpreter(self):
         package = rp.get("llama.cpp")
-        argv = rp.build_command(rp.Installer("uv", "/bin/uv"), package, Path("/t"))
+        target = Path("/t")
+        argv = rp.build_command(rp.Installer("uv", "/bin/uv"), package, target)
         self.assertEqual(argv, ["/bin/uv", "pip", "install", "--python", sys.executable,
-                                "--target", "/t", "llama-cpp-python>=0.3.0"])
+                                "--target", str(target), "llama-cpp-python>=0.3.0"])
 
 
 class SupervisorRefreshTests(unittest.TestCase):
@@ -273,7 +274,11 @@ class ChildProcessVisibilityTests(unittest.TestCase):
              patch.object(rp, "app_home", return_value=home), \
              patch.dict("os.environ", {"PYTHONPATH": "/existing"}), \
              patch("subprocess.Popen") as popen, patch.object(engine.VllmEngine, "_wait_ready"):
-            engine.VllmEngine("model").load()
+            instance = engine.VllmEngine("model")
+            try:
+                instance.load()
+            finally:
+                instance.unload()
         paths = popen.call_args.kwargs["env"]["PYTHONPATH"].split(os.pathsep)
         self.assertEqual(paths, ["/existing", str(Path(home) / "packages")])
 

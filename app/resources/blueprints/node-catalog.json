@@ -1,0 +1,82 @@
+{
+  "nodeTypes": [
+    {"id": "input", "label": "Input", "detail": "Receive a value supplied when the workflow starts."},
+    {"id": "dataset", "label": "Dataset", "detail": "Provide a dataset to downstream nodes."},
+    {"id": "transform", "label": "Transform", "detail": "Convert, extract, or summarize a value."},
+    {"id": "model", "label": "Model", "detail": "Apply a model operation with a defined input and output."},
+    {"id": "output", "label": "Output", "detail": "Return a value from the workflow."},
+    {"id": "tool", "label": "Tool", "detail": "Pause the preview for an approval."}
+  ],
+  "contracts": {
+    "text": {"label": "Text", "schema": {"type": "string"}},
+    "integer": {"label": "Integer", "schema": {"type": "integer"}},
+    "number": {"label": "Number", "schema": {"type": "number"}},
+    "boolean": {"label": "Boolean", "schema": {"type": "boolean"}},
+    "object": {"label": "Object", "schema": {"type": "object"}},
+    "array": {"label": "Array", "schema": {"type": "array"}}
+  },
+  "operations": [
+    {
+      "id": "input", "kind": "input", "label": "Read run input",
+      "detail": "Read text or parse JSON supplied when the workflow starts.",
+      "out": [{"id": "text", "name": "Input", "type": "text", "chooseType": true}]
+    },
+    {
+      "id": "dataset-rows", "kind": "dataset", "label": "Provide JSON rows",
+      "detail": "Pass a JSON array of records or values to the next step.",
+      "setting": {"label": "Dataset rows (JSON)", "placeholder": "[{\"name\": \"Example\"}]", "default": "[]", "multiline": true},
+      "out": [{"id": "rows", "name": "Rows", "type": "array"}]
+    },
+    {
+      "id": "pass", "kind": "transform", "label": "Pass through",
+      "detail": "Forward the input value unchanged.",
+      "sameType": true,
+      "in": [{"id": "value", "name": "Value", "type": "text", "chooseType": true}],
+      "out": [{"id": "value", "name": "Value", "type": "text", "chooseType": true}]
+    },
+    {
+      "id": "parse-json", "kind": "transform", "label": "Parse JSON",
+      "detail": "Parse text as JSON and validate the result against the output type.",
+      "in": [{"id": "value", "name": "JSON text", "type": "text"}],
+      "out": [{"id": "value", "name": "Parsed value", "type": "object", "chooseType": true}]
+    },
+    {
+      "id": "field", "kind": "transform", "label": "Get object field",
+      "detail": "Return a named field from an object.",
+      "setting": {"label": "Field name", "placeholder": "name", "required": true},
+      "in": [{"id": "value", "name": "Object", "type": "object"}],
+      "out": [{"id": "value", "name": "Field value", "type": "text", "chooseType": true}]
+    },
+    {
+      "id": "first", "kind": "transform", "label": "Get first item",
+      "detail": "Return the first value in an array.",
+      "in": [{"id": "value", "name": "Items", "type": "array"}],
+      "out": [{"id": "value", "name": "First item", "type": "object", "chooseType": true}]
+    },
+    {
+      "id": "count", "kind": "transform", "label": "Count items",
+      "detail": "Return the number of values in an array.",
+      "in": [{"id": "value", "name": "Items", "type": "array"}],
+      "out": [{"id": "value", "name": "Count", "type": "integer"}]
+    },
+    {
+      "id": "format", "kind": "transform", "label": "Format as text",
+      "detail": "Convert a value to text. Structured values are formatted as JSON.",
+      "in": [{"id": "value", "name": "Value", "type": "object", "chooseType": true}],
+      "out": [{"id": "value", "name": "Text", "type": "text"}]
+    },
+    {
+      "id": "output", "kind": "output", "label": "Return value",
+      "detail": "Expose the input as a workflow result.",
+      "sameType": true,
+      "in": [{"id": "value", "name": "Value", "type": "text", "chooseType": true}],
+      "out": [{"id": "value", "name": "Result", "type": "text", "chooseType": true}]
+    },
+    {
+      "id": "approval", "kind": "tool", "label": "Request approval (fixture)",
+      "detail": "Show the preview approval request and return its recorded decision.",
+      "in": [{"id": "value", "name": "Context", "type": "text", "chooseType": true}],
+      "out": [{"id": "receipt", "name": "Decision", "type": "receipt"}]
+    }
+  ]
+}

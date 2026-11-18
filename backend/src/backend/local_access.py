@@ -49,6 +49,7 @@ class LocalAccessMiddleware:
         if self._expected is not None and scope.get("path") not in _OPEN_PATHS:
             if not hmac.compare_digest(headers.get(b"authorization", b""), self._expected):
                 return await _reject(send, 401, b"Missing or invalid credentials")
+            scope["magnite_authenticated"] = True
         if scope.get("path") == "/_desktop/shutdown" and scope.get("method") == "POST":
             if self._expected is None or self._shutdown is None:
                 return await _reject(send, 404, b"Not available")

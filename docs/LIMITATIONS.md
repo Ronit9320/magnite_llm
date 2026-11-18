@@ -39,8 +39,9 @@ and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance wo
 - vLLM and Ollama integrations have regression coverage but need live release checks.
 - Training is LoRA/QLoRA adapter training, not cloud/full-model training. QLoRA
   needs supported hardware and bitsandbytes; it is explicitly unsupported on macOS.
-- Adapter activation restarts torch; native multi-LoRA and GGUF adapter conversion
-  are not implemented. Clearing an adapter unloads inference.
+- Ordinary chat adapter activation restarts the Torch engine. Blueprint Model
+  nodes can select compatible PEFT adapters within a run. Clearing the chat
+  adapter unloads inference. [Blueprint capabilities](BLUEPRINTS.md#supported-runtimes-and-checkpoints)
 - Cancellation is cooperative. Download progress and independent job
   management need further work; model-pull history is not durable and has no cancel API.
   RAG ingest and reindex report progress (`GET /rag/activity`) and stop within one
@@ -68,9 +69,10 @@ and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance wo
 - Large-corpus retrieval beyond 50,000 chunks, large-model OOM recovery, active-work forced termination,
   and concurrent training/inference need broader verification. Existing lifecycle
   checks do not establish every engine/operation combination.
-- Chat history is not durable and interrupted training does not automatically
-  resume. Backup/restore across changed paths or future schema versions needs
-  manual care. `DATA_SCHEMA` is an updater compatibility gate, not a migration system.
+- Interrupted training requires a new job. Restore chat history and other
+  local records with the same application revision and path layout first.
+  `DATA_SCHEMA` gates update compatibility.
+  [Storage and backup](STORAGE_AND_PRIVACY.md)
 - Tiny-model test passes establish workflow delivery, not useful answer quality
   or fine-tuning effectiveness. Recorded M1 Metal/MPS results do not establish
   all Apple/GPU/model configurations.

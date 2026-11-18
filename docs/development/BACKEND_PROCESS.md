@@ -327,6 +327,8 @@ removes indexed content and vectors, never the original source file.
 | `training_jobs.db` | Serialized jobs/config/status/history |
 | `adapters.db`, `adapters/adapter-<job-id>/` | Adapter records and newly trained weights |
 | `adapters/imports/`, `adapters/exports/` | Imported weights and generated ZIP archives |
+| `blueprints.db` | Saved Blueprint revisions, run snapshots, per-step traces, replayable events, and redacted tool approvals |
+| `tool-workspace/` | Default working directory for commands approved during tool runs |
 | `rag/rag.db` | RAG configuration, documents, chunks and vector blobs |
 | `vllm.log` | vLLM subprocess stderr, appended when used |
 
@@ -334,6 +336,39 @@ Default application home is `~/.magnite`; Windows has an APPDATA branch in
 `paths.app_home()`. `DATA_SCHEMA` gates updater compatibility; no automatic migration framework exists. Model weights and
 embedding caches are separate Hub storage. Qt settings and the desktop's saved chats
 (`<home>/chats`, written by the client; see architecture.md, Chat history) are outside backend ownership.
+
+Blueprint storage starts at SQLite `user_version = 1`. The database is additive,
+so existing databases and the updater's `DATA_SCHEMA` stay at their current
+versions. The portable JSON document has its own `version`. Export contains the
+graph, inline data, and local binding IDs. A stored run also contains its exact
+revision, request and fixture data, copies and hashes of linked dataset rows, and
+the resolved model and adapter identities and paths. Model and adapter files
+remain in their local stores. Run detail can include user-supplied data even after
+the original dataset is removed.
+
+The desktop stores incomplete drafts and canvas layout in profile-scoped Qt
+settings. Publishing writes the portable graph as a backend revision. Both
+desktop surfaces follow the same run event stream and reload authoritative
+step and approval records. Node tests add optional fields to existing run
+records; older records still read without a migration. Removing a blueprint
+removes its saved revisions and leaves previous run snapshots intact.
+
+Local runs record the tokenizer class and fingerprint alongside the checkpoint.
+Blueprint-origin training jobs persist their source revision and node, the
+registered model identity, and the checkpoint path and tokenizer fingerprint.
+The training worker preserves answer-only labels and publishes the resulting
+adapter through the existing adapter store.
+
+The runner commits step transitions and their events together. Startup marks
+leftover queued or running runs as failed with an interruption error, finishes
+any in-progress step, and skips untouched steps. See the
+[Blueprint API](../LOCAL_API.md#blueprints) for replay and cancellation.
+
+Chat tool runs share the Blueprint run store. The approval audit keeps the
+run and node IDs, action kind, fingerprint, timestamps, decision and outcome.
+The broker holds the exact pending action in memory while the client reviews it.
+Graph step values and chat snapshots follow the ordinary run retention rules.
+Restart settles any pending or claimed approval as interrupted without replay.
 
 Other environment inputs: `MAGNITE_ENGINE_OVERRIDE`, `MAGNITE_OLLAMA_URL`
 (default `http://127.0.0.1:11434`), Hub authentication/offline/cache variables,

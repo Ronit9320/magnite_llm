@@ -1,0 +1,17 @@
+{
+  "version": "22.23.5",
+  "archives": {
+    "linux-x64": {
+      "extension": "tar.xz",
+      "sha256": "cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8"
+    },
+    "darwin-arm64": {
+      "extension": "tar.gz",
+      "sha256": "e7131995759b61a0170b646010d2ad35a5d37b4cb0d471f3e8317eac6f742f3d"
+    },
+    "win-x64": {
+      "extension": "zip",
+      "sha256": "4a191082e9706866830379d577d2cc8a50c776fcd9436a8d061b063ed0d9a0e3"
+    }
+  }
+}

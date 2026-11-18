@@ -53,16 +53,20 @@ def main():
         check("extract", [image, "--appimage-extract"])
         appdir = root / "squashfs-root"
         launcher = appdir / "AppRun"
+        runtime = appdir / "usr/bin/runtime"
+        python = runtime / "python/bin/python3"
         check("theme", [launcher, "--theme-check"])
-        check("ui", [launcher, "--ui-check"])
+        check("ui", [launcher, "--ui-check"], 360)
         check("desktop", [launcher, "--selftest"])
+        check("blueprints", [launcher, "--ui-check"], environment={**env, "MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
+        packaged_env = {**env, "LD_LIBRARY_PATH": str(appdir / "usr/lib")}
+        check("bundled-pi", [python, "-I", "-B", repo / "packaging/smoke_pi.py"], environment=packaged_env)
         if args.features:
             feature_env = {**env, "MAGNITE_SELFTEST_INFERENCE": "1"}
             check("gguf-inference", [launcher, "--selftest"], 600, feature_env)
-            python = appdir / "usr/bin/runtime/python/bin/python3"
-            feature_env = {**env, "LD_LIBRARY_PATH": str(appdir / "usr/lib")}
-            check("lora-rag-workflow", [python, "-I", "-B", repo / "backend/tests/live_workflow.py"],
-                  600, feature_env)
+            if (runtime / "profile").read_text().strip() == "ml":
+                check("lora-rag-workflow", [python, "-I", "-B", repo / "backend/tests/live_workflow.py"],
+                      600, packaged_env)
         # Exercise the actual AppImage launcher too, without relying on FUSE.
         check("appimage-launcher", [image, "--appimage-extract-and-run", "--theme-check"])
 

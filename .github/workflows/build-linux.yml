@@ -63,6 +63,16 @@ jobs:
         run: |
           python3 packaging/smoke_appimage.py "dist/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" \
             --logs build/packaging/relocated-tests --cache build/packaging/test-cache --features
+      - name: Verify a separate GGUF package without ML extras
+        env:
+          MAGNITE_PACKAGE_WITHOUT_ML: '1'
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          export MAGNITE_PACKAGE_DIR="$GITHUB_WORKSPACE/build/packaging/base"
+          export MAGNITE_DIST_DIR="$MAGNITE_PACKAGE_DIR/dist"
+          bash packaging/build_appimage.sh > build/packaging/runner-evidence/base-build.log 2>&1
+          python3 packaging/smoke_appimage.py "$MAGNITE_DIST_DIR/Magnite-$RELEASE_VERSION-linux-x86_64.AppImage" \
+            --logs build/packaging/base-relocated-tests --cache build/packaging/test-cache --features
       - name: Record exact tested provenance and checksums
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -88,7 +98,7 @@ jobs:
           compression-level: 0
       - name: Report bounded failure details in public annotations
         if: failure()
-        run: python packaging/report_failure.py build/packaging/runner-evidence build/packaging/relocated-tests
+        run: python packaging/report_failure.py build/packaging/runner-evidence build/packaging/relocated-tests build/packaging/base-relocated-tests
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -96,6 +106,7 @@ jobs:
           name: linux-preview-verification
           path: |
             build/packaging/relocated-tests/
+            build/packaging/base-relocated-tests/
             build/packaging/runner-evidence/
             build/packaging/Magnite.AppDir/usr/bin/build-info/
             dist/linux-compatibility.json
