@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import glob
+import json
+import logging
 import os
 import sqlite3
 
@@ -12,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 
+from backend.rag import keyword
 from backend.rag.batching import embed_batches
 from backend.rag.schemas import RagChunk, RagConfig, RagDocument
 
@@ -47,6 +50,20 @@ CREATE TABLE IF NOT EXISTS rag_config (
     value TEXT NOT NULL
 );
 """
+
+_FTS_SCHEMA = (
+    f"CREATE VIRTUAL TABLE IF NOT EXISTS {keyword.FTS_TABLE} USING fts5("
+    "text, content='rag_chunks', content_rowid='id', tokenize='unicode61 remove_diacritics 2')"
+)
+
+_FTS_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS rag_fts_state (
+    key   TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+"""
+
+log = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -151,6 +168,8 @@ class RagStore:
         self._lock = threading.RLock()
         self._indexes: dict = {}          # model -> _SearchIndex (derived; rebuilt lazily)
         self._reindexing = False
+        self._fts_ok = False              # FTS5 usable (module present, table created, rebuilds working)
+        self._fts_synced = False          # the keyword index was verified against rag_chunks since the last write
         self._init_db()
         for stale in glob.glob(os.path.join(data_dir, "reindex-*.tmp")):     # left by a crashed reindex
             try:
@@ -163,6 +182,13 @@ class RagStore:
             conn.execute(_DOC_SCHEMA)
             conn.executescript(_CHUNK_SCHEMA)
             conn.execute(_CONFIG_SCHEMA)
+            if keyword.fts5_available(conn):
+                try:
+                    conn.execute(_FTS_SCHEMA)
+                    conn.execute(_FTS_STATE_SCHEMA)
+                    self._fts_ok = True
+                except sqlite3.Error as exc:
+                    log.warning("Keyword index unavailable, using vector search only: %s", exc)
 
         with self._lock:
             open_or_quarantine(self._db_path, init, hint="Knowledge documents must be added again.")
@@ -243,6 +269,7 @@ class RagStore:
                     f"dimension {existing_dim}. Docs were embedded with a "
                     "different model."
                 )
+            fts = self._ensure_keyword_index()
             with self._conn() as conn:
                 conn.execute(
                     """
@@ -264,6 +291,10 @@ class RagStore:
                         for i in range(len(chunks))
                     ],
                 )
+                if fts:
+                    self._fts_apply(conn, (
+                        (f"INSERT INTO {keyword.FTS_TABLE} (rowid, text) SELECT id, text FROM rag_chunks "
+                         "WHERE doc_id = ?", (doc_id,)),))
                 conn.commit()
             self._invalidate()
 
@@ -294,21 +325,36 @@ class RagStore:
         return self._from_row(row) if row else None
 
     def delete_document(self, doc_id: str) -> bool:
-        with self._lock, self._conn() as conn:
+        with self._lock:
             self._refuse_during_reindex()
-            cur = conn.execute("DELETE FROM rag_documents WHERE id = ?", (doc_id,))
-            conn.execute("DELETE FROM rag_chunks WHERE doc_id = ?", (doc_id,))
-            conn.commit()
-            self._invalidate()
-            return cur.rowcount > 0
+            fts = self._ensure_keyword_index()
+            with self._conn() as conn:
+                if fts:
+                    self._fts_apply(conn, (
+                        (f"INSERT INTO {keyword.FTS_TABLE} ({keyword.FTS_TABLE}, rowid, text) "
+                         "SELECT 'delete', id, text FROM rag_chunks WHERE doc_id = ?", (doc_id,)),))
+                cur = conn.execute("DELETE FROM rag_documents WHERE id = ?", (doc_id,))
+                conn.execute("DELETE FROM rag_chunks WHERE doc_id = ?", (doc_id,))
+                if fts:
+                    self._fts_apply(conn, ())
+                conn.commit()
+                self._invalidate()
+                return cur.rowcount > 0
 
     def clear(self) -> None:
-        with self._lock, self._conn() as conn:
+        with self._lock:
             self._refuse_during_reindex()
-            conn.execute("DELETE FROM rag_chunks")
-            conn.execute("DELETE FROM rag_documents")
-            conn.commit()
-            self._invalidate()
+            fts = self._ensure_keyword_index()
+            with self._conn() as conn:
+                if fts:
+                    self._fts_apply(conn, (
+                        (f"INSERT INTO {keyword.FTS_TABLE} ({keyword.FTS_TABLE}) VALUES ('delete-all')", ()),))
+                conn.execute("DELETE FROM rag_chunks")
+                conn.execute("DELETE FROM rag_documents")
+                if fts:
+                    self._fts_apply(conn, ())
+                conn.commit()
+                self._invalidate()
 
     def count_chunks(self) -> int:
         with self._lock, self._conn() as conn:
@@ -408,6 +454,97 @@ class RagStore:
     def _invalidate(self) -> None:
         with self._lock:
             self._indexes.clear()
+            self._fts_synced = False        # re-verified (cheaply) before the next keyword search or write
+
+    # ---- keyword index (FTS5, derived from rag_chunks.text) -------------
+
+    @property
+    def keyword_available(self) -> bool:
+        return self._fts_ok
+
+    def _write_fts_state(self, conn) -> None:
+        row = conn.execute("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM rag_chunks").fetchone()
+        for key, value in (("chunks", row["n"]), ("max_id", row["m"])):
+            conn.execute("INSERT INTO rag_fts_state (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, int(value)))
+
+    def _rebuild_keyword_index(self, conn) -> None:
+        conn.execute(f"INSERT INTO {keyword.FTS_TABLE} ({keyword.FTS_TABLE}) VALUES ('rebuild')")
+        self._write_fts_state(conn)
+
+    def _mark_keyword_stale(self, conn=None) -> None:
+        """Forget the sync state so the next use rebuilds the keyword index."""
+        self._fts_synced = False
+        try:
+            if conn is not None:
+                conn.execute("DELETE FROM rag_fts_state")
+            else:
+                with self._conn() as own:
+                    own.execute("DELETE FROM rag_fts_state")
+        except sqlite3.Error as exc:
+            log.warning("Could not reset the keyword index state: %s", exc)
+
+    def _fts_apply(self, conn, statements) -> None:
+        """Run FTS statements inside the caller's transaction, then record the new sync state.
+
+        An FTS failure never fails the write: the state row is dropped so the next use rebuilds.
+        """
+        try:
+            for sql, params in statements:
+                conn.execute(sql, params)
+            self._write_fts_state(conn)
+        except sqlite3.Error as exc:
+            log.warning("Keyword index update failed, it will be rebuilt: %s", exc)
+            self._mark_keyword_stale(conn)
+
+    def _ensure_keyword_index(self) -> bool:
+        """True when the keyword index exists and matches rag_chunks; rebuilds it when it does not.
+
+        The table is derived data. Its state row (chunk count, highest chunk id) is compared with the
+        chunks table, so rows written or deleted by a build without FTS support are detected.
+        """
+        with self._lock:
+            if not self._fts_ok:
+                return False
+            if self._fts_synced:
+                return True
+            try:
+                with self._conn() as conn:
+                    conn.execute(_FTS_SCHEMA)
+                    conn.execute(_FTS_STATE_SCHEMA)
+                    now = conn.execute("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM rag_chunks").fetchone()
+                    state = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM rag_fts_state")}
+                    if state.get("chunks") != now["n"] or state.get("max_id") != now["m"]:
+                        self._rebuild_keyword_index(conn)
+            except sqlite3.Error as exc:
+                log.warning("Keyword index rebuild failed, using vector search only: %s", exc)
+                self._fts_ok = False
+                return False
+            self._fts_synced = True
+            return True
+
+    def _keyword_ids(self, expr: str, model: str, allowed: Optional[set], n: int) -> list:
+        """Chunk ids matching an FTS5 expression, best bm25 first, for one model and optional documents."""
+        with self._lock:
+            sql = (f"SELECT c.id FROM {keyword.FTS_TABLE} JOIN rag_chunks c ON c.id = {keyword.FTS_TABLE}.rowid "
+                   "JOIN rag_documents d ON d.id = c.doc_id "
+                   f"WHERE {keyword.FTS_TABLE} MATCH ? AND d.model = ?")
+            params: list = [expr, model]
+            if allowed is not None:
+                if len(allowed) <= 500:
+                    sql += f" AND c.doc_id IN ({','.join('?' * len(allowed))})"
+                    params += sorted(allowed)
+                else:
+                    sql += " AND c.doc_id IN (SELECT value FROM json_each(?))"
+                    params.append(json.dumps(sorted(allowed)))
+            sql += f" ORDER BY {keyword.FTS_TABLE}.rank LIMIT ?"
+            params.append(int(n))
+            try:
+                with self._conn() as conn:
+                    return [int(r["id"]) for r in conn.execute(sql, params)]
+            except sqlite3.Error:
+                self._mark_keyword_stale()
+                raise
 
     def _index_for(self, model: str) -> Optional[_SearchIndex]:
         """The cached index for a model, or None when it would exceed the memory budget."""
