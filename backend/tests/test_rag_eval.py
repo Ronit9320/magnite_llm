@@ -192,5 +192,65 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(result["ranked_hits"][0][:2], [False, True])
 
 
+class HybridScoringTests(unittest.TestCase):
+    def _library(self):
+        import numpy as np
+        chunks = [f"filler text {i}" for i in range(30)] + ["the invoice INV-77341 is overdue"]
+        vecs = np.zeros((31, 3), dtype=np.float32)
+        for i in range(30):
+            vecs[i] = [1.0, 0.01 * (i + 1), 0.0]
+        vecs[30] = [0.0, 0.0, 1.0]
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+        return chunks, vecs, np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+    def test_hybrid_rank_finds_exact_term(self):
+        chunks, vecs, q = self._library()
+        needles = ["INV-77341"]
+        self.assertNotIn(True, rag_eval.rank_hits(q, vecs, chunks, needles, k=10))       # vector never sees it
+        conn = rag_eval.build_fts(chunks)
+        hits = rag_eval.rank_hits_hybrid("INV-77341", q, vecs, chunks, needles, 2, None, None, conn)
+        self.assertEqual(hits, [False, True])            # tie with vector rank 1 goes to the higher cosine
+        hits = rag_eval.rank_hits_hybrid("INV-77341", q, vecs, chunks, needles, 3, None, None, conn)
+        self.assertEqual(hits, [False, True, False])
+
+    def test_hybrid_rank_without_searchable_text_equals_vector(self):
+        chunks, vecs, q = self._library()
+        conn = rag_eval.build_fts(chunks)
+        self.assertEqual(rag_eval.rank_hits_hybrid("--- ::", q, vecs, chunks, ["filler text 0"], 3, None, None, conn),
+                         rag_eval.rank_hits(q, vecs, chunks, ["filler text 0"], 3))
+
+    def test_hybrid_rank_respects_expected_document(self):
+        chunks, vecs, q = self._library()
+        conn = rag_eval.build_fts(chunks)
+        docs = ["a.txt"] * 30 + ["b.txt"]
+        self.assertEqual(rag_eval.rank_hits_hybrid("INV-77341", q, vecs, chunks, ["INV-77341"], 2, docs, "a.txt", conn),
+                         [False, False])
+
+    def test_evaluate_both_modes_from_one_embedding_pass(self):
+        import numpy as np
+        docs = {"a.txt": " ".join(f"w{i}" for i in range(40)) + " INV-77341 " + " ".join(f"v{i}" for i in range(40))}
+        qs = [rag_eval.Question("INV-77341", "a.txt", ["INV-77341"])]
+        calls = []
+
+        def embed_docs(texts):
+            calls.append(len(texts))
+            return np.ones((len(texts), 2), dtype=np.float32)
+
+        result = rag_eval.evaluate(docs, qs, embed_docs, lambda t: np.ones(2, dtype=np.float32),
+                                   chunk_words=20, overlap=0, search="both")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(set(result["ranked_by_mode"]), {"vector", "hybrid"})
+        self.assertEqual(result["ranked_hits"], result["ranked_by_mode"]["vector"])
+        self.assertTrue(any(result["ranked_by_mode"]["hybrid"][0]))
+
+    def test_report_has_a_search_column(self):
+        row = rag_eval.CandidateResult(model="m/a", dtype="float16", dim=8, chunk_words=100, chunks=5,
+                                       recall={1: 0.5, 4: 0.8, 10: 0.9}, mrr=0.6, ingest_chunks_per_s=1.0,
+                                       peak_rss_mb=10.0, search="hybrid")
+        text = rag_eval.format_report([row])
+        self.assertIn("| search |", text)
+        self.assertIn("| m/a | hybrid |", text)
+
+
 if __name__ == "__main__":
     unittest.main()

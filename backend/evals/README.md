@@ -15,3 +15,17 @@ recall@1/4/10, MRR, ingest speed, load time and peak RAM.
 Each candidate runs in its own process. A memory guard (`backend/src/backend/rag/memguard.py`) checks free memory before loading, caps the Apple-GPU allocator, polls the real footprint (including GPU memory) and stops the run (exit 75) before the machine swaps; limits via `MAGNITE_RAG_MAX_MB`, `MAGNITE_RAG_MIN_FREE_MB`, `MAGNITE_RAG_MAX_SWAP_MB`. Chunk size is set per model from its
 sequence limit (about 512 tokens, never more than the model can embed); override with `--chunk-words`.
 The metric functions are covered by `backend/tests/test_rag_eval.py`.
+
+## Vector vs hybrid search
+
+`--search vector|hybrid|both` (default `vector`) chooses how each question is ranked. `hybrid` is what the app does by
+default: an FTS5 keyword ranking and the vector ranking merged with Reciprocal Rank Fusion (k = 60). `both` embeds
+the documents once and reports one row per mode (the `search` column), so the two are compared on identical vectors:
+
+```bash
+.venv/bin/python backend/evals/rag_eval.py --candidate sentence-transformers/all-MiniLM-L6-v2 --search both \
+    --docs <dir> --questions questions.jsonl --out results_hybrid.md
+```
+
+Keep an exact-term question set (IDs, error codes, environment variable names, ports) next to the usual one:
+hybrid mainly helps there, and the report should show the regression risk on ordinary questions too.

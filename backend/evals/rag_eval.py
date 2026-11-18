@@ -14,6 +14,9 @@ Run every default candidate (each in its own process, so peak RAM is clean):
 Run one:
     python backend/evals/rag_eval.py --candidate Qwen/Qwen3-Embedding-0.6B --dtype float16 \
         --docs ~/my_docs --questions q.jsonl
+Compare vector search with hybrid (FTS5 keyword + vector, fused with RRF) from one embedding pass:
+    python backend/evals/rag_eval.py --candidate sentence-transformers/all-MiniLM-L6-v2 --search both \
+        --docs ~/my_docs --questions q.jsonl
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -132,6 +136,7 @@ class CandidateResult:
     device: str = ""
     first_hit_ranks: list = field(default_factory=list)   # one per question, 0 = miss in top 10
     notes: list = field(default_factory=list)
+    search: str = "vector"                                # vector | hybrid
 
 
 # ---- pure helpers (unit-tested, no ML imports) ---------------------------------
@@ -218,10 +223,54 @@ def rank_hits(query_vec: np.ndarray, vecs: np.ndarray, chunks: list, needles: li
     return hits
 
 
+def build_fts(chunks: list) -> sqlite3.Connection:
+    """In-memory FTS5 table over the chunks (rowid = position), tokenized like the store's keyword index."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(text, tokenize='unicode61 remove_diacritics 2')")
+    conn.executemany("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", list(enumerate(chunks)))
+    return conn
+
+
+def rank_hits_hybrid(query_text: str, query_vec: np.ndarray, vecs: np.ndarray, chunks: list, needles: list,
+                     k: int, chunk_docs: Optional[list] = None, doc: Optional[str] = None,
+                     fts_conn: Optional[sqlite3.Connection] = None) -> list:
+    """Hit flags for the top-k chunks by Reciprocal Rank Fusion of vector and FTS5 keyword rankings.
+
+    Mirrors RagStore.search: each leg contributes max(2k, k+16) candidates, the fused order breaks ties
+    by higher cosine and then lower chunk position. Without searchable text it equals ``rank_hits``.
+    """
+    from backend.rag import keyword
+
+    scores = vecs @ query_vec.reshape(-1)
+    n = max(2 * k, k + 16)
+    vector_ranked = [int(i) for i in np.argsort(-scores, kind="stable")[:n]]
+    expr = keyword.match_expression(query_text)
+    keyword_ranked: list = []
+    if expr is not None and fts_conn is not None:
+        keyword_ranked = [int(r[0]) for r in fts_conn.execute(
+            "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?", (expr, n))]
+    fused = keyword.rrf_fuse([vector_ranked, keyword_ranked])
+    order = sorted(fused, key=lambda i: (-fused[i], -float(scores[i]), i))[:k]
+    hits = []
+    for idx in order:
+        from_doc = chunk_docs is None or doc is None or chunk_docs[idx] == doc
+        hits.append(bool(from_doc and is_hit(chunks[idx], needles)))
+    hits.extend([False] * (k - len(hits)))
+    return hits
+
+
 def evaluate(docs: dict, questions: list, embed_docs: Callable, embed_query: Callable,
-             chunk_words: int, overlap: Optional[int] = None, ks=KS) -> dict:
-    """Chunk every document, embed once, then rank each question against the whole library."""
+             chunk_words: int, overlap: Optional[int] = None, ks=KS, search: str = "vector") -> dict:
+    """Chunk every document, embed once, then rank each question against the whole library.
+
+    ``search`` is vector, hybrid or both; every requested mode is ranked from the same embeddings
+    (``ranked_by_mode``). ``ranked_hits`` is the first requested mode's ranking.
+    """
     from backend.rag.chunking import chunk_text
+
+    modes = ["vector", "hybrid"] if search == "both" else [search]
+    if any(m not in ("vector", "hybrid") for m in modes):
+        raise ValueError(f"unknown search mode {search!r}")
 
     overlap = chunk_words // 8 if overlap is None else overlap
     chunks, chunk_docs = [], []
@@ -237,17 +286,27 @@ def evaluate(docs: dict, questions: list, embed_docs: Callable, embed_query: Cal
     ingest_seconds = time.perf_counter() - started
 
     kmax = max(ks)
-    ranked = []
+    fts_conn = build_fts(chunks) if "hybrid" in modes else None
+    ranked_by_mode = {m: [] for m in modes}
     query_seconds = 0.0
     for q in questions:
         t0 = time.perf_counter()
         qv = np.asarray(embed_query(q.question), dtype=np.float32)
         query_seconds += time.perf_counter() - t0
-        ranked.append(rank_hits(qv, vecs, chunks, q.answer_contains, kmax, chunk_docs, q.doc))
+        for mode in modes:
+            if mode == "vector":
+                row = rank_hits(qv, vecs, chunks, q.answer_contains, kmax, chunk_docs, q.doc)
+            else:
+                row = rank_hits_hybrid(q.question, qv, vecs, chunks, q.answer_contains, kmax, chunk_docs,
+                                       q.doc, fts_conn)
+            ranked_by_mode[mode].append(row)
+    if fts_conn is not None:
+        fts_conn.close()
     return {
         "chunks": len(chunks),
         "dim": int(vecs.shape[1]),
-        "ranked_hits": ranked,
+        "ranked_hits": ranked_by_mode[modes[0]],
+        "ranked_by_mode": ranked_by_mode,
         "ingest_seconds": ingest_seconds,
         "ingest_chunks_per_s": len(chunks) / ingest_seconds if ingest_seconds > 0 else 0.0,
         "query_ms": 1000.0 * query_seconds / max(1, len(questions)),
@@ -255,13 +314,13 @@ def evaluate(docs: dict, questions: list, embed_docs: Callable, embed_query: Cal
 
 
 def format_report(rows: list) -> str:
-    head = ("| model | dtype | dim | chunk words | chunks | recall@1 | recall@4 | recall@10 | MRR "
+    head = ("| model | search | dtype | dim | chunk words | chunks | recall@1 | recall@4 | recall@10 | MRR "
             "| ingest chunks/s | load s | query ms | peak footprint MB |\n"
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     lines = [head]
     for r in rows:
         lines.append(
-            f"| {r.model} | {r.dtype} | {r.dim} | {r.chunk_words} | {r.chunks} "
+            f"| {r.model} | {r.search} | {r.dtype} | {r.dim} | {r.chunk_words} | {r.chunks} "
             f"| {r.recall[1]:.2f} | {r.recall[4]:.2f} | {r.recall[10]:.2f} | {r.mrr:.2f} "
             f"| {r.ingest_chunks_per_s:.1f} | {r.load_seconds:.1f} | {r.query_ms:.0f} "
             f"| {r.peak_rss_mb:.0f} |")
@@ -294,7 +353,8 @@ def load_documents(directory: str) -> tuple:
 
 def run_candidate(model_id: str, dtype: str, query_prompt: str, document_prompt: str,
                   docs: dict, questions: list, chunk_words: Optional[int],
-                  device: Optional[str] = None) -> CandidateResult:
+                  device: Optional[str] = None, search: str = "vector") -> list:
+    """One CandidateResult per requested search mode, all from a single model load and embedding pass."""
     from backend.rag import memguard
 
     memguard.apply_mps_limits()            # must happen before torch is imported
@@ -307,11 +367,11 @@ def run_candidate(model_id: str, dtype: str, query_prompt: str, document_prompt:
 
     with guard.watch(stop):
         return _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions,
-                            chunk_words, device, guard, memguard)
+                            chunk_words, device, guard, memguard, search)
 
 
 def _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions, chunk_words,
-                 device, guard, memguard) -> CandidateResult:
+                 device, guard, memguard, search="vector") -> list:
     from sentence_transformers import SentenceTransformer
 
     try:
@@ -347,15 +407,14 @@ def _run_guarded(model_id, dtype, query_prompt, document_prompt, docs, questions
         return encode([query_prompt + text])[0]
 
     words = chunk_words or default_chunk_words(model.max_seq_length)
-    result = evaluate(docs, questions, embed_docs, embed_query, words)
-    ranked = result["ranked_hits"]
-    return CandidateResult(
+    result = evaluate(docs, questions, embed_docs, embed_query, words, search=search)
+    return [CandidateResult(
         model=model_id, dtype=dtype, dim=result["dim"], chunk_words=words, chunks=result["chunks"],
         recall={k: recall_at_k(ranked, k) for k in KS}, mrr=mrr(ranked),
         ingest_chunks_per_s=result["ingest_chunks_per_s"], peak_rss_mb=guard.peak_footprint_mb,
         load_seconds=load_seconds, query_ms=result["query_ms"], device=str(model.device),
-        first_hit_ranks=first_hit_ranks(ranked),
-    )
+        first_hit_ranks=first_hit_ranks(ranked), search=mode,
+    ) for mode, ranked in result["ranked_by_mode"].items()]
 
 
 def _run_all(args) -> list:
@@ -369,13 +428,16 @@ def _run_all(args) -> list:
             cmd += ["--chunk-words", str(args.chunk_words)]
         if args.device:
             cmd += ["--device", args.device]
+        if args.search != "vector":
+            cmd += ["--search", args.search]
         print(f"== {model_id} ({dtype})", flush=True)
         proc = subprocess.run(cmd)
         if proc.returncode == 0:
             with open(out, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            data["recall"] = {int(k): v for k, v in data["recall"].items()}
-            rows.append(CandidateResult(**data))
+            for item in data:
+                item["recall"] = {int(k): v for k, v in item["recall"].items()}
+                rows.append(CandidateResult(**item))
         else:
             why = " (stopped by the memory guard)" if proc.returncode == EXIT_MEMORY_GUARD else ""
             print(f"   failed (exit {proc.returncode}){why}; continuing", file=sys.stderr)
@@ -396,6 +458,8 @@ def main() -> int:
     ap.add_argument("--query-prompt", default=None)
     ap.add_argument("--document-prompt", default="")
     ap.add_argument("--chunk-words", type=int, default=0, help="override words per chunk")
+    ap.add_argument("--search", default="vector", choices=["vector", "hybrid", "both"],
+                    help="vector (default), hybrid (FTS5 keyword + vector, RRF), or both from one embedding pass")
     ap.add_argument("--device", default=None, help="cpu, mps or cuda (default: library choice)")
     ap.add_argument("--out", help="write the markdown report here")
     ap.add_argument("--json-out", help=argparse.SUPPRESS)
@@ -430,17 +494,22 @@ def main() -> int:
         prompt = prompt_for(args.candidate)
     from backend.rag.memguard import MemoryGuardTripped
     try:
-        result = run_candidate(args.candidate, args.dtype, prompt, args.document_prompt,
-                               docs, questions, args.chunk_words or None, args.device)
+        results = run_candidate(args.candidate, args.dtype, prompt, args.document_prompt,
+                                docs, questions, args.chunk_words or None, args.device, args.search)
     except MemoryGuardTripped as exc:
         print(f"MEMORY GUARD: {exc}", file=sys.stderr)
         return EXIT_MEMORY_GUARD
-    result.notes = notes
+    for result in results:
+        result.notes = notes
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
-            json.dump(asdict(result), f)
+            json.dump([asdict(r) for r in results], f)
     else:
-        print(format_report([result]))
+        report = format_report(results)
+        print(report)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(report_with_header(results, system_summary()) + "\n")
     return 0
 
 
