@@ -1,12 +1,10 @@
 # Pi tool runtime
 
-Magnite uses Pi Agent Core 1.5.2 for model-driven tool turns. A fixed Blueprint
+Magnite uses Pi Agent Core 1.5.2 for model-driven tool turns in Tool mode and
+in saved Tool nodes with the legacy `agent` operation. A fixed Blueprint
 continues to run through Magnite's graph executor. Its approval node can submit
-a fixed action directly. Pi Agent nodes use the model loaded in Chat and pass
-their saved instructions as the system message. Their `task` and `reply`
-ports carry text. Pi registers an empty tool list for these nodes and the
-Python bridge rejects proposal frames. Saved Tool nodes with the legacy
-`agent` operation continue to use the same approval flow as tool chat.
+a fixed action directly. The separate Pi Agent text node was retired; use a
+Model node with Plain text responses for text steps.
 
 Pi's custom `streamFn` exchanges newline-delimited JSON with the Python worker
 over stdin and stdout. Pi sequences turns and tool executions. Magnite owns

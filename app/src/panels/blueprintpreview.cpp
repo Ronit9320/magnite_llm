@@ -190,8 +190,6 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
                 {"detail", "Run a thinking checkpoint."}});
             types.append(QJsonObject{{"id", "adapter"}, {"label", "Adapter"},
                 {"detail", "Attach trained LoRA weights."}});
-            types.append(QJsonObject{{"id", "agent"}, {"label", "Pi Agent"},
-                {"detail", "Run a text task through Pi."}});
         }
         m_fixtures["nodeTypes"] = types;
         contracts["null"] = QJsonObject{{"label", "Null"}, {"schema", QJsonObject{{"type", "null"}}}};
@@ -229,8 +227,10 @@ BlueprintPreview::BlueprintPreview(BackendClient *backend, QObject *parent, bool
         catalog.append(QJsonObject{{"id", "lora"}, {"kind", "adapter"}, {"label", "Attach trained LoRA"},
             {"detail", "Select local adapter weights and connect them to the LoRA adapter port of a compatible checkpoint."},
             {"out", QJsonArray{adapterPort}}});
-        catalog.append(QJsonObject{{"id", "pi-reply"}, {"kind", "agent"}, {"label", "Respond with Pi"},
-            {"detail", "Use the model loaded in Chat to follow saved instructions. Connect a text task and use the text reply in later steps."},
+        // Retired: kept so older graphs still draw and show the repair message.
+        catalog.append(QJsonObject{{"id", "pi-reply"}, {"kind", "agent"}, {"label", "Retired Pi Agent"},
+            {"detail", "This node was removed. Replace it with a Model node that has Plain text responses and put its instructions in the system prompt."},
+            {"legacyOnly", true},
             {"in", QJsonArray{QJsonObject{{"id", "task"}, {"name", "Task"}, {"type", "text"}}}},
             {"out", QJsonArray{QJsonObject{{"id", "reply"}, {"name", "Reply"}, {"type", "text"}}}},
             {"setting", QJsonObject{{"label", "Agent instructions"}, {"multiline", true},
@@ -420,6 +420,7 @@ QString BlueprintPreview::settingError(const QJsonObject &node) const {
 }
 
 QString BlueprintPreview::nodeKindLabel(const QString &id) const {
+    if (id == "agent") return "Retired Pi Agent";
     return findById(m_fixtures["nodeTypes"].toArray(), id)["label"].toString(id);
 }
 

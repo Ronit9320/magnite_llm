@@ -1,6 +1,6 @@
 # Blueprint node catalog and next additions
 
-The **Add node** dialog shows nine built-in node cards. Choose a card, then
+The **Add node** dialog shows eight built-in node cards. Choose a card, then
 choose an operation in **Configure**. **Saved nodes** contains reusable copies
 of configured nodes and opens additional pages as the library grows.
 
@@ -19,14 +19,15 @@ of configured nodes and opens additional pages as the library grows.
 | Transform | Provide a constant | Emits a fixed JSON value saved on the node. |
 | Transform | Build an object | Takes named, typed inputs and returns an object with those input keys. |
 | Model | Generate a response | Takes named inputs and produces typed JSON or a single text output using a local Transformers checkpoint. |
-| Reasoning | Reason through a task | Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support. |
+| Reasoning | Reason through a task | Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support. The checkpoint picker disables checkpoints without it. |
 | Adapter | Attach trained LoRA | Takes a binding to registered LoRA weights and provides a resource link to a compatible Model or Reasoning node. |
-| Pi Agent | Respond with Pi | Takes a text task and saved instructions and returns a text reply using the model loaded in Conversation. |
 | Tool | Request approval | Takes a structured action and emits a receipt after approval and execution. |
 | Output | Return value | Takes a typed value and exposes it in the run result. |
 
 Saved workflows from the retired Order intake starter can still run **Look up
-order clause** and **Validate and price order**. Older graphs may also contain
+order clause** and **Validate and price order**. The **Pi Agent** node was
+removed; older graphs containing it open with a `retired_node` validation error
+until it is replaced with a Model node using Plain text responses. Older graphs may also contain
 **Ask the local tool model**, a Tool operation that uses Pi with the approval flow.
 
 The [support ticket routing example](WORKFLOW_EXAMPLES.md) shows how Model,

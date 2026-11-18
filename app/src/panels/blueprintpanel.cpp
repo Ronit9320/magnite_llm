@@ -614,9 +614,11 @@ void BlueprintPanel::createBlueprint() {
 void BlueprintPanel::createTriageExample() {
     auto request = m_preview->makeNode("input", "request", 0, 0);
     request["name"] = "Incoming request";
-    auto agent = m_preview->makeNode("pi-reply", "triage", 245, 0);
+    auto agent = m_preview->makeNode("generate", "triage", 245, 0);
     agent["name"] = "Summarize request";
-    agent["setting"] = "Summarize the request in one sentence. Include what the requester needs. Use only the request as evidence.";
+    agent["response"] = "text";
+    agent["maxTokens"] = 160;
+    agent["prompt"] = "Summarize the request in one sentence. Include what the requester needs. Use only the request as evidence.";
     auto status = m_preview->makeNode("constant", "status", 245, 175);
     status["name"] = "Review status";
     status["setting"] = "\"Needs review\"";
@@ -634,11 +636,11 @@ void BlueprintPanel::createTriageExample() {
     }
     const auto id = BlueprintPreview::id();
     const QJsonObject graph{{"id", id}, {"revision", 0}, {"dirty", true}, {"name", "Request triage"},
-        {"description", "Summarize an incoming request with Pi and return a review record."},
+        {"description", "Summarize an incoming request with a local model and return a review record."},
         {"nodes", QJsonArray{request, agent, status, record, output}},
         {"edges", QJsonArray{
-            QJsonObject{{"from", "request"}, {"out", "value"}, {"to", "triage"}, {"in", "task"}},
-            QJsonObject{{"from", "triage"}, {"out", "reply"}, {"to", "record"}, {"in", "summary"}},
+            QJsonObject{{"from", "request"}, {"out", "value"}, {"to", "triage"}, {"in", "value"}},
+            QJsonObject{{"from", "triage"}, {"out", "value"}, {"to", "record"}, {"in", "summary"}},
             QJsonObject{{"from", "status"}, {"out", "value"}, {"to", "record"}, {"in", "status"}},
             QJsonObject{{"from", "record"}, {"out", "value"}, {"to", "result"}, {"in", "value"}}}}};
     if (saveGraph(graph, false)) openBlueprint(id);
@@ -1792,7 +1794,9 @@ void BlueprintPanel::editLiveBinding() {
         const auto entries = m_preview->fixtures()["models"].toArray();
         for (const auto &value : entries) {
             const auto entry = value.toObject();
-            models->addItem(entry["name"].toString(), entry["id"].toString());
+            const bool unsupported = reasoning && entry["thinking"] == false;
+            models->addItem(entry["name"].toString() + (unsupported ? " · no thinking" : ""), entry["id"].toString());
+            if (unsupported) BlueprintPreview::disableItem(models, models->count() - 1);
         }
         models->setCurrentIndex(qMax(0, models->findData(selected.isEmpty() ? node["model"].toString() : selected)));
         refresh();

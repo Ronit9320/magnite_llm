@@ -91,7 +91,7 @@ provided responses. Existing requests default to fixture mode.
 | Export or import the portable document | `GET /blueprints/{id}/export` with optional `revision`, or `POST /blueprints/import` with the exported JSON |
 | Train an adapter for a node | `POST /blueprints/{id}/nodes/{node_id}/training` with typed `examples`, optional `revision`, and optional training `settings`. Returns an ordinary training job. |
 | Bind an existing or trained adapter | `PUT /blueprints/{id}/nodes/{node_id}/adapter` with the current `revision` and either `adapter_id` or a completed `training_job_id` for that node. Returns a new revision. |
-| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning, Tool and Pi Agent nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
+| Queue a run | `POST /blueprints/{id}/runs` with `inputs`, optional `revision`, and `mode`. Fixture mode takes `fixtures` for Model, Reasoning and Tool nodes. Use the query `surface=chat` for a saved workflow launched in chat. Returns HTTP 202 with a run ID. |
 | Queue an isolated node test | `POST /blueprints/{id}/node-tests` with the blueprint `name`, the full `node` contract, and named `inputs`. It runs locally without other nodes and returns HTTP 202. An Input node takes its test value under `inputs.value`. |
 | Read history or details | `GET /blueprints/runs` with optional `blueprint_id`, `surface`, `active`, `limit`, and `offset`. `GET /blueprints/runs/{run_id}` includes the snapshot, per-step trace, and results. |
 | Follow or replay events | `GET /blueprints/runs/{run_id}/events` |
@@ -135,7 +135,7 @@ and `additionalProperties` on the applicable types.
 | `transform` / `order-clause`, `order-price` | `message` and one-based `index` → selected clause. `clause` and extracted `fields` → validated order with prices. Both return through `value`. |
 | `model` / `generate`, `reasoning` / `reason` | Declared input ports → declared output ports. Both bind `model_id` and optional `adapter_id`, and accept `system_prompt`, `response`, and `max_tokens`. |
 | `adapter` / `lora` | Registered `adapter_id` → `adapter` (string resource reference). |
-| `agent` / `pi-reply` | `task` (string) → `reply` (string). Optional `instructions` set the Pi system message. Uses the loaded local chat model for text processing. |
+| `agent` / `pi-reply` | Retired. Graphs that contain it still parse, but validation reports `retired_node` until it is replaced with a Model node. |
 | `tool` / `approval` | In local mode, an action object on `value` requests approval and produces `receipt` after dispatch. In fixture mode, `receipt` uses the supplied decision. |
 | `tool` / `agent` | Text or a chat message array on `value` starts Pi. `receipt` contains the final `text`. |
 | `output` / `output` | `value` → `value` and run `results[node_id]` |

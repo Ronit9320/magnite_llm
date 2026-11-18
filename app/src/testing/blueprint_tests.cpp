@@ -820,7 +820,10 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
         const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
+        check(cards.size() == 8 && !picker->findChild<QScrollArea *>() &&
+              std::none_of(cards.begin(), cards.end(), [](const auto *card) {
+                  return card->accessibleName() == "Add Pi Agent";
+              }) &&
               picker->height() <= picker->screen()->availableGeometry().height() &&
               std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
                   const auto *title = card->template findChild<QLabel *>("headingLabel");
@@ -829,7 +832,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                          picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
                          title && card->accessibleName() == "Add " + title->text() &&
                          caption && caption->height() >= caption->heightForWidth(caption->width());
-              }), "all nine live cards and their text fit without scrolling");
+              }), "all eight live cards fit without scrolling and Pi Agent is gone");
         capture(*picker, "live-add-node-cards");
         picker->reject();
         pump();
@@ -995,11 +998,33 @@ int runLiveBlueprintChecks(const QString &captures) {
             }();
             if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Save revision"); }),
                       "the desktop opens the editable request triage example")) {
+                // The example's Model node starts unbound; bind the cached checkpoint and reopen it.
+                QJsonObject draft;
+                for (const auto &value : session.saved())
+                    if (value.toObject()["id"] == triageDraft) draft = value.toObject();
+                auto nodes = draft["nodes"].toArray();
+                for (int i = 0; i < nodes.size(); ++i) {
+                    auto entry = nodes.at(i).toObject();
+                    if (entry["id"] == "triage") entry["model"] = modelId(testModel);
+                    nodes.replace(i, entry);
+                }
+                draft["nodes"] = nodes;
+                session.saveBlueprint(draft);
+                if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
                 pump();
-                capture(panel, "live-pi-triage-graph");
+                for (auto *button : panel.findChildren<QPushButton *>()) {
+                    if (button->isVisible() && button->text() == "Open"
+                        && visibleText(*button->parentWidget(), "Request triage")) {
+                        button->click();
+                        break;
+                    }
+                }
+                until([&] { return visibleButton(panel, "Save revision"); });
+                pump();
+                capture(panel, "live-triage-graph");
                 visibleButton(panel, "Save revision")->click();
                 if (check(until([&] { return visibleText(panel, "Revision 1"); }),
-                          "the Pi Agent, constant, and object builder publish together")) {
+                          "the Model node, constant, and object builder publish together")) {
                     if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
                     if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
                         message->setPlainText("Please send replacement labels for order 245.");
@@ -1010,8 +1035,8 @@ int runLiveBlueprintChecks(const QString &captures) {
                         const auto record = run["result"].toObject()["result"].toObject();
                         return run["status"] == "passed" && record["status"] == "Needs review" &&
                                !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
-                    }, 40000), "the local Pi Agent returns text and builds the review record");
-                    capture(panel, "live-pi-triage-result");
+                    }, 60000), "the triage Model node returns text and builds the review record");
+                    capture(panel, "live-triage-result");
                 }
             }
         }

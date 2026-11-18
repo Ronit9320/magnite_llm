@@ -69,7 +69,10 @@ def _node_contract(node, issues):
             except Problems as exc:
                 issues.extend(exc.issues)
     elif isinstance(node, AgentNode):
-        _signature(issues, node, {"task": "string"}, {"reply": "string"})
+        # Kept parseable so older graphs open and can be repaired in the editor.
+        issues.append(Issue(code="retired_node", node_id=node.id,
+                            message="The Pi Agent node was removed. Replace it with a Model node that has "
+                                    "Plain text responses and put its instructions in the system prompt."))
     elif isinstance(node, TransformNode):
         if node.operation == "constant":
             _signature(issues, node, {}, {"value": None})

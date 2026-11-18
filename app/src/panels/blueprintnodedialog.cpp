@@ -247,11 +247,15 @@ private:
         const bool adapter = m_operation->currentData() == "lora";
         m_binding->clear();
         m_binding->addItem(adapter ? "Choose a trained adapter" : "Choose a local checkpoint", "");
+        const bool reasoning = m_operation->currentData() == "reason";
         for (const auto &value : m_preview.fixtures()[adapter ? "adapters" : "models"].toArray()) {
             const auto option = value.toObject();
             auto title = option["name"].toString();
             if (adapter && option["base_model"].isString()) title += " · " + option["base_model"].toString();
-            m_binding->addItem(title, option["id"].toString());
+            // Reasoning needs a checkpoint whose chat template can switch thinking on.
+            const bool unsupported = reasoning && option["thinking"] == false;
+            m_binding->addItem(unsupported ? title + " · no thinking" : title, option["id"].toString());
+            if (unsupported) BlueprintPreview::disableItem(m_binding, m_binding->count() - 1);
         }
         if (!selection.isEmpty() && m_binding->findData(selection) < 0)
             m_binding->addItem("Unavailable · " + selection, selection);

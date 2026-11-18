@@ -156,6 +156,7 @@ class ToolNode(Node):
 
 
 class AgentNode(Node):
+    """Retired Pi Agent node. Graph validation rejects it with a repair message."""
     kind: Literal["agent"]
     operation: Literal["pi-reply"]
     instructions: Annotated[Text, Field(max_length=16000)] = ""

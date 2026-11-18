@@ -8,6 +8,7 @@
 #include <functional>
 
 class BackendClient;
+class QComboBox;
 class QJsonDocument;
 class QTimer;
 
@@ -63,6 +64,7 @@ public:
     void refreshHistory(const QString &id);
     void toolCapability(Result done);
     static QString modelLabel(const QString &reference);
+    static void disableItem(QComboBox *combo, int index);
     void train(const QJsonObject &graph, const QString &node, const QJsonArray &examples,
                const QJsonObject &settings, Result done);
     void jobs(const QString &blueprint, const QString &node, Result done);

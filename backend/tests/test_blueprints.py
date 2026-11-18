@@ -394,30 +394,28 @@ class BlueprintApiTests(unittest.TestCase):
                                  ["passed", "failed", "skipped", "skipped", "skipped"])
                 self.assertEqual(run["results"], {})
 
-    def test_local_pi_agent_composes_a_typed_review_record(self):
+    def test_retired_pi_agent_node_parses_but_is_rejected_with_a_repair_message(self):
         agent = node("triage", "agent", "pi-reply", inputs={"task": STRING}, outputs={"reply": STRING},
                      instructions="Summarize the user's request.")
-        constant = node("status", "transform", "constant", outputs={"value": STRING},
-                        parameters={"value": "Needs review"})
-        compose = node("record", "transform", "build-object", inputs={"summary": STRING, "status": STRING},
-                       outputs={"value": OBJECT})
-        graph = blueprint(source(), agent, constant, compose, output(OBJECT), edges=[
-            edge("request", "triage", in_port="task"), edge("triage", "record", "reply", "summary"),
-            edge("status", "record", in_port="status"), edge("record", "result"),
-        ])
-        saved = self.save(graph)
-        with patch("backend.tooling.pi_bridge.loaded_engine", return_value=object()), patch(
-            "backend.tooling.pi_bridge.run", return_value="A request for more labels."
-        ) as pi:
-            result, _ = self.terminal(
-                self.start(saved, {"mode": "local", "inputs": {"request": "We need more labels."}})
-            )
-            self.assertEqual(pi.call_args.args[0], "We need more labels.")
-            self.assertIsNone(pi.call_args.args[2])
-            self.assertEqual(pi.call_args.kwargs["instructions"], agent["instructions"])
-        self.assertEqual(result["results"], {"result": {"status": "Needs review",
-                                                        "summary": "A request for more labels."}})
-        self.assertEqual(self.client.get(f"/blueprints/runs/{result['id']}/approvals").json(), [])
+        graph = blueprint(source(), agent, output(), edges=[
+            edge("request", "triage", in_port="task"), edge("triage", "result", "reply")])
+        validation = self.client.post("/blueprints/validate", json=graph).json()
+        self.assertFalse(validation["valid"])
+        issue = next(issue for issue in validation["issues"] if issue["code"] == "retired_node")
+        self.assertEqual(issue["node_id"], "triage")
+        self.assertIn("Model node", issue["message"])
+        self.assertEqual(self.client.post("/blueprints", json=graph).status_code, 422)
+
+    def test_checkpoint_list_reports_thinking_templates(self):
+        from backend.routes.blueprints import _template_thinks
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.assertFalse(_template_thinks(folder))
+            (root / "tokenizer_config.json").write_text('{"chat_template": "{{ messages }}"}')
+            self.assertFalse(_template_thinks(folder))
+            (root / "chat_template.jinja").write_text("{% if enable_thinking %}<think>{% endif %}")
+            self.assertTrue(_template_thinks(folder))
 
     def test_transform_failure_and_consumer_handoff_validation(self):
         parse = node("parse", "transform", "parse-json", inputs={"value": STRING}, outputs={"value": OBJECT})

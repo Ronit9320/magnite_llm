@@ -2,10 +2,12 @@
 
 #include "backend_client.h"
 
+#include <QComboBox>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QStandardItemModel>
 #include <QTimer>
 #include <QUrl>
 
@@ -669,6 +671,12 @@ void BlueprintPreview::checkpoint(const QString &model, Result done) {
     request("GET", "/blueprints/checkpoints/" + segment(model), {}, [done](int status, const QJsonDocument &doc) {
         done(doc.object(), status == 200 ? QString{} : errorText(status, doc));
     });
+}
+
+void BlueprintPreview::disableItem(QComboBox *combo, int index) {
+    if (auto *model = qobject_cast<QStandardItemModel *>(combo->model())) {
+        if (auto *item = model->item(index)) item->setEnabled(false);
+    }
 }
 
 QString BlueprintPreview::modelLabel(const QString &reference) {

@@ -14,7 +14,7 @@ from backend.blueprints.graph import Graph, graph_for, node_test_graph, validate
 from backend.blueprints.order import order_clause, price_order
 from backend.blueprints.runtime import TorchBlueprintSession, check_runtime
 from backend.blueprints.schemas import (
-    AdapterNode, AgentNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, NodeTestRequest,
+    AdapterNode, Blueprint, DatasetNode, GenerationNode, InlineRows, Issue, NodeTestRequest,
     Problems, Revision, RunRequest, RunSnapshot,
     RunStatus, RunSummary, RunSurface, Step, StepStatus, ToolNode, checked_json,
 )
@@ -164,8 +164,7 @@ class BlueprintRunner:
             if node.operation == "agent" and kind not in ("string", "array"):
                 raise Problems([Issue(code="invalid_tool_input", node_id=node.id,
                                       message="A Pi agent node requires text or chat messages")])
-        agent = next((n for n in graph.nodes.values()
-                      if isinstance(n, AgentNode) or isinstance(n, ToolNode) and n.operation == "agent"), None)
+        agent = next((n for n in graph.nodes.values() if isinstance(n, ToolNode) and n.operation == "agent"), None)
         if agent is None:
             return None
         try:
@@ -318,13 +317,6 @@ class BlueprintRunner:
                                   message="Tool action ended with status " + result["status"])])
         return {"receipt": {"decision": "approved", **result}}
 
-    def _run_agent(self, node: AgentNode, task: str, job: _Job) -> dict:
-        try:
-            reply = pi_bridge.run(task, job.tool_engine, None, job.stop, instructions=node.instructions)
-            return {"reply": reply}
-        except (ValueError, OSError, RuntimeError) as exc:
-            raise Problems([Issue(code="pi_failed", node_id=node.id, message=str(exc))]) from exc
-
     def _run_graph(self, job: _Job, session: TorchBlueprintSession | None) -> None:
         with self._lock:
             if not self._can_continue(job):
@@ -355,8 +347,6 @@ class BlueprintRunner:
                 validate_ports(inputs, node.inputs, node_id, "inputs")
                 if isinstance(node, ToolNode) and job.run.mode == "local":
                     outputs = self._run_tool(node, inputs["value"], job)
-                elif isinstance(node, AgentNode) and job.run.mode == "local":
-                    outputs = self._run_agent(node, inputs["task"], job)
                 else:
                     outputs = _execute(node, inputs, job.snapshot, job.stop, session)
                 if job.stop.is_set():
