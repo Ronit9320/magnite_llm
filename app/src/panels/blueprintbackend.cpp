@@ -35,11 +35,13 @@ QString segment(const QString &id) { return QString::fromLatin1(QUrl::toPercentE
 QString blueprintPath(const QString &id) { return "/blueprints/" + segment(id); }
 QString runPath(const QString &id) { return blueprintPath("runs") + "/" + segment(id); }
 
-QString issuesText(const QJsonArray &issues) {
+// ``names`` maps node IDs to display names; a node mapped to "" is omitted (its step already says it).
+QString issuesText(const QJsonArray &issues, const QHash<QString, QString> &names = {}) {
     QStringList messages;
     for (const auto &value : issues) {
         const auto issue = value.toObject();
-        QString location = issue["node_id"].toString();
+        const auto node = issue["node_id"].toString();
+        QString location = names.value(node, node);
         const auto path = issue["path"].toString();
         if (!path.isEmpty()) location += (location.isEmpty() ? QString{} : QString(" · ")) + path;
         if (location.isEmpty()) {
@@ -254,6 +256,12 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         !snapshot["tool_model"].toObject().isEmpty() && !findById(graph["nodes"].toArray(), "assistant").isEmpty() &&
         request["inputs"].toObject()["messages"].isArray();
     const bool toolChat = raw["tool_chat"].toBool(legacyToolChat);
+    QHash<QString, QString> names;
+    for (const auto &value : graph["nodes"].toArray()) {
+        const auto node = value.toObject();
+        names.insert(node["id"].toString(), node["name"].toString(node["id"].toString()));
+    }
+    if (raw["error"].isObject()) record["error"] = issuesText(QJsonArray{raw["error"]}, names);
     record["details"] = true;
     record["result"] = toolChat ? raw["results"].toObject()["reply"].toObject()["text"] : raw["results"];
     record["toolChat"] = toolChat;
@@ -305,7 +313,7 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         entry["inputs"] = step["inputs"];
         entry["output"] = step["outputs"];
         if (step["duration_ms"].isDouble()) entry["duration"] = qRound64(step["duration_ms"].toDouble());
-        if (step["error"].isObject()) entry["error"] = issuesText(QJsonArray{step["error"]});
+        if (step["error"].isObject()) entry["error"] = issuesText(QJsonArray{step["error"]}, {{id, QString{}}});
         steps.append(entry);
     }
     record["steps"] = steps;

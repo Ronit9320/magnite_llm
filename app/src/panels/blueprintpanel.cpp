@@ -348,7 +348,8 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     m_publish->setToolTip("Publish this draft as a new revision that Conversation and runs can use.");
     m_reload = action("Discard draft edits", false, true);
     m_reload->setToolTip("Reload the last saved revision.");
-    m_openInConversation = action("Open in Conversation", false, true);
+    m_openInConversation = iconAction("message-circle", "Open in Conversation");
+    m_openInConversation->setAccessibleName("Open in Conversation");
     m_openInConversation->hide();
     connect(m_openInConversation, &Button::clicked, this, [this] {
         emit conversationRequested(m_graph["id"].toString());
@@ -1045,7 +1046,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
     m_publish->setEnabled(m_preview->connected());
     m_reload->setVisible(m_preview->live() && dirty && revision);
     m_openInConversation->setVisible(m_preview->live() && revision > 0);
-    m_openInConversation->setToolTip("Run the latest saved revision in Conversation.");
+    m_openInConversation->setToolTip("Open in Conversation · run the latest saved revision there");
     m_reload->setEnabled(m_preview->connected());
     m_description->setText(m_graph["description"].toString().trimmed());
     m_description->setVisible(!m_description->text().isEmpty());
@@ -2068,6 +2069,8 @@ void BlueprintPanel::editSchema(const QString &side, const QString &portId) {
     auto *editor = new QPlainTextEdit(BlueprintPreview::jsonText(port["schema"]));
     editor->setObjectName("blueprintCode");
     Surface::field(body, "JSON Schema", editor);
+    body->addWidget(wrapped("Supported keywords: type, properties, required, additionalProperties, items, "
+                            "minimum (numbers) and minLength (text).", "cardMeta"));
     auto *message = wrapped({}, "blueprintError");
     body->addWidget(message);
     QJsonObject schema;
@@ -2600,11 +2603,21 @@ void BlueprintPanel::refreshHistory() {
         meta->setToolTip("Run ID " + id);
         title->addWidget(meta);
         row->addLayout(title, 1);
-        row->addWidget(statusLabel(run["status"].toString()));
-        row->addWidget(label(run["source"].toString(), "cardMeta"));
-        row->addWidget(label(run.contains("ended")
-            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "blueprintCode"));
-        row->addWidget(label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta"));
+        row->setSpacing(16);
+        // Fixed columns keep status, source, duration and time aligned down the list.
+        const auto column = [row](QLabel *cell, int width) {
+            cell->setFixedWidth(width);
+            row->addWidget(cell);
+        };
+        column(statusLabel(run["status"].toString()), 118);
+        auto source = run["source"].toString();
+        if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
+        column(label(source, "cardMeta"), 92);
+        auto *elapsed = label(run.contains("ended")
+            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "cardMeta");
+        elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        column(elapsed, 56);
+        column(label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta"), 112);
         auto *open = action("Inspect", false, true);
         row->addWidget(open);
         connect(open, &Button::clicked, this, [this, id] { openRun(id); });

@@ -427,8 +427,9 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
     }
     painter.setFont(meta);
     painter.setPen(QColor(Theme::textMuted()));
-    painter.drawText(QRectF(box.x() + 11, box.y() + 63, box.width() - 22, 17), Qt::AlignVCenter,
-                     QFontMetrics(meta).elidedText(detail, Qt::ElideRight, nodeWidth - 22));
+    if (detail != node["name"].toString())
+        painter.drawText(QRectF(box.x() + 11, box.y() + 63, box.width() - 22, 17), Qt::AlignVCenter,
+                         QFontMetrics(meta).elidedText(detail, Qt::ElideRight, nodeWidth - 22));
     // Port names use the body face so they read as labels, not code.
     QFont mono(Theme::bodyFont());
     mono.setPixelSize(11);

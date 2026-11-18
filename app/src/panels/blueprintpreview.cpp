@@ -554,7 +554,9 @@ QJsonObject BlueprintPreview::makeNode(const QString &operationKey, const QStrin
     const auto kind = spec["kind"].toString();
     const auto contracts = m_fixtures["contracts"].toObject();
     QJsonObject node{{"id", nodeId}, {"kind", kind}, {"operation", operationKey},
-        {"name", nodeKindLabel(kind)}, {"x", x}, {"y", y}};
+        // Transform and Knowledge cards cover many operations, so name the node after what it does.
+        {"name", kind == "transform" || kind == "knowledge" ? spec["label"].toString() : nodeKindLabel(kind)},
+        {"x", x}, {"y", y}};
     if (!live() && kind == "model") node["model"] = "qwen";
     const auto setting = spec["setting"].toObject();
     if (!setting.isEmpty()) node["setting"] = setting["default"].toString();

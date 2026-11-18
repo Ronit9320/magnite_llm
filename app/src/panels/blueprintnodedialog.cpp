@@ -7,12 +7,14 @@
 #include "widgets/surface.h"
 
 #include <QDialogButtonBox>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
@@ -51,9 +53,13 @@ public:
         setObjectName("blueprintNodeDialog");
         setWindowTitle(existing.isEmpty() ? "Create node" : "Configure node");
         auto *body = new QVBoxLayout(this);
-        body->setContentsMargins(20, 18, 20, 18);
         body->setSpacing(7);
-        body->addWidget(caption(windowTitle(), "panelTitle"));
+        // Same title treatment as the other editor dialogs.
+        body->addWidget(caption(windowTitle(), "headingLabel"));
+        auto *divider = new QFrame;
+        divider->setObjectName("blueprintRule");
+        divider->setFixedHeight(1);
+        body->addWidget(divider);
         m_kind = new ComboBox;
         m_operation = new ComboBox;
         for (const auto &value : m_preview.fixtures()["nodeTypes"].toArray()) {
@@ -89,11 +95,18 @@ public:
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, this, [this] { commit(); });
         connect(m_kind, &QComboBox::currentIndexChanged, this, [this] { loadOperations(); });
-        connect(m_operation, &QComboBox::currentIndexChanged, this, [this] { loadOptions(); });
+        connect(m_operation, &QComboBox::currentIndexChanged, this, [this] {
+            // A name that was only the previous default follows the newly chosen operation.
+            if (m_name->text() == m_name->placeholderText()) m_name->clear();
+            m_name->setPlaceholderText(defaultName());
+            loadOptions();
+        });
         loadOperations(BlueprintPreview::operationId(existing));
         m_operation->setFocus();
-        setMinimumWidth(490);
-        resize(520, 470);
+        setMinimumWidth(500);
+        // Tall enough that ports and settings show without scrolling in most configurations.
+        const int available = parent && parent->screen() ? parent->screen()->availableGeometry().height() : 900;
+        resize(540, qMin(660, int(available * .9)));
         if (m_preview.live()) {
             connect(&m_preview, &BlueprintPreview::optionsChanged, this, [this] {
                 if (m_binding) refreshBindings(m_binding->currentData().toString());
@@ -116,7 +129,7 @@ private:
             m_operation->addItem(spec["label"].toString(), id);
         }
         m_operation->setCurrentIndex(qMax(0, m_operation->findData(preferred)));
-        m_name->setPlaceholderText(m_kind->currentText());
+        m_name->setPlaceholderText(defaultName());
         loadOptions();
     }
 
@@ -246,6 +259,11 @@ private:
         }
     }
 
+    QString defaultName() const {
+        const auto kind = m_kind->currentData().toString();
+        return kind == "transform" || kind == "knowledge" ? m_operation->currentText() : m_kind->currentText();
+    }
+
     static bool editableKeys(const QString &operation, const QString &side) {
         return operation == "generate" || operation == "reason"
             || ((operation == "build-object" || operation == "template") && side == "in");
@@ -332,7 +350,7 @@ private:
         node["kind"] = m_kind->currentData().toString();
         node["operation"] = code;
         const auto name = m_name->text().trimmed();
-        node["name"] = name.isEmpty() ? m_kind->currentText() : name;
+        node["name"] = name.isEmpty() ? defaultName() : name;
         if (m_line) node["setting"] = m_line->text();
         if (m_text) node["setting"] = m_text->toPlainText();
         if (m_choice) node["setting"] = m_choice->currentData().toString();

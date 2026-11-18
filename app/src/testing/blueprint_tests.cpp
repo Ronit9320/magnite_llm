@@ -1114,9 +1114,83 @@ int runLiveBlueprintChecks(const QString &captures) {
                                !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
                     }, 60000), "the triage Model node returns text and builds the review record");
                     capture(panel, "live-triage-result");
+                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(2);
+                    pump(300);
+                    capture(panel, "live-run-history");
+                    if (auto *mode = visibleButton(chat, "Blueprint")) mode->click();
+                    pump(500);
+                    capture(chat, "live-conversation-blueprint");
                 }
             }
         }
+    }
+
+    {
+        // Dialog tour: open each editor dialog on a representative draft and capture it for review.
+        QJsonObject tour{{"id", BlueprintPreview::id()}, {"revision", 0}, {"dirty", true}, {"name", "Dialog tour"},
+                         {"description", ""}, {"edges", QJsonArray{}}};
+        const QStringList operations{"generate", "reason", "dataset-rows", "search", "filter", "compare", "template"};
+        QJsonArray nodes;
+        for (int i = 0; i < operations.size(); ++i)
+            nodes.append(session.makeNode(operations[i], QString("n%1").arg(i), (i % 3) * 230, (i / 3) * 170));
+        tour["nodes"] = nodes;
+        session.saveBlueprint(tour);
+        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        pump();
+        for (auto *button : panel.findChildren<QPushButton *>()) {
+            if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Dialog tour")) {
+                button->click();
+                break;
+            }
+        }
+        pump();
+        const auto captureDialog = [&](const QString &name, const std::function<void()> &trigger) {
+            bool seen = false;
+            QTimer poll;
+            poll.setInterval(150);
+            QElapsedTimer opened;
+            const auto connection = QObject::connect(&poll, &QTimer::timeout, &panel, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                if (!opened.isValid()) opened.start();
+                if (opened.elapsed() < 1200) return;  // Let live checkpoint and dataset options arrive.
+                capture(*dialog, name);
+                seen = true;
+                dialog->reject();
+            });
+            poll.start();
+            trigger();
+            poll.stop();
+            QObject::disconnect(connection);
+            return seen;
+        };
+        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        int captured = 0;
+        for (int i = 0; tree && i < operations.size(); ++i) {
+            tree->setCurrentItem(tree->topLevelItem(i));
+            pump();
+            captured += captureDialog("dialog-configure-" + operations[i], [&] {
+                if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+            });
+            if (operations[i] == "generate" || operations[i] == "reason")
+                captured += captureDialog("dialog-binding-" + operations[i], [&] {
+                    if (auto *binding = visibleButton(panel, "Change binding")) binding->click();
+                });
+            if (operations[i] == "dataset-rows") {
+                captured += captureDialog("dialog-dataset", [&] {
+                    if (auto *source = visibleButton(panel, "Choose dataset")) source->click();
+                });
+                captured += captureDialog("dialog-schema", [&] {
+                    for (auto *button : panel.findChildren<QPushButton *>("blueprintPortContract"))
+                        if (button->isVisible()) { button->click(); break; }
+                });
+            }
+        }
+        capture(panel, "dialog-tour-canvas");
+        check(captured == int(operations.size()) + 4, "every editor dialog opens and closes in the dialog tour");
+        session.deleteBlueprint(tour["id"].toString());
+        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        pump();
     }
 
     client.abortAll();
