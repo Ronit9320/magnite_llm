@@ -21,7 +21,7 @@ reveals remain in use; no web view or web dependencies are added to the client.
   a recipe reuse action and a device telemetry card. Raw JSON and full review
   are available from the monitor context menu. In compact windows
   this card stacks below the monitor.
-- **Next run recipe** follows the studio. Existing model, dataset and method
+- **Train** (the next-run recipe) leads the studio, above the latest run. Existing model, dataset and method
   dropdowns appear when editing the compact recipe. Edit settings expands hyperparameters and preset/output
   options. The advisory backend resource estimate and Start Training action live
   here too. The next recipe stays editable while training; concurrent starts
@@ -34,8 +34,8 @@ reveals remain in use; no web view or web dependencies are added to the client.
   Comparisons retain shared axes, actual optimiser steps, saved configurations,
   preserved selections and explicit missing-data handling.
 - **Export run** saves the actual job snapshot, including configuration and
-  retained history, as JSON. **Use as next run** copies only recorded settings
-  into the next recipe. Editing this recipe never changes
+  retained history, as JSON. **Use in Train** copies only recorded settings
+  into Train. Editing this recipe never changes
   the displayed run's saved configuration.
 
 Submitting returns to Studio, collapses settings and the archive, and scrolls to

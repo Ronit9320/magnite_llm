@@ -180,7 +180,7 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
     check(window.isModal() && window.isVisible() && panel.isVisible(),
           "settings opens as a modal native utility window");
     auto* pages = panel.findChild<QStackedWidget*>("settingsPages");
-    check(pages && pages->count() == 8, "all eight reviewed categories exist");
+    check(pages && pages->count() == 9, "all nine categories exist, including Profile");
     {
         // Text-fit guard: every Settings category at every interface size, in both themes.
         QSettings guardSettings;
@@ -248,7 +248,7 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
             "Understand your local runtime and troubleshoot problems.",
             "Keep your local workspace up to date."};
         bool clean = true;
-        for (int category = 0; category < 8; ++category) {
+        for (int category = 0; category < 9; ++category) {
             panel.selectCategory(category);
             for (auto* label : panel.findChildren<QLabel*>())
                 clean = clean && !taglines.contains(label->text());
@@ -256,10 +256,24 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         check(clean, "settings headings have no taglines above or below the title");
         panel.selectCategory(0);
     }
+    {   // Profile: listed first, with a tile for each kind of work.
+        const auto first = panel.findChildren<QPushButton*>("settingsCategory");
+        QPushButton* top = nullptr;
+        for (auto* item : first)
+            if (!top || item->mapTo(&panel, QPoint()).y() < top->mapTo(&panel, QPoint()).y()) top = item;
+        check(top && top->accessibleName() == "Profile", "Profile is the first Settings category");
+        panel.selectCategory(8);
+        pump(120);
+        int tiles = 0;
+        for (auto* tile : panel.findChildren<QFrame*>("settingsMetric"))
+            if (tile->property("profileStat").isValid() && tile->isVisible()) ++tiles;
+        check(tiles == 8, "Profile shows eight work statistics");
+        panel.selectCategory(0);
+    }
     for (bool dark : {false, true}) {
         panel.findChild<QComboBox*>("settingsTheme")->setCurrentIndex(dark ? 1 : 0);
         Theme::setDark(dark);
-        for (int category = 0; category < 8; ++category) {
+        for (int category = 0; category < 9; ++category) {
             panel.selectCategory(category);
             pump(180);
             auto* scroll = qobject_cast<QScrollArea*>(pages->currentWidget());

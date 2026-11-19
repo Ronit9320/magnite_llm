@@ -66,6 +66,8 @@ set(MAGNITE_SOURCES
     src/panels/docspanel.h
     src/widgets/docscontentview.cpp
     src/widgets/edgescrollbar.cpp
+    src/widgets/smoothwheel.cpp
+    src/systemappearance.cpp
     src/widgets/edgescrollbar.h
     src/widgets/smoothscrollbar.cpp
     src/widgets/smoothscrollbar.h

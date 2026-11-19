@@ -34,7 +34,11 @@ class DocsLibrary {
     const DocsArticle *article(const QString &id) const;
     const DocsSource *source(const QString &id) const;
     const DocsExample *example(const QString &id) const;
+    // Subjects in reading order: the catalog's "groups" list, then any other group in article order.
     QStringList groups() const;
+    QString groupDescription(const QString &group) const { return m_groupDescriptions.value(group); }
+    // The article before/after `id` in reading order, or nullptr at either end.
+    const DocsArticle *neighbor(const QString &id, int direction) const;
     QStringList types() const;
     QList<DocsMatch> search(const QString &query) const;
     QStringList sourceIds() const { return m_sources.keys(); }
@@ -48,5 +52,7 @@ class DocsLibrary {
     QList<DocsArticle> m_articles;
     QMap<QString, DocsSource> m_sources;
     QMap<QString, DocsExample> m_examples;
+    QStringList m_groupOrder;
+    QMap<QString, QString> m_groupDescriptions;
     QString m_error;
 };

@@ -188,6 +188,20 @@ class BlueprintStore:
             row = conn.execute("SELECT summary FROM runs WHERE id = ?", (run_id,)).fetchone()
         return RunSummary.model_validate_json(row["summary"]) if row is not None else None
 
+    def counts(self) -> dict:
+        """Totals for the profile: saved workflows, runs, and tool tasks among them."""
+        with connection(self.path) as conn:
+            blueprints = conn.execute("SELECT COUNT(DISTINCT id) FROM revisions").fetchone()[0]
+            row = conn.execute(
+                """SELECT COUNT(*),
+                          SUM(CASE WHEN json_extract(summary, '$.tool_chat') THEN 1 ELSE 0 END),
+                          SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END),
+                          MIN(created_at)
+                   FROM runs""").fetchone()
+        runs, tasks, passed, first = row[0] or 0, row[1] or 0, row[2] or 0, row[3]
+        return {"blueprints": blueprints, "runs": runs - tasks, "tool_tasks": tasks,
+                "passed": passed, "first": first}
+
     def history(self, blueprint_id: str | None, limit: int, offset: int,
                 surface: RunSurface | None = None, active: bool = False) -> list[RunSummary]:
         clauses, params = [], []

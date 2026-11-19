@@ -195,6 +195,7 @@ private:
     QScrollArea *m_chatScroll;
     QWidget *m_chatHost;
     QLabel *m_emptyConversation = nullptr;
+    QLabel *m_knowledgeUseHint = nullptr;
     QWidget *m_welcome = nullptr;
     QVBoxLayout *m_chatLayout;
 

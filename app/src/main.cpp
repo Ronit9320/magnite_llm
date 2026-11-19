@@ -7,6 +7,7 @@
 #include "testing/restart_tests.h"
 #include "widgets/windowchrome.h"
 #include "testing/uicheck.h"
+#include "widgets/smoothwheel.h"
 #include "testing/windowchrome_tests.h"
 
 #include <QDir>
@@ -74,6 +75,7 @@ int main(int argc, char *argv[]) {
     Theme::setupApplicationTheme();
     EdgeScrollBar::adoptAllScrollAreas();
     KeyboardFocusRing::install();
+    SmoothWheel::install();
     QFont appFont = app.font();
     appFont.setFamily(Theme::bodyFont());
     app.setFont(appFont);

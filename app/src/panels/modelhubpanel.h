@@ -41,6 +41,7 @@ signals:
     void deviceUpdated();
     void downloadFinished(bool success);
     void downloadActivity(const QString &repo, const QString &status, const QString &detail);
+    void modelRemoved(const QString &id);
 
 public slots:
     void refresh();
@@ -69,6 +70,8 @@ private:
     void showDeviceDetails();
     void startDownload();
     void cancelDownload();
+    void deleteLocalModel();
+    void confirmAndDelete(const QString &id, double sizeMb, int dependentAdapters);
     void sendCancel();
     void pollDownload();
     void finishDownload(const QString &message, bool success);
@@ -112,6 +115,7 @@ private:
     QPushButton *m_cancelButton = nullptr;
     QProgressBar *m_progress = nullptr;
     QPushButton *m_detailAction = nullptr;
+    QPushButton *m_detailDelete = nullptr;
     QLabel *m_detailStatus = nullptr;
     ComboBox *m_weight = nullptr;
     ComboBox *m_context = nullptr;
@@ -141,5 +145,8 @@ private:
     QString m_pullJob;
     bool m_polling = false;
     bool m_cancelling = false;
+    bool m_deleting = false;
+    int m_discoveryScroll = -1;   // list position to return to from a model's details
+    QHash<QString, QJsonObject> m_localModels;   // lower-case repo -> registry record
     QJsonObject m_pullProgress;
 };

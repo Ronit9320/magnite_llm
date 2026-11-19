@@ -1,6 +1,8 @@
 #include "testing/uicheck.h"
 #include "testing/blueprint_tests.h"
 #include "testing/modelhub_tests.h"
+#include "widgets/smoothwheel.h"
+#include "systemappearance.h"
 #include "testing/docs_tests.h"
 #include "testing/settings_tests.h"
 #include "testing/windowchrome_tests.h"
@@ -449,7 +451,128 @@ struct Fixture : QTcpServer {
 };
 }
 
+namespace {
+int runSmoothWheelChecks() {
+    int failures = 0;
+    auto check = [&failures](bool ok, const QString &message) {
+        if (!ok) ++failures;
+        fprintf(stderr, "[smoothwheel] %s: %s\n", ok ? "ok" : "FAIL", qUtf8Printable(message));
+    };
+    SmoothWheel::install();
+    QSettings().setValue("appearance/studio3ReducedMotion", false);
+    QWidget window;
+    window.resize(400, 300);
+    auto *layout = new QVBoxLayout(&window);
+    auto *outer = new QScrollArea(&window);
+    outer->setWidgetResizable(true);
+    layout->addWidget(outer);
+    auto *page = new QWidget;
+    auto *pageLayout = new QVBoxLayout(page);
+    auto *inner = new QScrollArea(page);
+    inner->setFixedHeight(120);
+    inner->setWidgetResizable(true);
+    auto *innerBody = new QWidget;
+    innerBody->setMinimumHeight(600);
+    inner->setWidget(innerBody);
+    pageLayout->addWidget(inner);
+    auto *filler = new QWidget(page);
+    filler->setMinimumHeight(1200);
+    pageLayout->addWidget(filler);
+    outer->setWidget(page);
+    window.show();
+    pump(120);
+    auto send = [](QWidget *target, int angle) {
+        QWheelEvent wheel(QPointF(20, 20), target->mapToGlobal(QPoint(20, 20)), QPoint(), QPoint(0, angle),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(target, &wheel);
+    };
+    QScrollBar *innerBar = inner->verticalScrollBar(), *outerBar = outer->verticalScrollBar();
+    const int notch = QApplication::wheelScrollLines() * innerBar->singleStep();
+    send(inner->viewport(), -120);
+    check(innerBar->value() < notch, "one notch glides instead of jumping");
+    pump(500);
+    check(innerBar->value() == notch, QString("a notch travels Qt's usual distance (%1 of %2)").arg(innerBar->value()).arg(notch));
+    check(outerBar->value() == 0, "an inner area that can scroll keeps the wheel");
+    send(inner->viewport(), -120); send(inner->viewport(), -120); send(inner->viewport(), -120);
+    pump(600);
+    check(innerBar->value() == qMin(4 * notch, innerBar->maximum()), "rapid notches add up");
+    innerBar->setValue(innerBar->maximum());
+    {   // Qt propagates real (spontaneous) wheel events upward only when they stay unaccepted.
+        QWheelEvent atLimit(QPointF(20, 20), inner->viewport()->mapToGlobal(QPoint(20, 20)), QPoint(), QPoint(0, -120),
+                            Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(inner->viewport(), &atLimit);
+        check(!atLimit.isAccepted(), "at its limit an inner area leaves the wheel for the page");
+    }
+    send(outer->viewport(), -120);
+    pump(600);
+    check(outerBar->value() > 0, "the page glides with the wheel");
+    const int before = outerBar->value();
+    QWheelEvent pad(QPointF(20, 20), outer->viewport()->mapToGlobal(QPoint(20, 20)), QPoint(0, -30), QPoint(0, -30),
+                    Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false);
+    QApplication::sendEvent(outer->viewport(), &pad);
+    check(outerBar->value() != before, "touchpad pixel scrolling is applied directly");
+    QSettings().setValue("appearance/studio3ReducedMotion", true);
+    outerBar->setValue(0);
+    send(outer->viewport(), -120);
+    check(outerBar->value() == QApplication::wheelScrollLines() * outerBar->singleStep(), "Reduce motion scrolls instantly");
+    QSettings().setValue("appearance/studio3ReducedMotion", false);
+    fprintf(stderr, "[smoothwheel] %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
+    return failures;
+}
+}
+
+namespace {
+int runThemeFadeChecks() {
+    int failures = 0;
+    auto check = [&failures](bool ok, const QString &message) {
+        if (!ok) ++failures;
+        fprintf(stderr, "[themefade] %s: %s\n", ok ? "ok" : "FAIL", qUtf8Printable(message));
+    };
+    QSettings().setValue("appearance/studio3ReducedMotion", false);
+    Theme::setDark(true);
+    QWidget window;
+    window.resize(420, 300);
+    auto *layout = new QVBoxLayout(&window);
+    layout->addWidget(new QLabel("Theme sample", &window));
+    window.show();
+    pump(120);
+    auto fade = [&window] { return window.findChild<QWidget *>("themeCrossfade", Qt::FindDirectChildrenOnly); };
+    Theme::setDark(false, true);
+    check(!Theme::isDark(), "the new theme is applied at once underneath");
+    check(fade() && fade()->isVisible() && fade()->geometry() == window.rect(), "a still of the old theme covers the window");
+    pump(Theme::motionThemeMs() / 2);
+    check(fade() != nullptr, "the old theme is still fading halfway through");
+    pump(Theme::motionThemeMs() + 200);
+    check(fade() == nullptr, "the still is removed when the fade ends");
+    Theme::setDark(true, true);
+    pump(60);
+    Theme::setDark(false, true);
+    check(window.findChildren<QWidget *>("themeCrossfade", Qt::FindDirectChildrenOnly).size() == 1,
+          "switching again mid-fade keeps a single still");
+    pump(Theme::motionThemeMs() + 200);
+    Theme::setDark(true);
+    check(fade() == nullptr, "switches without animation stay instant");
+    QSettings().setValue("appearance/studio3ReducedMotion", true);
+    Theme::setDark(false, true);
+    check(fade() == nullptr && !Theme::isDark(), "Reduce motion switches instantly");
+    QSettings().setValue("appearance/studio3ReducedMotion", false);
+    Theme::setDark(false, true);
+    check(fade() == nullptr, "re-applying the same theme does not animate");
+    check(SystemAppearance::fromColorScheme(1) == std::optional<bool>(true) &&
+              SystemAppearance::fromColorScheme(2) == std::optional<bool>(false) &&
+              !SystemAppearance::fromColorScheme(0).has_value() && !SystemAppearance::fromColorScheme(7).has_value(),
+          "portal color-scheme: 1 is dark, 2 is light, anything else defers to Qt");
+    const auto portal = SystemAppearance::instance()->prefersDark();
+    fprintf(stderr, "[themefade] info: this desktop's portal preference: %s\n",
+            portal ? (*portal ? "dark" : "light") : "none");
+    fprintf(stderr, "[themefade] %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
+    return failures;
+}
+}
+
 int runUiCheck(const QString &captures) {
+    if (qEnvironmentVariableIsSet("MAGNITE_THEMEFADE_CHECK")) return runThemeFadeChecks() ? 1 : 0;
+    if (qEnvironmentVariableIsSet("MAGNITE_SMOOTHWHEEL_CHECK")) return runSmoothWheelChecks() ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) return runLiveBlueprintChecks(captures) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return runBlueprintChecks(captures) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
@@ -1131,7 +1254,7 @@ int runUiCheck(const QString &captures) {
                       QString("%1 fits %2px in %3 mode").arg(name).arg(width).arg(dark?"dark":"light"));
                 capture(panel,QString("%1-%2-%3").arg(dark?"dark":"light").arg(width).arg(name));
                 if (name == "settings") {
-                    for (int category = 1; category < 8; ++category) {
+                    for (int category = 1; category < 9; ++category) {
                         settings.selectCategory(category); pump();
                         capture(panel, QString("%1-%2-settings-category-%3").arg(dark?"dark":"light").arg(width).arg(category));
                     }
@@ -1600,6 +1723,15 @@ int runUiCheck(const QString &captures) {
         fixture.removedModels.clear(); fixture.deleteStatus=204;
     }
     knowledge.show(); pump();
+    {   // Documents first; embedding and chunking detail waits behind Retrieval settings.
+        auto *disclosure=knowledge.findChild<QPushButton *>("ragDisclosure");
+        auto *modelCard=knowledge.findChild<QWidget *>("ragModelCard");
+        check(disclosure && modelCard && !modelCard->isVisibleTo(&knowledge) && knowledge.findChild<QLineEdit *>("documentQuery")->isVisibleTo(&knowledge),
+              "Knowledge leads with documents and a question box; model detail is folded away");
+        if (disclosure) disclosure->setChecked(true);
+        pump();
+        check(modelCard && modelCard->isVisibleTo(&knowledge),"Retrieval settings reveals the embedding model");
+    }
     {
         // The panel shows what GET /rag/status reports, never hardcoded or stored values.
         auto *modelInfo=knowledge.findChild<QLabel *>("ragModelInfo");
@@ -1799,8 +1931,14 @@ int runUiCheck(const QString &captures) {
           "training opens in Studio with Observatory second");
     auto *studio=training.findChild<QWidget *>("trainingStudio");
     auto *recipe=training.findChild<QWidget *>("trainingRecipe");
-    check(studio->mapTo(&training,QPoint()).y()<recipe->mapTo(&training,QPoint()).y(),
-          "live training studio comes before the next run recipe");
+    check(recipe->mapTo(&training,QPoint()).y()<studio->mapTo(&training,QPoint()).y(),
+          "Train comes above the previous run in Studio");
+    {
+        auto *title=recipe->findChild<QLabel *>("trainingRecipeTitle");
+        auto *reuseButton=training.findChild<QPushButton *>("trainingReuseRun");
+        check(title && title->text()=="Train" && reuseButton && reuseButton->text().startsWith("Use in Train"),
+              "the next-run recipe is called Train");
+    }
     training.resize(1104,1520);
     settingsToggle->setChecked(true); pump(250);
     capture(&training,"training-iteration2-setup");

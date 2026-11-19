@@ -194,13 +194,13 @@ void DocsPanel::setupUi() {
     m_forward->setFixedWidth(28);
     top->addWidget(m_forward);
     top->addWidget(text("Docs", "docsToolbarTitle"));
-    m_toolbarSubtitle = text("/   Models, data & understanding.", "docsHint");
+    m_toolbarSubtitle = text("/   Guides, models & data.", "docsHint");
     m_toolbarSubtitle->setWordWrap(false);
     top->addWidget(m_toolbarSubtitle);
     top->addStretch();
     m_search = new QLineEdit;
     m_search->setObjectName("docsSearch");
-    m_search->setPlaceholderText("Search concepts, data, parameters…");
+    m_search->setPlaceholderText("Search guides, concepts, settings…");
     m_search->setAccessibleName("Search the reference library");
     m_search->setClearButtonEnabled(true);
     m_search->setMinimumWidth(100);
@@ -468,7 +468,7 @@ void DocsPanel::renderNavigation() {
     rule(m_navigationBody);
     m_navigationBody->addSpacing(8);
     m_navigationBody->addWidget(text("A reference to return to.", "docsSmallTitle"));
-    m_navigationBody->addWidget(text("Concepts, examples and sources.", "docsHint"));
+    m_navigationBody->addWidget(text("Guides, concepts and sources.", "docsHint"));
     auto *sources = action("Sources & offline access ↗", [this] { showSources(); }, "docsSources");
     sources->setFlat(true);
     sources->setProperty("leftAligned", true);
@@ -601,9 +601,9 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     offline->setWordWrap(false);
     topline->addWidget(offline);
     body->addLayout(topline);
-    body->addWidget(text("Understand the model.\nUnderstand your data.", "docsHero"));
-    body->addWidget(text("Explore what models learn, how examples shape their behavior, and "
-                         "what your training results actually mean.",
+    body->addWidget(text("Learn the workspace.\nUnderstand your models.", "docsHero"));
+    body->addWidget(text("Step-by-step guides to every part of Magnite Space, and the ideas behind "
+                         "models, data and training.",
                          "docsIntro"));
     if (const auto *recent = m_library.article(m_lastArticle)) {
         auto *b = action(
@@ -617,32 +617,47 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     auto *primary = new QVBoxLayout;
     primary->setSpacing(22);
     auto *feature = frame("docsFeature");
-    auto *featureRow = new QHBoxLayout(feature);
-    featureRow->setContentsMargins(24, 26, 24, 26);
-    featureRow->setSpacing(22);
-    auto *featureLayout = new QVBoxLayout;
-    featureLayout->setSpacing(18);
-    featureLayout->setAlignment(Qt::AlignTop);
-    featureLayout->addWidget(text("UNDERSTANDING DATA", "docsEyebrow"));
-    auto *featureTitle = text("The data behind the\nbehavior.", "docsFeatureTitle");
-    featureTitle->ensurePolished();
-    featureTitle->setMinimumHeight(featureTitle->fontMetrics().lineSpacing() * 2 + 4);
-    featureLayout->addWidget(featureTitle);
-    featureLayout->addWidget(text("Valid rows are only the beginning. Look at the examples, "
-                                  "repetitions and missing cases that make up the learning signal.",
-                                  "docsCardDescription"));
-    featureLayout->addWidget(
-        action("Explore dataset quality →", [this] { openArticle("data-quality"); }, "primaryBtn"), 0, Qt::AlignLeft);
-    featureRow->addLayout(featureLayout, 2);
-    if (mainWidth() >= 650) {
-        auto *diagram = new DocsDiagram(DocsDiagram::Data);
-        diagram->setFixedWidth(165);
-        diagram->setFixedHeight(245);
-        featureRow->addWidget(diagram);
+    auto *featureLayout = new QVBoxLayout(feature);
+    featureLayout->setContentsMargins(24, 24, 24, 20);
+    featureLayout->setSpacing(10);
+    featureLayout->addWidget(text("START HERE", "docsEyebrow"));
+    featureLayout->addWidget(text("Your first hour in Magnite Space.", "docsFeatureTitle"));
+    featureLayout->addWidget(text("Follow these in order, or jump to the part you need.", "docsCardDescription"));
+    featureLayout->addSpacing(6);
+    const QStringList path{"welcome", "first-model", "conversations", "knowledge", "blueprints", "training-studio"};
+    int step = 0;
+    for (const auto &id : path) {
+        const auto *a = m_library.article(id);
+        if (!a)
+            continue;
+        auto *row = new DocsCard;
+        row->setProperty("docsRole", "pathStep");
+        row->setFlat(true);
+        row->setProperty("articleId", id);
+        row->setAccessibleName(QString("Step %1: %2").arg(step + 1).arg(a->title));
+        auto *line = new QHBoxLayout(row);
+        line->setContentsMargins(0, 9, 0, 9);
+        line->setSpacing(14);
+        auto *number = text(QString::number(++step), "docsPathNumber");
+        number->setWordWrap(false);
+        number->setFixedWidth(22);
+        line->addWidget(number, 0, Qt::AlignTop);
+        auto *copy = new QVBoxLayout;
+        copy->setSpacing(3);
+        copy->addWidget(text(a->title, "docsQuestion"));
+        copy->addWidget(text(a->description, "docsHint"));
+        line->addLayout(copy, 1);
+        line->addWidget(text("→", "docsHint"), 0, Qt::AlignVCenter);
+        transparentToMouse(row);
+        connect(row, &QPushButton::clicked, this, [this, id] { openArticle(id); });
+        featureLayout->addWidget(row);
     }
+    featureLayout->addSpacing(8);
+    featureLayout->addWidget(action("Start the tour →", [this] { openArticle("welcome"); }, "primaryBtn"), 0,
+                             Qt::AlignLeft);
     primary->addWidget(feature);
     auto *concepts = new QHBoxLayout;
-    concepts->addWidget(text("Concepts to explore", "docsSectionTitle"));
+    concepts->addWidget(text("Popular articles", "docsSectionTitle"));
     concepts->addStretch();
     auto *all = action("All articles →", [this] { showLibrary(); }, "docsTextButton");
     all->setFlat(true);
@@ -650,8 +665,8 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     primary->addLayout(concepts);
     auto *grid = new QGridLayout;
     grid->setSpacing(12);
-    const QStringList featured{"model-learning",    "tokens-context", "data-quality",
-                               "data-distribution", "generalization", "lora"};
+    const QStringList featured{"blueprints",     "tool-mode",    "knowledge",
+                               "model-learning", "data-quality", "lora"};
     const int columns = mainWidth() >= 650 ? 2 : 1;
     for (int i = 0; i < featured.size(); ++i)
         if (const auto *a = m_library.article(featured[i]))
@@ -667,10 +682,11 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     q->addWidget(text("QUESTIONS WORTH ASKING", "docsEyebrow"));
     q->addWidget(text("Follow a question.", "docsSectionTitle"));
     q->addWidget(text("Open the explanation that connects to what you’re working on.", "docsCardDescription"));
-    const QList<QStringList> prompts{{"What is the model actually learning?", "model-learning", "objective"},
+    const QList<QStringList> prompts{{"How do I turn a repeated task into a workflow?", "blueprints", "idea"},
+                                     {"What can Tool mode do on my computer?", "tool-mode", "approvals"},
+                                     {"Where does my data live?", "settings-data", "storage"},
+                                     {"What is the model actually learning?", "model-learning", "objective"},
                                      {"Is my validation data really unseen?", "data-distribution", "split"},
-                                     {"What does a lower loss tell me?", "generalization", "score"},
-                                     {"What happens to long examples?", "tokens-context", "limits"},
                                      {"How does retrieval differ from training?", "rag", "retrieval"}};
     for (const auto &p : prompts) {
         auto *card = new DocsCard;
@@ -703,22 +719,17 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     subjects->setSpacing(12);
     int i = 0;
     const int count = mainWidth() >= 700 ? 3 : mainWidth() >= 500 ? 2 : 1;
-    const QStringList descriptions{"Prediction, tokens and the artifacts you work with.",
-                                   "Coverage, formatting and the patterns in your examples.",
-                                   "Training controls and interpreting what a run tells you.",
-                                   "LoRA, retrieval and working with adapters.",
-                                   "Local workflows, troubleshooting and terminology."};
     for (const auto &group : m_library.groups()) {
         auto *card = new DocsCard;
         auto *l = new QVBoxLayout(card);
         l->setContentsMargins(18, 18, 18, 18);
         l->addWidget(text(group, "docsCardTitle"));
-        l->addWidget(text(descriptions.value(i), "docsCardDescription"));
+        l->addWidget(text(m_library.groupDescription(group), "docsCardDescription"));
         int n = 0;
         for (const auto &a : m_library.articles())
             if (a.group == group)
                 ++n;
-        l->addWidget(text(QString("%1 articles   →").arg(n), "docsEyebrow"));
+        l->addWidget(text(QString("%1 article%2   →").arg(n).arg(n == 1 ? "" : "s"), "docsEyebrow"));
         transparentToMouse(card);
         connect(card, &QPushButton::clicked, this, [this, group] {
             Route r;
@@ -888,7 +899,18 @@ void DocsPanel::renderReader(QVBoxLayout *body) {
     crumbs->addWidget(group);
     crumbs->addStretch();
     body->addLayout(crumbs);
-    body->addWidget(text(article->type + "   ·   Local reference", "docsEyebrow"));
+    {
+        int position = 0, total = 0;
+        for (const auto &a : m_library.articles())
+            if (a.group == article->group) {
+                ++total;
+                if (a.id == article->id)
+                    position = total;
+            }
+        body->addWidget(text(QString("%1   ·   %2   ·   %3 of %4")
+                                 .arg(article->type, article->group.toUpper()).arg(position).arg(total),
+                             "docsEyebrow"));
+    }
     body->addWidget(text(article->title, "docsHeading"));
     body->addWidget(text(article->description, "docsIntro"));
     auto *actions = new QHBoxLayout;
@@ -991,6 +1013,38 @@ void DocsPanel::renderReader(QVBoxLayout *body) {
         body->addWidget(host);
         m_sections[section.id] = host;
     }
+    {
+        auto *pager = new QHBoxLayout;
+        pager->setSpacing(12);
+        for (const int direction : {-1, 1}) {
+            const auto *other = m_library.neighbor(article->id, direction);
+            if (!other) {
+                pager->addStretch(1);
+                continue;
+            }
+            auto *card = new DocsCard;
+            card->setProperty("docsRole", direction < 0 ? "previous" : "next");
+            card->setProperty("articleId", other->id);
+            card->setAccessibleName((direction < 0 ? "Previous article: " : "Next article: ") + other->title);
+            auto *l = new QVBoxLayout(card);
+            l->setContentsMargins(18, 16, 18, 16);
+            l->setSpacing(6);
+            const QString where = other->group == article->group ? QString() : "   ·   " + other->group;
+            auto *label = text(direction < 0 ? "←  PREVIOUS" + where.toUpper() : "NEXT" + where.toUpper() + "  →", "docsEyebrow");
+            auto *title = text(other->title, "docsCardTitle");
+            if (direction > 0) {
+                label->setAlignment(Qt::AlignRight);
+                title->setAlignment(Qt::AlignRight);
+            }
+            l->addWidget(label);
+            l->addWidget(title);
+            transparentToMouse(card);
+            connect(card, &QPushButton::clicked, this, [this, id = other->id] { openArticle(id); });
+            pager->addWidget(card, 1);
+        }
+        body->addSpacing(8);
+        body->addLayout(pager);
+    }
     rule(body);
     body->addWidget(text("SOURCES & FURTHER READING", "docsEyebrow"));
     body->addWidget(text("Concepts are linked to primary references. Magnite Space-specific "
@@ -1057,6 +1111,12 @@ void DocsPanel::addArticleBody(QVBoxLayout *body, const QString &html) {
             view->setContent("<p>" + content + "</p>");
             l->addWidget(view);
             body->addWidget(box);
+        } else if (kind == "concept-flow") {
+            QStringList steps;
+            static const QRegularExpression span("<span>(.*?)</span>");
+            for (auto it = span.globalMatch(part); it.hasNext();)
+                steps << DocsLibrary::plainText(it.next().captured(1)).trimmed();
+            body->addWidget(new DocsDiagram(steps));
         } else
             body->addWidget(new DocsDiagram(kind == "distribution-example" ? DocsDiagram::Distribution
                                             : kind == "flow-diagram"       ? DocsDiagram::LoRA

@@ -1,4 +1,36 @@
 {
+  "format_version": 1,
+  "reviewed": "2026-11-19",
+  "groups": [
+    {
+      "name": "Getting started",
+      "description": "A tour of the app and your first model, from download to reply."
+    },
+    {
+      "name": "Using Magnite Space",
+      "description": "Step-by-step guides to every part of the workspace."
+    },
+    {
+      "name": "Models & learning",
+      "description": "Prediction, tokens and the files you work with."
+    },
+    {
+      "name": "Understanding data",
+      "description": "Coverage, formatting and the patterns in your examples."
+    },
+    {
+      "name": "Training & evaluation",
+      "description": "Training controls and what a run can tell you."
+    },
+    {
+      "name": "Adaptation & inference",
+      "description": "LoRA, retrieval and working with adapters."
+    },
+    {
+      "name": "Help & reference",
+      "description": "Troubleshooting, vocabulary and bundled references."
+    }
+  ],
   "sources": {
     "workflow": {
       "label": "Magnite Space · Local workflows",
@@ -74,9 +106,412 @@
       "label": "Google · Generalization and overfitting",
       "url": "https://developers.google.com/machine-learning/crash-course/overfitting/overfitting",
       "kind": "External · internet required"
+    },
+    "blueprints": {
+      "label": "Magnite Space · Blueprints and Tool mode",
+      "url": "reference/BLUEPRINTS.md",
+      "kind": "Bundled reference"
     }
   },
   "articles": [
+    {
+      "id": "welcome",
+      "title": "Welcome to Magnite Space",
+      "short": "Tour of the app",
+      "group": "Getting started",
+      "type": "GUIDE",
+      "icon": "layers",
+      "description": "What each part of the workspace is for, and a sensible order to try them in.",
+      "sources": [
+        "workflow",
+        "privacy"
+      ],
+      "sections": [
+        [
+          "local",
+          "Everything runs on this computer",
+          "<p>Magnite Space is a desktop workspace for running, adapting and combining open language models. Inference, training, document search and workflows run locally. The app talks to the internet only for Hub search, model downloads and update checks.</p><p>The desktop window starts and supervises a local service on your machine. When the status in the title bar reads <strong>Connected</strong>, that service is ready.</p>"
+        ],
+        [
+          "map",
+          "A map of the sidebar",
+          "<table><thead><tr><th>Area</th><th>What you do there</th></tr></thead><tbody><tr><td><strong>Model hub</strong></td><td>Search Hugging Face, compare models, estimate memory and download.</td></tr><tr><td><strong>Library</strong></td><td>Manage downloaded and imported models, trained adapters and projects.</td></tr><tr><td><strong>Training</strong></td><td>Fine-tune a model on your own examples with LoRA, then review runs.</td></tr><tr><td><strong>Blueprints</strong></td><td>Build saved workflows from typed steps: models, data, search and tools.</td></tr><tr><td><strong>Docs</strong></td><td>This reference: app guides and the ideas behind them.</td></tr><tr><td><strong>Conversations</strong></td><td>Chat with a model, give tasks in Tool mode, run a Blueprint, and use your documents through Knowledge.</td></tr><tr><td><strong>Settings</strong></td><td>Appearance, chat behavior, runtime engine, storage, notifications and updates.</td></tr></tbody></table>"
+        ],
+        [
+          "path",
+          "A first path through the app",
+          "<ol><li><a href=\"magnite-docs://article/first-model\">Download a small model</a> in Model hub and chat with it.</li><li>Add a few documents to <a href=\"magnite-docs://article/knowledge\">Knowledge</a> and ask about them.</li><li>Try <a href=\"magnite-docs://article/tool-mode\">Tool mode</a> to let the model request actions you approve.</li><li>Build a <a href=\"magnite-docs://article/blueprints\">Blueprint</a> that turns a repeated task into a saved workflow.</li><li><a href=\"magnite-docs://article/training-studio\">Train an adapter</a> when you have examples of the behavior you want.</li></ol><div class=\"concept-flow\"><span>Find a model</span><i>→</i><span>Use it</span><i>→</i><span>Combine it</span><i>→</i><span>Adapt it</span></div>"
+        ],
+        [
+          "help",
+          "Finding your way",
+          "<p>Search Docs from the box at the top of this page; results jump straight to the matching section. Save articles you return to, and use the back and forward arrows like a browser. Each article ends with links to the next article and related reading.</p><div class=\"article-callout\"><strong>Shortcuts</strong>Open Settings → General → Keyboard shortcuts for the full list.</div>"
+        ]
+      ]
+    },
+    {
+      "id": "first-model",
+      "title": "Download and chat with your first model",
+      "short": "Your first model",
+      "group": "Getting started",
+      "type": "GUIDE",
+      "icon": "download",
+      "description": "Find a model that fits your machine, download it and get a reply in Conversation.",
+      "sources": [
+        "workflow",
+        "troubleshoot"
+      ],
+      "sections": [
+        [
+          "choose",
+          "Choose a model that fits",
+          "<p>Open <strong>Model hub</strong> and search for a model family, or browse the most downloaded models. Small instruction-tuned models (under about 2 billion parameters) load quickly and are a good first test.</p><p>Open a model to see its details. The memory estimate adds the weights and the context cache for the context length you choose and compares them with your device. Treat it as advice: other applications share the same memory.</p><div class=\"article-callout\"><strong>GGUF or Transformers?</strong>GGUF files run with llama.cpp and are ideal for chat. Training and Blueprint Model nodes need a Transformers checkpoint (Safetensors weights with a tokenizer).</div>"
+        ],
+        [
+          "download",
+          "Download it",
+          "<p>Choose <strong>Download repository</strong>. The app downloads the whole repository into the shared Hugging Face cache and shows progress at the bottom of Model hub. One download runs at a time; <strong>Cancel download</strong> removes its unfinished files.</p><p>When it finishes, the model appears in <strong>Library</strong>. If a download fails part-way, its leftover files are listed in Settings → Storage &amp; privacy → Partial downloads.</p>"
+        ],
+        [
+          "chat",
+          "Load it and send a message",
+          "<p>Choose <strong>Load in Conversation</strong>, or open a conversation and pick the model in the toolbar, then choose <strong>Load model</strong>. The engine is chosen automatically from the model format; you can override it under <strong>Model settings</strong>.</p><p>Type a prompt and press Enter to send (Shift+Enter adds a line). <strong>Stop</strong> ends a reply early. The meter in the toolbar shows how much of the model's context the conversation uses.</p><div class=\"concept-flow\"><span>Model hub</span><i>→</i><span>Download</span><i>→</i><span>Load model</span><i>→</i><span>Send</span></div>"
+        ],
+        [
+          "next",
+          "Where to go next",
+          "<p>Adjust <strong>Temperature</strong> and <strong>Response tokens</strong> in Model settings to change how varied and how long replies are. When you finish, unload the model to free memory for training or another model.</p><p>Read <a href=\"magnite-docs://article/tokens-context\">Tokens, context and what the model actually sees</a> to understand the context meter, or <a href=\"magnite-docs://article/conversations\">Conversations</a> for everything the conversation view can do.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "hub-library",
+      "title": "Find, download and manage models",
+      "short": "Model hub & Library",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "search",
+      "description": "Search and compare models in Model hub, then organize models, adapters and projects in Library.",
+      "sources": [
+        "workflow",
+        "privacy",
+        "troubleshoot"
+      ],
+      "sections": [
+        [
+          "search",
+          "Search and filter the Hub",
+          "<p>Model hub searches Hugging Face. Use <strong>Filters</strong> to narrow results by task, publisher and format, or show only models already on this computer. Sort by downloads, likes, size or name, and use <strong>Load more</strong> to see further results.</p><p>Tick <strong>Compare</strong> on up to three models to see their parameters, context length, license and size side by side.</p>"
+        ],
+        [
+          "details",
+          "Read a model's page",
+          "<p>A model page lists its parameters, maximum context, license and downloads. The memory panel estimates what loading it needs for a chosen weight format and context length. Provenance shows the publisher, revision and whether access requires approval; check the publisher's model card for license terms.</p><p>For a downloaded model the page offers <strong>Load in Conversation</strong> and <strong>Delete from this computer</strong>. Back returns you to the same place in the results.</p>"
+        ],
+        [
+          "library",
+          "Organize your Library",
+          "<p><strong>Library</strong> has three tabs:</p><ul><li><strong>Models</strong>: everything downloaded or imported. Filter by source, load a model, or delete it. Use <em>Import model…</em> to add a GGUF file from disk without copying it.</li><li><strong>Adapters</strong>: LoRA weights from Training or imported archives. Activate, export or delete them.</li><li><strong>Projects</strong>: folders that group conversations and files. Pin the ones you use most.</li></ul>"
+        ],
+        [
+          "delete",
+          "Free up space",
+          "<p>Deleting a Hub model removes its files from the shared Hugging Face cache, which other tools may also use. A model that is loaded or used by a running training job cannot be deleted. Adapters trained on a model stop working until the model is downloaded again; the confirmation tells you how many.</p><p>Settings → Storage &amp; privacy shows how much space the cache and workspace use, and lists unfinished downloads you can delete.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "conversations",
+      "title": "Conversations: Chat, Tool mode and Blueprint",
+      "short": "Conversations",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "message-circle",
+      "description": "The three conversation modes, model settings, adapters and how conversations are kept.",
+      "sources": [
+        "workflow",
+        "privacy"
+      ],
+      "sections": [
+        [
+          "modes",
+          "Three ways to work",
+          "<table><thead><tr><th>Mode</th><th>Use it to</th></tr></thead><tbody><tr><td><strong>Chat</strong></td><td>Test prompts against a local model or a model with an active adapter.</td></tr><tr><td><strong>Tool mode</strong></td><td>Give the model a task. It can propose actions such as reading a file or running a command, which you approve. See <a href=\"magnite-docs://article/tool-mode\">Tool mode</a>.</td></tr><tr><td><strong>Blueprint</strong></td><td>Run a saved workflow with your inputs and follow each step. <strong>New run</strong> and <strong>Run history</strong> work like New task and Task history. See <a href=\"magnite-docs://article/blueprints\">Blueprints</a>.</td></tr></tbody></table>"
+        ],
+        [
+          "settings",
+          "Model settings and adapters",
+          "<p>The gear icon opens <strong>Model settings</strong>: the engine (Auto follows Settings → Runtime), <strong>Temperature</strong> for how varied replies are, and <strong>Response tokens</strong> for the longest reply. The active adapter is shown here; <strong>Manage adapters</strong> opens Library → Adapters.</p><p>Activating an adapter reloads inference with its base model. Compare its replies with the base model on the same prompts to see what training changed.</p>"
+        ],
+        [
+          "knowledge",
+          "Answer from your documents",
+          "<p>The database icon opens <strong>Knowledge</strong>. Turn on <strong>Use in this conversation</strong> to add matching passages from your documents to each prompt; the passages used appear with the reply. See <a href=\"magnite-docs://article/knowledge\">Knowledge</a>.</p>"
+        ],
+        [
+          "history",
+          "History, projects and context",
+          "<p>Conversations are saved on this computer and listed in the sidebar under <strong>Conversations</strong>, where you can search them. <strong>New conversation</strong> starts a fresh one. Move conversations into Library projects to keep related work together.</p><p>The context meter shows how full the model's context window is. When a long conversation approaches the limit, start a new one or let Settings → Chat compact older messages automatically.</p><div class=\"article-callout\"><strong>Your data</strong>Conversations stay in your data directory. Export or delete them all from Settings → Storage &amp; privacy.</div>"
+        ]
+      ]
+    },
+    {
+      "id": "tool-mode",
+      "title": "Tool mode and the Pi harness",
+      "short": "Tool mode",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "cpu",
+      "description": "How a local model works through tasks with Pi, and how you stay in control of every action.",
+      "sources": [
+        "workflow",
+        "privacy",
+        "limits"
+      ],
+      "sections": [
+        [
+          "harness",
+          "What the harness does",
+          "<p>Tool mode connects the loaded local model to <strong>Pi</strong>, an agent harness that runs in its own process on your computer. Pi gives the model a task, a set of tools and a structured way to ask for them. The model plans, proposes an action, sees the result and continues until it can answer.</p><div class=\"concept-flow\"><span>Your task</span><i>→</i><span>Model proposes an action</span><i>→</i><span>You approve</span><i>→</i><span>Result returns to the model</span></div><p>Nothing is executed on the model's word alone: every action waits for your decision.</p>"
+        ],
+        [
+          "start",
+          "Give it a task",
+          "<p>Open a conversation, choose <strong>Tool mode</strong> and load a supported local model. Describe the task and send it. Follow up in the same conversation to build on earlier turns, or choose <strong>New task</strong> for a clean context. <strong>Task history</strong> reopens a recent turn.</p><p>Small models can misunderstand tool formats. If replies are malformed, try a larger instruction-tuned model.</p>"
+        ],
+        [
+          "approvals",
+          "Approving actions",
+          "<p>Each proposed action appears inline with exactly what will happen: the file or address to open, the file or folder to read, or the program, its arguments and working directory for a command.</p><ul><li><strong>Approve once</strong> allows that one action for this run.</li><li><strong>Deny</strong> rejects it and tells the model.</li></ul><p>An approval request expires after 90 seconds. Repeating the same request needs a new decision.</p><div class=\"article-callout\"><strong>Commands run as you</strong>An approved command runs with your account's permissions and can change files or start programs. Read every argument and deny anything you did not intend.</div>"
+        ],
+        [
+          "limits",
+          "Limits and workspace",
+          "<p>A task can take at most six model turns and four actions. Commands get a direct argument list (no shell) and a 30-second time limit, and their output is returned to the model. The default working directory is <code>tool-workspace</code> inside the app's data folder.</p><p>The run record keeps inputs, outputs and a redacted log of decisions. Treat it as private data when you back up or share your profile.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "knowledge",
+      "title": "Knowledge: chat with your documents",
+      "short": "Knowledge",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "database",
+      "description": "Add documents, tune how they are split and searched, and use them in conversations and Blueprints.",
+      "sources": [
+        "workflow",
+        "troubleshoot"
+      ],
+      "sections": [
+        [
+          "add",
+          "Add documents",
+          "<p>Open a conversation and choose the database icon to open <strong>Knowledge</strong>. Under <strong>Documents</strong>, choose <strong>Add files…</strong> to index PDF, text, Markdown or HTML files. Each document has a switch to include or leave it out. The first time, the embedding model is downloaded. Your original files are never changed or moved.</p><p>Scanned PDFs without a text layer cannot be read; extract the text first.</p>"
+        ],
+        [
+          "index",
+          "How documents are indexed",
+          "<p>Each document is split into chunks of a set number of words, with some overlap so ideas that cross a boundary are kept together. Each chunk is turned into an embedding: a vector that places similar meanings close together.</p><div class=\"concept-flow\"><span>Document</span><i>→</i><span>Chunks</span><i>→</i><span>Embeddings</span><i>→</i><span>Search index</span></div><p>Change chunk size, overlap and the embedding model under <strong>Retrieval settings</strong> at the bottom of the panel. Changing the embedding model offers to <strong>Re-index</strong> existing documents.</p>"
+        ],
+        [
+          "search",
+          "Search and use it in a conversation",
+          "<p>Use <strong>Try a question</strong> to preview which passages match before you ask the model. Hybrid search combines keyword and vector matching. Choose which documents are included with <strong>Select sources</strong>.</p><p>Turn on <strong>Use in this conversation</strong> at the top of the panel. Matching passages are added to each prompt and shown with the reply, so you can check where an answer came from.</p><div class=\"article-callout\"><strong>Retrieval is not memory</strong>The model reads the passages for this prompt only. A good match does not guarantee a faithful answer; compare the reply with the source passage.</div>"
+        ],
+        [
+          "blueprints",
+          "Use Knowledge in workflows",
+          "<p>The <strong>Knowledge</strong> node in Blueprints searches the same documents and returns numbered passages ready for a Model prompt. See <a href=\"magnite-docs://article/blueprint-nodes\">the node reference</a> and <a href=\"magnite-docs://article/rag\">Retrieval, context and model knowledge</a> for the ideas behind it.</p><p>Select documents and choose <strong>Remove</strong>, or <strong>Clear all</strong>, to delete their index only; your files stay where they are.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "blueprints",
+      "title": "Build workflows with Blueprints",
+      "short": "Blueprints",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "layers",
+      "description": "Turn a repeated task into a saved, typed workflow of model, data, search and tool steps.",
+      "sources": [
+        "blueprints",
+        "workflow"
+      ],
+      "sections": [
+        [
+          "idea",
+          "What a Blueprint is",
+          "<p>A Blueprint is a graph of steps (nodes) connected by typed ports. Data flows from inputs, through transforms, models and searches, to outputs. Because every port has a type, the editor can check a workflow before it runs and the trace shows exactly what each step received and produced.</p><div class=\"concept-flow\"><span>Input</span><i>→</i><span>Transform</span><i>→</i><span>Model</span><i>→</i><span>Output</span></div>"
+        ],
+        [
+          "create",
+          "Create and connect nodes",
+          "<p>Open <strong>Blueprints</strong> in the sidebar. <strong>Create new</strong> starts an empty workflow, and the <strong>Request triage example</strong> creates an editable draft to learn from.</p><ol><li>Choose <strong>Add node</strong> and pick a card, or reuse one from <strong>Saved nodes</strong>.</li><li>Click an output dot, then a matching input dot, to connect them. An output can feed several inputs; each input has one source.</li><li>Select a node and use <strong>Configure</strong> to set its operation, ports and settings. For Model and Reasoning nodes, choose a downloaded Transformers checkpoint.</li></ol><p><strong>Workflow nodes</strong> lists every node and its links; selecting a link reveals the node at the other end.</p>"
+        ],
+        [
+          "save",
+          "Check, save and run",
+          "<p><strong>Check readiness</strong> reports missing bindings, incompatible adapters, token budgets and runtime needs. <strong>Save revision</strong> publishes the current graph; earlier revisions are kept.</p><p>Open <strong>Test &amp; run</strong> to test one node with sample inputs or run the whole workflow. Inputs are a JSON object keyed by Input node, or plain text when there is a single text input. The run trace shows each step's inputs, outputs and timing. <strong>Run history</strong> reopens earlier runs, even after the graph changes.</p>"
+        ],
+        [
+          "conversation",
+          "Run it from a conversation",
+          "<p>Choose <strong>Open in Conversation</strong>, or pick <strong>Blueprint</strong> mode in a conversation and select a workflow. The picker shows each workflow's latest saved revision. Tool nodes ask for approval inline, just like <a href=\"magnite-docs://article/tool-mode\">Tool mode</a>.</p><p>Runs you start here form a session. <strong>New run</strong> starts an empty one, and <strong>Run history</strong> reopens any earlier run, with its workflow selected so you can run it again. Runs are saved on this computer, so history survives a restart.</p>"
+        ],
+        [
+          "adapters",
+          "Train a step",
+          "<p>To specialize one Model step, open <strong>Training jobs…</strong> on a saved Model or Reasoning node and add examples with named inputs and outputs. When the job completes, select the new weights on an <strong>Adapter</strong> node connected to the model's LoRA adapter input.</p><div class=\"article-callout\"><strong>One run at a time</strong>Up to eight runs can wait in the queue; they execute one at a time and release the checkpoint when they finish.</div>"
+        ]
+      ]
+    },
+    {
+      "id": "blueprint-nodes",
+      "title": "Blueprint node reference",
+      "short": "Node reference",
+      "group": "Using Magnite Space",
+      "type": "REFERENCE",
+      "icon": "box",
+      "description": "Every node you can add to a Blueprint, what it takes and what it returns.",
+      "sources": [
+        "blueprints"
+      ],
+      "sections": [
+        [
+          "data",
+          "Inputs, data and outputs",
+          "<table><thead><tr><th>Node</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Input</strong></td><td>Takes a value supplied when the run starts and emits it.</td></tr><tr><td><strong>Dataset</strong></td><td>Provides typed JSON rows, inline or from a dataset imported in Training.</td></tr><tr><td><strong>Knowledge</strong></td><td>Searches Knowledge documents for a query and returns results plus numbered context passages.</td></tr><tr><td><strong>Output</strong></td><td>Exposes a typed value in the run result.</td></tr></tbody></table>"
+        ],
+        [
+          "transform",
+          "Transform operations",
+          "<table><thead><tr><th>Operation</th><th>Result</th></tr></thead><tbody><tr><td>Pass through</td><td>Forwards a value unchanged.</td></tr><tr><td>Parse JSON</td><td>Turns JSON text into a typed value.</td></tr><tr><td>Get object field / Get first item</td><td>Picks one field from an object, or the first item of an array.</td></tr><tr><td>Count items</td><td>Returns the length of an array.</td></tr><tr><td>Format as text</td><td>Turns any value into text; structured values become JSON.</td></tr><tr><td>Provide a constant</td><td>Emits a fixed value saved on the node.</td></tr><tr><td>Build an object</td><td>Combines named inputs into one object.</td></tr><tr><td>Fill a text template</td><td>Inserts inputs into text with <code>{key}</code> placeholders.</td></tr><tr><td>Compare two values</td><td>Returns true or false for equals, ordering or contains.</td></tr><tr><td>Choose a value</td><td>Returns one of two inputs based on a condition. Both inputs are computed.</td></tr><tr><td>Validate data</td><td>Checks a value against rules and fails the step at the first problem.</td></tr><tr><td>Filter rows / Sort rows</td><td>Keeps rows matching a rule such as <code>amount &gt;= 100</code>, or orders rows by a field.</td></tr></tbody></table>"
+        ],
+        [
+          "models",
+          "Models, adapters and tools",
+          "<table><thead><tr><th>Node</th><th>What it does</th></tr></thead><tbody><tr><td><strong>Model</strong></td><td>Generates text or typed JSON from named inputs with a local Transformers checkpoint.</td></tr><tr><td><strong>Reasoning</strong></td><td>Like Model, for checkpoints with explicit thinking support; returns a typed final answer.</td></tr><tr><td><strong>Adapter</strong></td><td>Attaches trained LoRA weights to a compatible Model or Reasoning node.</td></tr><tr><td><strong>Tool</strong></td><td>Requests an action, waits for your approval, then returns a receipt.</td></tr></tbody></table><p>For a Model node with several outputs, ask for a JSON object keyed by the output names. Plain-text response mode uses a single text output.</p>"
+        ],
+        [
+          "types",
+          "Ports and types",
+          "<p>Ports carry text, numbers, booleans, arrays or objects. An integer output can feed a number input. Refine array and object schemas in the inspector, including item types and required fields. The key is used in connections and JSON; the label is what the canvas shows.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "training-studio",
+      "title": "Training studio and Observatory",
+      "short": "Training studio",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "graduation-cap",
+      "description": "Set up a LoRA run, follow it live in Studio and review or compare runs in Observatory.",
+      "sources": [
+        "workflow",
+        "api",
+        "limits"
+      ],
+      "sections": [
+        [
+          "studio",
+          "Studio: set up a run in Train",
+          "<p>Open <strong>Training</strong>. <strong>Train</strong> sits at the top of Studio: it holds the settings for your next run. Below it you see the latest run's results and saved configuration, so you can set up the next iteration with the last one in view.</p><ol><li>Choose a base model (a Transformers checkpoint, not GGUF).</li><li>Choose an imported dataset, or <em>Import file…</em>: JSONL, CSV or plain text.</li><li>Choose <strong>Edit settings</strong> to adjust the method (LoRA or QLoRA), epochs, learning rate, batch size and sequence length. <em>Advanced settings</em> and <em>Output options</em> hold the rest.</li></ol><p><strong>+ New run</strong> opens the same settings in a larger dialog. Save a recipe as a preset to reuse it. The resource estimate shows whether the run should fit your device.</p>"
+        ],
+        [
+          "watch",
+          "Watch it run",
+          "<p>Start the run and follow its steps, loss and device usage live. The <strong>Event log</strong> records what happened, including warnings and errors; use <strong>Follow latest</strong> to stay at the newest entry. <strong>Stop run</strong> asks the trainer to stop at the next safe point.</p><div class=\"concept-flow\"><span>Base model + dataset</span><i>→</i><span>Recipe</span><i>→</i><span>Run</span><i>→</i><span>Adapter</span></div>"
+        ],
+        [
+          "observatory",
+          "Observatory: review and compare",
+          "<p><strong>Observatory</strong> keeps a local record of every run. Charts show loss, learning rate, gradient norm and throughput over steps. <strong>Compare baseline</strong> overlays another run, and <strong>Export run</strong> saves its record. <strong>Use in Train</strong> copies a run's settings into Train so you can change one setting at a time.</p><p>Read <a href=\"magnite-docs://article/read-run\">Interpreting loss and runtime measurements</a> before drawing conclusions from a chart.</p>"
+        ],
+        [
+          "use",
+          "Use the result",
+          "<p>A finished run produces an adapter in Library → Adapters. Activate it and compare its replies with the base model on prompts it did not train on. See <a href=\"magnite-docs://article/first-run\">Anatomy of a training run</a> for the full workflow.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "first-run",
+      "title": "Anatomy of a training run",
+      "short": "Anatomy of a run",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "graduation-cap",
+      "description": "How data, a base model, optimization and evaluation fit together inside Magnite Space.",
+      "sources": [
+        "workflow",
+        "api",
+        "limits"
+      ],
+      "sections": [
+        [
+          "before-you-start",
+          "The parts of an experiment",
+          "<p>A training run connects four decisions: which pretrained behavior you start with, which examples you supply, which parameters can change, and how you judge the result. The buttons in the app correspond to these decisions; a successful job only confirms that the computation completed.</p><p>The training base is a compatible Transformers model. A GGUF snapshot belongs to the inference workflow. The dataset supplies the examples, the recipe controls optimization, and the resulting adapter must be evaluated with its matching base.</p>"
+        ],
+        [
+          "prepare",
+          "Prepare the base and dataset",
+          "<p>In Library, download or locate compatible transformer weights. In Training, import a UTF-8 JSONL, CSV or text file. Review the imported row count and inspect the examples before starting.</p><p>A useful first dataset is consistent, easy to inspect, and specific to your task. Keep a separate set of evaluation prompts that the model will not train on.</p>"
+        ],
+        [
+          "configure",
+          "Make a small, named experiment",
+          "<p>Open the run configuration in Training. Select the base model and imported dataset. Give the adapter a descriptive name. Begin with LoRA and quantization None when your setup supports them.</p><p>Choose a batch size and sequence length that fit your machine. The resource estimate is advisory. A successful short run checks the workflow; it does not prove the recipe will generalize.</p><div class=\"article-callout\"><strong>Keep the comparison simple</strong>Record the dataset, base snapshot and configuration. Change one important setting at a time.</div>"
+        ],
+        [
+          "observe",
+          "Watch the run",
+          "<p>Follow status, steps and loss in Studio. Open Observatory to review history and compare runs. Enable a validation split when you have enough examples for a held-out set; a split of zero produces no held-out validation measurements.</p><p>Missing telemetry means unknown, not zero. Device-wide memory can include other applications. Use the event log to understand a failed or stopped run.</p>"
+        ],
+        [
+          "evaluate",
+          "Test and keep the result",
+          "<p>After a successful run, open Adapters and activate the new adapter with its matching base. Try your held-out prompts and compare the responses with the base model. Check the behavior you wanted to improve and a few unrelated prompts.</p><p>Export the adapter if you want a portable copy. The export does not include the full base model, which must remain accessible.</p>"
+        ]
+      ]
+    },
+    {
+      "id": "settings-data",
+      "title": "Settings, storage and privacy",
+      "short": "Settings & storage",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "settings",
+      "description": "Where your data lives, what each Settings page controls, and how to clean up.",
+      "sources": [
+        "privacy",
+        "install"
+      ],
+      "sections": [
+        [
+          "pages",
+          "What each page controls",
+          "<table><thead><tr><th>Page</th><th>Controls</th></tr></thead><tbody><tr><td>General</td><td>Your name for greetings, keyboard shortcuts, resetting preferences.</td></tr><tr><td>Appearance</td><td>Light, dark or System theme, interface size and Reduce motion.</td></tr><tr><td>Chat</td><td>Send key, context meter style and automatic compaction.</td></tr><tr><td>Runtime</td><td>The default inference engine.</td></tr><tr><td>Storage &amp; privacy</td><td>Data directory, model cache, partial downloads, exporting and deleting chats.</td></tr><tr><td>Notifications</td><td>Alerts when training or downloads finish.</td></tr><tr><td>Diagnostics</td><td>Backend status, installed engines, hardware and logs.</td></tr><tr><td>Updates</td><td>Checking for and installing preview updates.</td></tr></tbody></table>"
+        ],
+        [
+          "storage",
+          "Where your data lives",
+          "<p>Conversations, datasets, adapters, Knowledge indexes and Blueprints live in the data directory (<code>~/.magnite</code> on Linux and macOS, <code>%APPDATA%/Magnite</code> on Windows). Downloaded Hub models live in the shared Hugging Face cache, which other tools can also use.</p><p>You can choose another data directory; the change applies after a restart and existing data is not moved.</p>"
+        ],
+        [
+          "cleanup",
+          "Free space and remove data",
+          "<ul><li><strong>Partial downloads</strong> lists unfinished Hub downloads and their size; delete them to reclaim space.</li><li>Delete models from Library or a model's Hub page.</li><li><strong>Export chats</strong> saves every conversation to one JSON file; <strong>Delete chats…</strong> removes them.</li></ul>"
+        ],
+        [
+          "privacy",
+          "Privacy",
+          "<p>Inference, training and document search run locally. Hub search, downloads and update checks use the internet. Diagnostics and logs stay on your computer unless you choose to share them.</p>"
+        ]
+      ]
+    },
     {
       "id": "model-learning",
       "title": "What does a language model learn?",
@@ -516,51 +951,10 @@
       ]
     },
     {
-      "id": "first-run",
-      "title": "Anatomy of a training run",
-      "short": "Anatomy of a run",
-      "group": "Magnite Space reference",
-      "type": "WORKFLOW",
-      "icon": "graduation-cap",
-      "description": "How data, a base model, optimization and evaluation fit together inside Magnite Space.",
-      "sources": [
-        "workflow",
-        "api",
-        "limits"
-      ],
-      "sections": [
-        [
-          "before-you-start",
-          "The parts of an experiment",
-          "<p>A training run connects four decisions: which pretrained behavior you start with, which examples you supply, which parameters can change, and how you judge the result. The buttons in the app correspond to these decisions; a successful job only confirms that the computation completed.</p><p>The training base is a compatible Transformers model. A GGUF snapshot belongs to the inference workflow. The dataset supplies the examples, the recipe controls optimization, and the resulting adapter must be evaluated with its matching base.</p>"
-        ],
-        [
-          "prepare",
-          "Prepare the base and dataset",
-          "<p>In Library, download or locate compatible transformer weights. In Training, import a UTF-8 JSONL, CSV or text file. Review the imported row count and inspect the examples before starting.</p><p>A useful first dataset is consistent, easy to inspect, and specific to your task. Keep a separate set of evaluation prompts that the model will not train on.</p>"
-        ],
-        [
-          "configure",
-          "Make a small, named experiment",
-          "<p>Open the run configuration in Training. Select the base model and imported dataset. Give the adapter a descriptive name. Begin with LoRA and quantization None when your setup supports them.</p><p>Choose a batch size and sequence length that fit your machine. The resource estimate is advisory. A successful short run checks the workflow; it does not prove the recipe will generalize.</p><div class=\"article-callout\"><strong>Keep the comparison simple</strong>Record the dataset, base snapshot and configuration. Change one important setting at a time.</div>"
-        ],
-        [
-          "observe",
-          "Watch the run",
-          "<p>Follow status, steps and loss in Studio. Open Observatory to review history and compare runs. Enable a validation split when you have enough examples for a held-out set; a split of zero produces no held-out validation measurements.</p><p>Missing telemetry means unknown, not zero. Device-wide memory can include other applications. Use the event log to understand a failed or stopped run.</p>"
-        ],
-        [
-          "evaluate",
-          "Test and keep the result",
-          "<p>After a successful run, open Adapters and activate the new adapter with its matching base. Try your held-out prompts and compare the responses with the base model. Check the behavior you wanted to improve and a few unrelated prompts.</p><p>Export the adapter if you want a portable copy. The export does not include the full base model, which must remain accessible.</p>"
-        ]
-      ]
-    },
-    {
       "id": "troubleshooting",
       "title": "Investigating a training problem",
       "short": "Troubleshooting",
-      "group": "Magnite Space reference",
+      "group": "Help & reference",
       "type": "TROUBLESHOOTING",
       "icon": "file-text",
       "description": "Interpret errors and unexpected behavior using your inputs, configuration and runtime.",
@@ -601,7 +995,7 @@
       "id": "glossary",
       "title": "Machine learning vocabulary",
       "short": "Glossary",
-      "group": "Magnite Space reference",
+      "group": "Help & reference",
       "type": "REFERENCE",
       "icon": "file-text",
       "description": "Definitions of the terms used across model training, data preparation and inference.",
@@ -708,7 +1102,7 @@
       "model-learning"
     ],
     "first-run": [
-      "model-learning",
+      "training-studio",
       "data-quality",
       "read-run"
     ],
@@ -721,8 +1115,56 @@
       "model-learning",
       "tokens-context",
       "data-distribution"
+    ],
+    "welcome": [
+      "first-model",
+      "conversations",
+      "blueprints"
+    ],
+    "first-model": [
+      "hub-library",
+      "conversations",
+      "model-types"
+    ],
+    "hub-library": [
+      "first-model",
+      "model-types",
+      "settings-data"
+    ],
+    "conversations": [
+      "tool-mode",
+      "knowledge",
+      "tokens-context"
+    ],
+    "tool-mode": [
+      "conversations",
+      "blueprints",
+      "settings-data"
+    ],
+    "knowledge": [
+      "rag",
+      "conversations",
+      "blueprint-nodes"
+    ],
+    "blueprints": [
+      "blueprint-nodes",
+      "tool-mode",
+      "knowledge"
+    ],
+    "blueprint-nodes": [
+      "blueprints",
+      "knowledge",
+      "lora"
+    ],
+    "training-studio": [
+      "first-run",
+      "read-run",
+      "parameters"
+    ],
+    "settings-data": [
+      "hub-library",
+      "conversations",
+      "troubleshooting"
     ]
-  },
-  "format_version": 1,
-  "reviewed": "2026-11-11"
+  }
 }

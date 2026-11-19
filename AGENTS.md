@@ -11,6 +11,7 @@ cmake --build build -j
 ./build/magnite-app
 ```
 
+- Agents: do not run an unbounded `cmake --build build -j` — it can hang the machine. Build in two limited steps instead: `cmake --build build --target magnite-app_autogen -j 4`, then `cmake --build build --target magnite-app -j 4`.
 - New C++ files must be added to `MAGNITE_SOURCES` in `app/CMakeLists.txt` (explicit list, AUTOMOC/AUTORCC on). Qt6 Widgets + Network + Svg and OpenSSL Crypto; `-Wall -Wextra`.
 - Source builds look up the repo from the binary's location: use `<repo>/build/magnite-app` for `backend/src` and `.venv` to resolve. Packaged builds instead use the isolated Python under `runtime/python` beside the executable. See `packaging/README.md` for the test AppImage recipe and checks.
 - Backend data lives in `~/.magnite` on Linux/macOS and `%APPDATA%/Magnite` on Windows (override `MAGNITE_HOME`). Run it standalone for debugging: `magnite-backend --port 0 --home ~/.magnite`. Desktop launches require a per-launch Bearer credential except for `/health`; tokenless standalone launches omit credential checks. The CLI enforces loopback Host values and a data-directory lock on POSIX/Windows; direct Uvicorn startup bypasses that wrapper.

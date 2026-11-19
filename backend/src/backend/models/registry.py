@@ -705,6 +705,87 @@ class ModelRegistry:
                 pass
         return self._store.list(source=source, q=q)
 
+    # ---- Partial downloads ---------------------------------------------
+
+    def _repo_folder(self, repo_id: str) -> Path:
+        if not repo_id or "/" not in repo_id or "\\" in repo_id or ".." in repo_id.split("/"):
+            raise ValueError(f"Invalid repository id '{repo_id}'")
+        return Path(self._hf_cache).expanduser() / ("models--" + repo_id.replace("/", "--"))
+
+    @staticmethod
+    def _incomplete_blobs(folder: Path) -> list[Path]:
+        blobs = folder / "blobs"
+        if not blobs.is_dir() or blobs.is_symlink():
+            return []
+        return [p for p in blobs.iterdir() if p.name.endswith(".incomplete") and p.is_file() and not p.is_symlink()]
+
+    @staticmethod
+    def _has_snapshot_files(folder: Path) -> bool:
+        snapshots = folder / "snapshots"
+        return snapshots.is_dir() and any(p.is_file() for p in snapshots.rglob("*"))
+
+    def list_partial_downloads(self) -> list[dict]:
+        """Hub repositories holding unfinished (*.incomplete) blobs left by an interrupted
+        or failed download. Repositories that are downloading right now are skipped."""
+        cache = Path(self._hf_cache).expanduser()
+        if not cache.is_dir():
+            return []
+        active = self._active_hf_repos()
+        found = []
+        for folder in sorted(cache.glob("models--*")):
+            if not folder.is_dir() or folder.is_symlink():
+                continue
+            repo_id = folder.name[len("models--"):].replace("--", "/", 1)
+            if repo_id.lower() in active:
+                continue
+            try:
+                partial = self._incomplete_blobs(folder)
+                if not partial:
+                    continue
+                size = sum(p.stat().st_size for p in partial)
+                modified = max(p.stat().st_mtime for p in partial)
+                complete = self._has_snapshot_files(folder)
+            except OSError as exc:
+                logger.warning("Cannot inspect partial download %s: %s", folder, exc)
+                continue
+            found.append({
+                "repo": repo_id, "bytes": size, "files": len(partial),
+                "modified": datetime.fromtimestamp(modified, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                # True when finished files from an earlier download remain usable.
+                "has_complete_files": complete,
+                "registered": self._store.get(model_id("huggingface", repo_id)) is not None,
+            })
+        return found
+
+    def delete_partial_download(self, repo_id: str) -> dict:
+        """Remove a repository's unfinished blobs. When nothing usable remains and the
+        model is not in the library, the leftover repository and lock folders go too."""
+        import shutil
+        folder = self._repo_folder(repo_id)
+        with self._sync_lock:
+            if repo_id.lower() in self._active_hf_repos():
+                raise RuntimeError("This model is being downloaded. Cancel the download first.")
+            if not folder.is_dir() or folder.is_symlink():
+                raise FileNotFoundError(repo_id)
+            freed = removed = 0
+            for blob in self._incomplete_blobs(folder):
+                try:
+                    size = blob.stat().st_size
+                    blob.unlink()
+                    freed += size
+                    removed += 1
+                except FileNotFoundError:
+                    continue
+            registered = self._store.get(model_id("huggingface", repo_id)) is not None
+            folder_removed = False
+            if not registered and not self._has_snapshot_files(folder):
+                freed += sum(p.stat().st_size for p in folder.rglob("*") if p.is_file() and not p.is_symlink())
+                shutil.rmtree(folder)
+                shutil.rmtree(Path(self._hf_cache).expanduser() / ".locks" / folder.name, ignore_errors=True)
+                folder_removed = True
+            return {"repo": repo_id, "bytes_freed": freed, "files_removed": removed,
+                    "folder_removed": folder_removed}
+
     def delete_model(self, model_id: str) -> bool:
         with self._sync_lock:
             return self._delete_model(model_id)

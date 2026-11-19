@@ -3,6 +3,7 @@
 #include "widgets/brandmark.h"
 #include <QShortcut>
 #include "mainwindow.h"
+#include <QScrollArea>
 #include "backend_manager.h"
 #include "backend_client.h"
 #include "update_manager.h"
@@ -278,7 +279,7 @@ void MainWindow::setupUi() {
     mode->setCursor(Qt::PointingHandCursor);
     syncThemeButton();
     connect(mode, &QPushButton::toggled, this, [this, mode](bool dark) {
-        Theme::setDark(dark);
+        Theme::setDark(dark, true);
         QSettings().setValue("appearance/studio3Dark", dark);
         QSettings().setValue("appearance/themeMode", dark?"dark":"light");
         syncThemeButton();
@@ -399,6 +400,9 @@ void MainWindow::setupUi() {
     connect(m_adaptersPanel, &AdaptersPanel::adapterActivity, m_libraryPanel,
             [this](const QString &name, const QString &action, const QString &status) {
         m_libraryPanel->recordActivity(name, action, status);
+    });
+    connect(m_modelHubPanel, &ModelHubPanel::modelRemoved, m_libraryPanel, [this](const QString &id) {
+        m_libraryPanel->recordActivity(id, "Removal", "Completed");
     });
     connect(m_modelHubPanel, &ModelHubPanel::downloadActivity, m_libraryPanel,
             [this](const QString &repo, const QString &status, const QString &detail) {
@@ -672,6 +676,18 @@ void MainWindow::captureNextPanel(int index) {
         return;
     }
     switchPanel(index);
+    // MAGNITE_SCREENSHOT_SETTINGS_CATEGORY picks which Settings page is captured.
+    if (index == PanelSettings && qEnvironmentVariableIsSet("MAGNITE_SCREENSHOT_SETTINGS_CATEGORY"))
+        m_settingsPanel->selectCategory(qEnvironmentVariableIntValue("MAGNITE_SCREENSHOT_SETTINGS_CATEGORY"));
+    // MAGNITE_SCREENSHOT_SETTINGS_FOCUS scrolls that Settings widget (by object name) into view.
+    if (index == PanelSettings && qEnvironmentVariableIsSet("MAGNITE_SCREENSHOT_SETTINGS_FOCUS")) {
+        const QString name = qEnvironmentVariable("MAGNITE_SCREENSHOT_SETTINGS_FOCUS");
+        QTimer::singleShot(qBound(100, qEnvironmentVariable("MAGNITE_SCREENSHOT_DWELL_MS", "300").toInt() - 100, 30000), this, [this, name] {
+            for (auto *scroll : m_settingsPanel->findChildren<QScrollArea *>())
+                if (scroll->isVisible())
+                    if (auto *target = scroll->findChild<QWidget *>(name)) scroll->ensureWidgetVisible(target, 0, 40);
+        });
+    }
     // MAGNITE_SCREENSHOT_DWELL_MS keeps each panel up long enough for its polled data to arrive.
     const int dwell = qBound(300, qEnvironmentVariable("MAGNITE_SCREENSHOT_DWELL_MS", "300").toInt(), 30000);
     QTimer::singleShot(dwell, this, [this, index]() {

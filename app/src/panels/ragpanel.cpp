@@ -4,6 +4,7 @@
 #include "textformat.h"
 #include "widgets/combobox.h"
 #include "widgets/confirmation.h"
+#include <QEvent>
 #include <QTimer>
 #include <memory>
 
@@ -58,19 +59,40 @@ RagPanel::RagPanel(QWidget *parent)
 void RagPanel::setupUi() {
     auto *layout = contentLayout();
 
-    auto *btnRow = new QHBoxLayout();
+    layout->setSpacing(14);
+    auto *documents = Surface::card(this);
+    documents->parentWidget()->setObjectName("ragDocumentsCard");
+    documents->setSpacing(10);
+    auto *documentsHead = new QHBoxLayout();
+    documentsHead->setSpacing(8);
+    auto *documentsTitles = new QVBoxLayout();
+    documentsTitles->setSpacing(2);
+    auto *documentsTitle = new QLabel("Documents", this);
+    documentsTitle->setObjectName("ragSectionTitle");
+    documentsTitles->addWidget(documentsTitle);
+    m_countLabel = new QLabel("Nothing indexed yet", this);
+    m_countLabel->setObjectName("ragCount");
+    m_countLabel->setTextFormat(Qt::PlainText);
+    m_countLabel->setWordWrap(true);
+    m_countLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    documentsTitles->addWidget(m_countLabel);
+    documentsHead->addLayout(documentsTitles, 1);
     m_addButton = new Button("Add files…", this);
     m_addButton->setObjectName("primaryBtn");
+    m_addButton->setIcon(Theme::coloredIcon("plus", QColor(Theme::accentText()), 14));
+    m_addButton->setToolTip("Index PDF, text, Markdown or HTML files. Your files stay where they are.");
+    documentsHead->addWidget(m_addButton, 0, Qt::AlignTop);
+    documents->addLayout(documentsHead);
     m_removeButton = new Button("Remove", this);
-    m_removeButton->setObjectName("secondaryBtn");
+    m_removeButton->setObjectName("ragQuietAction");
+    m_removeButton->setFlat(true);
     m_removeButton->setEnabled(false);
+    m_removeButton->setToolTip("Remove the selected documents from Knowledge. Your files are kept.");
     m_clearButton = new Button("Clear all", this);
-    m_clearButton->setObjectName("destructiveBtn");
-    btnRow->addWidget(m_addButton);
-    btnRow->addWidget(m_removeButton);
-    btnRow->addWidget(m_clearButton);
-    auto *documents = Surface::card(this, "Sources");
-    documents->addLayout(btnRow);
+    m_clearButton->setObjectName("ragQuietDanger");
+    m_clearButton->setFlat(true);
+    m_clearButton->setProperty("danger", true);
+    m_clearButton->setToolTip("Remove every document from Knowledge. Your files are kept.");
 
     // Ingest/reindex progress (GET /rag/activity), shown only while such a request is open.
     m_progressBox = new QWidget(this);
@@ -120,16 +142,52 @@ void RagPanel::setupUi() {
 
     // Empty state (shown instead of the scroll area when no docs are added).
     m_emptyState = new QWidget(this);
+    m_emptyState->setObjectName("ragEmptyState");
     auto *emptyLayout = new QVBoxLayout(m_emptyState);
-    emptyLayout->setContentsMargins(12, 12, 12, 12);
+    emptyLayout->setContentsMargins(12, 18, 12, 14);
+    emptyLayout->setSpacing(6);
     emptyLayout->setAlignment(Qt::AlignCenter);
-    auto *hint = new QLabel("No documents yet.", m_emptyState);
-    hint->setObjectName("mutedLabel");
+    auto *emptyIcon = new QLabel(m_emptyState);
+    emptyIcon->setObjectName("ragEmptyIcon");
+    emptyIcon->setFixedSize(40, 40);
+    emptyIcon->setAlignment(Qt::AlignCenter);
+    emptyIcon->setProperty("ragIcon", "database");
+    emptyIcon->setPixmap(Theme::coloredIcon("database", QColor(Theme::accentLabel()), 20).pixmap(20, 20));
+    emptyLayout->addWidget(emptyIcon, 0, Qt::AlignHCenter);
+    auto *emptyTitle = new QLabel("No documents yet", m_emptyState);
+    emptyTitle->setObjectName("ragEmptyTitle");
+    emptyTitle->setAlignment(Qt::AlignCenter);
+    emptyLayout->addWidget(emptyTitle);
+    auto *hint = new QLabel("Add PDF, text, Markdown or HTML files. When Knowledge is on, the model reads the "
+                            "passages that match each question.", m_emptyState);
+    hint->setObjectName("ragHint");
     hint->setAlignment(Qt::AlignCenter);
     hint->setWordWrap(true);
     emptyLayout->addWidget(hint);
     m_emptyState->setLayout(emptyLayout);
     documents->addWidget(m_emptyState);
+    m_listActions = new QWidget(this);
+    auto *listActions = new QHBoxLayout(m_listActions);
+    listActions->setContentsMargins(0, 0, 0, 0);
+    listActions->setSpacing(4);
+    m_selectionHint = new QLabel("Select documents to remove them", this);
+    m_selectionHint->setObjectName("ragHint");
+    // Hints wrap rather than widen the drawer (it sizes itself to its content's minimum width).
+    m_selectionHint->setWordWrap(true);
+    m_selectionHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    listActions->addWidget(m_selectionHint, 1);
+    listActions->addWidget(m_removeButton);
+    listActions->addWidget(m_clearButton);
+    documents->addWidget(m_listActions);
+
+    // Try a question: preview the passages a prompt would receive.
+    auto *retrieval = Surface::card(this);
+    retrieval->parentWidget()->setObjectName("ragTryCard");
+    retrieval->setSpacing(8);
+    auto *tryTitle = new QLabel("Try a question", this);
+    tryTitle->setObjectName("ragSectionTitle");
+    retrieval->addWidget(tryTitle);
+    layout->addWidget(retrieval->parentWidget());
 
     // The embedding model and chunking the backend is really using (GET /rag/status).
     auto *modelCard = Surface::card(this, "Embedding model");
@@ -168,7 +226,6 @@ void RagPanel::setupUi() {
     m_clampHint->setWordWrap(true);
     m_clampHint->hide();
     modelCard->addWidget(m_clampHint);
-    layout->addWidget(modelCard->parentWidget());
 
     // Retrieval config as a surface card (design doc §4/§8).
     auto *configCard = new QFrame(this);
@@ -204,28 +261,37 @@ void RagPanel::setupUi() {
 
     configLayout->addLayout(form);
 
-    auto addDisclosure = [this, layout](const QString &title, QWidget *section) {
-        auto *toggle = new Button(title, this);
-        toggle->setCheckable(true);
-        toggle->setProperty("themeIcon", "chevron-down");
-        toggle->setIcon(Theme::coloredIcon("chevron-down", QColor(Theme::textSecondary()), 16));
-        layout->addWidget(toggle);
-        layout->addWidget(section);
-        section->hide();
-        connect(toggle, &QPushButton::toggled, section, &QWidget::setVisible);
-        connect(toggle, &QPushButton::toggled, toggle, [toggle](bool open) {
-            const QString icon = open ? "chevron-up" : "chevron-down";
-            toggle->setProperty("themeIcon", icon);
-            toggle->setIcon(Theme::coloredIcon(icon, QColor(Theme::textSecondary()), 16));
-        });
+    // Embedding model and chunking are detail: one disclosure at the bottom holds both.
+    auto *settings = new QWidget(this);
+    auto *settingsLayout = new QVBoxLayout(settings);
+    settingsLayout->setContentsMargins(0, 0, 0, 0);
+    settingsLayout->setSpacing(10);
+    settingsLayout->addWidget(modelCard->parentWidget());
+    settingsLayout->addWidget(configCard);
+    auto *settingsToggle = new Button("Retrieval settings", this);
+    settingsToggle->setObjectName("ragDisclosure");
+    settingsToggle->setCheckable(true);
+    settingsToggle->setFlat(true);
+    settingsToggle->setProperty("leftAligned", true);
+    settingsToggle->setToolTip("Embedding model, chunk size and how many passages are retrieved");
+    const auto chevron = [settingsToggle](bool open) {
+        settingsToggle->setIcon(Theme::coloredIcon(open ? "chevron-down" : "chevron-right",
+                                                   QColor(Theme::textSecondary()), 14));
     };
-    addDisclosure("Retrieval settings", configCard);
-    auto *retrieval = Surface::card(this);
-    addDisclosure("Test retrieval", retrieval->parentWidget());
+    chevron(false);
+    settingsToggle->setProperty("themeIcon", "chevron-right");
+    layout->addWidget(settingsToggle);
+    layout->addWidget(settings);
+    settings->hide();
+    connect(settingsToggle, &QPushButton::toggled, settings, &QWidget::setVisible);
+    connect(settingsToggle, &QPushButton::toggled, this, [settingsToggle, chevron](bool open) {
+        settingsToggle->setProperty("themeIcon", open ? "chevron-down" : "chevron-right");
+        chevron(open);
+    });
     // Test-retrieval row.
     auto *queryRow = new QHBoxLayout();
     m_queryEdit = new QLineEdit(this);
-    m_queryEdit->setPlaceholderText("Test a query against the ingested documents...");
+    m_queryEdit->setPlaceholderText("Ask something your documents answer…");
     m_queryEdit->setClearButtonEnabled(true);
     m_queryEdit->setObjectName("documentQuery");
     m_queryEdit->setAccessibleName("Search document contents");
@@ -240,12 +306,11 @@ void RagPanel::setupUi() {
     retrieval->addLayout(queryRow);
 
     m_resultLabel = new QLabel(this);
-    m_resultLabel->setObjectName("monoLabel");
+    m_resultLabel->setObjectName("ragResult");
     m_resultLabel->setWordWrap(true);
-    m_resultLabel->setText("Search for a topic or ask a question to preview matching passages.");
+    m_resultLabel->setText("See which passages a prompt would receive before you ask the model.");
     m_resultLabel->setTextFormat(Qt::PlainText);
     retrieval->addWidget(m_resultLabel);
-    retrieval->addStretch();
 
 
 
@@ -255,7 +320,7 @@ void RagPanel::setupUi() {
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
     layout->addStretch();
-    setStatus("Add PDF, text, Markdown or HTML files to get started.");
+    setStatus({});
     m_configTimer = new QTimer(this);
     m_configTimer->setSingleShot(true);
     m_configTimer->setInterval(350);
@@ -319,9 +384,11 @@ void RagPanel::refresh(bool preserveStatus) {
         }
         applyStatus();
         populatePicker();
+        // The count line above the list already says how much is indexed; the status line is for news.
         if (!preserveStatus) setStatus(m_active->engineReady
-                      ? countOf(m_active->documents, "document") + " · " + countOf(m_active->chunks, "chunk")
-                      : "Embeddings unavailable — RAG needs sentence-transformers (backend[ml]).");
+                      ? QString()
+                      : "Embeddings unavailable — RAG needs sentence-transformers (backend[ml]).",
+                      m_active->engineReady ? QString() : QString("error"));
     });
 
     m_client->get("/rag/documents", [this](int status, const QJsonDocument &doc) {
@@ -485,6 +552,7 @@ void RagPanel::onCardClicked(RagDocCard *card, bool ctrl) {
         card->setSelected(!card->isCardSelected());
     }
     m_removeButton->setEnabled(hasSelection() && !m_mutating);
+    updateEmptyState();
 }
 
 bool RagPanel::hasSelection() const {
@@ -614,8 +682,8 @@ void RagPanel::onTestQuery() {
                              .arg(text));
         }
         m_resultLabel->setText(lines.join('\n'));
-        setStatus(QString("Retrieved %1 chunk(s) for “%2”.")
-                      .arg(results.size()).arg(query), "ok");
+        setStatus(QString("Retrieved %1 for “%2”.")
+                      .arg(countOf(results.size(), "passage"), query), "ok");
     });
 }
 
@@ -676,6 +744,7 @@ void RagPanel::applyStatus() {
     m_topKSpin->setMinimum(1);
     if (a.topK > 0) m_topKSpin->setValue(a.topK);
     m_loadingConfig = false;
+    updateEmptyState();
 }
 
 namespace {
@@ -806,6 +875,7 @@ void RagPanel::setDocumentScope(const QJsonValue &scope) {
         const QSignalBlocker guard(card->sourceToggle());
         card->sourceToggle()->setChecked(!scope.isArray() || ids.contains(card->id()));
     }
+    updateEmptyState();
     emit sourceScopeChanged();
 }
 
@@ -835,10 +905,21 @@ void RagPanel::updateEmptyState() {
     m_clearButton->setEnabled(hasDocs && !m_mutating);
     m_docScroll->setVisible(hasDocs);
     m_emptyState->setVisible(!hasDocs);
+    m_listActions->setVisible(hasDocs);
+    m_selectionHint->setVisible(hasDocs && !hasSelection());
+    int enabled = 0;
+    for (const auto *card : m_cards) enabled += card->sourceToggle()->isChecked();
+    QString count = hasDocs ? QString("%1 document%2").arg(m_cards.size()).arg(m_cards.size() == 1 ? "" : "s")
+                            : QString("Nothing indexed yet");
+    if (hasDocs && m_active && m_active->chunks > 0)
+        count += QString(" · %1 passage%2").arg(m_active->chunks).arg(m_active->chunks == 1 ? "" : "s");
+    if (hasDocs && enabled < m_cards.size()) count += QString(" · %1 in use").arg(enabled);
+    m_countLabel->setText(count);
 }
 
 void RagPanel::setStatus(const QString &text, const QString &tone) {
     m_statusLabel->setText(text);
+    m_statusLabel->setVisible(!text.isEmpty());
     applyStatusTone(m_statusLabel, tone);
 }
 
@@ -857,4 +938,12 @@ void RagPanel::applySettingsJson(const QString &json) {
     auto o = doc.object();
     if (o.contains("topK") && m_topKSpin->isEnabled()) m_topKSpin->setValue(o["topK"].toInt());
     m_loadingConfig = false;
+}
+
+void RagPanel::changeEvent(QEvent *event) {
+    BasePanel::changeEvent(event);
+    if (event->type() != QEvent::StyleChange && event->type() != QEvent::PaletteChange) return;
+    for (auto *icon : findChildren<QLabel *>("ragEmptyIcon"))
+        icon->setPixmap(Theme::coloredIcon("database", QColor(Theme::accentLabel()), 20).pixmap(20, 20));
+    if (m_addButton) m_addButton->setIcon(Theme::coloredIcon("plus", QColor(Theme::accentText()), 14));
 }

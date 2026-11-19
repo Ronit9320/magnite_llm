@@ -323,14 +323,17 @@ QWidget#trainingPage QLabel#trainingTimeline { font-size: 11px; color: @textSeco
 QWidget#trainingPage QWidget#trainingExperimentIndex { border-right: 1px solid @surfaceBorder; }
 QWidget#trainingPage QListWidget#trainingRuns { background: transparent; border: none; outline: none; }
 QWidget#trainingPage QListWidget#trainingRuns::item { border: 1px solid transparent; border-radius: 5px; margin-bottom: 7px; }
-QWidget#trainingPage QListWidget#trainingRuns::item:selected { background: @surfaceFill; border-color: @surfaceBorder; border-left: 2px solid transparent; }
+QWidget#trainingPage QListWidget#trainingRuns::item:selected { background: @surfaceFill; border: 1px solid @surfaceBorder; }
 QWidget#trainingPage QWidget#trainingIndexItem { border: none; background: transparent; }
-QWidget#trainingPage QLabel#trainingIndexName { font-size: 11px; font-weight: 500; }
+QWidget#trainingPage QLabel#trainingIndexName { font-size: 13px; font-weight: 500; }
+QWidget#trainingPage QLabel#trainingIndexState { font-size: 11px; color: @textMuted; font-family: @monoFont; }
+QWidget#trainingPage QLabel#trainingTableName { font-size: 14px; font-weight: 500; color: @textPrimary; }
+QWidget#trainingPage QLabel#trainingTableMeta { font-size: 11px; color: @textMuted; }
 QWidget#trainingPage QLabel#trainingIndexLoss { font-family: @headingFont; font-size: 16px; }
-QWidget#trainingPage QTableWidget#trainingExperimentTable { background: @surfaceFill; border: 1px solid transparent; border-radius: 8px; outline: none; }
-QWidget#trainingPage QTableWidget#trainingExperimentTable::item { border-bottom: 1px solid @surfaceBorder; padding: 0 12px; font-size: 11px; }
+QWidget#trainingPage QTableWidget#trainingExperimentTable { background: @surfaceFill; border: 1px solid transparent; border-radius: 8px; outline: none; font-size: 13px; }
+QWidget#trainingPage QTableWidget#trainingExperimentTable::item { border-bottom: 1px solid @surfaceBorder; padding: 0 12px; }
 QWidget#trainingPage QTableWidget#trainingExperimentTable::item:selected { background: @surfaceFillHover; color: @textPrimary; }
-QWidget#trainingPage QTableWidget#trainingExperimentTable QHeaderView::section { background: @insetBackground; color: @textMuted; font-size: 11px; border: none; padding: 11px 12px; }
+QWidget#trainingPage QTableWidget#trainingExperimentTable QHeaderView::section { background: @insetBackground; color: @textMuted; font-size: 11px; font-weight: 500; letter-spacing: 1px; border: none; padding: 11px 12px; }
 QWidget#trainingPage QLabel#trainingRecipeSummary { font-size: 12px; padding: 8px 0; }
 QWidget#trainingPage QPushButton { font-size: 11px; }
 QWidget#trainingPage QPushButton#trainingReuseRun { background: @insetBackground; font-size: 11px; }
@@ -443,6 +446,9 @@ QLabel#settingsStorageFree { font-weight: 500; font-size: 12px; }
 QFrame#settingsMetric { background: @canvasBackground; border: 1px solid transparent; border-radius: 8px; }
 QFrame#settingsStorageOverview QFrame#settingsMetric { background: @surfaceFill; }
 QLabel#settingsMetricValue { font-family: @headingFont; font-size: 16px; }
+QLabel#settingsProfileValue { font-family: @headingFont; font-size: 28px; color: @textPrimary; }
+QLabel#settingsProfileAvatar { background: @surfaceFillActive; border-radius: 26px; }
+QLabel#settingsSectionEyebrow { color: @textMuted; font-size: 11px; font-weight: 500; letter-spacing: 1px; padding-top: 6px; }
 QFrame[metricTone="models"] QLabel#settingsHint { color: @accentLabel; }
 QFrame[metricTone="workspace"] QLabel#settingsHint { color: @comparisonSeries; }
 QLabel#settingsRuntimeStatus { color: @textMuted; background: @canvasBackground; padding: 6px 10px; border-radius: 10px; font-size: 11px; }
@@ -481,6 +487,7 @@ QLabel#docsHint { font-size: 11px; color: @textMuted; }
 QLabel#docsEyebrow { font-size: 11px; font-weight: 500; color: @textMuted; letter-spacing: 1px; }
 QLabel#docsOffline { font-size: 11px; color: @accentLabel; }
 QLabel#docsQuestion { font-size: 13px; color: @textPrimary; }
+QLabel#docsPathNumber { font-family: @headingFont; font-size: 16px; font-weight: 500; color: @accentLabel; }
 QFrame#docsFeature, QFrame#docsInlineContents, QFrame#docsExample { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
 QFrame#docsCallout { background: @surfaceFill; border: none; border-left: 3px solid transparent; border-radius: 6px; }
 QFrame#docsRule { background: @surfaceBorder; border: none; }
@@ -681,3 +688,19 @@ QFrame#emptyState { background: @surfaceFill; border: 1px dashed @surfaceBorder;
 QLabel#emptyStateTitle { font-family: @headingFont; font-size: 16px; font-weight: 500; color: @textPrimary; background: transparent; }
 QLabel#emptyStateBody { font-size: 13px; color: @textSecondary; background: transparent; }
 QLabel#emptyStateIcon { background: transparent; }
+/* Knowledge drawer in Conversation. */
+QFrame#knowledgeUseCard, QFrame#ragDocumentsCard, QFrame#ragTryCard { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; }
+QLabel#ragSectionTitle { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QLabel#ragCount { font-size: 11px; color: @textMuted; }
+QLabel#ragHint { font-size: 11px; color: @textMuted; }
+QLabel#ragEmptyTitle { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QLabel#ragEmptyIcon { background: @surfaceFillActive; border-radius: 20px; }
+QLabel#ragResult { font-size: 12px; color: @textSecondary; }
+QPushButton#ragQuietAction, QPushButton#ragQuietDanger { padding: 4px 8px; min-height: 0; font-size: 11px; background: transparent; border: none; }
+QPushButton#ragQuietAction { color: @textSecondary; }
+QPushButton#ragQuietDanger { color: @statusError; }
+QPushButton#ragQuietAction:hover, QPushButton#ragQuietDanger:hover { background: @surfaceFillHover; }
+QPushButton#ragQuietAction:disabled, QPushButton#ragQuietDanger:disabled { color: @textMuted; }
+QPushButton#ragDisclosure { padding: 8px 4px; font-size: 12px; font-weight: 500; color: @textSecondary; background: transparent; border: none; text-align: left; }
+QPushButton#ragDisclosure:checked { color: @textPrimary; }
+QPushButton#ragDisclosure:hover { color: @textPrimary; }

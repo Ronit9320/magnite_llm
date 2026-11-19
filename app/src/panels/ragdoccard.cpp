@@ -63,8 +63,8 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
     nameLabel->setToolTip(name);
     text->addWidget(nameLabel);
     const QString meta = m_path.isEmpty()
-        ? QStringLiteral("uploaded · ") + countOf(chunks, "chunk")
-        : countOf(chunks, "chunk");
+        ? QStringLiteral("uploaded · ") + countOf(chunks, "passage")
+        : countOf(chunks, "passage");
     auto *pathLabel = new QLabel(meta, this);
     pathLabel->setObjectName(QStringLiteral("cardMeta"));
     pathLabel->setWordWrap(true);

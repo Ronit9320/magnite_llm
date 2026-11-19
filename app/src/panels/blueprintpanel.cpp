@@ -1,10 +1,12 @@
 #include "panels/blueprintpanel.h"
+#include "textformat.h"
 
 #include "panels/blueprintpreview.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
 #include "widgets/blueprintcanvas.h"
+#include "widgets/brandmark.h"
 #include "widgets/button.h"
 #include "widgets/combobox.h"
 #include "widgets/confirmation.h"
@@ -23,6 +25,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QKeyEvent>
+#include <QPainter>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -1287,7 +1290,7 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
             }
             const auto removed = edges.size() - retained.size();
             if (removed && !Ui::confirmAction(m_canvasPanel, "Update node",
-                    QString("This change will remove %1 incompatible connection(s).").arg(removed), "Save changes")) return;
+                    QString("This change will remove %1.").arg(countOf(removed, "incompatible connection")), "Save changes")) return;
             graph["edges"] = retained;
             m_outputNode.clear();
             m_outputPort.clear();
@@ -2692,6 +2695,40 @@ QJsonArray taskMessages(const QJsonObject &previous, const QString &input) {
 }
 }
 
+namespace {
+class ConversationRunLogo : public QWidget {
+public:
+    using QWidget::QWidget;
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        BrandMark::paint(painter, rect(), QColor(Theme::accentPrimary()));
+    }
+};
+
+// The blank screen of a new task or workflow session, in the same voice as a new chat.
+void addWelcome(QVBoxLayout *layout, const QString &eyebrow, const QString &title, const QString &hint) {
+    layout->addStretch();
+    auto *seal = new ConversationRunLogo;
+    seal->setObjectName("conversationLogo");
+    seal->setFixedSize(64, 64);
+    seal->setAccessibleName("Magnite Space logo");
+    layout->addWidget(seal, 0, Qt::AlignHCenter);
+    layout->addSpacing(4);
+    auto *marker = label(eyebrow, "chatEyebrow");
+    marker->setAlignment(Qt::AlignCenter);
+    layout->addWidget(marker);
+    auto *heading = wrapped(title, "emptyConversation");
+    heading->setAlignment(Qt::AlignCenter);
+    layout->addWidget(heading);
+    auto *detail = wrapped(hint);
+    detail->setAlignment(Qt::AlignCenter);
+    layout->addWidget(detail);
+    layout->addStretch();
+}
+}
+
 ConversationRunPanel::ConversationRunPanel(BlueprintPreview *preview, Mode mode, QWidget *parent)
     : QWidget(parent), m_preview(preview), m_mode(mode), m_dark(Theme::isDark()) {
     const bool tool = mode == Mode::Tool;
@@ -2708,26 +2745,28 @@ ConversationRunPanel::ConversationRunPanel(BlueprintPreview *preview, Mode mode,
     layout->setSpacing(10);
 
     auto *header = new QHBoxLayout;
+    // Both modes keep a session: the runs on screen. New starts an empty one; history reopens a saved run.
+    auto *history = action(tool ? "Task history" : "Run history", false, true);
+    m_newTask = action(tool ? "New task" : "New run");
+    m_newTask->setIcon(Theme::coloredIcon("plus", QColor(Theme::textSecondary()), 16));
+    m_newTask->setProperty("themeIcon", "plus");
+    connect(history, &Button::clicked, this, &ConversationRunPanel::openTaskHistory);
+    connect(this, &ConversationRunPanel::activityChanged, history, [this, history] {
+        history->setEnabled(!hasActiveTask());
+    });
+    connect(m_newTask, &Button::clicked, this, [this] {
+        m_taskRuns.clear();
+        m_input->clear();
+        m_error->hide();
+        rebuildTranscript();
+        updateActions();
+        if (m_input->isVisible()) m_input->setFocus();
+        else if (m_blueprint) m_blueprint->setFocus();
+    });
     if (tool) {
         header->addWidget(label("Task conversation", "headingLabel"), 1);
-        auto *history = action("Task history", false, true);
-        m_newTask = action("New task");
-        m_newTask->setIcon(Theme::coloredIcon("plus", QColor(Theme::textSecondary()), 16));
-        m_newTask->setProperty("themeIcon", "plus");
         header->addWidget(history);
         header->addWidget(m_newTask);
-        connect(history, &Button::clicked, this, &ConversationRunPanel::openTaskHistory);
-        connect(this, &ConversationRunPanel::activityChanged, history, [this, history] {
-            history->setEnabled(!hasActiveTask());
-        });
-        connect(m_newTask, &Button::clicked, this, [this] {
-            m_taskRuns.clear();
-            m_input->clear();
-            m_error->hide();
-            rebuildTranscript();
-            updateActions();
-            m_input->setFocus();
-        });
     } else {
         header->addWidget(label("Workflow", "headingLabel"));
         m_blueprint = new ComboBox;
@@ -2735,8 +2774,10 @@ ConversationRunPanel::ConversationRunPanel(BlueprintPreview *preview, Mode mode,
         m_blueprint->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         m_blueprint->setMinimumContentsLength(16);
         header->addWidget(m_blueprint, 1);
-        auto *library = action("Open Blueprints");
+        auto *library = action("Open Blueprints", false, true);
         header->addWidget(library);
+        header->addWidget(history);
+        header->addWidget(m_newTask);
         connect(library, &Button::clicked, this, &ConversationRunPanel::libraryRequested);
         connect(m_blueprint, &ComboBox::currentIndexChanged, this, [this] {
             m_preferredBlueprint.clear();
@@ -2790,8 +2831,10 @@ ConversationRunPanel::ConversationRunPanel(BlueprintPreview *preview, Mode mode,
     connect(m_preview, &BlueprintPreview::runChanged, this, [this, tool](const QString &id) {
         const auto run = m_preview->run(id);
         if (run["source"] != "Local chat" || tool != isToolTask(run)) return;
+        // A task still running from before (e.g. after a restart) resumes in Tool mode. A workflow session only
+        // holds runs started or reopened here, so New run stays empty while an earlier run finishes.
         if (tool && m_taskRuns.isEmpty() && !m_starting && running(run)) m_taskRuns.append(id);
-        if (!tool || m_taskRuns.contains(id)) {
+        if (m_taskRuns.contains(id)) {
             rebuildTranscript();
             updateActions();
             if (tool) emit activityChanged();
@@ -2949,10 +2992,10 @@ void ConversationRunPanel::updateActions() {
     const bool active = hasActiveTask();
     const bool needsInput = tool || !BlueprintPreview::inputContracts(m_chatGraph, {}).isEmpty();
     m_send->setEnabled(m_readyToSend && !m_starting && !active && (!needsInput || text));
+    m_newTask->setEnabled(!active && (!m_taskRuns.isEmpty() || text));
     if (tool) {
         m_stop->setVisible(active && !m_starting);
         m_stop->setEnabled(!m_preview->live() || m_preview->connected());
-        m_newTask->setEnabled(!active && (!m_taskRuns.isEmpty() || text));
         m_input->setPlaceholderText(m_taskRuns.isEmpty() ? "Describe a task for your local model…" : "Ask a follow-up…");
     }
 }
@@ -2967,7 +3010,7 @@ void ConversationRunPanel::send() {
         const auto scenario = !tool ? "normal" :
             original.contains("version", Qt::CaseInsensitive) ? "command" : "approval";
         const auto id = m_preview->start(m_chatGraph, original, {}, scenario, "Local chat", &error);
-        if (tool && !id.isEmpty() && !m_taskRuns.contains(id)) m_taskRuns.append(id);
+        if (!id.isEmpty() && !m_taskRuns.contains(id)) m_taskRuns.append(id);
         if (error.isEmpty()) m_input->clear();
         m_error->setText(error);
         m_error->setVisible(!error.isEmpty());
@@ -2991,7 +3034,7 @@ void ConversationRunPanel::send() {
     const auto done = [self = QPointer(this), original, tool](const auto &run, const auto &error) {
         if (!self) return;
         self->m_starting = false;
-        if (tool && !run.isEmpty()) self->m_taskRuns.append(run["id"].toString());
+        if (!run.isEmpty() && !self->m_taskRuns.contains(run["id"].toString())) self->m_taskRuns.append(run["id"].toString());
         if (error.isEmpty() && self->m_input->toPlainText() == original) self->m_input->clear();
         self->m_error->setText(error);
         self->m_error->setVisible(!error.isEmpty());
@@ -3012,25 +3055,28 @@ void ConversationRunPanel::send() {
 }
 
 void ConversationRunPanel::openTaskHistory() {
+    const bool tool = m_mode == Mode::Tool;
     SettingsDetailDialog dialog(this);
-    dialog.setWindowTitle("Task history");
+    dialog.setWindowTitle(tool ? "Task history" : "Run history");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
     auto *items = new QListWidget;
-    items->setAccessibleName("Recent tool tasks");
+    items->setAccessibleName(tool ? "Recent tool tasks" : "Recent workflow runs");
     const auto runs = m_preview->chatRuns();
     for (auto it = runs.constEnd(); it != runs.constBegin();) {
         const auto run = (*--it).toObject();
-        if (!isToolTask(run)) continue;
+        if (isToolTask(run) != tool) continue;
         const auto prompt = run["input"].toString().simplified();
-        const auto summary = prompt.isEmpty() ? run["name"].toString() : prompt.left(85);
+        QString summary = prompt.isEmpty() ? run["name"].toString() : prompt.left(85);
+        if (!tool) summary = run["name"].toString() + (prompt.isEmpty() ? QString() : " · " + prompt.left(60));
         auto *item = new QListWidgetItem(summary + " · " + BlueprintPreview::statusLabel(run["status"].toString()), items);
         item->setData(Qt::UserRole, run["id"]);
     }
-    if (!items->count()) body->addWidget(wrapped("Your recent tasks will appear here."));
+    if (!items->count()) body->addWidget(wrapped(tool ? "Your recent tasks will appear here."
+                                                      : "Workflows you run here will appear in this list."));
     body->addWidget(items);
     items->setCurrentRow(0);
-    const auto buttons = dialogButtons(&dialog, body, "Open task");
+    const auto buttons = dialogButtons(&dialog, body, tool ? "Open task" : "Open run");
     for (auto *button : buttons->buttons())
         if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) button->setEnabled(items->count() > 0);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -3042,6 +3088,13 @@ void ConversationRunPanel::openTaskHistory() {
     m_taskRuns = {id};
     m_input->clear();
     m_error->hide();
+    if (!tool) {   // select the run's workflow, so running it again is one step
+        const auto blueprint = m_preview->run(id)["blueprintId"].toString();
+        if (!blueprint.isEmpty()) {
+            m_preferredBlueprint = blueprint;
+            refreshPicker();
+        }
+    }
     rebuildTranscript();
     updateActions();
     emit activityChanged();
@@ -3056,22 +3109,17 @@ void ConversationRunPanel::rebuildTranscript() {
     clear(m_messages);
     const bool tool = m_mode == Mode::Tool;
     QJsonArray runs;
-    if (tool) {
-        for (const auto &id : std::as_const(m_taskRuns)) runs.append(m_preview->run(id));
-    } else {
-        for (const auto &value : m_preview->chatRuns())
-            if (!isToolTask(value.toObject())) runs.append(value);
+    for (const auto &id : std::as_const(m_taskRuns)) {
+        const auto run = m_preview->run(id);
+        if (!run.isEmpty()) runs.append(run);
     }
     if (runs.isEmpty()) {
-        m_messages->addStretch();
-        auto *title = wrapped(tool ? "What would you like to do?" : "Run a saved workflow", "blueprintTitle");
-        title->setAlignment(Qt::AlignCenter);
-        m_messages->addWidget(title);
-        auto *hint = wrapped(tool ? "Choose a local model and describe the task. You can review each action before it runs."
-            : "Choose a blueprint above to see its inputs. Results and tool approvals appear here.");
-        hint->setAlignment(Qt::AlignCenter);
-        m_messages->addWidget(hint);
-        m_messages->addStretch();
+        if (tool)
+            addWelcome(m_messages, "TOOL MODE", "What would you like to do?",
+                       "Choose a local model and describe the task. You can review each action before it runs.");
+        else
+            addWelcome(m_messages, "BLUEPRINT", "Run a saved workflow",
+                       "Choose a blueprint above to see its inputs. Results and tool approvals appear here.");
         return;
     }
 

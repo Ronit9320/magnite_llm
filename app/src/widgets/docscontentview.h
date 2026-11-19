@@ -35,8 +35,10 @@ class DocsTextView : public QTextBrowser {
 
 class DocsDiagram : public QWidget {
   public:
-    enum Kind { Learning, Tokens, LoRA, Data, Distribution };
+    enum Kind { Learning, Tokens, LoRA, Data, Distribution, Steps };
     explicit DocsDiagram(Kind kind, QWidget *parent = nullptr);
+    // A flow of 2–5 labelled steps joined by arrows (articles' concept-flow blocks).
+    explicit DocsDiagram(const QStringList &steps, QWidget *parent = nullptr);
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override { return QSize(0, 80); }
     int heightForWidth(int width) const override;
@@ -45,5 +47,7 @@ class DocsDiagram : public QWidget {
     void paintEvent(QPaintEvent *event) override;
 
   private:
+    bool vertical(int width) const;
     Kind m_kind;
+    QStringList m_steps;
 };
