@@ -325,7 +325,9 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     m_pages->addWidget(m_workspace);
     setupCreatePage();
     auto *library = new QVBoxLayout(m_library);
-    library->setContentsMargins(0, 0, 0, 0);
+    // The library page lines up with the 32px gutter the other panels use;
+    // the editor keeps the tighter frame for the canvas.
+    library->setContentsMargins(12, 0, 12, 0);   // 20px root + 12 = the 32px BasePanel gutter
     m_service = wrapped({}, "blueprintWarning");
     m_service->hide();
     library->addWidget(m_service);
@@ -552,7 +554,11 @@ void BlueprintPanel::refreshLibrary() {
         const auto revision = graph["revision"].toInt();
         auto *badge = label(revision ? QString("Revision %1").arg(revision) : QString("Draft"), "blueprintRevision");
         name->addWidget(badge, 0, Qt::AlignVCenter);
-        if (revision && graph["dirty"].toBool()) name->addWidget(label("Unsaved edits", "blueprintRevision"), 0, Qt::AlignVCenter);
+        if (revision && graph["dirty"].toBool()) {
+            auto *unsaved = label("Unsaved edits", "blueprintRevision");
+            unsaved->setProperty("state", "warn");
+            name->addWidget(unsaved, 0, Qt::AlignVCenter);
+        }
         name->addStretch();
         text->addLayout(name);
         const auto description = graph["description"].toString().trimmed();

@@ -72,12 +72,14 @@ void SmoothScrollBar::paintEvent(QPaintEvent *event) {
     else
         pill = QRectF(handle.left(), height() - kEdgeInset - thickness, handle.width(), thickness);
 
-    QColor color(Theme::accentPrimary());
-    const QColor hover(Theme::accentHover());
+    // Neutral at rest so the thumb never competes with primary actions; it
+    // brightens on hover and takes the accent only while it is dragged.
+    QColor color(Theme::controlBorder());
+    const QColor hover(Theme::textMuted());
     color = QColor::fromRgbF(color.redF() + (hover.redF() - color.redF()) * m_swell,
                              color.greenF() + (hover.greenF() - color.greenF()) * m_swell,
                              color.blueF() + (hover.blueF() - color.blueF()) * m_swell);
-    if (isSliderDown()) color = QColor(Theme::accentActive());
+    if (isSliderDown()) color = QColor(Theme::accentPrimary());
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);

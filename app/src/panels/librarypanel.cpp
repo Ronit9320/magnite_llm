@@ -1,4 +1,5 @@
 #include "panels/librarypanel.h"
+#include "textformat.h"
 
 #include "backend_client.h"
 #include "panels/adaptercard.h"
@@ -111,16 +112,24 @@ LibraryPanel::LibraryPanel(ModelsPanel *models, AdaptersPanel *adapters)
     m_scopeLabel = text({}, "hubSectionTitle", this);
     auto *scopeRow = new QHBoxLayout;
     scopeRow->addWidget(m_scopeLabel, 1);
-    auto *all = new Button("All items", this);
+    // One filter row: search, Pinned, source, sort. "Show all" appears only
+    // when a project, folder or Pinned filter narrows the list.
+    auto *all = new Button("Show all", this);
+    all->setObjectName("libraryShowAll");
+    all->setToolTip("Clear the project, folder and Pinned filters");
+    all->hide();
+    m_allItems = all;
     scopeRow->addWidget(all);
     m_pinned = new Button("Pinned", this);
     m_pinned->setCheckable(true);
-    scopeRow->addWidget(m_pinned);
+    m_pinned->setProperty("themeIcon", "pin");
+    m_pinned->setIcon(Theme::coloredIcon("pin", QColor(Theme::textSecondary()), 14));
     m_search = new QLineEdit(this);
     m_search->setAccessibleName("Search Library");
     m_search->setClearButtonEnabled(true);
     m_search->addAction(Theme::coloredIcon("search", QColor(Theme::textMuted()), 16), QLineEdit::LeadingPosition);
     tools->addWidget(m_search, 1);
+    tools->addWidget(m_pinned);
     m_filter = new ComboBox(this);
     m_filter->setAccessibleName("Filter Library");
     tools->addWidget(m_filter);
@@ -185,9 +194,9 @@ LibraryPanel::LibraryPanel(ModelsPanel *models, AdaptersPanel *adapters)
             m_sort->addItems({"Recently added", "Name A–Z", "Largest first"});
         }
         m_filter->setVisible(page != Adapters);
-        all->setVisible(page <= Adapters);
         refresh->setVisible(page <= Adapters);
         m_pinned->setVisible(page <= Adapters);
+        if (page > Adapters) m_allItems->hide();
         m_scopeLabel->setVisible(page <= Adapters);
         const QSignalBlocker block(m_search);
         m_search->clear();
@@ -277,8 +286,8 @@ void LibraryPanel::updateView() {
     double size = 0;
     for (auto *card : models) size += card->data().value("size_mb").toDouble();
     for (auto *card : adapters) size += card->data().value("size_mb").toDouble();
-    m_storage->setText(QString("Model storage   ·   %1 models   ·   %2 adapters   ·   %3 in local weights")
-                      .arg(models.size()).arg(adapters.size()).arg(ModelCard::formatSizeMb(size)));
+    m_storage->setText(QString("Model storage   ·   %1   ·   %2   ·   %3 in local weights")
+                      .arg(countOf(models.size(), "model"), countOf(adapters.size(), "adapter"), ModelCard::formatSizeMb(size)));
     filterItems();
     if (page == Projects || page == Folders) renderCollections();
     if (page == History) renderHistory();
@@ -360,7 +369,11 @@ void LibraryPanel::filterItems() {
         row->style()->unpolish(row);
         row->style()->polish(row);
     }
-    m_results->setText(visible ? QString("%1 %2").arg(visible).arg(adapters ? (visible == 1 ? "adapter" : "adapters") : (visible == 1 ? "model" : "models")) : "No items match this view.");
+    m_allItems->setVisible(m_tabs->currentIndex() <= Adapters && (!m_scope.isEmpty() || m_pinned->isChecked()));
+    // With nothing in the library at all, the empty state below explains it instead.
+    const int total = adapters ? m_adapters->findChildren<AdapterCard *>().size() : m_models->findChildren<ModelCard *>().size();
+    m_results->setText(visible ? countOf(visible, adapters ? "adapter" : "model") : "No items match this view.");
+    m_results->setVisible(visible || total);
 }
 
 namespace {
@@ -737,8 +750,7 @@ void LibraryPanel::renderHistory() {
         auto *statusLabel = text(action + " · " + status, "hubMeta", row->parentWidget());
         statusLabel->setMinimumWidth(135);
         row->addWidget(statusLabel);
-        const auto date = QDateTime::fromString(entry["time"].toString(), Qt::ISODate).toLocalTime();
-        row->addWidget(text(date.toString("MMM d, yyyy · HH:mm"), "hubSmallMeta", row->parentWidget()));
+        row->addWidget(text(displayDate(entry["time"].toString(), true), "hubSmallMeta", row->parentWidget()));
         auto *retry = new Button("Retry…", row->parentWidget());
         retry->setFixedWidth(78);
         if (action == "Download" && status != "Completed") {
@@ -751,7 +763,8 @@ void LibraryPanel::renderHistory() {
         }
         row->addWidget(retry);
     }
-    m_results->setText(QString("%1 activity entries").arg(list ? list->count() : 0));
+    m_results->setText(countOf(list ? list->count() : 0, "activity entry", "activity entries"));
+    m_results->setVisible(true);
     if (!list) m_history->addWidget(text(query.isEmpty() ? "No library activity yet." : "No matching activity.", "hubMeta", m_history->parentWidget()));
 }
 

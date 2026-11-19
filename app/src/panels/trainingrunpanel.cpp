@@ -1,4 +1,5 @@
 #include "trainingrunpanel.h"
+#include "textformat.h"
 #include "backend_client.h"
 #include "widgets/surface.h"
 #include "widgets/trainingchart.h"
@@ -93,7 +94,7 @@ void TrainingRunPanel::display(const QJsonObject &job) {
         {"target_modules","Target modules"},{"quantization","Quantization"},{"validation_split","Validation fraction"},{"seed","Seed"}};
     for (const auto &field : fields) if (c.contains(field.first))
         facts << field.second+": "+c[field.first].toVariant().toString();
-    facts << "Started: "+job["started_at"].toString("—") << "Finished: "+job["finished_at"].toString("—");
+    facts << "Started: "+displayDate(job["started_at"].toString("—"),true) << "Finished: "+displayDate(job["finished_at"].toString("—"),true);
     facts << QString("%1 retained metric entries · latest 1,000 available").arg(history.size());
     m_configuration->setText(facts.join('\n'));
     m_raw->setPlainText(QString::fromUtf8(QJsonDocument(job).toJson(QJsonDocument::Indented)));

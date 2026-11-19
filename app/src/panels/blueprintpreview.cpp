@@ -1,4 +1,5 @@
 #include "panels/blueprintpreview.h"
+#include "textformat.h"
 #include "backend_client.h"
 
 #include <QDateTime>
@@ -72,7 +73,7 @@ QString validate(const QJsonValue &value, const QJsonObject &schema, const QStri
     if (value.isDouble() && schema.contains("minimum") && value.toDouble() < schema["minimum"].toDouble())
         return path + " must be at least " + QString::number(schema["minimum"].toDouble());
     if (value.isString() && value.toString().size() < schema["minLength"].toInt())
-        return path + " needs at least " + QString::number(schema["minLength"].toInt()) + " character(s)";
+        return path + " needs at least " + countOf(schema["minLength"].toInt(), "character");
     if (type != "object") return {};
     if (!value.isObject()) return path + " must be an object";
     const auto object = value.toObject();

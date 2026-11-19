@@ -1,4 +1,5 @@
 #include "panels/ragdoccard.h"
+#include "textformat.h"
 
 #include "theme.h"
 
@@ -62,8 +63,8 @@ RagDocCard::RagDocCard(const QJsonObject &data, QWidget *parent)
     nameLabel->setToolTip(name);
     text->addWidget(nameLabel);
     const QString meta = m_path.isEmpty()
-        ? QStringLiteral("uploaded · %1 chunk(s)").arg(chunks)
-        : QStringLiteral("%1 chunk(s)").arg(chunks);
+        ? QStringLiteral("uploaded · ") + countOf(chunks, "chunk")
+        : countOf(chunks, "chunk");
     auto *pathLabel = new QLabel(meta, this);
     pathLabel->setObjectName(QStringLiteral("cardMeta"));
     pathLabel->setWordWrap(true);

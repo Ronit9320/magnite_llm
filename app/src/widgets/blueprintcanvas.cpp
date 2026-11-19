@@ -400,7 +400,7 @@ void BlueprintCanvas::drawNode(QPainter &painter, const QJsonObject &node) const
     if (node["name"].toString() != kindLabel)
         painter.drawText(box.adjusted(45, 10, -22, 10 - box.height() + 26), Qt::AlignVCenter, kindLabel);
     QFont title(Theme::headingFont());
-    title.setPixelSize(15);
+    title.setPixelSize(16);
     title.setWeight(QFont::DemiBold);
     painter.setFont(title);
     painter.setPen(QColor(Theme::textPrimary()));

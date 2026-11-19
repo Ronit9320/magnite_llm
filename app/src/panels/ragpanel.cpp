@@ -1,4 +1,7 @@
 #include "widgets/spinbox.h"
+#include "theme.h"
+#include <QColor>
+#include "textformat.h"
 #include "widgets/combobox.h"
 #include "widgets/confirmation.h"
 #include <QTimer>
@@ -204,10 +207,17 @@ void RagPanel::setupUi() {
     auto addDisclosure = [this, layout](const QString &title, QWidget *section) {
         auto *toggle = new Button(title, this);
         toggle->setCheckable(true);
+        toggle->setProperty("themeIcon", "chevron-down");
+        toggle->setIcon(Theme::coloredIcon("chevron-down", QColor(Theme::textSecondary()), 16));
         layout->addWidget(toggle);
         layout->addWidget(section);
         section->hide();
         connect(toggle, &QPushButton::toggled, section, &QWidget::setVisible);
+        connect(toggle, &QPushButton::toggled, toggle, [toggle](bool open) {
+            const QString icon = open ? "chevron-up" : "chevron-down";
+            toggle->setProperty("themeIcon", icon);
+            toggle->setIcon(Theme::coloredIcon(icon, QColor(Theme::textSecondary()), 16));
+        });
     };
     addDisclosure("Retrieval settings", configCard);
     auto *retrieval = Surface::card(this);
@@ -310,7 +320,7 @@ void RagPanel::refresh(bool preserveStatus) {
         applyStatus();
         populatePicker();
         if (!preserveStatus) setStatus(m_active->engineReady
-                      ? QString("%1 document(s) · %2 chunks").arg(m_active->documents).arg(m_active->chunks)
+                      ? countOf(m_active->documents, "document") + " · " + countOf(m_active->chunks, "chunk")
                       : "Embeddings unavailable — RAG needs sentence-transformers (backend[ml]).");
     });
 
@@ -361,7 +371,7 @@ void RagPanel::ingestFiles(const QStringList &files) {
         setStatus("Backend not connected.", "error");
         return;
     }
-    setStatus(QString("Indexing %1 document(s). The first use downloads the embedding model.").arg(files.size()));
+    setStatus(QString("Indexing %1. The first use downloads the embedding model.").arg(countOf(files.size(), "document")));
     m_cancelRequested = false;
     setMutating(true);
     auto pending = std::make_shared<int>(files.size());
@@ -385,10 +395,10 @@ void RagPanel::ingestFiles(const QStringList &files) {
                 refresh(true);
                 const int added = total - failed->size() - *cancelled;
                 if (*cancelled) {
-                    setStatus(QString("Cancelled. Nothing was stored for %1 document(s).%2")
-                                  .arg(*cancelled).arg(added ? QString(" Added %1.").arg(added) : QString()));
+                    setStatus(QString("Cancelled. Nothing was stored for %1.%2")
+                                  .arg(countOf(*cancelled, "document")).arg(added ? QString(" Added %1.").arg(countOf(added, "document")) : QString()));
                 } else if (failed->isEmpty()) {
-                    setStatus(QString("Added %1 document(s). Ready to search.").arg(total), "ok");
+                    setStatus(QString("Added %1. Ready to search.").arg(countOf(total, "document")), "ok");
                 } else {
                     setStatus(QString("Added %1 of %2 documents. %3 failed: %4")
                                   .arg(added).arg(total).arg(failed->size()).arg(failed->first()), "error");
@@ -502,7 +512,7 @@ void RagPanel::onRemoveDocument() {
         setStatus("No documents selected.");
         return;
     }
-    if (!Ui::confirmRemoval(this,"Remove documents?",QString("Remove %1 selected document(s) from Knowledge? Your original files are kept.").arg(ids.size()),"Remove")) return;
+    if (!Ui::confirmRemoval(this,"Remove documents?",QString("Remove %1 from Knowledge? Your original files are kept.").arg(countOf(ids.size(), "selected document")),"Remove")) return;
     m_mutating = true;
     ++m_collectionRevision;
     m_queryButton->setEnabled(false);
@@ -521,7 +531,7 @@ void RagPanel::onRemoveDocument() {
                 m_addButton->setEnabled(true);
                 m_resultLabel->setText("Your document collection changed. Search again for updated results.");
                 refresh(true);
-                setStatus(*failed ? QString("Could not remove %1 document(s). Try again.").arg(*failed) : "Selected documents removed.",
+                setStatus(*failed ? QString("Could not remove %1. Try again.").arg(countOf(*failed, "document")) : "Selected documents removed.",
                           *failed ? "error" : "ok");
             });
     }
@@ -741,11 +751,11 @@ void RagPanel::onModelChosen(int index) {
             });
         return;
     }
-    QString message = QString("Switch Knowledge to %1 (%2)? All %3 chunks from %4 document(s) will be "
+    QString message = QString("Switch Knowledge to %1 (%2)? All %3 from %4 will be "
                               "re-indexed. Your current index keeps working until this finishes, and "
                               "cancelling leaves it unchanged.")
-                          .arg(preset.label, preset.model, QLocale(QLocale::English).toString(m_active->chunks))
-                          .arg(m_active->documents);
+                          .arg(preset.label, preset.model, countOf(m_active->chunks, "chunk"))
+                          .arg(countOf(m_active->documents, "document"));
     const QString warning = modelWarning(preset);
     if (!warning.isEmpty()) message += "\n\n" + warning;
     if (!Ui::confirmAction(this, "Re-index Knowledge?", message, "Re-index")) { revertPicker(); return; }

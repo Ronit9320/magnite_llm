@@ -2,6 +2,7 @@
 #include "widgets/librarydialog.h"
 #include <QFileInfo>
 #include "panels/adapterspanel.h"
+#include "widgets/emptystate.h"
 #include "widgets/edgescrollbar.h"
 
 #include "backend_client.h"
@@ -72,29 +73,8 @@ void AdaptersPanel::setupUi() {
     layout->addWidget(m_scrollArea, 1);
     EdgeScrollBar::attach(m_scrollArea);
 
-    // Empty state: centered hint + Import (import is the only adapter action
-    // usable with no cards present).
-    m_emptyState = new QWidget(this);
-    m_emptyState->setObjectName("surfaceCard");
-    auto *emptyLayout = new QVBoxLayout(m_emptyState);
-    emptyLayout->setContentsMargins(12, 12, 12, 12);
-    emptyLayout->setSpacing(10);
-    emptyLayout->setAlignment(Qt::AlignTop);
-    auto *title = new QLabel("Adapter rack empty",m_emptyState);
-    title->setObjectName("headingLabel");
-    title->setWordWrap(true);
-    title->setAlignment(Qt::AlignLeft);
-    emptyLayout->addWidget(title);
-    auto *hint = new QLabel(
-        "No adapters yet. Train one in the Training panel.\n\n"
-        "Import an archive from the registry toolbar, or train an adapter in Training.",
-        m_emptyState);
-    hint->setObjectName("bodyLabel");
-    hint->setAlignment(Qt::AlignLeft);
-    hint->setWordWrap(true);
-    emptyLayout->addWidget(hint);
-    emptyLayout->addStretch();
-    m_emptyState->setLayout(emptyLayout);
+    m_emptyState = new EmptyState("layers", "No adapters yet",
+                                  "Train one in Training, or import an adapter archive.", this);
     layout->addWidget(m_emptyState, 1);
 
     m_statusLabel = new QLabel(this);
@@ -102,7 +82,7 @@ void AdaptersPanel::setupUi() {
     m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
-    m_statusLabel->setText("No adapters yet. Train one in the Training panel.");
+
 
     connect(importButton, &QPushButton::clicked, this, &AdaptersPanel::onImportAdapter);
 }
@@ -162,15 +142,11 @@ void AdaptersPanel::refresh() {
         const bool hasAdapter = !arr.isEmpty();
         m_scrollArea->setVisible(hasAdapter);
         m_emptyState->setVisible(!hasAdapter);
-        if (!hasAdapter) {
-            setStatus("No adapters yet. Train one in the Training panel.");
-        } else if (m_activeAdapterId.isEmpty()) {
-            setStatus(QString("%1 adapter(s). Activate an adapter to use it in Conversation.")
-                          .arg(arr.size()));
-        } else {
-            setStatus(QString("%1 adapter(s). The marked adapter is active in Conversation.")
-                          .arg(arr.size()));
-        }
+        // The empty state and the list header already say how many there are;
+        // the status line only adds what to do next.
+        if (!hasAdapter) setStatus(QString());
+        else if (m_activeAdapterId.isEmpty()) setStatus("Activate an adapter to use it in Conversation.");
+        else setStatus("The marked adapter is active in Conversation.");
         emit registryRefreshed();
     });
 }

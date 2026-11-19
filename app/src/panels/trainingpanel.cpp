@@ -1,4 +1,5 @@
 #include "widgets/settingswindow.h"
+#include "textformat.h"
 #include "widgets/spinbox.h"
 #include "widgets/tabwidget.h"
 #include <QTableWidget>
@@ -1059,7 +1060,7 @@ void TrainingPanel::renderJob(const QJsonObject &job) {
     findChild<QPushButton *>("trainingExportRun")->setEnabled(true);
     findChild<QPushButton *>("trainingReuseRun")->setEnabled(true);
     const auto precision=job["config"].toObject()["quantization"].toString("none");
-    m_runMeta->setText(job["base_model"].toString()+"  ·  "+(precision=="none"?"LoRA":"QLoRA")+"  ·  "+job["created_at"].toString());
+    m_runMeta->setText(job["base_model"].toString()+"  ·  "+(precision=="none"?"LoRA":"QLoRA")+"  ·  "+displayDate(job["created_at"].toString(),true));
     const auto status=job["status"].toString();
     m_runEyebrow->setText(status=="running" || status=="queued" ? "LIVE EXPERIMENT" : "EXPERIMENT RESULTS");
     m_followActive->setVisible(!m_jobId.isEmpty() && job["id"].toString()!=m_jobId);
@@ -1584,7 +1585,7 @@ void TrainingPanel::refreshExperimentViews() {
         auto *resultRow=new QHBoxLayout(); auto *loss=new QLabel(number(job["loss"]),row); loss->setObjectName("trainingIndexLoss");
         resultRow->addWidget(loss); resultRow->addStretch(); auto *state=new QLabel(result,row); state->setObjectName("trainingTiny"); resultRow->addWidget(state); body->addLayout(resultRow);
         row->setAttribute(Qt::WA_TransparentForMouseEvents); item->setSizeHint(QSize(0,qMax(93,row->sizeHint().height()+kRunItemChrome))); m_runs->setItemWidget(item,row);
-        const QStringList cells{job["name"].toString()+"\n"+job["created_at"].toString(),job["base_model"].toString(),number(job["loss"]),number(validation),result,"↗"};
+        const QStringList cells{job["name"].toString()+"\n"+displayDate(job["created_at"].toString(),true),job["base_model"].toString(),number(job["loss"]),number(validation),result,"↗"};
         for (int col=0;col<cells.size();++col) {
             auto *cell=new QTableWidgetItem(col==0?QString():cells[col]); cell->setData(Qt::UserRole,id); cell->setToolTip(col==5?"Use this experiment as the next recipe":cells[col]);
             QFont cellFont(Theme::bodyFont()); cellFont.setPixelSize(11); cell->setFont(cellFont); m_experiments->setItem(i,col,cell);
@@ -1593,7 +1594,7 @@ void TrainingPanel::refreshExperimentViews() {
                 auto *nameCell=new QWidget(this); nameCell->setAttribute(Qt::WA_TransparentForMouseEvents);
                 auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,0,0); nameBody->setSpacing(2);   // the stretches centre the two lines in the full row height
                 auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingIndexName"); nameLabel->setTextFormat(Qt::PlainText);
-                auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
+                auto *dateLabel=new QLabel(displayDate(job["created_at"].toString(),true),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
                 nameBody->addStretch(); nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); nameBody->addStretch(); m_experiments->setCellWidget(i,col,nameCell);
             }
             if (col==4) cell->setForeground(QColor(status=="error"?Theme::statusError():status=="done"||status=="running"?Theme::statusSuccess():Theme::textMuted()));

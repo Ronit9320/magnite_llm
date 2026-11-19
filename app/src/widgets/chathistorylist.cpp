@@ -200,7 +200,7 @@ void ChatHistoryList::rebuild() {
             item->setFlags(Qt::NoItemFlags);
             item->setForeground(QColor(Theme::textSecondary()));
             auto font = m_list->font();
-            font.setBold(true);
+            font.setWeight(QFont::Medium);   // DM Sans ships Regular and Medium only
             item->setFont(font);
             item->setSizeHint(QSize(0, kRowHeight));
             for (const auto &chat : it.value()) addChat(chat);
@@ -210,7 +210,7 @@ void ChatHistoryList::rebuild() {
             item->setFlags(Qt::NoItemFlags);
             item->setForeground(QColor(Theme::textSecondary()));
             auto font = m_list->font();
-            font.setBold(true);
+            font.setWeight(QFont::Medium);   // DM Sans ships Regular and Medium only
             item->setFont(font);
             item->setSizeHint(QSize(0, kRowHeight));
         }

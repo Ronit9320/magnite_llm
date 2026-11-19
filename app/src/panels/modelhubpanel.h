@@ -1,6 +1,7 @@
 #pragma once
 
 #include "panels/basepanel.h"
+#include "widgets/emptystate.h"
 
 #include <QHash>
 #include <QJsonArray>
@@ -99,7 +100,7 @@ private:
     QString m_deviceError;
     QLabel *m_status = nullptr;
     QLabel *m_resultCount = nullptr;
-    QLabel *m_empty = nullptr;
+    EmptyState *m_empty = nullptr;
     QWidget *m_cardHost = nullptr;
     FlowLayout *m_flow = nullptr;
     QPushButton *m_loadMore = nullptr;

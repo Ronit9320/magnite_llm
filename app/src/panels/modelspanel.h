@@ -1,5 +1,7 @@
 #pragma once
 
+#include "widgets/emptystate.h"
+
 #include "panels/basepanel.h"
 
 #include <QJsonArray>
@@ -97,7 +99,7 @@ private:
     FlowLayout *m_flowLayout;
     QWidget *m_cardHost;
     QLabel *m_statusLabel;
-    QLabel *m_emptyRack = nullptr;
+    EmptyState *m_emptyRack = nullptr;
     QList<OverviewTile *> m_overviewTiles;
     QTimer *m_pullTimer;
     QTimer *m_overviewTimer;

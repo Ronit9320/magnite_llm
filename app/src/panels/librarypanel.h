@@ -55,6 +55,7 @@ private:
     QLabel *m_scopeLabel;
     QLineEdit *m_search;
     Button *m_pinned;
+    Button *m_allItems = nullptr;   // clears a project/folder scope or the Pinned filter; only shown when one is set
     ComboBox *m_filter;
     ComboBox *m_sort;
     QLabel *m_results;

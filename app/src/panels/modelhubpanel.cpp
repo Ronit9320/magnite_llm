@@ -152,13 +152,16 @@ public:
     }
     QSize sizeHint() const override {
         ensurePolished();
-        return {fontMetrics().horizontalAdvance(m_text) + 16, fontMetrics().height() + 6};
+        // Size from the stylesheet's real padding and border, so a bordered status pill never elides.
+        const QMargins m = contentsMargins();
+        return {fontMetrics().horizontalAdvance(m_text) + qMax(16, m.left() + m.right()) + 2,
+                fontMetrics().height() + qMax(6, m.top() + m.bottom())};
     }
     QSize minimumSizeHint() const override { return {0, sizeHint().height()}; }
 protected:
     void resizeEvent(QResizeEvent *event) override {
         QLabel::resizeEvent(event);
-        setText(fontMetrics().elidedText(m_text, Qt::ElideRight, qMax(0, width() - 12)));
+        setText(fontMetrics().elidedText(m_text, Qt::ElideRight, qMax(0, contentsRect().width())));
     }
 private:
     QString m_text;
@@ -396,7 +399,6 @@ void ModelHubPanel::setupDiscovery() {
     device->addLayout(memory, 1);
     m_deviceButton = new Button("Device details", deviceCard);
     m_deviceButton->setObjectName("hubDeviceDetails");
-    m_deviceButton->setFlat(true);
     m_deviceButton->setMinimumWidth(112);
     connect(m_deviceButton, &QPushButton::clicked, this, &ModelHubPanel::showDeviceDetails);
     device->addWidget(m_deviceButton);
@@ -472,8 +474,7 @@ void ModelHubPanel::setupDiscovery() {
     m_flow->setColumnMinimumWidth(380);
     m_flow->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_cardHost);
-    m_empty = label("Search a model family, or refresh to browse the most downloaded models.", "rackEmpty", m_discovery);
-    m_empty->setAlignment(Qt::AlignCenter);
+    m_empty = new EmptyState("search", "Find a model", "Search a model family, or refresh to browse the most downloaded models.", m_discovery);
     m_empty->setMinimumHeight(160);
     layout->addWidget(m_empty);
     m_loadMore = new Button("Load more models", m_discovery);
@@ -718,7 +719,15 @@ void ModelHubPanel::renderCards() {
             auto *column = new QVBoxLayout;
             column->setSpacing(6);
             column->addWidget(label(pair.first, "hubSmallMeta", frame));
-            column->addWidget(label(pair.second, "hubCardValue", frame));
+            // A quiet dash keeps the grid scannable when the publisher left a value out.
+            const bool unknown = pair.second == "Not reported";
+            auto *value = label(unknown ? QStringLiteral("—") : pair.second, "hubCardValue", frame);
+            if (unknown) {
+                value->setProperty("unknown", true);
+                value->setToolTip(pair.first + " not reported by the publisher");
+                value->setAccessibleName(pair.first + ": not reported");
+            }
+            column->addWidget(value);
             metrics->addLayout(column, 1);
         }
         body->addLayout(metrics);
@@ -757,7 +766,8 @@ void ModelHubPanel::renderCards() {
     m_filterButton->setText(active ? QString("Filters · %1").arg(active) : "Filters");
     m_resultCount->setText(QString("%1 of %2 loaded models").arg(shown).arg(m_models.size()));
     m_empty->setVisible(shown == 0 && !m_searching);
-    m_empty->setText(m_models.isEmpty() ? "No models loaded. Search or refresh to try again." : "No loaded models match these filters. Reset filters or load more results.");
+    if (m_models.isEmpty()) m_empty->setContent("No models loaded", "Search or refresh to try again.");
+    else m_empty->setContent("No matching models", "Reset the filters or load more results.");
     m_loadMore->setVisible(m_hasMore);
     m_compareTray->setVisible(!m_compared.isEmpty());
     m_compareCount->setText(m_compared.size() == 1 ? QString("1 of 3 selected · Select one more to compare") : QString("%1 of 3 models selected").arg(m_compared.size()));

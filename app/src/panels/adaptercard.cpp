@@ -1,4 +1,5 @@
 #include "panels/adaptercard.h"
+#include "textformat.h"
 
 
 #include <QHBoxLayout>
@@ -63,13 +64,13 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     if (rank > 0) {
         auto *rankLabel = new QLabel(QStringLiteral("r=%1").arg(rank), this);
         rankLabel->setObjectName(QStringLiteral("adapterPill"));
-        metaRow->addWidget(rankLabel);
+        metaRow->addWidget(rankLabel, 0, Qt::AlignVCenter);   // tags keep their own height beside taller buttons
     }
     const QString method = data.value("method").toString().toUpper();
     if (!method.isEmpty()) {
         auto *methodLabel = new QLabel(method, this);
         methodLabel->setObjectName(QStringLiteral("adapterPill"));
-        metaRow->addWidget(methodLabel);
+        metaRow->addWidget(methodLabel, 0, Qt::AlignVCenter);
     }
     auto *dot = new QLabel(QStringLiteral("·"), this);
     dot->setObjectName(QStringLiteral("cardMeta"));
@@ -83,8 +84,7 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
         auto *dateDot = new QLabel(QStringLiteral("·"), this);
         dateDot->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(dateDot);
-        const auto timestamp = QDateTime::fromString(trainedAt,Qt::ISODate);
-        auto *date = new QLabel(timestamp.isValid() ? timestamp.date().toString("dd MMM yyyy") : trainedAt.left(10), this);
+        auto *date = new QLabel(displayDate(trainedAt), this);
         date->setToolTip(trainedAt);
         date->setObjectName(QStringLiteral("cardMeta"));
         metaRow->addWidget(date);

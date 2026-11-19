@@ -293,7 +293,12 @@ void ChatPanel::setupUi() {
     hint->setAlignment(Qt::AlignCenter);
     hint->setWordWrap(true);
     welcome->addWidget(hint);
-    auto *suggestions = new QHBoxLayout();
+    // A flow keeps the three cards on one row when there is room and moves
+    // one down when an open drawer narrows the column, instead of squeezing labels.
+    auto *suggestionHost = new QWidget(m_welcome);
+    auto *suggestions = new FlowLayout(suggestionHost, 10, 10);
+    suggestions->setContentsMargins(0, 0, 0, 0);
+    suggestions->setColumnMinimumWidth(150);
     struct WorkspaceAction {
         QString label;
         QString description;
@@ -311,7 +316,7 @@ void ChatPanel::setupUi() {
         cardPolicy.setHeightForWidth(true);   // the card wraps its text, so its height depends on its width
         button->setSizePolicy(cardPolicy);
         button->setToolTip(workspaceActions[i].description);
-        suggestions->addWidget(button, 1);
+        suggestions->addWidget(button);
         connect(button, &QPushButton::clicked, this, [this, i]() {
             if (i == 2) {
                 emit adaptersRequested();
@@ -330,7 +335,7 @@ void ChatPanel::setupUi() {
             m_input->setFocus();
         });
     }
-    welcome->addLayout(suggestions);
+    welcome->addWidget(suggestionHost);
     welcome->addStretch();
     m_chatLayout->addWidget(m_welcome, 1);
     m_chatScroll->setWidget(m_chatHost);

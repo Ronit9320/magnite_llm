@@ -1,4 +1,5 @@
 #include "panels/modelcard.h"
+#include "textformat.h"
 
 #include "theme.h"
 
@@ -185,7 +186,7 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent, bool 
         }
         row->addLayout(actions);
         layout->insertLayout(0, row);
-        const QString added = data.value("downloaded_at").toString().left(10);
+        const QString added = displayDate(data.value("downloaded_at").toString());
         if (!added.isEmpty()) {
             auto *date = new QLabel(added, this);
             date->setObjectName("cardMeta");

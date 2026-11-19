@@ -1,5 +1,6 @@
 #include <QApplication>
 #include "mainwindow.h"
+#include "widgets/focusring.h"
 #include "theme.h"
 #include "widgets/edgescrollbar.h"
 #include "testing/reasoning_tests.h"
@@ -72,6 +73,7 @@ int main(int argc, char *argv[]) {
     // set to DM Sans (falls back to the system font if DM Sans can't load).
     Theme::setupApplicationTheme();
     EdgeScrollBar::adoptAllScrollAreas();
+    KeyboardFocusRing::install();
     QFont appFont = app.font();
     appFont.setFamily(Theme::bodyFont());
     app.setFont(appFont);

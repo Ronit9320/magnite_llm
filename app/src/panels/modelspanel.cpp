@@ -1,4 +1,5 @@
 #include "widgets/librarydialog.h"
+#include "textformat.h"
 #include "widgets/confirmation.h"
 #include "panels/modelspanel.h"
 #include "widgets/edgescrollbar.h"
@@ -180,10 +181,8 @@ void ModelsPanel::setupUi() {
     m_loadMoreButton->setAccessibleName("Load more results");
     m_loadMoreButton->hide();
     layout->addWidget(m_loadMoreButton, 0, Qt::AlignHCenter);
-    m_emptyRack = new QLabel("Your library starts here\n\nSearch a repository above, select a result, then download its weights.\nLocal models appear here when the backend is connected.",this);
-    m_emptyRack->setObjectName("rackEmpty");
-    m_emptyRack->setAlignment(Qt::AlignCenter);
-    m_emptyRack->setWordWrap(true);
+    m_emptyRack = new EmptyState("box", "Your library starts here",
+                                 "Search a repository above, then download its weights.", this);
     m_emptyRack->setMinimumHeight(200);
     layout->addWidget(m_emptyRack,1);
 
@@ -227,7 +226,7 @@ void ModelsPanel::useLibraryWorkspace() {
     m_viewCombo->hide();
     m_downloadButton->hide();
     findChild<QWidget *>("libraryDiscoveryLinks")->hide();
-    m_emptyRack->setText("Your library starts here\n\nExplore Model Hub to find and download a model. Downloaded models appear here.");
+    m_emptyRack->setContent("Your library starts here", "Find a model in Model Hub and download it. It will appear here.");
     embedInWorkspace();
     findChild<QWidget *>("studioNote")->hide();
     for (auto *tile : m_overviewTiles) tile->hide();
@@ -340,9 +339,10 @@ void ModelsPanel::addCards(const QJsonArray &items, bool isHub, bool append) {
     if (!append) {
         m_scrollArea->setVisible(!items.isEmpty());
         m_emptyRack->setVisible(items.isEmpty());
-        m_emptyRack->setText(isHub ? "No models found\n\nTry a different repository name or model family."
-                                 : m_libraryOnly ? "Your library starts here\n\nExplore Model Hub to find and download a model. Downloaded models appear here."
-                                                 : "Your library starts here\n\nSearch a repository above and download a model to get started.");
+        if (isHub) m_emptyRack->setContent("No models found", "Try a different repository name or model family.");
+        else m_emptyRack->setContent("Your library starts here", m_libraryOnly
+                                         ? "Find a model in Model Hub and download it. It will appear here."
+                                         : "Search a repository above and download a model to get started.");
     }
     for (const auto &value : items) {
         auto *card = new ModelCard(value.toObject(), isHub, m_cardHost, m_libraryOnly && !isHub);
@@ -368,11 +368,10 @@ void ModelsPanel::addCards(const QJsonArray &items, bool isHub, bool append) {
 void ModelsPanel::showLocalModels(const QJsonArray &models) {
     clearCards();
     addCards(models, false);
-    QString summary = models.isEmpty() ? QString("No local models yet. Search the Hub and download one.")
-                                       : QString(models.size() == 1 ? "%1 local model." : "%1 local models.").arg(models.size());
-    if (!m_afterRefreshNote.isEmpty()) summary = m_afterRefreshNote + "  " + summary;
+    // The list header counts the models and the empty state explains an empty
+    // library, so the status line only keeps a note from the last refresh.
+    setStatus(m_afterRefreshNote);
     m_afterRefreshNote.clear();
-    setStatus(summary);
     updateActionButtons();
     emit modelsChanged();
 }
@@ -500,7 +499,7 @@ void ModelsPanel::reportHubStatus() {
     int downloaded = 0;
     for (const ModelCard *card : m_cards)
         if (card->isDownloaded()) ++downloaded;
-    QString text = QString("%1 result(s)").arg(m_cards.size());
+    QString text = countOf(m_cards.size(), "result");
     if (downloaded > 0) text += QString(" · %1 already downloaded").arg(downloaded);
     if (m_hasMoreResults) text += " · more available";
     setStatus(text + ". Select one and click Download.");

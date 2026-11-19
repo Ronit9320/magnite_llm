@@ -41,7 +41,7 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     m_seal->setToolTip(brandTooltip);
     m_toggle = new QPushButton(this);
     m_toggle->setObjectName("sidebarToggle");
-    m_toggle->setFixedSize(18, 24);
+    m_toggle->setFixedSize(24, 28);   // a usable hit area that still fits beside the 158px wordmark
     m_toggle->setCursor(Qt::PointingHandCursor);
     connect(m_toggle, &QPushButton::clicked, this, &Sidebar::toggle);
     m_top->addWidget(m_seal);
@@ -117,7 +117,13 @@ Sidebar::Sidebar(const QList<NavItem> &workspaces, const NavItem &settings, int 
     if (m_playground) navigation->addStretch();
     auto *local=new QFrame(this); local->setObjectName("sidebarLocalCard");
     auto *localBody=new QVBoxLayout(local); localBody->setContentsMargins(12,12,12,12); localBody->setSpacing(6);
-    auto *localName=new QLabel("● Local workspace",local); localName->setObjectName("sidebarLocalName"); localBody->addWidget(localName);
+    // An icon, not a status dot: this card states where work runs; live status is in the title bar.
+    auto *localRow=new QHBoxLayout; localRow->setSpacing(6);
+    auto *localIcon=new QLabel(local); localIcon->setProperty("themeIcon","cpu");
+    localIcon->setPixmap(Theme::iconPixmap("cpu",QColor(Theme::textSecondary()),14,devicePixelRatioF())); localIcon->setFixedSize(14,14);
+    localRow->addWidget(localIcon);
+    auto *localName=new QLabel("Local workspace",local); localName->setObjectName("sidebarLocalName"); localRow->addWidget(localName,1);
+    localBody->addLayout(localRow);
     auto *localDetail=new QLabel("Your machine. Your models.",local); localDetail->setObjectName("sidebarLocalDetail"); localDetail->setWordWrap(true); localBody->addWidget(localDetail);
     auto *footer = new QVBoxLayout;
     footer->setSpacing(6);

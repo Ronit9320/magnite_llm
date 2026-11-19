@@ -66,6 +66,14 @@ inline QString accentSurface() {
                            base.blueF() * 0.92 + accent.blueF() * 0.08).name();
 }
 
+// Tinted surface for inline warning banners (service reconnecting, etc.).
+inline QString warningSurface() {
+    const QColor base(surfaceFill()), warning(statusWarning());
+    return QColor::fromRgbF(base.redF() * 0.9 + warning.redF() * 0.1,
+                           base.greenF() * 0.9 + warning.greenF() * 0.1,
+                           base.blueF() * 0.9 + warning.blueF() * 0.1).name();
+}
+
 // ---- Typography (design doc §3) ----
 inline QString headingFont() { return QStringLiteral("Space Grotesk"); }
 inline QString bodyFont()    { return QStringLiteral("DM Sans"); }

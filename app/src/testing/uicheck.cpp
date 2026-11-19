@@ -100,6 +100,9 @@
 #include <QDateTime>
 #include <functional>
 #include <memory>
+#include "textformat.h"
+#include "widgets/emptystate.h"
+#include "widgets/focusring.h"
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -474,6 +477,36 @@ int runUiCheck(const QString &captures) {
     check(TrainingTime::duration(-1)=="—" && TrainingTime::duration(qInf())=="—" &&
           TrainingTime::duration(qQNaN())=="—",
           "unavailable training durations do not display invalid values");
+    check(countOf(1,"adapter")=="1 adapter" && countOf(2,"adapter")=="2 adapters" &&
+          countOf(1,"activity entry","activity entries")=="1 activity entry" && countOf(0,"chunk")=="0 chunks",
+          "counts read \"1 adapter\" and \"2 adapters\", never \"adapter(s)\"");
+    {
+        const QString shown=displayDate("2026-11-19T12:24:57Z");
+        check(!shown.contains('T') && shown.endsWith("2026") && displayDate("not a date")=="not a date",
+              "backend timestamps show as readable dates and other text passes through");
+    }
+    {
+        EmptyState empty("box","Nothing here","Add something to begin.");
+        empty.setContent("Still nothing",QString());
+        check(empty.title()=="Still nothing" && empty.accessibleName()=="Still nothing" &&
+              !empty.findChild<QLabel *>("emptyStateBody")->isVisibleTo(&empty),
+              "empty state updates its title and hides an empty body line");
+    }
+    {
+        QWidget host; auto *row=new QHBoxLayout(&host);
+        auto *first=new QPushButton("First",&host); auto *second=new QPushButton("Second",&host);
+        row->addWidget(first); row->addWidget(second);
+        host.show(); pump(40);
+        // Offscreen windows never become active, so deliver the focus changes directly.
+        auto focus=[](QWidget *w,QEvent::Type type,Qt::FocusReason reason) { QFocusEvent e(type,reason); QApplication::sendEvent(w,&e); };
+        focus(second,QEvent::FocusIn,Qt::TabFocusReason); pump(20);
+        auto *ring=host.findChild<QWidget *>("keyboardFocusRing");
+        const bool shown=KeyboardFocusRing::target()==second && ring && ring->isVisible() &&
+                         ring->geometry().contains(second->geometry());
+        focus(second,QEvent::FocusOut,Qt::MouseFocusReason); focus(first,QEvent::FocusIn,Qt::MouseFocusReason); pump(20);
+        check(shown && !KeyboardFocusRing::target() && !ring->isVisible(),
+              "keyboard focus draws a ring around the button; mouse focus never does");
+    }
     if (qEnvironmentVariableIsSet("MAGNITE_DOCS_DESIGN_CHECK")) return runDocsChecks(captures)?1:0;
     Fixture fixture;
     if (!fixture.listen(QHostAddress::LocalHost,0)) { check(false,"loopback fixture server: "+fixture.errorString()); return 1; }

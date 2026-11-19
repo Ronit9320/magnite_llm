@@ -16,8 +16,8 @@ QPushButton#themeToggle { background: transparent; border: 1px solid transparent
 QPushButton#themeToggle:hover { background: @surfaceFillHover; color: @textPrimary; }
 QPushButton#themeToggle:focus { color: @textPrimary; }
 QLabel#statusPill[state="err"] { color: @statusError; }
-QLabel#studioTag { font-size: 11px; font-weight: 600; letter-spacing: 1px; font-family: @bodyFont; color: @textMuted; }
-QLabel#heroKicker { font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+QLabel#studioTag { font-size: 11px; font-weight: 500; letter-spacing: 1px; font-family: @bodyFont; color: @textMuted; }
+QLabel#heroKicker { font-size: 12px; font-weight: 500; letter-spacing: 1px; }
 QPushButton { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 8px; padding: 7px 12px; min-height: 20px; font-weight: 500; }
 QPushButton:hover { background: @surfaceFillHover; border-color: @surfaceBorder; }
 QPushButton:pressed { background: @surfaceFillActive; }
@@ -53,7 +53,7 @@ QLabel#subtitle { color: @textSecondary; font-size: 12px; }
 QLabel#statusLabel { color: @textSecondary; font-size: 12px; }
 QLabel#cardMeta { color: @textSecondary; font-size: 12px; }
 QLabel#contextDivider { color: @textMuted; font-size: 12px; padding: 6px 0; }
-QLabel#cardDownloaded { color: @statusSuccess; font-size: 12px; font-weight: 600; }
+QLabel#cardDownloaded { color: @statusSuccess; font-size: 12px; font-weight: 500; }
 QLabel#headingLabel { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#cardTitle { font-family: @headingFont; font-size: 14px; font-weight: 600; }
 QLabel#metricValue { font-family: @headingFont; font-size: 20px; color: @textPrimary; }
@@ -68,9 +68,9 @@ QLabel#ragChunkingInfo, QLabel#ragSearchInfo, QLabel#ragClampHint, QLabel#ragPro
 QLabel#ragModelHint { color: @statusWarning; font-size: 12px; }
 QFrame#ragConfigCard { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
 QFrame#modelCard[selected="true"], QFrame#adapterCard[active="true"] { background: @surfaceFillHover; }
-QLabel#archBadge { background: @insetBackground; color: @textSecondary; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
-QLabel#adapterPill { background: @insetBackground; color: @textSecondary; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
-QLabel#chatPill { background: @insetBackground; color: @textSecondary; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+QLabel#archBadge { background: @insetBackground; color: @textSecondary; padding: 3px 8px; border-radius: 6px; font-size: 11px; }
+QLabel#adapterPill { background: @insetBackground; color: @textSecondary; padding: 3px 8px; border-radius: 6px; font-size: 11px; }
+QLabel#chatPill { background: @insetBackground; color: @textSecondary; padding: 3px 8px; border-radius: 6px; font-size: 11px; }
 QLineEdit { background: @surfaceFill; color: @textPrimary; border: 1px solid @controlBorder; border-radius: 8px; padding: 7px; selection-background-color: @accentPrimary; selection-color: @accentText; }
 QComboBox { background: @surfaceFill; color: @textPrimary; border: 1px solid @controlBorder; border-radius: 8px; padding: 8px 36px 8px 10px; selection-background-color: @accentPrimary; selection-color: @accentText; combobox-popup: 0; }
 QComboBox:hover { background: @surfaceFillHover; border-color: @controlBorder; }
@@ -96,14 +96,14 @@ QComboBox QAbstractItemView::item:hover { background: @surfaceFillHover; }
 QComboBox QAbstractItemView::item:selected { background: @surfaceFillHover; color: @textPrimary; }
 QComboBox QAbstractItemView::item:disabled { color: @textMuted; }
 QGroupBox { background: @surfaceFill; border: 1px solid @surfaceBorder; border-radius: 10px; margin-top: 12px; padding: 9px; }
-QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 6px; font-weight: 600; }
+QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 6px; font-weight: 500; }
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; border: none; }
 QStackedWidget { background: transparent; border: none; }
 /* A 12px grab track with a slim handle on its outer edge; hovering swells the handle without moving layout. */
 QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }
-QScrollBar::handle:vertical { background: @accentPrimary; min-height: 36px; border-radius: 2px; margin: 0 2px 0 6px; }
-QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed { background: @accentHover; border-radius: 4px; margin: 0 2px 0 2px; }
+QScrollBar::handle:vertical { background: @controlBorder; min-height: 36px; border-radius: 2px; margin: 0 2px 0 6px; }
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed { background: @textMuted; border-radius: 4px; margin: 0 2px 0 2px; }
 QScrollBar::add-line:vertical { height: 0; }
 QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical { background: transparent; }
@@ -140,7 +140,6 @@ QLabel#tileValue { font-family: @headingFont; font-size: 16px; color: @textPrima
 QLabel#tileCaption { color: @textSecondary; font-size: 12px; }
 QSplitter::handle { background: transparent; border-radius: 2px; }
 QSplitter::handle:hover { background: @textMuted; }
-QLabel#rackEmpty { font-family: @bodyFont; color: @textSecondary; border: 1px solid transparent; padding: 30px; font-size: 12px; background: @surfaceFill; border-radius: 6px; }
 QTabWidget::pane { background: transparent; border: none; top: 8px; }
 QTabBar::tab { color: @textSecondary; border: none; padding: 6px 14px; min-width: 48px; }
 QTabBar::tab:selected { color: @textPrimary; }
@@ -173,7 +172,7 @@ QDoubleSpinBox:disabled { background: @insetBackground; color: @textMuted; }
 QTextEdit:disabled { background: @insetBackground; color: @textMuted; }
 QPlainTextEdit:disabled { background: @insetBackground; color: @textMuted; }
 QScrollBar:horizontal { background: transparent; height: 12px; margin: 0; }
-QScrollBar::handle:horizontal { background: @accentPrimary; min-width: 36px; border-radius: 2px; margin: 6px 0 2px 0; }
+QScrollBar::handle:horizontal { background: @controlBorder; min-width: 36px; border-radius: 2px; margin: 6px 0 2px 0; }
 QScrollBar::add-line:horizontal { width: 0; }
 QScrollBar::sub-line:horizontal { width: 0; }
 QScrollBar::add-page:horizontal { background: transparent; }
@@ -225,7 +224,7 @@ QPushButton#destructiveBtn:disabled, QPushButton#cancelDownload:disabled, QPushB
 QFrame#ragDocCard[selected="true"] { background: @surfaceFillHover; }
 QPushButton#primaryBtn:disabled, QPushButton#cardPrimary:disabled { background: @insetBackground; color: @textMuted; border-color: @surfaceBorder; }
 QLabel#statusLabel[state="warn"] { color: @statusWarning; }
-QLabel#activeBadge { color: @statusSuccess; font-weight: 600; }
+QLabel#activeBadge { color: @statusSuccess; font-weight: 500; }
 QComboBox::drop-down:disabled { background: transparent; }
 QLabel#sectionHint { color: @textSecondary; font-size: 12px; }
 
@@ -273,7 +272,7 @@ QMenu::item:selected { background: @surfaceFillHover; color: @textPrimary; }
 QMenu::item:disabled { color: @textMuted; }
 QMenu::separator { height: 1px; background: @surfaceBorder; margin: 4px 6px; }
 QDialogButtonBox { spacing: 8px; }
-QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed { background: @accentHover; border-radius: 4px; margin: 2px 0 2px 0; }
+QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed { background: @textMuted; border-radius: 4px; margin: 2px 0 2px 0; }
 
 /* Training studio: live experiment first, next-run recipe underneath. */
 QFrame#trainingSignalBoard, QFrame#trainingRunContext, QFrame#trainingRecipe {
@@ -300,7 +299,7 @@ QWidget#trainingPage QLabel#trainingMicro { font-size: 11px; color: @textMuted; 
 QWidget#trainingPage QLabel#trainingTiny { font-size: 11px; color: @textMuted; font-family: @monoFont; }
 QWidget#trainingPage QLabel#trainingMono { font-size: 11px; font-family: @monoFont; }
 QWidget#trainingPage QLabel#trainingAccentMicro { font-size: 11px; font-family: @monoFont; color: @accentLabel; }
-QWidget#trainingPage QLabel#trainingBadge { border: 1px solid @surfaceBorder; border-radius: 10px; padding: 3px 8px; font-size: 11px; color: @textSecondary; }
+QWidget#trainingPage QLabel#trainingBadge { background: @insetBackground; border: 1px solid @surfaceBorder; border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 500; color: @textSecondary; }
 QWidget#trainingPage QLabel#trainingBadge[state="ok"] { color: @statusSuccess; }
 QWidget#trainingPage QLabel#trainingBadge[state="error"] { color: @statusError; }
 QWidget#trainingPage QLabel#trainingBadge[state="warn"] { color: @statusWarning; }
@@ -385,10 +384,10 @@ QLabel#trainingChartHover, QWidget#trainingPage QLabel#trainingChartHover {
     background: @chartHoverFill; color: @chartHoverText; border: 1px solid @surfaceBorder;
     border-radius: 5px; padding: 5px 7px; font-family: @monoFont; font-size: 11px;
 }
-QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed { background: @accentActive; }
+QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed { background: @accentPrimary; }
 
 /* Stable status/action alignment and a readable, selectable event stream. */
-QWidget#trainingPage QLabel#trainingBadge { min-height: 18px; max-height: 24px; padding: 2px 8px; border-radius: 11px; font-size: 11px; }
+QWidget#trainingPage QLabel#trainingBadge { min-height: 18px; max-height: 24px; }
 QWidget#trainingPage QPushButton#trainingRunActions { padding: 0; min-height: 26px; font-size: 16px; }
 QWidget#trainingPage QPushButton#trainingLogToggle { padding: 5px 2px; font-family: @headingFont; font-size: 12px; }
 QWidget#trainingPage QPushButton#trainingLogFollow, QWidget#trainingPage QPushButton#trainingLogCopy { padding: 4px 8px; font-size: 11px; min-height: 22px; }
@@ -479,7 +478,7 @@ QLabel#docsSmallTitle { font-size: 12px; font-weight: 500; color: @textPrimary; 
 QLabel#docsBody { font-size: 14px; color: @textSecondary; }
 QLabel#docsCardDescription { font-size: 12px; color: @textSecondary; }
 QLabel#docsHint { font-size: 11px; color: @textMuted; }
-QLabel#docsEyebrow { font-size: 11px; font-weight: 600; color: @textMuted; letter-spacing: 1px; }
+QLabel#docsEyebrow { font-size: 11px; font-weight: 500; color: @textMuted; letter-spacing: 1px; }
 QLabel#docsOffline { font-size: 11px; color: @accentLabel; }
 QLabel#docsQuestion { font-size: 13px; color: @textPrimary; }
 QFrame#docsFeature, QFrame#docsInlineContents, QFrame#docsExample { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
@@ -488,7 +487,7 @@ QFrame#docsRule { background: @surfaceBorder; border: none; }
 QLabel#docsStatus { background: @surfaceFill; padding: 10px 22px; border-top: 1px solid @surfaceBorder; color: @textSecondary; font-size: 12px; }
 QPushButton#docsNav, QPushButton#docsArticleNav, QPushButton#docsSubject, QPushButton#docsSectionLink { padding: 7px 10px; min-height: 16px; font-size: 12px; }
 QPushButton#docsArticleNav { padding-left: 20px; font-size: 11px; }
-QPushButton#docsSubject { font-weight: 600; font-size: 11px; }
+QPushButton#docsSubject { font-weight: 500; font-size: 11px; }
 QPushButton#docsNav:checked, QPushButton#docsArticleNav:checked, QPushButton#docsSectionLink:checked { color: @accentLabel; }
 QPushButton#docsSources { padding: 8px 0; font-size: 11px; }
 QPushButton#docsTextButton, QPushButton#docsRecent { padding: 5px 10px; min-height: 18px; font-size: 12px; }
@@ -514,7 +513,7 @@ QLabel#hubMeta { font-size: 12px; color: @textSecondary; }
 QLabel#hubSmallMeta { font-size: 11px; color: @textMuted; }
 QLabel#hubValue { font-size: 13px; color: @textPrimary; }
 QLabel#hubLocalState { font-size: 11px; color: @statusSuccess; }
-QLabel#hubTag { background: @canvasBackground; padding: 4px 7px; border-radius: 4px; font-size: 11px; color: @textSecondary; }
+QLabel#hubTag { background: @insetBackground; color: @textSecondary; padding: 3px 8px; border-radius: 6px; font-size: 11px; }
 QLabel#hubCallout { background: @insetBackground; border-left: 2px solid transparent; padding: 12px; color: @textSecondary; }
 QFrame#hubModelCard, QFrame#hubFilters, QFrame#hubDownloadStrip, QFrame#hubCompareTray { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; }
 QPushButton#hubFiltersToggle:checked { background: @surfaceFillActive; color: @accentLabel; }
@@ -547,13 +546,14 @@ QPushButton#hubModelName, QPushButton#hubComparisonModelName {
     padding: 0; min-height: 0; border: none; background: transparent; text-align: left;
 }
 QPushButton#hubComparisonModelName { font-size: 16px; }
-QPushButton#hubViewDetails, QPushButton#hubTextLink, QPushButton#hubDeviceDetails {
+QPushButton#hubViewDetails, QPushButton#hubTextLink {
     border: none; background: transparent; font-size: 11px; min-height: 20px; padding: 3px 4px;
 }
 QLabel#hubCardDescription { font-size: 12px; color: @textSecondary; }
-QLabel#hubPill { background: @canvasBackground; color: @textSecondary; padding: 3px 6px; border-radius: 3px; font-size: 11px; }
-QLabel#hubLocalPill { background: @insetBackground; color: @statusSuccess; padding: 3px 6px; border-radius: 3px; font-size: 11px; }
+QLabel#hubPill { background: @insetBackground; color: @textSecondary; padding: 3px 8px; border-radius: 6px; font-size: 11px; }
+QLabel#hubLocalPill { background: @insetBackground; border: 1px solid @surfaceBorder; border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 500; color: @statusSuccess; }
 QLabel#hubCardValue { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QLabel#hubCardValue[unknown="true"] { color: @textMuted; }
 QFrame#hubRule { background: @surfaceBorder; border: none; }
 QLabel#hubDetailTitle { font-family: @headingFont; font-size: 32px; font-weight: 600; color: @textPrimary; }
 QFrame#hubStatCell { background: transparent; border: none; border-left: 1px solid @surfaceBorder; }
@@ -640,7 +640,7 @@ QLabel#blueprintSection { font-family: @headingFont; font-size: 16px; font-weigh
 QLabel#blueprintCode, QPlainTextEdit#blueprintCode { font-family: @monoFont; font-size: 11px; }
 QLabel#blueprintError, QLabel#blueprintStepError { color: @statusError; }
 QLabel#blueprintSuccess { color: @statusSuccess; }
-QLabel#blueprintWarning { color: @statusWarning; }
+QLabel#blueprintWarning { color: @textPrimary; background: @warningSurface; border: none; border-left: 3px solid @statusWarning; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
 QLabel#blueprintRunning { color: @comparisonSeries; }
 QLabel#blueprintStepError { font-size: 11px; padding-left: 31px; padding-bottom: 3px; }
 QPushButton#blueprintStep {
@@ -657,11 +657,12 @@ QTreeWidget#blueprintNodeTree { background: @canvasBackground; border: 1px solid
 QPushButton#blueprintIconButton, QPushButton#blueprintEdit, QPushButton#blueprintDuplicate,
 QPushButton#blueprintDelete { padding: 0; }
 QLabel#blueprintNodeIcon, QFrame#blueprintBinding { background: @canvasBackground; border: none; border-radius: 7px; }
-QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 600; }
+QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 500; }
 QLabel#blueprintRevision {
-    font-family: @monoFont; font-size: 11px; color: @textMuted;
-    background: @surfaceFill; border-radius: 5px; padding: 3px 6px;
+    font-size: 11px; font-weight: 500; color: @textSecondary;
+    background: @insetBackground; border: 1px solid @surfaceBorder; border-radius: 10px; padding: 2px 8px;
 }
+QLabel#blueprintRevision[state="warn"] { color: @statusWarning; }
 QPushButton#blueprintPortContract {
     background: @canvasBackground; text-align: left; border: 1px solid @surfaceBorder;
     border-radius: 6px; min-height: 20px; padding: 4px 8px; font-size: 12px;
@@ -674,3 +675,9 @@ QPushButton#blueprintStartCard:hover { background: @surfaceFillHover; }
 QPushButton#blueprintStartCard:focus { border: 1px solid @accentLabel; }
 QTreeWidget#blueprintNodeTree::item { padding: 2px 0; }
 QTreeWidget#blueprintNodeTree::item:selected { background: @surfaceFillHover; color: @textPrimary; }
+
+/* Shared empty state (widgets/emptystate.h) */
+QFrame#emptyState { background: @surfaceFill; border: 1px dashed @surfaceBorder; border-radius: 10px; }
+QLabel#emptyStateTitle { font-family: @headingFont; font-size: 16px; font-weight: 500; color: @textPrimary; background: transparent; }
+QLabel#emptyStateBody { font-size: 13px; color: @textSecondary; background: transparent; }
+QLabel#emptyStateIcon { background: transparent; }

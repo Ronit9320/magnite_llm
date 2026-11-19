@@ -79,6 +79,7 @@ std::vector<Token> tokens() {
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
         {"@controlBorder",        Theme::controlBorder()},
+        {"@warningSurface",       Theme::warningSurface()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
@@ -203,8 +204,11 @@ void Theme::setDark(bool dark) {
     for (auto *widget : QApplication::allWidgets()) {
         if (auto *label = qobject_cast<QLabel *>(widget);
             label && label->property("themeIcon").isValid())
-            label->setPixmap(coloredIcon(label->property("themeIcon").toString(),
-                                        QColor(textSecondary()),14).pixmap(14,14));
+        {
+            const int size = label->property("themeIconSize").toInt() > 0 ? label->property("themeIconSize").toInt() : 14;
+            const QColor tone(label->property("themeIconTone") == "muted" ? textMuted() : textSecondary());
+            label->setPixmap(iconPixmap(label->property("themeIcon").toString(), tone, size, label->devicePixelRatioF()));
+        }
         if (auto *button = qobject_cast<QAbstractButton *>(widget);
             button && button->property("themeIcon").isValid())
             button->setIcon(coloredIcon(button->property("themeIcon").toString(),
@@ -271,6 +275,7 @@ int Theme::selfCheck() {
     check("insetBackground", Theme::insetBackground() == "#E9E6DC");
     check("accentSurface", QColor(Theme::accentSurface()).isValid() && Theme::accentSurface() != Theme::surfaceFill());
     check("accentLabel", QColor(Theme::accentLabel()).isValid());
+    check("warningSurface keeps warning text readable", contrastRatio(Theme::statusWarning(), Theme::warningSurface()) >= 4.5 && contrastRatio(Theme::textPrimary(), Theme::warningSurface()) >= 4.5);
     check("accentPrimary", Theme::accentPrimary() == "#FF5C28");
     check("accentHover", Theme::accentHover() == "#FF784E");
     check("accentActive", Theme::accentActive() == "#E1491B");
@@ -334,6 +339,17 @@ int Theme::selfCheck() {
         offScale.removeDuplicates();
         const QByteArray detail = offScale.join(", ").toUtf8();
         check("qss font sizes on type scale (min 11px)", offScale.isEmpty(), detail.constData());
+        // DM Sans is bundled as Regular and Medium only: heavier body text would be synthesized.
+        QStringList fauxBold;
+        for (const QString &rule : raw.split(QLatin1Char('}'))) {
+            const auto weight = QRegularExpression(QStringLiteral("font-weight:\\s*(\\d+|bold)")).match(rule);
+            if (!weight.hasMatch()) continue;
+            const bool heavy = weight.captured(1) == "bold" || weight.captured(1).toInt() > 500;
+            if (heavy && !rule.contains(QStringLiteral("@headingFont")))
+                fauxBold << rule.section(QLatin1Char('{'), 0, 0).trimmed().section(QLatin1Char('\n'), -1);
+        }
+        const QByteArray fauxDetail = fauxBold.join(", ").toUtf8();
+        check("qss weights above 500 only on the heading font", fauxBold.isEmpty(), fauxDetail.constData());
     }
     const std::vector<const char *> kIcons = {
         "database", "graduation-cap", "folder", "layers", "message-circle",
