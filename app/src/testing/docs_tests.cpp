@@ -59,9 +59,32 @@ int runDocsChecks(const QString &captures) {
         docs.resize(1240, 900);
         docs.show();
         pump(220);
-        check(docs.library().error().isEmpty() && docs.library().articles().size() == 16 &&
-                  docs.library().groups().size() == 5,
-              "sixteen complete offline articles in five subjects");
+        check(docs.library().error().isEmpty() && docs.library().articles().size() == 26 &&
+                  docs.library().groups().size() == 7,
+              "twenty-six complete offline articles in seven subjects");
+        check(docs.library().groups().value(0) == "Getting started" &&
+                  docs.library().groups().value(1) == "Using Magnite Space" &&
+                  docs.library().groups().last() == "Help & reference",
+              "app guides come first and help comes last");
+        for (const char *id : {"welcome", "first-model", "conversations", "tool-mode", "knowledge", "blueprints",
+                               "blueprint-nodes", "training-studio", "settings-data"})
+            check(docs.library().article(id) != nullptr, QString("app guide %1 exists").arg(id).toUtf8().constData());
+        {
+            QString previousGroup;
+            QStringList closed;
+            bool contiguous = true;
+            for (const auto &a : docs.library().articles()) {
+                if (a.group != previousGroup) {
+                    if (closed.contains(a.group))
+                        contiguous = false;
+                    closed << previousGroup;
+                    previousGroup = a.group;
+                }
+                if (docs.library().groupDescription(a.group).isEmpty())
+                    contiguous = false;
+            }
+            check(contiguous, "each subject is contiguous in reading order and described");
+        }
         {
             // Topic titles in the left menu must stay fully visible at every interface size.
             const QVariant storedSize = settings.value("appearance/interfaceSize");
@@ -96,6 +119,37 @@ int runDocsChecks(const QString &captures) {
             else settings.remove("appearance/interfaceSize");
             Theme::applyPreferences();
             pump(120);
+        }
+        {
+            docs.openArticle("welcome");
+            pump();
+            QPushButton *next = nullptr, *previous = nullptr;
+            for (auto *card : docs.findChildren<DocsCard *>()) {
+                if (card->property("docsRole") == "next") next = card;
+                if (card->property("docsRole") == "previous") previous = card;
+            }
+            check(next && !previous && next->property("articleId") == "first-model",
+                  "the first article offers only Next, to the following article");
+            if (next) next->click();
+            pump();
+            check(docs.currentArticleId() == "first-model", "Next opens the following article");
+            bool flow = false;
+            for (auto *diagram : docs.findChildren<QWidget *>("docsConceptDiagram"))
+                if (diagram->isVisible() && diagram->accessibleDescription() == "Model hub → Download → Load model → Send")
+                    flow = true;
+            check(flow, "concept flows draw the article's own steps");
+            docs.openArticle("glossary");
+            pump();
+            bool hasNext = false;
+            for (auto *card : docs.findChildren<DocsCard *>())
+                if (card->property("docsRole") == "next") hasNext = true;
+            check(!hasNext, "the last article has no Next");
+            docs.showOverview();
+            pump();
+            int steps = 0;
+            for (auto *card : docs.findChildren<DocsCard *>())
+                if (card->property("docsRole") == "pathStep" && card->isVisible()) ++steps;
+            check(steps == 6, "overview shows the six-step start-here path");
         }
         for (const auto &article : docs.library().articles()) {
             check(docs.openArticle(article.id), qPrintable("open article " + article.id));
@@ -282,11 +336,19 @@ int runDocsChecks(const QString &captures) {
                 pump(220);
                 docs.grab().save(captures + "/docs-home-" + suffix + ".png");
                 for (const auto &id :
-                     QStringList{"model-learning", "data-distribution", "dataset-format", "generalization"}) {
+                     QStringList{"model-learning", "data-distribution", "dataset-format", "generalization", "first-model", "blueprints"}) {
                     docs.openArticle(id, docs.library().article(id)->sections.first().id);
                     pump(180);
                     scroll->verticalScrollBar()->setValue(0);
                     docs.grab().save(captures + "/docs-" + id + "-" + suffix + ".png");
+                    if (id == "first-model") {   // the step flow and the previous/next cards
+                        docs.openArticle(id, "chat");
+                        pump(180);
+                        docs.grab().save(captures + "/docs-" + id + "-flow-" + suffix + ".png");
+                        scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+                        pump(120);
+                        docs.grab().save(captures + "/docs-" + id + "-end-" + suffix + ".png");
+                    }
                 }
                 docs.resize(640, 760);
                 docs.showOverview();

@@ -319,6 +319,45 @@ int runModelHubChecks(const QString &directory) {
         if (scroll->isVisibleTo(&hub)) check(scroll->horizontalScrollBar()->maximum() == 0, "compact discovery never clips controls horizontally");
     }
     filter->click();
+    pump();
+    {   // Back from a model's page returns to the same place in the list.
+        hub.resize(850, 360);
+        pump(120);
+        QScrollArea *list = nullptr;
+        for (auto *scroll : hub.findChildren<QScrollArea *>("cardScroll"))
+            if (scroll->isVisibleTo(&hub)) list = scroll;
+        check(list && list->verticalScrollBar()->maximum() > 0, "short window makes the model list scroll");
+        if (list && list->verticalScrollBar()->maximum() > 0) {
+            QPushButton *target = nullptr;
+            for (auto *button : hub.findChildren<QPushButton *>("hubModelName"))
+                if (button->isVisibleTo(&hub)) target = button;   // the last card
+            list->ensureWidgetVisible(target, 0, 0);
+            pump();
+            const int position = list->verticalScrollBar()->value();
+            check(position > 0, "list is scrolled down before opening a model");
+            target->click();
+            check(waitFor([&] { return hub.findChild<QPushButton *>("hubBack") != nullptr; }), "model page opens from a scrolled list");
+            pump(150);
+            hub.findChild<QPushButton *>("hubBack")->click();
+            pump(120);
+            check(list->verticalScrollBar()->value() == position,
+                  qUtf8Printable(QString("back restores the list position (%1, expected %2)").arg(list->verticalScrollBar()->value()).arg(position)));
+            // Reading further down a model's page must not move the list either.
+            list->verticalScrollBar()->setValue(0);
+            pump();
+            for (auto *button : hub.findChildren<QPushButton *>("hubModelName"))
+                if (button->isVisibleTo(&hub)) { button->click(); break; }
+            check(waitFor([&] { return hub.findChild<QPushButton *>("hubBack") != nullptr; }), "model page opens from the top of the list");
+            pump(150);
+            for (auto *scroll : hub.findChildren<QScrollArea *>("cardScroll"))
+                if (scroll->isVisibleTo(&hub)) scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+            pump();
+            hub.findChild<QPushButton *>("hubBack")->click();
+            pump(120);
+            check(list->verticalScrollBar()->value() == 0,
+                  qUtf8Printable(QString("scrolling a model page leaves the list at the top (%1)").arg(list->verticalScrollBar()->value())));
+        }
+    }
     client.abortAll();
     pump();
     fprintf(stderr, "[modelhub] %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);

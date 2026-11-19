@@ -2,7 +2,8 @@
 
 These instructions describe the current app. Use the [example inputs](../examples/README.md)
 for a small walkthrough; they are format demonstrations, not a useful training corpus.
-The sidebar calls Models “Library,” Chat “Playground,” and RAG “Knowledge.”
+The sidebar opens Model hub, Library, Training, Blueprints and Docs. Chat, Tool mode,
+Blueprint runs and Knowledge (document retrieval) live in Conversation.
 
 ## Download, load, and chat
 

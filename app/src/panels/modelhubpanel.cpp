@@ -47,6 +47,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <utility>
 
 namespace {
 constexpr int pageSize = 30;
@@ -543,9 +545,13 @@ void ModelHubPanel::refreshLocalState() {
     request("/models?source=huggingface", [this](int code, const QJsonDocument &document) {
         if (code != 200 || !document.isArray()) return;
         QSet<QString> local;
+        m_localModels.clear();
         for (const auto &entry : document.array()) {
             const auto model = entry.toObject();
-            if (model.value("status").toString("ready") == "ready") local.insert(model.value("ref").toString().toLower());
+            if (model.value("status").toString("ready") != "ready") continue;
+            const QString ref = model.value("ref").toString().toLower();
+            local.insert(ref);
+            m_localModels.insert(ref, model);
         }
         for (auto &entry : m_models) entry["downloaded"] = local.contains(repoId(entry).toLower()) && repoId(entry) != m_pullRepo;
         for (auto it = m_metadata.begin(); it != m_metadata.end(); ++it) it.value()["downloaded"] = local.contains(it.key().toLower()) && it.key() != m_pullRepo;
@@ -868,6 +874,8 @@ void ModelHubPanel::openDetails(const QString &repo) {
     m_detailError.clear();
     m_detailLoading = true;
     const auto generation = ++m_detailGeneration;
+    if (m_pages->currentIndex() == 0)
+        if (auto *list = qobject_cast<QScrollArea *>(m_pages->widget(0))) m_discoveryScroll = list->verticalScrollBar()->value();
     m_pages->setCurrentIndex(1);
     renderDetails();
     if (auto *scroll = qobject_cast<QScrollArea *>(m_pages->widget(1))) scroll->verticalScrollBar()->setValue(0);
@@ -897,6 +905,7 @@ void ModelHubPanel::renderDetails() {
     m_renderedRepo = m_detailRepo;
     clearLayout(m_detailLayout);
     m_detailAction = nullptr;
+    m_detailDelete = nullptr;
     m_detailStatus = nullptr;
     m_weight = nullptr;
     m_context = nullptr;
@@ -942,6 +951,11 @@ void ModelHubPanel::renderDetails() {
     m_detailAction->setObjectName("hubDownloadModel");
     m_detailAction->setProperty("primary", true);
     actions->addWidget(m_detailAction);
+    m_detailDelete = new Button("Delete from this computer", m_details);
+    m_detailDelete->setObjectName("destructiveBtn");
+    m_detailDelete->setToolTip("Remove the downloaded files for this model");
+    connect(m_detailDelete, &QPushButton::clicked, this, &ModelHubPanel::deleteLocalModel);
+    actions->addWidget(m_detailDelete);
     actions->addWidget(compare);
     actions->addStretch();
     heading->addLayout(actions);
@@ -1187,6 +1201,7 @@ void ModelHubPanel::backToDiscovery() {
     m_pages->setCurrentIndex(0);
     m_detailRepo.clear();
     m_detailAction = nullptr;
+    m_detailDelete = nullptr;
     m_detailStatus = nullptr;
     m_weight = nullptr;
     m_context = nullptr;
@@ -1196,7 +1211,23 @@ void ModelHubPanel::backToDiscovery() {
     m_memoryStatus = nullptr;
     m_detailDevice = nullptr;
     renderCards();
-    m_search->setFocus();
+    // The cards were rebuilt while hidden; lay them out now so the old position exists again.
+    auto *list = qobject_cast<QScrollArea *>(m_pages->widget(0));
+    const int position = std::exchange(m_discoveryScroll, -1);
+    if (list && position >= 0) {
+        if (auto *body = list->widget(); body && body->layout()) body->layout()->activate();
+        QScrollBar *bar = list->verticalScrollBar();
+        bar->setValue(position);
+        // Rebuilt cards keep settling for a moment (reflowed rows, wrapped text), and every
+        // shrink of the range clamps the position. Hold it until the layout is stable.
+        auto hold = std::make_shared<QMetaObject::Connection>();
+        *hold = connect(bar, &QScrollBar::rangeChanged, bar, [bar, position](int, int maximum) {
+            if (maximum >= position) bar->setValue(position);
+        });
+        QTimer::singleShot(0, bar, [bar, position] { bar->setValue(position); });
+        QTimer::singleShot(400, bar, [hold] { QObject::disconnect(*hold); });
+    }
+    m_search->setFocus(Qt::OtherFocusReason);
 }
 
 void ModelHubPanel::updateEstimate() {
@@ -1435,8 +1466,74 @@ void ModelHubPanel::updateDownloadUi() {
     if (m_detailAction) {
         const bool local = m_detailData.value("downloaded").toBool();
         m_detailAction->setText(local ? "Load in Conversation" : "Download repository");
-        m_detailAction->setEnabled(local || (m_pullRepo.isEmpty() && !m_detailLoading && m_detailError.isEmpty()));
+        m_detailAction->setEnabled(!m_deleting && (local || (m_pullRepo.isEmpty() && !m_detailLoading && m_detailError.isEmpty())));
     }
+    if (m_detailDelete) {
+        const bool local = m_detailData.value("downloaded").toBool();
+        m_detailDelete->setVisible(local);
+        m_detailDelete->setEnabled(local && !m_deleting);
+        m_detailDelete->setText(m_deleting ? "Deleting…" : "Delete from this computer");
+    }
+}
+
+void ModelHubPanel::deleteLocalModel() {
+    if (m_deleting || !m_client || !m_client->isReady() || m_detailRepo.isEmpty()) return;
+    const QJsonObject record = m_localModels.value(m_detailRepo.toLower());
+    const QString id = record.value("id").toString(localId(m_detailRepo));
+    const QString ref = record.value("ref").toString(m_detailRepo);
+    const double sizeMb = record.value("size_mb").toDouble();
+    // Adapters are trained against a base model; say how many this would orphan.
+    QPointer<ModelHubPanel> guard(this);
+    m_client->get("/adapters", [guard, id, ref, sizeMb](int code, const QJsonDocument &document) {
+        if (!guard) return;
+        int dependents = 0;
+        if (code == 200 && document.isArray()) {
+            for (const auto &entry : document.array()) {
+                const QString base = entry.toObject().value("base_model").toString();
+                if (!base.isEmpty() && (base == id || base.compare(ref, Qt::CaseInsensitive) == 0)) ++dependents;
+            }
+        }
+        guard->confirmAndDelete(id, sizeMb, dependents);
+    });
+}
+
+void ModelHubPanel::confirmAndDelete(const QString &id, double sizeMb, int dependentAdapters) {
+    if (m_deleting || !m_client || !m_client->isReady()) return;
+    const QString repo = m_detailRepo;
+    const QString size = ModelCard::formatSizeMb(sizeMb);
+    QString message = QString("Delete “%1” from this computer?\n\nThis removes its downloaded files").arg(repo);
+    message += size == "-" ? "." : QString(" and frees about %1.").arg(size);
+    message += "\n\nIt is stored in the shared Hugging Face cache, so other tools that use that cache will lose it too.";
+    if (dependentAdapters > 0)
+        message += QString("\n\n%1 adapter%2 trained on it will stop working until you download it again.")
+                       .arg(dependentAdapters).arg(dependentAdapters == 1 ? "" : "s");
+    message += "\n\nYou can download it again from this page.";
+    if (!Ui::confirmRemoval(this, "Delete model?", message)) return;
+
+    m_deleting = true;
+    updateDownloadUi();
+    status(QString("Deleting “%1”…").arg(repo));
+    QPointer<ModelHubPanel> guard(this);
+    m_client->remove("/models/" + id, [guard, id, repo, size](int code, const QJsonDocument &document) {
+        if (!guard) return;
+        guard->m_deleting = false;
+        if (code == 204 || code == 404) {
+            for (auto &entry : guard->m_models) if (repoId(entry).compare(repo, Qt::CaseInsensitive) == 0) entry["downloaded"] = false;
+            if (guard->m_metadata.contains(repo)) guard->m_metadata[repo]["downloaded"] = false;
+            if (guard->m_detailRepo == repo) guard->m_detailData["downloaded"] = false;
+            guard->m_localModels.remove(repo.toLower());
+            guard->status(code == 404 ? QString("“%1” was already removed.").arg(repo)
+                          : size == "-" ? QString("Deleted “%1”.").arg(repo)
+                                        : QString("Deleted “%1”. Freed about %2.").arg(repo, size), "ok");
+            if (code == 204) emit guard->modelRemoved(id);
+            emit guard->modelsChanged();
+        } else {
+            const QString detail = document.object().value("detail").toString();
+            guard->status(detail.isEmpty() ? QString("Could not delete (HTTP %1).").arg(code)
+                                           : QString("Could not delete: %1").arg(detail), "error");
+        }
+        guard->updateDownloadUi();
+    });
 }
 
 void ModelHubPanel::status(const QString &message, const QString &tone) {

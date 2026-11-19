@@ -118,6 +118,77 @@ def _disk_usage(path: Path) -> dict:
         return {"total": None, "free": None}
 
 
+def _earliest(values) -> str | None:
+    stamps = sorted(str(v) for v in values if v)
+    return stamps[0] if stamps else None
+
+
+@router.get("/stats")
+def usage_stats():
+    """Counts of the work kept in this workspace, for the Settings profile.
+
+    Each section is read independently; a store that is unavailable reports null
+    instead of failing the whole profile."""
+    import logging
+    log = logging.getLogger(__name__)
+    stats: dict = {}
+    starts: list = []
+
+    def section(name, read):
+        try:
+            stats[name] = read()
+        except Exception as exc:  # noqa: BLE001 -- one missing store must not hide the rest
+            log.warning("Profile statistics unavailable for %s: %s", name, exc)
+            stats[name] = None
+
+    def models():
+        from backend.routes.models import _get_registry
+        records = _get_registry().list_models()
+        starts.extend(r.downloaded_at for r in records)
+        return {"total": len(records),
+                "downloaded": sum(r.source in ("huggingface", "ollama") for r in records),
+                "imported": sum(r.source == "local" for r in records),
+                "size_mb": round(sum(r.size_mb or 0 for r in records), 1)}
+
+    def training():
+        from backend.routes.training import _get_manager
+        jobs = _get_manager().list()
+        starts.extend(j.created_at for j in jobs)
+        done = [j for j in jobs if j.status == "done"]
+        return {"runs": len(jobs), "completed": len(done),
+                "failed": sum(j.status == "error" for j in jobs),
+                "steps": sum(j.current_step or 0 for j in jobs)}
+
+    def adapters():
+        from backend.routes.adapters import _get_store
+        records = _get_store().list()
+        return {"total": len(records), "trained": sum(bool(r.training_job_id) for r in records)}
+
+    def datasets():
+        from backend.routes.training import _get_datasets
+        records = _get_datasets().list()
+        starts.extend(r.created_at for r in records)
+        return {"total": len(records), "rows": sum(r.rows or 0 for r in records)}
+
+    def knowledge():
+        from backend.routes.rag import _get_store
+        documents = _get_store().list_documents()
+        starts.extend(d.created_at for d in documents)
+        return {"documents": len(documents), "chunks": sum(d.chunks or 0 for d in documents)}
+
+    def blueprints():
+        from backend.routes.blueprints import blueprint_runner
+        counts = blueprint_runner().store.counts()
+        starts.append(counts.pop("first"))
+        return counts
+
+    for name, read in (("models", models), ("training", training), ("adapters", adapters),
+                       ("datasets", datasets), ("knowledge", knowledge), ("blueprints", blueprints)):
+        section(name, read)
+    stats["since"] = _earliest(starts)
+    return stats
+
+
 @router.get("/storage")
 def storage_info():
     from huggingface_hub.constants import HF_HUB_CACHE

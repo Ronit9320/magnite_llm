@@ -120,6 +120,8 @@ TrainingPanel::TrainingPanel(QWidget *parent)
 namespace {
 // The run list item's 1px borders and 7px bottom margin (console.qss) sit around the row widget.
 constexpr int kRunItemChrome=9;
+constexpr int kExperimentRowHeight=62;   // Studio experiments table
+constexpr int kExperimentWideTable=880;   // below this the base model column is hidden
 }
 
 void TrainingPanel::setupUi() {
@@ -171,7 +173,7 @@ void TrainingPanel::setupUi() {
     m_workspaceGrid->setHorizontalSpacing(18); m_workspaceGrid->setVerticalSpacing(18);
     contentLayout()->addWidget(studio);
     m_indexCard=new QWidget(this); m_indexCard->setObjectName("trainingExperimentIndex");
-    auto *index=new QVBoxLayout(m_indexCard); index->setContentsMargins(0,0,12,0); index->setSpacing(12);
+    auto *index=new QVBoxLayout(m_indexCard); index->setContentsMargins(3,0,12,0); index->setSpacing(12);
     auto *indexHeading=new QHBoxLayout(); indexHeading->addWidget(label("Experiments","trainingCardHeading"));
     indexHeading->addStretch(); auto *indexNew=new Button("+",this); indexNew->setFlat(true); indexHeading->addWidget(indexNew);
     connect(indexNew,&QPushButton::clicked,this,&TrainingPanel::openRunDialog); index->addLayout(indexHeading);
@@ -349,7 +351,7 @@ void TrainingPanel::setupUi() {
         configGrid->setColumnStretch(col,1);
     }
     configuration->addLayout(configGrid);
-    auto *reuse=new Button("Use as next run     →",this); reuse->setObjectName("trainingReuseRun"); reuse->setEnabled(false);
+    auto *reuse=new Button("Use in Train     →",this); reuse->setObjectName("trainingReuseRun"); reuse->setEnabled(false);
     configuration->addWidget(reuse); connect(reuse,&QPushButton::clicked,this,&TrainingPanel::reuseRun);
     auto *review=new Button("Review run",this); review->setObjectName("trainingReviewRun"); review->setFlat(true); review->setEnabled(false);
     connect(review,&QPushButton::clicked,this,[this,review] { emit runDetailsRequested(review->property("jobId").toString()); }); review->hide();
@@ -378,14 +380,15 @@ void TrainingPanel::setupUi() {
     m_startButton->setIcon(Theme::coloredIcon("play",QColor(Theme::accentText()),14));
     auto *recipe=Surface::card(this); recipe->setContentsMargins(20,17,20,15);
     m_setup=recipe->parentWidget(); m_setup->setObjectName("trainingRecipe");
-    contentLayout()->addWidget(m_setup);
+    // Train leads the Studio: the next run is set up above the previous run it learns from.
+    contentLayout()->insertWidget(contentLayout()->indexOf(findChild<QWidget *>("trainingStudio")),m_setup);
     auto *recipeHeading=new QHBoxLayout();
-    auto *recipeTitle=new QLabel("Next run recipe",this); recipeTitle->setObjectName("headingLabel");
+    auto *recipeTitle=new QLabel("Train",this); recipeTitle->setObjectName("headingLabel");
     recipeTitle->setObjectName("trainingRecipeTitle"); recipeHeading->addWidget(recipeTitle); recipeHeading->addStretch();
     m_settingsToggle=new Button("Edit settings",this); m_settingsToggle->setCheckable(true);
     m_settingsToggle->setObjectName("trainingSettingsToggle"); m_settingsToggle->setFlat(true); m_settingsToggle->setMinimumWidth(108);
     recipeHeading->addWidget(m_settingsToggle); recipe->addLayout(recipeHeading);
-    auto *recipeHint=new QLabel("Prepare your next iteration from a saved local recipe.",this);
+    auto *recipeHint=new QLabel("Set up your next run. Reuse an earlier run's settings with Use in Train.",this);
     recipeHint->setObjectName("trainingMicro"); recipeHint->setWordWrap(true);
     recipeHeading->removeWidget(recipeTitle); auto *recipeIdentity=new QVBoxLayout(); recipeIdentity->setSpacing(4);
     recipeIdentity->addWidget(recipeTitle); recipeIdentity->addWidget(recipeHint); recipeHeading->insertLayout(0,recipeIdentity);
@@ -566,15 +569,16 @@ void TrainingPanel::setupUi() {
     m_archiveToggle=new Button("Compare baseline",this); m_archiveToggle->setObjectName("trainingArchiveToggle");
     m_archiveToggle->setCheckable(true); archiveHead->addWidget(m_archiveToggle); archive->addLayout(archiveHead);
     m_experiments=new QTableWidget(this); m_experiments->setObjectName("trainingExperimentTable");
-    QFont tableFont=m_experiments->font(); tableFont.setPixelSize(10); m_experiments->setFont(tableFont);
     m_experiments->setColumnCount(6); m_experiments->setHorizontalHeaderLabels({"EXPERIMENT","BASE MODEL","TRAIN LOSS","VAL LOSS","STATUS",""});
     m_experiments->verticalHeader()->hide(); m_experiments->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft|Qt::AlignVCenter); m_experiments->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_experiments->horizontalHeader()->setSectionResizeMode(0,QHeaderView::Stretch);
-    m_experiments->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
+    // Base model ids are short and known; the experiment name gets the remaining width.
+    m_experiments->horizontalHeader()->setSectionResizeMode(1,QHeaderView::ResizeToContents);
     m_experiments->horizontalHeader()->setSectionResizeMode(5,QHeaderView::Fixed); m_experiments->setColumnWidth(5,38);
     m_experiments->setEditTriggers(QAbstractItemView::NoEditTriggers); m_experiments->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_experiments->setSelectionMode(QAbstractItemView::SingleSelection); m_experiments->setShowGrid(false);
     m_experiments->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_experiments->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); m_experiments->setMinimumHeight(100);
+    m_experiments->installEventFilter(this);
     archive->addWidget(m_experiments);
     m_historyEmpty=label("No experiments yet. Create a new run to begin.","trainingEmptyState");
     m_historyEmpty->setWordWrap(true); archive->addWidget(m_historyEmpty); m_historyEmpty->hide();
@@ -1578,27 +1582,28 @@ void TrainingPanel::refreshExperimentViews() {
         auto *model=new QLabel(job["base_model"].toString(),row); model->setTextFormat(Qt::PlainText); model->setObjectName("trainingMicro");
         model->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred); body->addWidget(model);
         auto *resultRow=new QHBoxLayout(); auto *loss=new QLabel(number(job["loss"]),row); loss->setObjectName("trainingIndexLoss");
-        resultRow->addWidget(loss); resultRow->addStretch(); auto *state=new QLabel(result,row); state->setObjectName("trainingTiny"); resultRow->addWidget(state); body->addLayout(resultRow);
+        resultRow->addWidget(loss); resultRow->addStretch(); auto *state=new QLabel(result,row); state->setObjectName("trainingIndexState"); resultRow->addWidget(state); body->addLayout(resultRow);
         row->setAttribute(Qt::WA_TransparentForMouseEvents); item->setSizeHint(QSize(0,qMax(93,row->sizeHint().height()+kRunItemChrome))); m_runs->setItemWidget(item,row);
         const QStringList cells{job["name"].toString()+"\n"+job["created_at"].toString(),job["base_model"].toString(),number(job["loss"]),number(validation),result,"↗"};
         for (int col=0;col<cells.size();++col) {
-            auto *cell=new QTableWidgetItem(col==0?QString():cells[col]); cell->setData(Qt::UserRole,id); cell->setToolTip(col==5?"Use this experiment as the next recipe":cells[col]);
-            QFont cellFont(Theme::bodyFont()); cellFont.setPixelSize(10); cell->setFont(cellFont); m_experiments->setItem(i,col,cell);
+            auto *cell=new QTableWidgetItem(col==0?QString():cells[col]); cell->setData(Qt::UserRole,id);
+            cell->setToolTip(col==5?"Use this experiment as the next recipe":col==0?job["name"].toString()+"\n"+job["base_model"].toString()+" · "+job["created_at"].toString():cells[col]);
+            m_experiments->setItem(i,col,cell);
             if (col==0) {
                 cell->setData(Qt::AccessibleTextRole,cells[col]);
                 auto *nameCell=new QWidget(this); nameCell->setAttribute(Qt::WA_TransparentForMouseEvents);
                 auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,0,0); nameBody->setSpacing(2);   // the table item's own 9px padding already supplies the vertical room
-                auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingIndexName"); nameLabel->setTextFormat(Qt::PlainText);
-                auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
+                auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingTableName"); nameLabel->setTextFormat(Qt::PlainText);
+                auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingTableMeta"); dateLabel->setTextFormat(Qt::PlainText);
                 nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); m_experiments->setCellWidget(i,col,nameCell);
             }
             if (col==4) cell->setForeground(QColor(status=="error"?Theme::statusError():status=="done"||status=="running"?Theme::statusSuccess():Theme::textMuted()));
         }
-        m_experiments->setRowHeight(i,52);
+        m_experiments->setRowHeight(i,kExperimentRowHeight);
         if (id==m_selectedRunId) { m_runs->setCurrentItem(item); m_experiments->selectRow(i); }
     }
     m_runs->verticalScrollBar()->setValue(scroll); m_experiments->verticalScrollBar()->setValue(tableScroll);
-    m_experiments->setFixedHeight(qBound(100,m_experiments->horizontalHeader()->sizeHint().height()+2*m_experiments->frameWidth()+m_jobs.size()*52,350)); filterRuns();
+    m_experiments->setFixedHeight(qBound(100,m_experiments->horizontalHeader()->sizeHint().height()+2*m_experiments->frameWidth()+m_jobs.size()*kExperimentRowHeight,420)); filterRuns();
 }
 
 void TrainingPanel::selectRun(const QString &id) {
@@ -1738,7 +1743,7 @@ void TrainingPanel::openRunDialog() {
     buttons->addWidget(save); buttons->addStretch();
     auto *start=new Button("Start local training ↗",container); start->setObjectName("primaryBtn"); start->setProperty("dialogStart",true);
     start->setToolTip("Start local training · Ctrl+Enter"); start->setEnabled(m_startButton->isEnabled()); buttons->addWidget(start); shell->addLayout(buttons);
-    connect(save,&QPushButton::clicked,this,[this] { if (!validateDialog()) return; applyDialogRecipe(); m_runDialog->accept(); setStatus("Next run recipe saved.","ok"); });
+    connect(save,&QPushButton::clicked,this,[this] { if (!validateDialog()) return; applyDialogRecipe(); m_runDialog->accept(); setStatus("Train settings saved.","ok"); });
     connect(start,&QPushButton::clicked,this,[this,start] { if (!validateDialog()) return; applyDialogRecipe(); onStart(); start->setEnabled(m_startButton->isEnabled()); });
     auto *shortcut=new QShortcut(QKeySequence(Qt::CTRL|Qt::Key_Return),container); shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut,&QShortcut::activated,start,&QPushButton::click);
@@ -1904,6 +1909,11 @@ void TrainingPanel::wireScrolling(QWidget *root) {
 }
 
 bool TrainingPanel::eventFilter(QObject *watched,QEvent *event) {
+    if (watched==m_experiments && event->type()==QEvent::Resize) {
+        // Narrow tables give the experiment name the room; the base model stays in each row's tooltip.
+        m_experiments->setColumnHidden(1,m_experiments->width()<kExperimentWideTable);
+        return BasePanel::eventFilter(watched,event);
+    }
     auto *widget=qobject_cast<QWidget *>(watched); if (!widget) return BasePanel::eventFilter(watched,event);
     QAbstractScrollArea *area=nullptr;
     for (auto *parent=widget;parent;parent=parent->parentWidget()) {

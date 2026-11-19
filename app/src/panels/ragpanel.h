@@ -42,6 +42,9 @@ public:
 signals:
     void sourceScopeChanged();
 
+protected:
+    void changeEvent(QEvent *event) override;
+
 public:
 
     QString settingsJson() const override;
@@ -87,6 +90,9 @@ private:
     QWidget *m_docHost;
     QVBoxLayout *m_docLayout;
     QWidget *m_emptyState;
+    QLabel *m_countLabel = nullptr;
+    QWidget *m_listActions = nullptr;
+    QLabel *m_selectionHint = nullptr;
     QSpinBox *m_chunkSizeSpin;
     QSpinBox *m_chunkOverlapSpin;
     QSpinBox *m_topKSpin;

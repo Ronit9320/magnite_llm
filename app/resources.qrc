@@ -4,6 +4,7 @@
         <file alias="blueprints/order-preview.json">resources/blueprints/order-preview.json</file>
         <file alias="docs/catalog.json">resources/docs/catalog.json</file>
         <file alias="docs/reference/WORKFLOWS.md">resources/docs/reference/WORKFLOWS.md</file>
+        <file alias="docs/reference/BLUEPRINTS.md">resources/docs/reference/BLUEPRINTS.md</file>
         <file alias="docs/reference/LOCAL_API.md">resources/docs/reference/LOCAL_API.md</file>
         <file alias="docs/reference/INSTALL.md">resources/docs/reference/INSTALL.md</file>
         <file alias="docs/reference/LIMITATIONS.md">resources/docs/reference/LIMITATIONS.md</file>
@@ -31,6 +32,7 @@
         <file alias="icons/circle-stop.svg">resources/icons/circle-stop.svg</file>
         <file alias="icons/cpu.svg">resources/icons/cpu.svg</file>
         <file alias="icons/database.svg">resources/icons/database.svg</file>
+        <file alias="icons/user.svg">resources/icons/user.svg</file>
         <file alias="icons/download.svg">resources/icons/download.svg</file>
         <file alias="icons/file-down.svg">resources/icons/file-down.svg</file>
         <file alias="icons/file-text.svg">resources/icons/file-text.svg</file>

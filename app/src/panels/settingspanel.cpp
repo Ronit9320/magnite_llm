@@ -21,12 +21,15 @@
 #include <QButtonGroup>
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDate>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsOpacityEffect>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -45,12 +48,15 @@
 #include <QStyle>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <memory>
 
 namespace {
+// Page indexes are stable (other code selects them by number); Profile is listed first in the menu.
 const QStringList titles = {"General",           "Appearance",    "Chat",        "Runtime",
-                            "Storage & privacy", "Notifications", "Diagnostics", "Updates"};
+                            "Storage & privacy", "Notifications", "Diagnostics", "Updates", "Profile"};
 const QStringList icons = {"settings", "layers", "message-circle", "cpu",
-                           "database", "box",    "file-text",      "refresh-cw"};
+                           "database", "box",    "file-text",      "refresh-cw", "user"};
+constexpr int kProfilePage = 8;
 QLabel* label(const QString& text, const char* name, QWidget* parent = nullptr) {
     auto* result = new QLabel(text, parent);
     result->setObjectName(name);
@@ -142,7 +148,11 @@ void SettingsPanel::setupUi() {
         item->setAccessibleName(titles[i]);
         item->setIconSize(QSize(17, 17));
         m_navigation.append(item);
-        navBody->addWidget(item);
+        if (i == kProfilePage) {
+            navBody->insertWidget(2, item);   // above General: your workspace comes first
+            navBody->insertSpacing(3, 8);
+        } else
+            navBody->addWidget(item);
         connect(item, &QPushButton::clicked, this, [this, i] { selectCategory(i); });
     }
     navBody->addStretch();
@@ -347,6 +357,36 @@ void SettingsPanel::setupUi() {
     row(storage, "Downloaded models", "Review and remove model files individually in the Library.",
         models);
     connect(models, &QPushButton::clicked, this, &SettingsPanel::modelsRequested);
+    auto* partialHeader = new QHBoxLayout;
+    partialHeader->setContentsMargins(0, 17, 0, 0);
+    partialHeader->setSpacing(10);
+    auto* partialCopy = new QVBoxLayout;
+    partialCopy->setSpacing(6);
+    partialCopy->addWidget(label("Partial downloads", "settingsRowTitle"));
+    m_partialSummary = label("Connect to the local service to check for unfinished downloads.",
+                             "settingsHint");
+    partialCopy->addWidget(m_partialSummary);
+    partialHeader->addLayout(partialCopy, 1);
+    m_partialScan = button("Scan again");
+    m_partialScan->setObjectName("partialScan");
+    m_partialDeleteAll = button("Delete all…", "destructiveBtn");
+    m_partialDeleteAll->hide();
+    partialHeader->addWidget(m_partialScan, 0, Qt::AlignVCenter);
+    partialHeader->addWidget(m_partialDeleteAll, 0, Qt::AlignVCenter);
+    storage->addLayout(partialHeader);
+    m_partialHost = new QWidget;
+    m_partialHost->setObjectName("partialDownloads");
+    auto* partialBody = new QVBoxLayout(m_partialHost);
+    partialBody->setContentsMargins(0, 0, 0, 0);
+    partialBody->setSpacing(0);
+    storage->addWidget(m_partialHost);
+    line(storage);
+    connect(m_partialScan, &QPushButton::clicked, this, &SettingsPanel::refreshPartials);
+    connect(m_partialDeleteAll, &QPushButton::clicked, this, [this] {
+        QStringList repos;
+        for (const auto& partial : m_partials) repos << partial["repo"].toString();
+        deletePartials(repos);
+    });
     auto* exportButton = button("Export JSON");
     exportButton->setObjectName("exportAllChats");
     m_chatCount = label("", "settingsHint");
@@ -363,6 +403,87 @@ void SettingsPanel::setupUi() {
     note(storage, "Local by default",
          "Hub search, downloads and update checks use the internet. Inference and training run "
          "locally. The shared model cache can also be used by other applications.");
+    auto* profile = columns[kProfilePage];
+    {
+        auto* card = new QFrame;
+        card->setObjectName("settingsStorageOverview");
+        auto* body = new QHBoxLayout(card);
+        body->setContentsMargins(20, 18, 20, 18);
+        body->setSpacing(16);
+        m_profileAvatar = new QLabel;
+        m_profileAvatar->setObjectName("settingsProfileAvatar");
+        m_profileAvatar->setFixedSize(52, 52);
+        m_profileAvatar->setAlignment(Qt::AlignCenter);
+        m_profileAvatar->setAccessibleName("Profile");
+        body->addWidget(m_profileAvatar, 0, Qt::AlignTop);
+        auto* copy = new QVBoxLayout;
+        copy->setSpacing(4);
+        m_profileTitle = label("Your workspace", "settingsStorageTotal");
+        copy->addWidget(m_profileTitle);
+        m_profileSince = label("Everything below is counted from this computer.", "settingsHint");
+        copy->addWidget(m_profileSince);
+        // Actions sit under the name so the card fits the narrow Settings window at every text size.
+        auto* actions = new QHBoxLayout;
+        actions->setContentsMargins(0, 8, 0, 0);
+        actions->setSpacing(8);
+        auto* editName = button("Edit name");
+        connect(editName, &QPushButton::clicked, this, [this] {
+            selectCategory(0);
+            m_profileName->setFocus();
+        });
+        actions->addWidget(editName);
+        auto* refresh = button("Refresh");
+        refresh->setObjectName("profileRefresh");
+        connect(refresh, &QPushButton::clicked, this, &SettingsPanel::refreshProfile);
+        actions->addWidget(refresh);
+        actions->addStretch();
+        copy->addLayout(actions);
+        body->addLayout(copy, 1);
+        profile->addWidget(card);
+    }
+    profile->addSpacing(6);
+    profile->addWidget(label("YOUR WORK", "settingsSectionEyebrow"));
+    {
+        struct Stat { const char *key, *title, *icon; };
+        const Stat stats[] = {{"models", "Models", "box"},           {"adapters", "Adapters", "layers"},
+                              {"training", "Training runs", "graduation-cap"}, {"datasets", "Datasets", "file-text"},
+                              {"knowledge", "Knowledge documents", "database"}, {"blueprints", "Blueprints", "layers"},
+                              {"tasks", "Tool tasks", "cpu"},       {"conversations", "Conversations", "message-circle"}};
+        auto* grid = new QGridLayout;
+        grid->setSpacing(10);
+        int index = 0;
+        for (const auto& stat : stats) {
+            auto* tile = new QFrame;
+            tile->setObjectName("settingsMetric");
+            tile->setProperty("profileStat", stat.key);
+            auto* l = new QVBoxLayout(tile);
+            l->setContentsMargins(16, 14, 16, 14);
+            l->setSpacing(4);
+            auto* head = new QHBoxLayout;
+            head->setSpacing(7);
+            auto* icon = new QLabel;
+            icon->setProperty("themeIcon", stat.icon);
+            icon->setPixmap(Theme::coloredIcon(stat.icon, QColor(Theme::textSecondary()), 14).pixmap(14, 14));
+            head->addWidget(icon);
+            head->addWidget(label(stat.title, "settingsHint"), 1);
+            l->addLayout(head);
+            auto* value = label("—", "settingsProfileValue");
+            value->setAccessibleName(stat.title);
+            m_statValues.insert(stat.key, value);
+            l->addWidget(value);
+            auto* detail = label(" ", "settingsHint");
+            m_statDetails.insert(stat.key, detail);
+            l->addWidget(detail);
+            grid->addWidget(tile, index / 2, index % 2);
+            ++index;
+        }
+        grid->setColumnStretch(0, 1);
+        grid->setColumnStretch(1, 1);
+        profile->addLayout(grid);
+    }
+    m_profileStatus = label("Counts come from data stored on this computer. Nothing leaves your device.",
+                            "settingsHint");
+    profile->addWidget(m_profileStatus);
     auto* notifications = columns[5];
     note(notifications, "Keep working while Magnite Space runs",
          "Desktop notifications appear when Magnite Space is in the background and your system supports "
@@ -509,7 +630,7 @@ void SettingsPanel::saveImmediate() {
     s.sync();
     if (MotionValue::reduced())
         m_pageMotion->snap(1);
-    Theme::applyPreferences();
+    Theme::applyPreferences(true);
     refreshNavigation();
     setStatus(s.status() == QSettings::NoError
                   ? "Preferences saved on this device."
@@ -561,6 +682,8 @@ void SettingsPanel::selectCategory(int index) {
     }
     if (index == 4 || index == 6)
         refreshDetails();
+    if (index == kProfilePage)
+        refreshProfile();
 }
 void SettingsPanel::refreshNavigation() {
     for (int i = 0; i < 3; ++i)
@@ -625,6 +748,7 @@ void SettingsPanel::refreshDetails() {
         m_diagnostics->setDetails(m_info);
     });
     refreshPackages();
+    refreshPartials();
     m_client->get("/system/storage", [this](int status, const QJsonDocument& doc) {
         m_detailsPending = false;
         if (status != 200 || !doc.isObject()) {
@@ -640,6 +764,230 @@ void SettingsPanel::refreshDetails() {
         m_effectivePath->setText(m_activeDataPath);
         m_storageInfo->setMeasurements(o);
     });
+}
+void SettingsPanel::refreshProfile() {
+    m_profileAvatar->setPixmap(Theme::coloredIcon("user", QColor(Theme::accentLabel()), 26).pixmap(26, 26));
+    const QString name = Greeting::userName();
+    m_profileTitle->setText(name.isEmpty() ? "Your workspace" : name);
+    const auto count = [](qint64 n) { return QLocale().toString(n); };
+    const auto set = [this](const QString& key, const QString& value, const QString& detail) {
+        m_statValues[key]->setText(value);
+        m_statDetails[key]->setText(detail.isEmpty() ? " " : detail);
+    };
+    if (m_store)
+        set("conversations", count(m_store->list().size()), "Saved chats on this computer");
+    if (!m_client || !m_client->isReady()) {
+        m_profileStatus->setText("Connect to the local service to count models, runs and documents.");
+        return;
+    }
+    if (m_profileBusy)
+        return;
+    m_profileBusy = true;
+    QPointer<SettingsPanel> guard(this);
+    m_client->get("/system/stats", [guard, count, set](int status, const QJsonDocument& doc) {
+        if (!guard)
+            return;
+        guard->m_profileBusy = false;
+        if (status != 200 || !doc.isObject()) {
+            guard->m_profileStatus->setText(QString("Could not read workspace statistics (HTTP %1).").arg(status));
+            return;
+        }
+        const auto o = doc.object();
+        const QLocale locale;
+        const auto plural = [](qint64 n, const QString& word) { return word + (n == 1 ? "" : "s"); };
+        const auto section = [&o](const char* key) { return o[key].toObject(); };
+        const auto missing = [&o](const char* key) { return !o[key].isObject(); };
+        auto num = [](const QJsonObject& s, const char* key) { return s[key].toVariant().toLongLong(); };
+        QStringList unavailable;
+        if (missing("models")) unavailable << "models";
+        else {
+            const auto m = section("models");
+            QStringList parts;
+            if (num(m, "downloaded")) parts << QString("%1 downloaded").arg(count(num(m, "downloaded")));
+            if (num(m, "imported")) parts << QString("%1 imported").arg(count(num(m, "imported")));
+            if (m["size_mb"].toDouble() > 0)
+                parts << locale.formattedDataSize(qint64(m["size_mb"].toDouble() * 1024 * 1024), 1,
+                                                  QLocale::DataSizeTraditionalFormat);
+            set("models", count(num(m, "total")), parts.join(" · "));
+        }
+        if (missing("adapters")) unavailable << "adapters";
+        else {
+            const auto a = section("adapters");
+            set("adapters", count(num(a, "total")),
+                num(a, "total") ? QString("%1 trained here").arg(count(num(a, "trained"))) : QString());
+        }
+        if (missing("training")) unavailable << "training";
+        else {
+            const auto t = section("training");
+            QStringList parts;
+            if (num(t, "runs")) parts << QString("%1 of %2 completed").arg(count(num(t, "completed")), count(num(t, "runs")));
+            if (num(t, "steps")) parts << QString("%1 %2").arg(count(num(t, "steps")), plural(num(t, "steps"), "step"));
+            set("training", count(num(t, "runs")), parts.join(" · "));
+        }
+        if (missing("datasets")) unavailable << "datasets";
+        else {
+            const auto d = section("datasets");
+            set("datasets", count(num(d, "total")),
+                num(d, "rows") ? QString("%1 %2").arg(count(num(d, "rows")), plural(num(d, "rows"), "example")) : QString());
+        }
+        if (missing("knowledge")) unavailable << "Knowledge";
+        else {
+            const auto k = section("knowledge");
+            set("knowledge", count(num(k, "documents")),
+                num(k, "chunks") ? QString("%1 indexed %2").arg(count(num(k, "chunks")), plural(num(k, "chunks"), "passage")) : QString());
+        }
+        if (missing("blueprints")) unavailable << "Blueprints";
+        else {
+            const auto b = section("blueprints");
+            set("blueprints", count(num(b, "blueprints")),
+                num(b, "runs") ? QString("%1 workflow %2").arg(count(num(b, "runs")), plural(num(b, "runs"), "run")) : QString());
+            set("tasks", count(num(b, "tool_tasks")), "Tasks in Tool mode");
+        }
+        const auto since = QDate::fromString(o["since"].toString().left(10), Qt::ISODate);
+        guard->m_profileSince->setText(since.isValid()
+            ? QString("In Magnite Space since %1 · %2").arg(locale.toString(since, "MMMM yyyy"), QCoreApplication::applicationVersion())
+            : QString("A fresh workspace · %1").arg(QCoreApplication::applicationVersion()));
+        guard->m_profileStatus->setText(unavailable.isEmpty()
+            ? "Counts come from data stored on this computer. Nothing leaves your device."
+            : "Not available right now: " + unavailable.join(", ") + ". Install the optional ML features or retry.");
+    });
+}
+void SettingsPanel::refreshPartials() {
+    if (!m_client || !m_client->isReady() || m_partialBusy)
+        return;
+    m_partialBusy = true;
+    m_partialScan->setEnabled(false);
+    m_partialSummary->setText("Scanning the model cache…");
+    QPointer<SettingsPanel> guard(this);
+    m_client->get("/models/partials", [guard](int status, const QJsonDocument& doc) {
+        if (!guard)
+            return;
+        guard->m_partialBusy = false;
+        guard->m_partialScan->setEnabled(true);
+        guard->m_partials.clear();
+        if (status != 200 || !doc.isArray()) {
+            guard->m_partialLoaded = false;
+            const QString detail = doc.object()["detail"].toString();
+            guard->m_partialSummary->setText(detail.isEmpty()
+                ? QString("Could not scan for partial downloads (HTTP %1).").arg(status)
+                : "Could not scan for partial downloads: " + detail);
+            guard->renderPartials();
+            return;
+        }
+        guard->m_partialLoaded = true;
+        for (const auto& entry : doc.array())
+            guard->m_partials << entry.toObject();
+        guard->renderPartials();
+    });
+}
+void SettingsPanel::renderPartials() {
+    auto* body = qobject_cast<QVBoxLayout*>(m_partialHost->layout());
+    while (auto* item = body->takeAt(0)) {
+        if (auto* widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+    m_partialDeleteAll->setVisible(m_partials.size() > 1);
+    m_partialDeleteAll->setEnabled(!m_partialBusy);
+    if (!m_partialLoaded)
+        return;
+    qint64 total = 0;
+    for (const auto& partial : m_partials)
+        total += partial["bytes"].toVariant().toLongLong();
+    const QLocale locale;
+    if (m_partials.isEmpty()) {
+        m_partialSummary->setText(
+            "No unfinished downloads. Interrupted or failed Hub downloads appear here.");
+        return;
+    }
+    m_partialSummary->setText(
+        QString("%1 unfinished download%2 using %3. A retry from the Hub resumes from these "
+                "files; delete them to free the space.")
+            .arg(m_partials.size())
+            .arg(m_partials.size() == 1 ? "" : "s")
+            .arg(locale.formattedDataSize(total, 1, QLocale::DataSizeTraditionalFormat)));
+    for (const auto& partial : m_partials) {
+        const QString repo = partial["repo"].toString();
+        auto* host = new QWidget(m_partialHost);
+        host->setObjectName("settingsRow");
+        auto* rowBody = new QHBoxLayout(host);
+        rowBody->setContentsMargins(0, 10, 0, 10);
+        rowBody->setSpacing(16);
+        auto* copy = new QVBoxLayout;
+        copy->setSpacing(4);
+        auto* title = label(repo, "settingsRowTitle", host);
+        title->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        copy->addWidget(title);
+        QStringList facts{
+            locale.formattedDataSize(partial["bytes"].toVariant().toLongLong(), 1,
+                                     QLocale::DataSizeTraditionalFormat),
+            QString("%1 unfinished file%2").arg(partial["files"].toInt())
+                .arg(partial["files"].toInt() == 1 ? "" : "s")};
+        const auto modified =
+            QDateTime::fromString(partial["modified"].toString(), Qt::ISODate).toLocalTime();
+        if (modified.isValid())
+            facts << "last written " + locale.toString(modified, QLocale::ShortFormat);
+        if (partial["has_complete_files"].toBool())
+            facts << "finished files are kept";
+        copy->addWidget(label(facts.join(" · "), "settingsHint", host));
+        rowBody->addLayout(copy, 1);
+        auto* remove = button("Delete", "destructiveBtn");
+        remove->setParent(host);
+        remove->setAccessibleName("Delete partial download " + repo);
+        remove->setEnabled(!m_partialBusy);
+        connect(remove, &QPushButton::clicked, this, [this, repo] { deletePartials({repo}); });
+        rowBody->addWidget(remove, 0, Qt::AlignVCenter);
+        body->addWidget(host);
+    }
+}
+void SettingsPanel::deletePartials(const QStringList& repos) {
+    if (repos.isEmpty() || m_partialBusy || !m_client || !m_client->isReady())
+        return;
+    qint64 total = 0;
+    for (const auto& partial : m_partials)
+        if (repos.contains(partial["repo"].toString()))
+            total += partial["bytes"].toVariant().toLongLong();
+    const QString size =
+        QLocale().formattedDataSize(total, 1, QLocale::DataSizeTraditionalFormat);
+    const QString message = repos.size() == 1
+        ? QString("Delete the unfinished download of “%1”?\n\nThis frees about %2. Finished "
+                  "files from earlier downloads stay. Downloading it again starts from the "
+                  "beginning.").arg(repos.first(), size)
+        : QString("Delete %1 unfinished downloads?\n\nThis frees about %2. Finished files from "
+                  "earlier downloads stay.").arg(repos.size()).arg(size);
+    if (!Ui::confirmRemoval(this, "Delete partial downloads?", message))
+        return;
+    m_partialBusy = true;
+    m_partialScan->setEnabled(false);
+    renderPartials();
+    setStatus("Deleting partial downloads…");
+    auto remaining = std::make_shared<int>(repos.size());
+    auto failures = std::make_shared<QStringList>();
+    auto freed = std::make_shared<qint64>(0);
+    QPointer<SettingsPanel> guard(this);
+    for (const QString& repo : repos) {
+        m_client->remove("/models/partials?repo=" + QString::fromUtf8(QUrl::toPercentEncoding(repo)),
+                         [guard, repo, remaining, failures, freed](int status, const QJsonDocument& doc) {
+            if (!guard)
+                return;
+            if (status == 200)
+                *freed += doc.object()["bytes_freed"].toVariant().toLongLong();
+            else if (status != 404) {
+                const QString detail = doc.object()["detail"].toString();
+                *failures << repo + (detail.isEmpty() ? QString(" (HTTP %1)").arg(status) : ": " + detail);
+            }
+            if (--*remaining > 0)
+                return;
+            guard->m_partialBusy = false;
+            const QString size =
+                QLocale().formattedDataSize(*freed, 1, QLocale::DataSizeTraditionalFormat);
+            guard->setStatus(failures->isEmpty()
+                ? QString("Partial downloads deleted. Freed about %1.").arg(size)
+                : "Some partial downloads could not be deleted: " + failures->join("; "));
+            guard->refreshPartials();
+            guard->refreshDetails();   // storage totals changed
+        });
+    }
 }
 void SettingsPanel::refreshPackages() {
     if (!m_client || !m_client->isReady())
@@ -893,8 +1241,11 @@ void SettingsPanel::setUpdateManager(UpdateManager* manager) {
 
 void SettingsPanel::changeEvent(QEvent* event) {
     BasePanel::changeEvent(event);
-    if (event->type() == QEvent::ApplicationPaletteChange)
+    if (event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
         refreshNavigation();
+        if (m_profileAvatar)
+            m_profileAvatar->setPixmap(Theme::coloredIcon("user", QColor(Theme::accentLabel()), 26).pixmap(26, 26));
+    }
 }
 
 void SettingsPanel::showShortcuts() {

@@ -104,6 +104,29 @@ def hub_sizes(
     return _get_registry().repo_sizes(repo)
 
 
+@router.get("/partials")
+def list_partial_downloads():
+    """Unfinished Hub downloads in the model cache (interrupted or failed pulls)."""
+    try:
+        return _get_registry().list_partial_downloads()
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail=f"Cannot scan the model cache: {exc}") from exc
+
+
+@router.delete("/partials")
+def delete_partial_download(repo: Annotated[str, Query(min_length=3, max_length=200)]):
+    try:
+        return _get_registry().delete_partial_download(repo)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"No partial download for '{repo}'") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not remove partial files: {exc}") from exc
+
+
 @router.get("/{model_id}", response_model=ModelRecord)
 def get_model(model_id: str):
     rec = _get_registry().list_synced()

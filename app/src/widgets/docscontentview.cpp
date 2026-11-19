@@ -130,8 +130,21 @@ DocsDiagram::DocsDiagram(Kind kind, QWidget *parent) : QWidget(parent), m_kind(k
         setAccessibleDescription("Illustrative data, not your files: 800 refund requests, 180 setup "
                                  "questions, and 20 other situations.");
 }
+DocsDiagram::DocsDiagram(const QStringList &steps, QWidget *parent) : DocsDiagram(Steps, parent) {
+    m_steps = steps.mid(0, 5);
+    setAccessibleDescription(m_steps.join(" → "));
+}
+bool DocsDiagram::vertical(int width) const {
+    const int count = m_kind == Steps ? qMax(1, int(m_steps.size())) : 3;
+    return width < count * 130;
+}
 QSize DocsDiagram::sizeHint() const { return QSize(430, m_kind == Distribution ? 160 : 90); }
-int DocsDiagram::heightForWidth(int width) const { return m_kind == Distribution ? 160 : width < 390 ? 230 : 90; }
+int DocsDiagram::heightForWidth(int width) const {
+    if (m_kind == Distribution)
+        return 160;
+    const int count = m_kind == Steps ? qMax(1, int(m_steps.size())) : 3;
+    return vertical(width) ? count * 56 + (count - 1) * 19 + 2 : 90;
+}
 void DocsDiagram::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
@@ -177,14 +190,18 @@ void DocsDiagram::paintEvent(QPaintEvent *) {
         titles = {"Your examples", "Model inputs", "Learning signal"};
         subtitles = {"Content · coverage · consistency", "Tokens · formatting · length", "What the objective rewards"};
         break;
+    case Steps:
+        titles = m_steps;
+        break;
     default:
         break;
     }
-    const bool vertical = width() < 390;
+    const int count = qMax(1, int(titles.size()));
+    const bool vertical = this->vertical(width());
     const qreal gap = vertical ? 19 : 25;
-    const qreal boxWidth = vertical ? width() - 2 : (width() - 2 - 2 * gap) / 3;
-    const qreal boxHeight = vertical ? (height() - 2 - 2 * gap) / 3 : height() - 14;
-    for (int i = 0; i < 3; ++i) {
+    const qreal boxWidth = vertical ? width() - 2 : (width() - 2 - (count - 1) * gap) / count;
+    const qreal boxHeight = vertical ? (height() - 2 - (count - 1) * gap) / count : height() - 14;
+    for (int i = 0; i < count; ++i) {
         const QRectF box(vertical ? 1 : 1 + i * (boxWidth + gap), vertical ? 1 + i * (boxHeight + gap) : 7, boxWidth,
                          boxHeight);
         p.setPen(Qt::NoPen);
@@ -211,7 +228,7 @@ void DocsDiagram::paintEvent(QPaintEvent *) {
                        Qt::AlignCenter | Qt::TextWordWrap, subtitles.value(i));
             p.setFont(body);
         }
-        if (i < 2) {
+        if (i < count - 1) {
             p.setPen(QColor(Theme::accentLabel()));
             const QRectF arrow =
                 vertical ? QRectF(0, box.bottom(), width(), gap) : QRectF(box.right(), 0, gap, height());

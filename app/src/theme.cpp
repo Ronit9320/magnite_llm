@@ -1,4 +1,5 @@
 #include "theme.h"
+#include "systemappearance.h"
 
 #include <QColor>
 #include <QFile>
@@ -20,6 +21,7 @@
 #include <QStyleHints>
 #include <QStyle>
 #include <QTimer>
+#include <QVariantAnimation>
 
 #include <algorithm>
 #include <cstdio>
@@ -30,6 +32,17 @@ namespace {
 bool darkMode = false;
 bool themeApplied = false;
 bool systemDark = false;
+bool startupPaletteDark = false;
+
+// System mode: the desktop portal's stated preference, then Qt's colour scheme, then the startup palette.
+bool detectSystemDark() {
+    if (const auto portal = SystemAppearance::instance()->prefersDark()) return *portal;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    const auto scheme = qApp->styleHints()->colorScheme();
+    if (scheme != Qt::ColorScheme::Unknown) return scheme == Qt::ColorScheme::Dark;
+#endif
+    return startupPaletteDark;
+}
 
 // Read a qt resource file (":/...").
 QString loadText(const QString &path) {
@@ -163,21 +176,86 @@ void Theme::setupApplicationTheme() {
         appearance.setValue("appearance/studio3Dark", true);
         appearance.setValue("appearance/darkRefinementApplied", true);
     }
-    systemDark=qApp->palette().color(QPalette::Window).lightness()<128;
+    // The palette Qt starts with reflects the desktop; ours replaces it once a theme is applied.
+    startupPaletteDark=qApp->palette().color(QPalette::Window).lightness()<128;
+    systemDark=detectSystemDark();
+    const auto followSystem=[] {
+        const bool dark=detectSystemDark();
+        if (dark==systemDark) return;
+        systemDark=dark;
+        if(QSettings().value("appearance/themeMode").toString()=="system") Theme::applyPreferences(true);
+    };
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    systemDark=qApp->styleHints()->colorScheme()==Qt::ColorScheme::Dark;
-    QObject::connect(qApp->styleHints(),&QStyleHints::colorSchemeChanged,qApp,[](Qt::ColorScheme scheme){
-        systemDark=scheme==Qt::ColorScheme::Dark;
-        if(QSettings().value("appearance/themeMode").toString()=="system") Theme::applyPreferences();
-    });
+    QObject::connect(qApp->styleHints(),&QStyleHints::colorSchemeChanged,qApp,followSystem);
 #endif
+    QObject::connect(SystemAppearance::instance(),&SystemAppearance::changed,qApp,followSystem);
     applyPreferences();
 }
 
 bool Theme::isDark() { return darkMode; }
 
-void Theme::setDark(bool dark) {
+namespace {
+// A still of a window as it looked before the theme changed. It sits on top while the new
+// stylesheet is applied underneath (the slow part), then fades away to reveal the new theme.
+class ThemeCrossfade : public QWidget {
+public:
+    ThemeCrossfade(QWidget *window, const QPixmap &still) : QWidget(window), m_still(still) {
+        setObjectName("themeCrossfade");
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_NoSystemBackground);
+        setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+        setFocusPolicy(Qt::NoFocus);
+        setGeometry(window->rect());
+        m_fade.setDuration(Theme::motionThemeMs());
+        m_fade.setEasingCurve(QEasingCurve::InOutQuad);
+        m_fade.setStartValue(1.0);
+        m_fade.setEndValue(0.0);
+        QObject::connect(&m_fade, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+            m_opacity = value.toReal();
+            // Floating bars and overlays raise themselves as the new style lays them out; stay above them.
+            if (parentWidget() && parentWidget()->children().constLast() != this) raise();
+            update();
+        });
+        QObject::connect(&m_fade, &QVariantAnimation::finished, this, &QObject::deleteLater);
+        show();
+        raise();
+    }
+    void start() { raise(); m_fade.start(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setOpacity(m_opacity);
+        painter.drawPixmap(rect(), m_still);
+    }
+
+private:
+    QPixmap m_still;
+    QVariantAnimation m_fade;
+    qreal m_opacity = 1.0;
+};
+
+bool crossfadeWanted(QWidget *window) {
+    const auto type = window->windowType();
+    return window->isVisible() && !window->isMinimized() && type != Qt::Popup && type != Qt::ToolTip &&
+           type != Qt::SplashScreen && !window->size().isEmpty();
+}
+}  // namespace
+
+void Theme::setDark(bool dark, bool animate) {
     if (themeApplied && darkMode==dark) return;
+    QList<ThemeCrossfade *> fades;
+    if (animate && themeApplied && darkMode != dark &&
+        !QSettings().value("appearance/studio3ReducedMotion", false).toBool()) {
+        for (auto *window : QApplication::topLevelWidgets()) {
+            if (!crossfadeWanted(window)) continue;
+            // A switch during a fade captures that fade too, so the change continues from what is on screen.
+            const QPixmap still = window->grab();
+            const auto previous = window->findChildren<QWidget *>("themeCrossfade", Qt::FindDirectChildrenOnly);
+            fades << new ThemeCrossfade(window, still);
+            qDeleteAll(previous);
+        }
+    }
     themeApplied=true;
     // Apply palette and stylesheet as one visual change, including open dialogs.
     QList<QWidget *> updatingWindows;
@@ -208,14 +286,22 @@ void Theme::setDark(bool dark) {
                 QColor(button->property("themeIconTone")=="error" ? statusError() : textSecondary())));
     }
     for (auto *window : updatingWindows) { window->setUpdatesEnabled(true); window->update(); }
+    for (auto *fade : fades) fade->start();
 }
 
-void Theme::applyPreferences() {
+void Theme::applyPreferences(bool animate) {
     QSettings settings;
     const auto mode=settings.value("appearance/themeMode").toString();
     const bool dark=mode=="system"?systemDark:mode=="light"?false:mode=="dark"?true:settings.value("appearance/studio3Dark",true).toBool();
     settings.setValue("appearance/studio3Dark",dark);
+    // Re-apply even when light/dark is unchanged (interface size); only a real switch animates.
+    const bool switching = themeApplied && darkMode != dark;
     themeApplied=false;
+    if (switching && animate) {
+        themeApplied=true;
+        setDark(dark, true);
+        return;
+    }
     setDark(dark);
 }
 
@@ -309,7 +395,7 @@ int Theme::selfCheck() {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
         "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
-        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain"};
+        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain", "user"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());

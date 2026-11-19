@@ -13,10 +13,12 @@ class QPixmap;
 namespace Theme {
 
 bool isDark();
-void applyPreferences();
+// animate crossfades open windows when light/dark changes (user actions; never at startup).
+void applyPreferences(bool animate = false);
 inline QString previewPaper() { return QStringLiteral("#FFFEF8"); }
 inline QString previewGraphite() { return QStringLiteral("#111113"); }
-void setDark(bool dark); // Apply immediately; persistence is owned by the switch.
+void setDark(bool dark, bool animate = false); // Persistence is owned by the switch.
+inline int motionThemeMs() { return 380; }   // light/dark crossfade
 
 // ---- Paper, graphite and orange palette ----
 inline QString canvasBackground()    { return isDark() ? QStringLiteral("#09090B") : QStringLiteral("#F1EFE7"); }
@@ -77,6 +79,7 @@ inline int minWindowWidth()        { return 1024; }
 inline int minWindowHeight()       { return 680; }
 inline int motionFastMs() { return 140; }
 inline int motionStandardMs() { return 180; }
+inline int motionScrollMs() { return 220; }   // base wheel-glide duration
 inline int cornerRadiusSmall()     { return 8; }
 
 // ---- Runtime helpers ----

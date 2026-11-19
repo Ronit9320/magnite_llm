@@ -716,6 +716,47 @@ int runBlueprintChecks(const QString &captures) {
     pump();
     check(preview.run(toolId)["status"].toString() == "denied" && visibleText(chat, "The action was denied"),
           "denial updates the shared run and the chat result");
+    {   // Both conversation modes keep sessions: New starts a branded blank screen, history reopens a saved run.
+        const auto logoShown = [](QWidget &host) {
+            auto *logo = host.findChild<QWidget *>("conversationLogo");
+            return logo && logo->isVisible();
+        };
+        if (auto *fresh = visibleButton(chat, "New task")) fresh->click();
+        pump();
+        check(logoShown(chat) && visibleText(chat, "What would you like to do?"), "a new task shows the Magnite logo");
+        ConversationRunPanel flows(&preview, ConversationRunPanel::Mode::Blueprint);
+        flows.resize(900, 650);
+        flows.show();
+        flows.activate();
+        pump();
+        check(logoShown(flows) && visibleText(flows, "Run a saved workflow") && !flows.findChild<QWidget *>("conversationWorkflowRun"),
+              "Blueprint mode opens on a new session with the Magnite logo");
+        auto *picker = visibleNamed<QComboBox>(flows, "Saved blueprint");
+        if (picker && picker->count() > 1) picker->setCurrentIndex(1);
+        pump();
+        if (auto *inputs = visibleNamed<QPlainTextEdit>(flows, "Workflow inputs")) inputs->setPlainText("Session check");
+        if (auto *run = visibleButton(flows, "Run workflow"); run && run->isEnabled()) run->click();
+        pump(120);
+        const auto workflowCards = [&flows] {
+            int count = 0;
+            for (auto *card : flows.findChildren<QWidget *>("conversationWorkflowRun")) count += card->isVisible();
+            return count;
+        };
+        check(workflowCards() == 1 && !logoShown(flows), "running a workflow adds it to the session");
+        if (auto *fresh = visibleButton(flows, "New run")) fresh->click();
+        pump(400);   // the earlier run keeps reporting progress meanwhile
+        check(workflowCards() == 0 && logoShown(flows), "New run starts an empty session that stays empty");
+        QTimer::singleShot(150, qApp, [] {
+            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) dialog->accept();
+        });
+        if (auto *history = visibleButton(flows, "Run history")) history->click();
+        pump(120);
+        check(workflowCards() == 1, "Run history reopens a saved workflow run");
+        capture(flows, "conversation-blueprint-session");
+        if (auto *fresh = visibleButton(flows, "New run")) fresh->click();
+        pump(300);
+        capture(flows, "conversation-blueprint-new");
+    }
     if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
     pump();
     for (auto *remove : panel.findChildren<QPushButton *>()) {

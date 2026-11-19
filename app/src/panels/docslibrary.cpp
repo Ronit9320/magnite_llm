@@ -22,6 +22,8 @@ bool DocsLibrary::load(const QString &resource) {
     m_articles.clear();
     m_sources.clear();
     m_examples.clear();
+    m_groupOrder.clear();
+    m_groupDescriptions.clear();
     m_error.clear();
     auto fail = [this](const QString &message) {
         m_articles.clear();
@@ -90,6 +92,22 @@ bool DocsLibrary::load(const QString &resource) {
     }
     if (m_articles.isEmpty())
         return fail("The reference library is empty.");
+    for (const auto &value : data["groups"].toArray()) {
+        const auto o = value.toObject();
+        const QString name = o["name"].toString();
+        if (name.isEmpty() || m_groupOrder.contains(name))
+            return fail("A subject is invalid.");
+        m_groupOrder << name;
+        m_groupDescriptions.insert(name, o["description"].toString());
+    }
+    // Reading order follows the subjects; articles keep their catalog order within one.
+    std::stable_sort(m_articles.begin(), m_articles.end(), [this](const DocsArticle &a, const DocsArticle &b) {
+        const auto rank = [this](const QString &group) {
+            const int index = m_groupOrder.indexOf(group);
+            return index < 0 ? int(m_groupOrder.size()) : index;
+        };
+        return rank(a.group) < rank(b.group);
+    });
     for (const auto &article : m_articles)
         for (const auto &id : article.related)
             if (!ids.contains(id) || id == article.id)
@@ -119,8 +137,22 @@ const DocsExample *DocsLibrary::example(const QString &id) const {
     auto it = m_examples.constFind(id);
     return it == m_examples.cend() ? nullptr : &it.value();
 }
+const DocsArticle *DocsLibrary::neighbor(const QString &id, int direction) const {
+    for (int i = 0; i < m_articles.size(); ++i)
+        if (m_articles[i].id == id) {
+            const int next = i + (direction < 0 ? -1 : 1);
+            return next >= 0 && next < m_articles.size() ? &m_articles[next] : nullptr;
+        }
+    return nullptr;
+}
 QStringList DocsLibrary::groups() const {
     QStringList result;
+    for (const auto &group : m_groupOrder)
+        for (const auto &a : m_articles)
+            if (a.group == group) {
+                result << group;
+                break;
+            }
     for (const auto &a : m_articles)
         if (!result.contains(a.group))
             result << a.group;
@@ -181,8 +213,8 @@ QList<DocsMatch> DocsLibrary::search(const QString &query) const {
             for (const auto &word : words) {
                 if (s.title.contains(word, Qt::CaseInsensitive))
                     rank += 5;
-                if (s.text.contains(word, Qt::CaseInsensitive))
-                    ++rank;
+                // Repeated mentions mark the section about a term, not one that names it in passing.
+                rank += qMin(3, int(s.text.count(word, Qt::CaseInsensitive)));
             }
             if (rank > bestScore) {
                 best = &s;

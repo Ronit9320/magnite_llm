@@ -1134,8 +1134,36 @@ void ChatPanel::setKnowledgePanel(RagPanel *panel) {
     m_knowledge = panel;
     auto *body = addDrawer("Knowledge", "conversationKnowledge", m_knowledgeToggle);
     m_knowledgeDrawer = body->parentWidget();
-    m_ragCheck->setText("Use in this conversation");
-    body->addWidget(m_ragCheck);
+    // The switch that matters most, as its own row: what it does on the left, the switch on the right.
+    auto *use = new QFrame(body->parentWidget());
+    use->setObjectName("knowledgeUseCard");
+    auto *useRow = new QHBoxLayout(use);
+    useRow->setContentsMargins(12, 10, 10, 10);
+    useRow->setSpacing(10);
+    auto *useCopy = new QVBoxLayout;
+    useCopy->setSpacing(2);
+    auto *useTitle = new QLabel("Use in this conversation", use);
+    useTitle->setObjectName("ragSectionTitle");
+    useCopy->addWidget(useTitle);
+    m_knowledgeUseHint = new QLabel(use);
+    m_knowledgeUseHint->setObjectName("ragHint");
+    m_knowledgeUseHint->setWordWrap(true);
+    m_knowledgeUseHint->setTextFormat(Qt::PlainText);
+    useCopy->addWidget(m_knowledgeUseHint);
+    useRow->addLayout(useCopy, 1);
+    m_ragCheck->setText({});
+    m_ragCheck->setAccessibleName("Use in this conversation");
+    useRow->addWidget(m_ragCheck, 0, Qt::AlignVCenter);
+    body->addSpacing(4);
+    body->addWidget(use);
+    body->addSpacing(6);
+    const auto describeUse = [this] {
+        m_knowledgeUseHint->setText(m_ragCheck->isChecked()
+            ? "Matching passages are added to each prompt and shown with the reply."
+            : "Off. Replies use only the model and this conversation.");
+    };
+    describeUse();
+    connect(m_ragCheck, &QCheckBox::toggled, this, describeUse);
     auto *scroll = new QScrollArea(body->parentWidget());
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);

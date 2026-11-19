@@ -1,6 +1,7 @@
 #pragma once
 #include "panels/basepanel.h"
 #include <QJsonObject>
+#include <QMap>
 #include <functional>
 
 class QTimer;
@@ -87,6 +88,19 @@ class SettingsPanel : public BasePanel {
     QLabel* m_effectivePath = nullptr;
     DiagnosticsSummary* m_diagnostics = nullptr;
     QLabel* m_chatCount = nullptr;
+    QWidget* m_partialHost = nullptr;
+    QLabel* m_profileAvatar = nullptr;
+    QLabel* m_profileTitle = nullptr;
+    QLabel* m_profileSince = nullptr;
+    QLabel* m_profileStatus = nullptr;
+    QMap<QString, QLabel*> m_statValues, m_statDetails;
+    bool m_profileBusy = false;
+    QLabel* m_partialSummary = nullptr;
+    QPushButton* m_partialScan = nullptr;
+    QPushButton* m_partialDeleteAll = nullptr;
+    QList<QJsonObject> m_partials;
+    bool m_partialBusy = false;
+    bool m_partialLoaded = false;
     QList<QPushButton*> m_navigation;
     MotionValue* m_pageMotion = nullptr;
     QGraphicsOpacityEffect* m_pageEffect = nullptr;
@@ -100,6 +114,10 @@ class SettingsPanel : public BasePanel {
     std::function<QString()> m_runtimeLogs;
     bool m_loading = false;
     void refreshPackages();
+    void refreshPartials();
+    void refreshProfile();
+    void renderPartials();
+    void deletePartials(const QStringList& repos);
     void installPackage(const QJsonObject& package);
     void cancelInstall();
     void pollInstall();
