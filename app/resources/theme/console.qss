@@ -149,7 +149,7 @@ QFrame#studioNote { background: @surfaceFill; border: 1px solid transparent; bor
 QLabel#noteTitle { font-family: @headingFont; font-size: 14px; font-weight: 500; }
 QPushButton#overviewTile { background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; padding: 0; text-align: left; min-height: 84px; }
 QPushButton#overviewTile:hover { background: @surfaceFillHover; }
-QLabel#emptyConversation { font-family: @headingFont; font-size: 28px; font-weight: 500; color: @textPrimary; padding: 0; }
+QLabel#emptyConversation, QLabel#blueprintRunHeading { font-family: @headingFont; font-size: 28px; font-weight: 500; color: @textPrimary; padding: 0; }
 QPushButton#overviewTile:focus { background: @surfaceFillHover; border-color: transparent; }
 QPushButton#overviewTile:pressed { background: @surfaceFillActive; }
 QLabel#statusLabel[state="error"] { color: @statusError; }

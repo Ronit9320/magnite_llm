@@ -2719,7 +2719,8 @@ void addWelcome(QVBoxLayout *layout, const QString &eyebrow, const QString &titl
     auto *marker = label(eyebrow, "chatEyebrow");
     marker->setAlignment(Qt::AlignCenter);
     layout->addWidget(marker);
-    auto *heading = wrapped(title, "emptyConversation");
+    // Its own name (styled like the chat greeting) so lookups for the Conversation greeting stay unambiguous.
+    auto *heading = wrapped(title, "blueprintRunHeading");
     heading->setAlignment(Qt::AlignCenter);
     layout->addWidget(heading);
     auto *detail = wrapped(hint);
