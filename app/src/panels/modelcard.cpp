@@ -169,6 +169,20 @@ ModelCard::ModelCard(const QJsonObject &data, bool isHub, QWidget *parent, bool 
             tags->addWidget(architecture, 0, Qt::AlignLeft | Qt::AlignVCenter);
         }
         row->addWidget(tagColumn);
+        // A list shows many rows at once: keep their actions secondary so the
+        // panel's own primary action stays the only filled button, and make
+        // Delete a quiet icon set apart from the everyday actions.
+        action->setObjectName(QString());
+        if (m_deleteButton) {
+            actions->removeWidget(m_deleteButton);
+            actions->addWidget(m_deleteButton);
+            m_deleteButton->setText(QString());
+            m_deleteButton->setObjectName("libraryRowDelete");
+            m_deleteButton->setToolTip("Delete model…");
+            m_deleteButton->setFixedSize(34, 34);
+            m_deleteButton->setProperty("themeIcon", "trash");
+            m_deleteButton->setIcon(Theme::coloredIcon("trash", QColor(Theme::textSecondary()), 16));
+        }
         row->addLayout(actions);
         layout->insertLayout(0, row);
         const QString added = data.value("downloaded_at").toString().left(10);

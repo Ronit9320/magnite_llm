@@ -78,6 +78,7 @@ std::vector<Token> tokens() {
         {"@surfaceFillHover",     Theme::surfaceFillHover()},
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
+        {"@controlBorder",        Theme::controlBorder()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
@@ -96,8 +97,8 @@ std::vector<Token> tokens() {
 }  // namespace
 
 QString Theme::monoFont() {
-    // Prefer a bundled/shipped mono, then fall back to whatever the OS reports
-    // as a fixed-pitch family. Space Grotesk/DM Sans have no bundled mono.
+    // JetBrains Mono is bundled (see loadFonts); the rest only cover a stripped
+    // resource build, then whatever the OS reports as a fixed-pitch family.
     static const QStringList kPreferred = {"JetBrains Mono", "SF Mono", "Menlo",
                                            "Cascadia Mono", "Consolas", "Noto Sans Mono",
                                            "Liberation Mono", "Courier New"};
@@ -147,6 +148,8 @@ void Theme::loadFonts() {
         QStringLiteral(":/fonts/SpaceGrotesk-SemiBold.ttf"),
         QStringLiteral(":/fonts/DMSans-Regular.ttf"),
         QStringLiteral(":/fonts/DMSans-Medium.ttf"),
+        QStringLiteral(":/fonts/JetBrainsMono-Regular.ttf"),
+        QStringLiteral(":/fonts/JetBrainsMono-Medium.ttf"),
     };
     for (const QString &path : kPaths) {
         QFile f(path);
@@ -242,6 +245,15 @@ QString Theme::qss() {
     return tpl;
 }
 
+static double contrastRatio(const QString &a, const QString &b) {
+    auto luminance = [](const QColor &c) {
+        auto channel = [](double v) { return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF());
+    };
+    const double la = luminance(QColor(a)), lb = luminance(QColor(b));
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
 int Theme::selfCheck() {
     int failures = 0;
     auto check = [&failures](const char *name, bool ok, const char *detail = nullptr) {
@@ -304,7 +316,25 @@ int Theme::selfCheck() {
     // 3. Qt resource tree: theme/fonts/icons embedded via resources.qrc.
     check("theme.qss embedded", !loadText(":/theme/theme.qss").isEmpty());
     check("fonts embedded", !loadText(":/fonts/SpaceGrotesk-Regular.ttf").isEmpty() &&
-                            !loadText(":/fonts/DMSans-Regular.ttf").isEmpty());
+                            !loadText(":/fonts/DMSans-Regular.ttf").isEmpty() &&
+                            !loadText(":/fonts/JetBrainsMono-Regular.ttf").isEmpty());
+    Theme::loadFonts();   // --theme-check runs before setupApplicationTheme()
+    check("monoFont is bundled JetBrains Mono", Theme::monoFont() == "JetBrains Mono");
+    check("light control border reaches 3:1", isDark() || (contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0));
+    {
+        // Type scale: every QSS font-size sits on the shared scale, never below 11px.
+        static const QList<int> kScale = {11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36};
+        const QString raw = loadText(QStringLiteral(":/theme/theme.qss"));
+        QStringList offScale;
+        auto sizes = QRegularExpression(QStringLiteral("font-size:\\s*(\\d+)px")).globalMatch(raw);
+        while (sizes.hasNext()) {
+            const int px = sizes.next().captured(1).toInt();
+            if (!kScale.contains(px)) offScale << QString::number(px);
+        }
+        offScale.removeDuplicates();
+        const QByteArray detail = offScale.join(", ").toUtf8();
+        check("qss font sizes on type scale (min 11px)", offScale.isEmpty(), detail.constData());
+    }
     const std::vector<const char *> kIcons = {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
@@ -398,7 +428,8 @@ int Theme::selfCheck() {
     setDark(true);
     check("refined dark canvas", canvasBackground() == "#09090B");
     check("refined dark surface", surfaceFill() == "#111113");
-    check("refined dark border", surfaceBorder() == "#2B2B30");
+    check("refined dark border", surfaceBorder() == "#36363C");
+    check("dark control border reaches 3:1", contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0);
     check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() <= 12);
     check("dark surfaces retain elevation", QColor(insetBackground()).lightness()<QColor(canvasBackground()).lightness() && QColor(canvasBackground()).lightness()<QColor(surfaceFill()).lightness() && QColor(surfaceFill()).lightness()<QColor(surfaceFillHover()).lightness());
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);

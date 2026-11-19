@@ -10,6 +10,7 @@ inspected; it is not a completed binary redistribution review.
 | --- | --- | --- |
 | DM Sans | Copyright 2014 The DM Sans Project Authors | [SIL OFL 1.1](app/resources/fonts/OFL-DMSans.txt) |
 | Space Grotesk | Copyright 2020 The Space Grotesk Project Authors | [SIL OFL 1.1](app/resources/fonts/OFL-SpaceGrotesk.txt) |
+| JetBrains Mono 2.304 (Regular, Medium) | Copyright 2020 The JetBrains Mono Project Authors | [SIL OFL 1.1](app/resources/fonts/OFL-JetBrainsMono.txt) |
 
 Keep the notices with redistributed font assets. Exact font provenance/version
 matching should be confirmed before a binary bundle is published.

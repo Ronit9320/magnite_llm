@@ -321,10 +321,12 @@ void TrainingPanel::setupUi() {
     metricRow("GPU utilization","utilization");
     m_utilization = new UtilizationMeter(22, 3, this);
     compute->addWidget(m_utilization);
-    metricRow("Memory allocation","memory");
+    metricRow("Memory","memory");
     auto *deviceMemory=new ProgressBar(this); deviceMemory->setObjectName("trainingDeviceMemory"); deviceMemory->setRange(0,100);
     deviceMemory->setTextVisible(false); deviceMemory->setFixedHeight(6); compute->addWidget(deviceMemory);
-    m_computeValues["memoryDetail"]=label("Device-wide usage                     Free —","trainingTiny"); compute->addWidget(m_computeValues["memoryDetail"]);
+    auto *memoryDetailRow=new QHBoxLayout(); memoryDetailRow->setSpacing(8);
+    m_computeValues["memoryDetail"]=label("Device-wide usage","trainingTiny"); memoryDetailRow->addWidget(m_computeValues["memoryDetail"]); memoryDetailRow->addStretch();
+    m_computeValues["memoryFree"]=label("Free —","trainingTiny"); memoryDetailRow->addWidget(m_computeValues["memoryFree"]); compute->addLayout(memoryDetailRow);
     auto *thermal=new QFrame(this); thermal->setObjectName("trainingThermal"); auto *thermalRow=new QHBoxLayout(thermal);
     thermalRow->setContentsMargins(0,12,0,0); m_computeValues["temperature"]=label("Temperature   —","trainingMicro");
     m_computeValues["power"]=label("Power   —","trainingMicro"); thermalRow->addWidget(m_computeValues["temperature"]); thermalRow->addStretch(); thermalRow->addWidget(m_computeValues["power"]);
@@ -566,9 +568,11 @@ void TrainingPanel::setupUi() {
     m_archiveToggle=new Button("Compare baseline",this); m_archiveToggle->setObjectName("trainingArchiveToggle");
     m_archiveToggle->setCheckable(true); archiveHead->addWidget(m_archiveToggle); archive->addLayout(archiveHead);
     m_experiments=new QTableWidget(this); m_experiments->setObjectName("trainingExperimentTable");
-    QFont tableFont=m_experiments->font(); tableFont.setPixelSize(10); m_experiments->setFont(tableFont);
+    QFont tableFont=m_experiments->font(); tableFont.setPixelSize(11); m_experiments->setFont(tableFont);
     m_experiments->setColumnCount(6); m_experiments->setHorizontalHeaderLabels({"EXPERIMENT","BASE MODEL","TRAIN LOSS","VAL LOSS","STATUS",""});
-    m_experiments->verticalHeader()->hide(); m_experiments->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft|Qt::AlignVCenter); m_experiments->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_experiments->verticalHeader()->hide();
+    // Rows follow the name cell, so the date line still fits when the interface size grows.
+    m_experiments->verticalHeader()->setMinimumSectionSize(52); m_experiments->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents); m_experiments->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft|Qt::AlignVCenter); m_experiments->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_experiments->horizontalHeader()->setSectionResizeMode(0,QHeaderView::Stretch);
     m_experiments->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
     m_experiments->horizontalHeader()->setSectionResizeMode(5,QHeaderView::Fixed); m_experiments->setColumnWidth(5,38);
@@ -1583,18 +1587,17 @@ void TrainingPanel::refreshExperimentViews() {
         const QStringList cells{job["name"].toString()+"\n"+job["created_at"].toString(),job["base_model"].toString(),number(job["loss"]),number(validation),result,"↗"};
         for (int col=0;col<cells.size();++col) {
             auto *cell=new QTableWidgetItem(col==0?QString():cells[col]); cell->setData(Qt::UserRole,id); cell->setToolTip(col==5?"Use this experiment as the next recipe":cells[col]);
-            QFont cellFont(Theme::bodyFont()); cellFont.setPixelSize(10); cell->setFont(cellFont); m_experiments->setItem(i,col,cell);
+            QFont cellFont(Theme::bodyFont()); cellFont.setPixelSize(11); cell->setFont(cellFont); m_experiments->setItem(i,col,cell);
             if (col==0) {
                 cell->setData(Qt::AccessibleTextRole,cells[col]);
                 auto *nameCell=new QWidget(this); nameCell->setAttribute(Qt::WA_TransparentForMouseEvents);
-                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,0,0); nameBody->setSpacing(2);   // the table item's own 9px padding already supplies the vertical room
+                auto *nameBody=new QVBoxLayout(nameCell); nameBody->setContentsMargins(15,0,0,0); nameBody->setSpacing(2);   // the stretches centre the two lines in the full row height
                 auto *nameLabel=new QLabel(job["name"].toString(),nameCell); nameLabel->setObjectName("trainingIndexName"); nameLabel->setTextFormat(Qt::PlainText);
                 auto *dateLabel=new QLabel(job["created_at"].toString(),nameCell); dateLabel->setObjectName("trainingMicro"); dateLabel->setTextFormat(Qt::PlainText);
-                nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); m_experiments->setCellWidget(i,col,nameCell);
+                nameBody->addStretch(); nameBody->addWidget(nameLabel); nameBody->addWidget(dateLabel); nameBody->addStretch(); m_experiments->setCellWidget(i,col,nameCell);
             }
             if (col==4) cell->setForeground(QColor(status=="error"?Theme::statusError():status=="done"||status=="running"?Theme::statusSuccess():Theme::textMuted()));
         }
-        m_experiments->setRowHeight(i,52);
         if (id==m_selectedRunId) { m_runs->setCurrentItem(item); m_experiments->selectRow(i); }
     }
     m_runs->verticalScrollBar()->setValue(scroll); m_experiments->verticalScrollBar()->setValue(tableScroll);
@@ -1639,7 +1642,9 @@ void TrainingPanel::applyTelemetry(const QJsonObject &data) {
     const double used=data["used_bytes"].toDouble(),total=data["total_bytes"].toDouble();
     auto *memory=findChild<QProgressBar *>("trainingDeviceMemory");
     memory->setValue(total>0?qBound(0,qRound(used/total*100),100):0);
-    m_computeValues["memoryDetail"]->setText(data["used_bytes"].isDouble()&&total>0?"Device-wide usage       Free "+gb(qMax(0.0,total-used)):"Device-wide memory unavailable");
+    const bool deviceMemoryKnown=data["used_bytes"].isDouble()&&total>0;
+    m_computeValues["memoryDetail"]->setText(deviceMemoryKnown?"Device-wide usage":"Device-wide memory unavailable");
+    m_computeValues["memoryFree"]->setText(deviceMemoryKnown?"Free "+gb(qMax(0.0,total-used)):QString());
     m_computeValues["temperature"]->setText("Temperature   "+(data["temperature_c"].isDouble()?number(data["temperature_c"])+"°C":"—"));
     m_computeValues["power"]->setText("Power   "+(data["power_w"].isDouble()?number(data["power_w"])+" W":"—"));
     m_computeCard->setToolTip(data["detail"].toString("This backend does not expose device telemetry."));

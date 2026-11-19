@@ -26,6 +26,7 @@
 #include <QSettings>
 #include "widgets/shortcuts.h"
 #include <QStyle>
+#include <QHash>
 #include "widgets/toggleswitch.h"
 #include "widgets/combobox.h"
 #include "widgets/utilizationmeter.h"
@@ -146,7 +147,7 @@ void ChatPanel::setupUi() {
     m_modelCombo->lineEdit()->setAccessibleName("Model ID");
     m_modelCombo->lineEdit()->setPlaceholderText("Select model");
     connect(m_modelCombo, &QComboBox::currentTextChanged, this, [this](const QString &text) {
-        m_modelCombo->setToolTip(text.isEmpty() ? "Choose a model or enter its ID" : text);
+        m_modelCombo->setToolTip(text.isEmpty() ? "Choose a model or enter its ID" : selectedModelId());
     });
     m_modelCombo->setToolTip("Choose a model or enter its ID");
     toolbar->addWidget(m_modelCombo);
@@ -372,6 +373,8 @@ void ChatPanel::setupUi() {
     actions->addWidget(m_meter->ring());
     m_stopButton = new Button("Stop", this);
     m_stopButton->setEnabled(false);
+    m_stopButton->hide();   // only shown while there is something to stop (see eventFilter)
+    m_stopButton->installEventFilter(this);
     actions->addWidget(m_stopButton);
     m_sendButton = new Button("Send  ↑", this);
     m_sendButton->setObjectName("primaryBtn");
@@ -423,7 +426,33 @@ void ChatPanel::setupUi() {
     setStatus("Choose and load a model to get started.");
 }
 
+QString ChatPanel::displayModelName(const QJsonObject &model) {
+    const QString name = model["name"].toString().trimmed();
+    if (!name.isEmpty()) return name;
+    // "huggingface:Qwen--Qwen3-0.6B" -> "Qwen3-0.6B"
+    const QString id = model["id"].toString();
+    return id.section(':', -1).section(QStringLiteral("--"), -1).section('/', -1);
+}
+
+QString ChatPanel::selectedModelId() const {
+    const QString text = m_modelCombo->currentText().trimmed();
+    const int idx = m_modelCombo->findText(text);
+    if (idx >= 0) {
+        const QString id = m_modelCombo->itemData(idx).toString();
+        if (!id.isEmpty()) return id;
+    }
+    return text;   // a typed-in model ID
+}
+
+void ChatPanel::selectModelId(const QString &id) {
+    const int idx = m_modelCombo->findData(id);
+    if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
+    else m_modelCombo->setEditText(id);
+}
+
 bool ChatPanel::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_stopButton && event->type() == QEvent::EnabledChange)
+        m_stopButton->setVisible(m_stopButton->isEnabled());
     if (watched == m_input && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
         auto *composer = m_input->parentWidget();
         composer->setProperty("focused",event->type() == QEvent::FocusIn);
@@ -462,19 +491,22 @@ void ChatPanel::refreshModels() {
         auto *picker = panel->m_modelCombo;
         const QJsonArray models = doc.array();
         const QSignalBlocker blockModelSignals(picker);
-        const QString prev = picker->currentText();
+        const QString prev = panel->selectedModelId();
         picker->clear();
+        // Show readable names ("Qwen3-0.6B") and keep the full ID as item data;
+        // a repeated name gets its source so every entry stays distinguishable.
+        QHash<QString, int> nameCounts;
+        for (const QJsonValue &v : models) ++nameCounts[displayModelName(v.toObject())];
         for (const QJsonValue &v : models) {
             const QJsonObject m = v.toObject();
             const QString id = m["id"].toString();
             if (id.isEmpty()) continue;
-            picker->addItem(id);
+            QString label = displayModelName(m);
+            if (nameCounts.value(label) > 1) label += QStringLiteral(" · ") + id.section(':', 0, 0);
+            picker->addItem(label, id);
             picker->setItemData(picker->count() - 1, id, Qt::ToolTipRole);
         }
-        // Restore previous text if still present
-        const int idx = picker->findText(prev);
-        if (idx >= 0) picker->setCurrentIndex(idx);
-        else picker->setEditText(prev);
+        panel->selectModelId(prev);
     });
 }
 
@@ -538,7 +570,7 @@ void ChatPanel::applyEngineStatus(const QJsonObject &status) {
     const auto loadedModel = status["loaded_model"].toString();
     const auto modelSummary = "model: " + (m_modelLoaded ? loadedModel : QStringLiteral("—"));
     if (m_modelLoaded && !loadedModel.isEmpty() && modelSummary != m_modelPill->text())
-        m_modelCombo->setCurrentText(loadedModel);
+        selectModelId(loadedModel);
     m_modelPill->setText(modelSummary);
     const QString adapter = status["active_adapter"].toString();
     m_adapterPill->setText("adapter: " + adapter);
@@ -566,7 +598,7 @@ void ChatPanel::onLoadModel() {
         setStatus("Backend not connected.", "error");
         return;
     }
-    const QString modelRef = m_modelCombo->currentText().trimmed();
+    const QString modelRef = selectedModelId();
     if (modelRef.isEmpty() || modelRef.startsWith("(")) {
         setStatus("Enter or select a model id.", "error");
         return;
@@ -1469,6 +1501,13 @@ void ChatPanel::updateActions() {
     case ModelOperation::Unloading: m_modelButton->setText("Unloading…"); break;
     case ModelOperation::Idle: m_modelButton->setText(m_modelLoaded ? "Unload model" : "Load model"); break;
     }
+    // Until a model is loaded, loading one is the next step: give it the primary style.
+    const bool needsModel = !m_modelLoaded && m_modelOperation == ModelOperation::Idle;
+    if (m_modelButton->property("needsModel").toBool() != needsModel) {
+        m_modelButton->setProperty("needsModel", needsModel);
+        m_modelButton->style()->unpolish(m_modelButton);
+        m_modelButton->style()->polish(m_modelButton);
+    }
     m_modelCombo->setEnabled(!busy && !toolBusy);
     m_engineCombo->setEnabled(!busy && !toolBusy);
     m_input->setReadOnly(m_preparing);
@@ -1493,7 +1532,7 @@ QString ChatPanel::settingsJson() const {
     obj["maxTokens"] = m_maxTokensSpin->value();
     obj["temperature"] = m_tempSpin->value();
     if (!m_knowledge) obj["rag"] = m_ragCheck->isChecked();
-    obj["model"] = m_modelCombo->currentText();
+    obj["model"] = selectedModelId();
     return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
@@ -1507,15 +1546,12 @@ void ChatPanel::applySettingsJson(const QString &json) {
     if (o.contains("temperature")) m_tempSpin->setValue(o["temperature"].toDouble());
     if (!m_knowledge && o.contains("rag")) m_ragCheck->setChecked(o["rag"].toBool());
     if (o.contains("model")) {
-        const QString m = o["model"].toString();
-        const int idx = m_modelCombo->findText(m);
-        if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
-        else m_modelCombo->setEditText(m);
+        selectModelId(o["model"].toString());
     }
 }
 void ChatPanel::loadModel(const QString &id) {
     if (isBusy() || (m_toolMode && m_toolMode->hasActiveTask())) return;
     if (m_chatContents->currentIndex() == 2) showOrdinaryChat();
-    m_modelCombo->setCurrentText(id);
+    selectModelId(id);
     onLoadModel();
 }

@@ -175,7 +175,7 @@ QList<TrainingChart::Sample> TrainingChart::samples() const {
 
 int TrainingChart::sampleCount() const { return samples().size(); }
 QRectF TrainingChart::plotRect() const {
-    QFont axisFont(Theme::monoFont()); axisFont.setPixelSize(9);
+    QFont axisFont(Theme::monoFont()); axisFont.setPixelSize(11);
     const int left=qMax(42,QFontMetrics(axisFont).horizontalAdvance("-0.0e+00")+8);
     return QRectF(left,35,qMax(1,width()-left-24),qMax(1,height()-67));
 }
@@ -185,7 +185,7 @@ void TrainingChart::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::Antialiasing);
     const auto area = plotRect();
     const auto values = samples();
-    QFont font(Theme::monoFont()); font.setPixelSize(9); p.setFont(font);
+    QFont font(Theme::monoFont()); font.setPixelSize(11); p.setFont(font);
     QColor grid(Theme::textMuted()); grid.setAlphaF(0.13); p.setPen(grid);
     for (int i=0; i<5; ++i) {
         const double y = area.top()+area.height()*i/4;

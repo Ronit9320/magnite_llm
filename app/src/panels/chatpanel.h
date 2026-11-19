@@ -72,6 +72,12 @@ public:
     // False for an unknown chat, or the open chat while busy. Deleting the open chat leaves a blank one.
     bool deleteChat(const QString &id);
 
+private:
+    // The picker shows readable names; these map between them and backend model IDs.
+    static QString displayModelName(const QJsonObject &model);
+    QString selectedModelId() const;
+    void selectModelId(const QString &id);
+
 protected:
     void changeEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;

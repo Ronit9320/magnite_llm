@@ -38,7 +38,9 @@ inline QString dangerHover()   { return isDark() ? QStringLiteral("#512D25") : Q
 inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113") : QStringLiteral("#FFFEF8"); }
 inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
-inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#2B2B30") : QStringLiteral("#CFD2C5"); }
+inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#36363C") : QStringLiteral("#C4C8B9"); }
+// Form-control edges must reach 3:1 against their fill (WCAG 1.4.11); card borders stay subtle.
+inline QString controlBorder()       { return isDark() ? QStringLiteral("#63636B") : QStringLiteral("#878C7C"); }
 
 // Unfilled part of the context meter ring and bar.
 inline QString meterTrack()          { return surfaceBorder(); }

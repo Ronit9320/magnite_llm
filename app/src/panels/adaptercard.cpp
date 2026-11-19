@@ -5,6 +5,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include "widgets/button.h"
+#include "theme.h"
+#include <QColor>
 #include <QStyle>
 #include <QVBoxLayout>
 #include <QDateTime>
@@ -119,6 +121,14 @@ AdapterCard::AdapterCard(const QJsonObject &data, QWidget *parent, bool compact)
     btnRow->addWidget(deleteButton);
     if (compact) {
         setProperty("libraryRow", true);
+        // Rows repeat: keep their actions secondary and Delete a quiet icon.
+        m_activateButton->setObjectName(QStringLiteral("cardBtn"));
+        deleteButton->setText(QString());
+        deleteButton->setObjectName(QStringLiteral("libraryRowDelete"));
+        deleteButton->setToolTip(QStringLiteral("Delete adapter…"));
+        deleteButton->setFixedSize(34, 34);
+        deleteButton->setProperty("themeIcon", "trash");
+        deleteButton->setIcon(Theme::coloredIcon(QStringLiteral("trash"), QColor(Theme::textSecondary()), 16));
         layout->setSpacing(4);
         row->setContentsMargins(14, 10, 14, 10);
         auto *actions = new QVBoxLayout;

@@ -204,7 +204,7 @@ void DocsDiagram::paintEvent(QPaintEvent *) {
         if (!subtitles.isEmpty()) {
             p.setPen(QColor(Theme::textMuted()));
             QFont small = body;
-            small.setPixelSize(9);
+            small.setPixelSize(11);
             p.setFont(small);
             p.drawText(QRectF(box.left() + 5, box.bottom() - (m_kind == Data ? 34 : 25), box.width() - 10,
                               m_kind == Data ? 28 : 17),
