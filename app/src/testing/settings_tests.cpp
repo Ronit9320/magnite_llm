@@ -203,6 +203,20 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                         check(panel.grab().save(captures + QString("/large-settings-%1-%2.png").arg(dark ? "dark" : "light").arg(category)), "capture settings category at Large");
                 }
             }
+        {
+            // A short window at Large: the sidebar scrolls instead of squeezing its labels
+            // (fonts with taller line spacing, e.g. on Ubuntu 22.04, need more room).
+            guardSettings.setValue("appearance/interfaceSize", 2);
+            Theme::applyPreferences();
+            workspace.resize(1280, 600);
+            pump(80);
+            panel.selectCategory(0);
+            pump(80);
+            const auto found = TextFit::clippedText(&panel);
+            check(found.isEmpty(), qPrintable(TextFit::describe("Large short window", "settings sidebar", found)));
+            workspace.resize(1280, 820);
+            pump(80);
+        }
         if (storedSize.isValid()) guardSettings.setValue("appearance/interfaceSize", storedSize);
         else guardSettings.remove("appearance/interfaceSize");
         Theme::applyPreferences();

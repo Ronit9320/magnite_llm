@@ -130,7 +130,19 @@ void SettingsPanel::setupUi() {
     auto* nav = new QWidget;
     nav->setObjectName("settingsNavigation");
     nav->setFixedWidth(218);
-    auto* navBody = new QVBoxLayout(nav);
+    // The sidebar scrolls when it is taller than the window (large interface sizes,
+    // short screens) instead of squeezing its labels.
+    auto* navFrame = new QVBoxLayout(nav);
+    navFrame->setContentsMargins(0, 0, 0, 0);
+    auto* navScroll = new QScrollArea;
+    navScroll->setObjectName("settingsScroll");
+    navScroll->setFrameShape(QFrame::NoFrame);
+    navScroll->setWidgetResizable(true);
+    navScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    navFrame->addWidget(navScroll);
+    auto* navContent = new QWidget;
+    navScroll->setWidget(navContent);
+    auto* navBody = new QVBoxLayout(navContent);
     navBody->setContentsMargins(16, 28, 16, 22);
     navBody->setSpacing(4);
     navBody->addWidget(label("Settings", "settingsNavTitle"));
