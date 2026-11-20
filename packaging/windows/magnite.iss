@@ -1,4 +1,4 @@
-; Per-user testing installer. Signing and installed-app updater delivery are Phase 5.
+; Per-user preview installer. Installed apps update by running a newer one silently (packaging/windows/update_install.ps1). Not Authenticode-signed yet.
 #ifndef StageDir
   #error StageDir is required
 #endif

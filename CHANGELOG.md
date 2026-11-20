@@ -1,19 +1,46 @@
 # Changelog
 
-## Unreleased — integrated native testing candidates
+## v0.2-preview — magnite-spacev0.2
 
-- Native Linux CPU AppImage, Mac ARM DMG and Windows x86-64 CPU installer
-  candidates passed the 2026-10-30 hosted integration workflow from clean source.
-  These do not replace the public Linux v0.1-preview assets.
-- Per-launch desktop API Bearer credentials, loopback Host checks, and POSIX/Windows
-  data-directory locks; platform backend supervision and graceful Windows shutdown.
-- Full platform Python dependency constraints and clean-source package provenance.
-- Training snapshot/commit serialization and native SQLite/archive lifetime fixes.
-- Current package, authentication, storage, and lifecycle documentation refreshed.
+First preview for Linux, macOS (Apple silicon) and Windows. See the
+[release notes](docs/release/RELEASE_NOTES.md) for the full list.
 
-See [native package evidence](docs/development/NATIVE_PACKAGES.md). Mac notarization,
-Windows signing, platform updater delivery and broader physical-machine/GPU
-acceptance remain separate work.
+### Added
+
+- Native macOS DMG and Windows per-user installer alongside the Linux AppImage,
+  all built and tested from one commit and published together.
+- In-app updates on macOS (bundle swap with rollback) and Windows (silent
+  installer run), using the same signed update metadata as Linux.
+- Conversation: Markdown replies, copy/retry, edit-and-resend with versions,
+  collapsible thinking, a context meter with automatic compaction, pinned chats,
+  projects and recents.
+- Knowledge inside Conversation: hybrid keyword + vector search, sentence-aware
+  chunking, embedding model choice with reindexing, cancellable ingest.
+- Training Studio and Observatory, prompt/response datasets, training in a child
+  process.
+- Redesigned Model hub and Library; offline Docs reference; Settings window with
+  diagnostics, storage controls and runtime package installs.
+- Per-launch API credentials, loopback Host checks, data-directory locks and
+  backend crash recovery.
+
+### Release process
+
+- Releases are published only from `release/**` branches by the manual
+  `release.yml` workflow, which builds all three platforms from one commit and
+  refuses reused versions or update sequences. `dev` and `master` keep their
+  automatic build-and-test runs and never publish.
+- A build profile (`backend/src/backend/_features.py`) switches Blueprints, Tool
+  mode and the bundled Node.js/Pi off for this release; they stay on in `dev`.
+
+### Changed
+
+- `DATA_SCHEMA` 2: v0.1-preview cannot update in place; install v0.2-preview manually.
+
+### Known gaps
+
+- macOS build not notarized, Windows installer not code-signed.
+- No automatic rollback for a Windows update that installs but fails to start.
+- CPU packages only.
 
 ## v0.1-preview — Linux development preview
 

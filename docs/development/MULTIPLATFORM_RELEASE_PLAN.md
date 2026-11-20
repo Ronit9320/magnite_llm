@@ -2,6 +2,19 @@
 
 ## Status and instructions for the next agent
 
+**2026-11-20 update (owner decision, `release/magnite-spacev0.2`).** Previews are
+now published from `release/**` branches, not from `dev`: `release.yml` is a
+manual, three-platform publisher that only runs on a release branch, and `dev` /
+`master` pushes build and test without publishing. This supersedes the
+"`dev` push publishes previews" rows of the branch table below. Phase 5 is IN
+PROGRESS: macOS (bundle swap with rollback) and Windows (silent installer)
+installed-app updates are implemented with per-platform signed manifests, and
+tested by hosted package checks and script tests; physical-machine update
+acceptance and OS code signing (Developer ID/notarization, Authenticode) are
+still open. Phase 6 is IN PROGRESS: the coordinated publisher exists; its first
+live run is the v0.2-preview rollout. Phase 4 (stable channel) is NOT STARTED.
+See [the release pipeline](RELEASE_PIPELINE.md).
+
 Created: 2026-10-30. **Phases 0–3 COMPLETE on `release/integration`.**
 All three native package jobs and the combined artifact gate passed for
 `3ee0a4c325faaa7b97b23ae116a6f3a0002e7a4c` in

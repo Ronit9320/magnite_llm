@@ -2,10 +2,11 @@
 
 These instructions describe the current app. Use the [example inputs](../examples/README.md)
 for a small walkthrough; they are format demonstrations, not a useful training corpus.
-The sidebar opens Model hub, Library, Training, Blueprints and Docs. Chat, Tool mode,
-Blueprint runs and Knowledge (document retrieval) live in Conversation.
-For saved typed workflows, node adapters, and local tool approvals, see the
-[Blueprints guide](BLUEPRINTS.md).
+The sidebar opens Model hub, Library, Training and Docs; Chat and Knowledge
+(document retrieval) live in Conversation. That is what the v0.2-preview packages
+contain. Builds with Blueprints and Tool mode switched on (the `dev` branch) also
+show a Blueprints workspace and Tool mode and Blueprint runs in Conversation; see
+the [Blueprints guide](BLUEPRINTS.md).
 
 ## Download, load, and chat
 

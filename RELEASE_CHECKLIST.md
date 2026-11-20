@@ -7,6 +7,49 @@ macOS, and Linux. Subsequent milestones build toward a stable v1.0 local AI
 workbench. The roadmap below records planned work, not completed features or
 new platform verification.
 
+## v0.2-preview (magnite-spacev0.2) — release gate
+
+Branch `release/magnite-spacev0.2`. Publish with **Publish preview release**
+(`release.yml`); see [the release pipeline](docs/development/RELEASE_PIPELINE.md).
+Items marked done were checked on 2026-11-20 on the Arch Linux development host only.
+
+Prepared on the branch:
+
+- [x] `RELEASE_VERSION = v0.2-preview`, `RELEASE_NAME = magnite-spacev0.2`,
+      `UPDATE_SEQUENCE = 2`, `DATA_SCHEMA = 2` (unchanged from current `dev`).
+- [x] Blueprints, Tool mode and bundled Node/Pi switched off; backend suite
+      (762 tests), `--ui-check`, `--selftest` and `--theme-check` pass with the
+      switch off; no `blueprints.db` is created.
+- [x] macOS and Windows in-app updates; updater manifest tests and macOS install
+      script tests pass on Linux.
+- [x] Release notes, README, INSTALL, LIMITATIONS, first-launch guides for macOS
+      and Windows, packaged `TESTING.md` files and CHANGELOG updated.
+
+Before publishing:
+
+- [ ] Merge the release machinery (switch, updater, `release.yml`) into `dev` and
+      `master` so the **Run workflow** button exists, without the release-only
+      commit.
+- [ ] Push the branch; `verify.yml` and `native-packages.yml` pass on all three
+      platforms, including the Windows in-app update script step and the macOS
+      update archive check.
+- [ ] `MAGNITE_UPDATE_SIGNING_KEY` is set; optionally add reviewers to the
+      `release` environment.
+- [ ] Final app content is merged into `dev` and cherry-picked here; release
+      notes match what ships.
+- [ ] Run `release.yml` with `draft_only` first; check assets, `SHA256SUMS`, tag
+      commit and notes, then publish.
+
+After publishing (physical machines):
+
+- [ ] Linux: fresh AppImage launch; v0.1-preview reports that the update needs a
+      manual install.
+- [ ] macOS: DMG install and Gatekeeper approval; record the dialogs.
+- [ ] Windows: SmartScreen flow on Windows 10 and 11; record the dialogs.
+- [ ] The next preview (`v0.2-preview.1`, sequence 3) updates in place on all
+      three platforms, including the App Management prompt on macOS and a failed
+      start (rollback on Linux/macOS, report on Windows).
+
 ## Current integration status — 2026-11-02
 
 The public Linux `v0.1-preview` remains the published release. Linux AppImage,

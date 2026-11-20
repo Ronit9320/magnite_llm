@@ -1,134 +1,181 @@
-# Linux preview releases and application updates
+# Release pipeline and application updates
 
-Multi-platform integration has started on `release/integration`; see the
-[current plan](MULTIPLATFORM_RELEASE_PLAN.md) and
-[source inventory](MULTIPLATFORM_INTEGRATION_INVENTORY.md). The Linux publication
-workflow described here is retained as a **manual-only legacy Linux publisher**
-until Phase 6 replaces it. Publication requires an explicit `publish=true`
-dispatch on `dev`; its default is artifact-only. Automatic `dev`/`master` and
-pull-request checks never publish. Native artifact builds use the reusable
-Linux/Mac/Windows jobs in [the native packaging guide](NATIVE_PACKAGES.md).
-No new preview or stable publication is part of this integration work.
+Releases are published from `release/**` branches by one manual workflow,
+`.github/workflows/release.yml`. It builds and tests Linux, macOS and Windows
+from one commit and publishes them together as a GitHub prerelease with signed
+update metadata for each platform. Installed apps on all three platforms update
+themselves from those releases. The current release branch is
+`release/magnite-spacev0.2` (v0.2-preview).
 
-## Scope and decisions
+## Branches and what runs
 
-The first application release is **v0.1-preview**. Linux x86-64 with the bundled
-CPU runtime is the initial package. Windows and macOS testing packages now pass the native coordinator; their
-public release, signing and installed-app updater work remain later phases. This is an unfinished development preview intended to exercise release
-and update delivery while the original application's roadmap continues.
+| Event | `verify.yml` + `native-packages.yml` | Publishes? |
+| --- | --- | --- |
+| Push to a feature branch | — | No |
+| PR into `dev`, `master` or `release/**` | Build and test all three platforms (code/packaging/workflow changes) | No |
+| Push to `dev` or `master` | Build and test all three platforms | No |
+| Push to `release/**` | Build and test all three platforms | No |
+| Manual **Publish preview release** on `release/**` | Builds, tests, signs and publishes | **Yes**, after the checks below |
+| Manual run on any other branch | `release.yml` refuses | No |
 
-The original Linux implementation used the existing `release/v0.1-testing` branch. That branch contained the
-original AppImage work and was fast-forwarded to `dev` at `c00d93a` before this
-implementation. All original packaging commits were already ancestors of `dev`.
-At that initial Linux implementation inspection the remote `mac` branch contained
-only a health-probe change; it now contains substantial packaging and shared
-changes inventoried in the integration plan. `master` is not a release source for this preview and is
-left untouched. Feature branches remain reserved for normal feature work.
+Documentation-only changes skip the automatic builds. `linux-preview.yml` is a
+manual Linux-only package build and never publishes.
 
-The owner explicitly deferred the broader release checklist until later. Its
-unchecked work remains open; passing this pipeline does not certify those
-features, security repairs, licensing reviews, or platform support as complete.
+`dev` and `master` keep every feature that is in development. A release branch is
+cut from `dev` and only receives fixes, by `git cherry-pick` from `dev`. Never
+merge a release branch back: its version, release notes and feature switches
+belong to that release only. Changes to the release machinery (workflows,
+updater, packaging) are made on `dev`, or cherry-picked there from the release
+branch, so the next release branch starts with them.
 
-## Architecture
+GitHub only shows the **Run workflow** button for workflows that exist on the
+default branch (`master`). Merge `release.yml` into `dev` and promote it to
+`master` before the first release from a branch; the run itself always uses the
+release branch's copy of the workflow.
 
-```mermaid
-flowchart TD
-    A[Manual legacy Linux dispatch] --> B[GitHub Actions: Ubuntu 22.04]
-    B --> C[Build Qt client and isolated Python CPU runtime]
-    C --> D[AppImage plus glibc audit]
-    D --> E[Backend, UI, updater and relocated real-model checks]
-    E --> F[Upload tested build artifact]
-    F --> G[Explicit publish opt-in: sign update metadata in a separate job]
-    G --> H[GitHub prerelease: v0.1-preview]
-    H --> I[Qt updater checks published preview releases]
-    I --> J[Verify Ed25519 metadata, download, verify SHA-256]
-    J --> K[User chooses Restart to install]
-    K --> L[Backend drains work and stops gracefully]
-    L --> M[Independent helper atomically exchanges AppImages]
-    M --> N[New desktop and backend acknowledge readiness]
-    N --> O[Retain previous AppImage for recovery]
-```
+## Cutting a release
 
-GitHub Actions builds and tests packages. GitHub Releases hosts packages and
-signed metadata. Installed clients independently check for updates. Publishing
-an update does not instantly replace copies on offline user computers.
+1. Branch from tested `dev`: `git switch -c release/<name> origin/dev`.
+2. In `backend/src/backend/_version.py` set `RELEASE_VERSION` (format
+   `vMAJOR.MINOR[.PATCH]-preview[.N]`), `RELEASE_NAME` (the GitHub release title)
+   and an `UPDATE_SEQUENCE` higher than every published release. Change
+   `DATA_SCHEMA` only if persistent formats changed; installed apps refuse
+   updates with a different schema.
+3. In `backend/src/backend/_features.py`, switch off features that are not ready.
+4. Write `docs/release/RELEASE_NOTES.md`; it becomes the release description.
+   Update the version-specific user docs (README, INSTALL, first-launch guides,
+   packaging `TESTING.md` files, CHANGELOG).
+5. Push the branch. The automatic runs must pass on all three platforms.
+6. Actions → **Publish preview release** → choose the release branch, type the
+   exact `RELEASE_VERSION` into `confirm_version`. Use `draft_only` to stop at a
+   draft and publish it from the GitHub UI after inspecting it.
+7. Install the published packages on real machines and check an update from the
+   previous release (see the release checklist).
 
-No hosted inference server or custom update API is introduced. App update traffic
-uses GitHub over HTTPS. Existing ML execution stays in the local Python backend.
+For a follow-up preview on the same branch (for example `v0.2-preview.1`), apply
+the fixes, bump `RELEASE_VERSION` and `UPDATE_SEQUENCE`, update the notes, and run
+the workflow again. A published version is never replaced.
 
-## One application version
+## What `release.yml` checks and does
 
-`backend/src/backend/_version.py` is the canonical source:
+1. **Guard** (read-only): the ref is `release/**`; the checkout is clean;
+   `confirm_version` equals `RELEASE_VERSION`; no release or tag with that name
+   exists (an API error is not treated as "missing"); `UPDATE_SEQUENCE` is higher
+   than the sequence in every published `update-*.json`
+   (`packaging/check_release_sequence.py`).
+2. **Build**: the reusable `build-linux.yml`, `build-macos.yml` and
+   `build-windows.yml` build and test the exact guard commit, as in normal CI.
+3. **Publish** (the only job with `contents: write` and the signing key, in the
+   `release` environment): checks the complete artifact set against the commit
+   (`verify_artifact_set.py`), signs `update-linux-x86_64.json`,
+   `update-macos-arm64.json` and `update-windows-x86_64.json`
+   (`release_metadata.py`), writes `SHA256SUMS`, creates a draft prerelease tagged
+   at the tested commit, uploads every asset, checks the upload list, then
+   publishes it as a prerelease that is not marked latest.
 
-- `RELEASE_VERSION`: `v0.1-preview`, used for UI, health/API metadata, tags,
-  filenames, release metadata, and build information.
-- `UPDATE_SEQUENCE`: `1`, the monotonic update ordering value.
-- `DATA_SCHEMA`: `2`, which includes the new Blueprint node and link types.
+Add required reviewers to the `release` environment (Settings → Environments)
+to make a second person approve each publication.
 
-Python distribution metadata requires PEP 440. Its `0.1rc0` spelling is computed
-from the release identity and is not another editable application version.
-CMake reads this same file. Packaging does not accept an independent display
-version override. Historical evidence describes older builds; those binaries
-must not be relabeled as this release. Future roadmap milestone labels are not
-installed application version identities.
-
-For every subsequent distributed update, change the canonical preview version
-and increase `UPDATE_SEQUENCE`. Never overwrite an already published version.
-The updater checks the signed sequence against both its compiled sequence and
-the highest successfully started sequence stored in QSettings.
-
-## Workflow and branch behavior
-
-`.github/workflows/native-packages.yml` builds three-platform artifacts on
-relevant `dev`/`master` pushes, PRs targeting them, and manual `release/**` runs.
-Regular docs-only changes skip automatic checks; packaging files remain inputs.
-Platform/feature branches do not run on push. `verify.yml` follows the same
-automatic branch/path policy and also supports manual dispatch.
-
-`.github/workflows/linux-preview.yml` is manual-only on `dev` or `release/**`.
-It builds artifacts by default. A separate `publish=true` opt-in on `dev` enables
-the legacy Linux-only publisher below. No branch merge, tag push or normal CI
-run implicitly authorizes publication or stable promotion.
-
-1. Build on Ubuntu 22.04, targeting glibc 2.35 or older requirements.
-2. Bundle Python 3.12.12 and the CPU dependencies; build portable CPU llama.cpp.
-3. Verify AppImage tool SHA-256 values from `packaging/tools.lock.json`.
-4. Audit every staged ELF file; reject symbols newer than the baseline.
-5. Run signature/manifest tests, real installer transaction tests, backend
-   regressions, theme/UI/startup tests, and relocated tiny-model workflows.
-6. Upload the exact tested AppImage and verification evidence as Actions artifacts.
-7. On an explicit `publish=true` dispatch on `dev`, download that artifact in a separate job with release-write permission.
-8. Sign metadata, checking that the private key matches the shipped public key.
-9. Create a draft tagged at the workflow commit, upload all assets, then publish
-   it as a prerelease with `latest=false`.
-
-An existing published version is never overwritten. Later pushes with an unchanged
-version still build/test and upload an Actions artifact, but skip publication;
-the workflow summary explains that a version/sequence bump is required. An
-unfinished draft requires inspection before retrying. This prevents a user from
-seeing a different binary under a version they already installed.
-
-A push to the working release branch originally published the first preview
-without merging into `dev`. Release branches are now artifact-only. Subsequent reviewed work can follow the normal merge into
-`dev` for app testing without publishing. A future coordinated preview needs the
-remaining release-plan work, a new canonical identity and an explicit rollout.
-Neither ordinary development nor native artifact testing changes `master`.
-
-The release assets are:
+Release assets:
 
 ```text
-Magnite-v0.1-preview-linux-x86_64.AppImage
-SHA256SUMS
-update-linux-x86_64.json
-update-linux-x86_64.json.sig
-linux-compatibility.json
-TESTING.md
+Magnite-<version>-linux-x86_64.AppImage
+Magnite-<version>-arm64.dmg                 first install on macOS
+Magnite-<version>-macos-arm64.zip           macOS in-app updates (same signed bundle)
+Magnite-<version>-windows-x86_64-setup.exe
+update-{linux-x86_64,macos-arm64,windows-x86_64}.json and .json.sig
+linux-compatibility.json, TESTING.md (Linux), SHA256SUMS
 ```
 
-The workflow needs GitHub Actions enabled and a repository configuration that
-allows its publishing job `contents: write`. The first hosted source and preview runs both passed on 2026-10-23; the exact
-run and published-asset checks are recorded below. Adding workflow YAML alone
-is not evidence of success for future candidates.
+## Build profile: switching unfinished features off
+
+`backend/src/backend/_features.py` holds `BLUEPRINTS_AND_TOOLS`. CMake generates
+`build_features.h` from it, the backend imports it and packaging reads it through
+`packaging/identity.py`. With it `False`:
+
+- the client has no Blueprints workspace and no Tool/Blueprint conversation modes;
+  the Settings profile hides their counts; Docs hides their articles and uses
+  alternate wording in a few general ones (`requires` and
+  `without_blueprints_and_tools` in the docs catalog);
+- the backend mounts no `/blueprints` or `/inference/tool-runs` routes and never
+  creates `blueprints.db`;
+- packages leave out Node.js and Pi's npm dependencies; the Pi smoke check
+  instead confirms they are absent.
+
+The code still compiles and its unit tests still run, and `DATA_SCHEMA` does not
+change, so switching a feature back on in a later release needs no migration.
+Prefer this over deleting unfinished work on a release branch: a large deletion
+would conflict with every fix cherry-picked from `dev`.
+
+## Installed-app updates
+
+All platforms share one flow in `app/src/update_manager.cpp`:
+
+1. List up to 100 GitHub releases (prereleases included; `/latest` would skip
+   them), sort the preview tags by version, and pick the newest one that has this
+   platform's `update-<platform>.json` and signature.
+2. Verify the Ed25519 signature against `packaging/keys/update-public.pem` built
+   into the client, then the version, sequence (higher than the compiled one and
+   the highest one this machine has started), `DATA_SCHEMA`, platform,
+   architecture, exact download URL and the platform's minimum OS
+   (`minimum_glibc`, `minimum_macos`, `minimum_windows`).
+3. Download with a size bound, check the SHA-256 and the file type.
+4. On **Restart to install**, ask the backend to quiesce, stop it gracefully,
+   start the platform's installer step detached, wait for it to report `ready`,
+   and quit.
+
+| Platform | Install step | If the new version doesn't start |
+| --- | --- | --- |
+| Linux | `packaging/update_helper.cpp`: atomic `renameat2` exchange of the AppImage | Exchanged back and relaunched |
+| macOS | `packaging/macos/update_install.sh`: the client unpacks the `.zip` beside the app first, the script renames the old bundle into the transaction folder and moves the new one in | Old bundle moved back and reopened |
+| Windows | `packaging/windows/update_install.ps1`: waits for the client and backend to exit, runs the setup `.exe` with `/VERYSILENT` over the installation | Reported only; Inno Setup undoes failed installs, but not a successful install that won't start |
+
+The new version confirms startup by writing its version to the health file
+named by `--update-health-file` once its backend is ready. The transaction folder
+(`.magnite-update-*`, beside the app on Linux/macOS, in `%TEMP%` on Windows) keeps
+the logs and, on Linux and macOS, the previous copy. macOS and Windows remove the
+previous successful transaction when the next update starts.
+
+Where an app cannot replace itself (source builds, an AppImage that is not
+writable, a macOS app opened from the disk image or App Translocation, a Windows
+folder not made by the installer) it still checks and reports updates but offers
+no install.
+
+Tests: `magnite-update-tests` (manifest rules for all platforms),
+`packaging/tests/test_update_helper.py` (Linux helper),
+`packaging/tests/test_macos_update_install.py` (the macOS script with stand-in
+`open`/`xattr`), and the Windows package smoke test, which runs the real update
+script against the built installer. An update between two published releases on
+physical Macs and PCs is still a manual release check.
+
+## Code signing and first-launch warnings
+
+| Platform | Today | Effect |
+| --- | --- | --- |
+| Linux | No OS signing needed | None |
+| macOS | Ad-hoc signed, not notarized | Gatekeeper blocks the first launch; users approve it in System Settings → Privacy & Security ([guide](../MACOS_FIRST_LAUNCH.md)) |
+| Windows | Not Authenticode-signed | SmartScreen shows "Windows protected your PC" (More info → Run anyway); Smart App Control blocks it outright ([guide](../WINDOWS_FIRST_LAUNCH.md)) |
+
+In-app updates avoid these prompts: the client downloads without the quarantine
+flag (macOS) or Mark of the Web (Windows) that browsers add, and every update is
+checked against the project's own Ed25519 key. That key is the trust anchor for
+updates; OS signing only affects first installs and OS reputation checks.
+
+There is no free way to remove the first-launch warnings:
+
+- **macOS** needs a Developer ID certificate from the Apple Developer Program
+  (paid yearly membership), `codesign --options runtime` with that identity, and
+  notarization with `notarytool` plus stapling. Add these to `build-macos.yml`
+  as secrets once the account exists.
+- **Windows** needs an Authenticode signature. Options include Microsoft's
+  managed signing service on Azure (Trusted Signing: a low-cost monthly service
+  with identity validation and eligibility rules), SignPath Foundation's free
+  signing for qualifying open-source projects, or an OV certificate from a
+  certificate authority. SmartScreen reputation still builds up over downloads.
+  Sign both the installer and the bundled executables.
+
+Until then, keep the first-launch guides linked from the release notes and
+publish `SHA256SUMS` with every release.
 
 ## Signing setup and repository access
 
@@ -173,7 +220,7 @@ Enable immutable releases in GitHub if desired; all assets are uploaded while
 the release is still a draft. Do not enable settings that prevent the publishing
 job from creating its intended preview tag without adapting the workflow.
 
-## Installed-app behavior
+## Linux update details (from v0.1-preview)
 
 Settings → Updates shows the installed version, preview channel, check/download/
 cancel/restart controls, and an automatic startup-check preference. Startup checks
@@ -248,20 +295,14 @@ The first preview cannot demonstrate receiving a newer published version until
 a subsequent version is published. Local tests exercise signed metadata and real
 atomic helper installation/rollback with disposable launcher fixtures instead.
 
-## Windows and macOS follow-up
+## Later work
 
-Keep common versioning, GitHub distribution, release channels and Qt update UI.
-Add native runners, platform artifacts, signing, clean-machine tests and dedicated
-installation implementations. macOS can evaluate Sparkle with signing/notarization;
-Windows needs a signed installer and process-tree-safe replacement. A `.dmg` or
-`.exe` download alone does not implement automatic updates. Linux-only helper
-code is excluded on other platforms.
+AppImageUpdate/zsync deltas, `.deb`/`.rpm` repositories, Flatpak, staged rollout,
+a stable channel (`v1.0.0` from `master`, see the
+[multi-platform plan](MULTIPLATFORM_RELEASE_PLAN.md)), key rotation, a migration
+framework for `DATA_SCHEMA` changes, and OS code signing.
 
-Later options include AppImageUpdate/zsync deltas, distribution repositories for
-`.deb`/`.rpm`, Flatpak-managed updates, staged rollout, componentized ML runtimes,
-key rotation, better recovery UI and stable releases. These are follow-up work.
-
-## Implementation and verification log
+## History: v0.1-preview implementation and verification log
 
 - Inspected local/remote branches and existing architecture, release and packaging
   documentation; reused and advanced the original AppImage release branch.

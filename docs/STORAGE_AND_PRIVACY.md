@@ -14,8 +14,8 @@
 | Hugging Face weights | huggingface_hub cache, separate from MAGNITE_HOME |
 | Qt preferences | QSettings under organization Magnite, application Magnite LLM; on Linux normally under XDG_CONFIG_HOME or `~/.config` |
 | Chat | Desktop conversation history in the application data `chats/` directory |
-| Blueprints | Saved revisions, run snapshots, traces, and approval audits in `blueprints.db`. Drafts, canvas layout, and reusable node templates live in profile-scoped Qt settings. |
-| Tool workspace | The default working directory for approved commands is `tool-workspace/` under application data. |
+| Blueprints | Builds with Blueprints switched on only (not v0.2-preview). Saved revisions, run snapshots, traces, and approval audits in `blueprints.db`. Drafts, canvas layout, and reusable node templates live in profile-scoped Qt settings. |
+| Tool workspace | Builds with Tool mode switched on only. The default working directory for approved commands is `tool-workspace/` under application data. |
 
 The registry uses the Hub library's cache location: `HF_HUB_CACHE` (exact path),
 then legacy `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then
