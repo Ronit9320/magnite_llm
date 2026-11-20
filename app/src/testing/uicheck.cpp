@@ -4341,7 +4341,9 @@ int runUiCheck(const QString &captures) {
     // Deliver pending callbacks while their panels still exist.
     client.abortAll(); pump();
     failures += runModelHubChecks(captures);
-    failures += runBlueprintChecks(captures);
+    // Blueprints are not part of switched-off builds; dev builds keep covering them.
+    if (Features::blueprintsAndTools) failures += runBlueprintChecks(captures);
+    else std::printf("[blueprints] SKIP: switched off in this build\n");
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

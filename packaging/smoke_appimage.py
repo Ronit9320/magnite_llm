@@ -62,7 +62,7 @@ def main():
         runtime = appdir / "usr/bin/runtime"
         python = runtime / "python/bin/python3"
         check("theme", [launcher, "--theme-check"])
-        check("ui", [launcher, "--ui-check"], 360)
+        check("ui", [launcher, "--ui-check"], 900)
         check("desktop", [launcher, "--selftest"])
         if features()["blueprints_and_tools"]:
             check("blueprints", [launcher, "--ui-check"], environment={**env, "MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})

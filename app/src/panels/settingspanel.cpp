@@ -484,6 +484,9 @@ void SettingsPanel::setupUi() {
             head->addWidget(label(stat.title, "settingsHint"), 1);
             l->addLayout(head);
             auto* value = label("—", "settingsProfileValue");
+            // A short number: without word wrap its minimum height is the full line, so the
+            // grid can't squeeze it (grid layouts ignore height-for-width of wrapped labels).
+            value->setWordWrap(false);
             value->setAccessibleName(stat.title);
             m_statValues.insert(stat.key, value);
             l->addWidget(value);

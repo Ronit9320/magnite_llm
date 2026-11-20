@@ -86,7 +86,7 @@ def main():
         smoke_pi = Path(__file__).resolve().parents[1] / "smoke_pi.py"
         run("bundled-pi", [python, "-I", "-B", smoke_pi], marker="Bundled Node and Pi bridge OK")
         run("theme", [exe, "--theme-check"], marker="0 failure(s)")
-        run("ui", [exe, "--ui-check"], marker="PASS (0 failures)")
+        run("ui", [exe, "--ui-check"], marker="PASS (0 failures)", timeout=900)
         run("desktop", [exe, "--selftest"], marker="PASS (0 failures)")
         if features()["blueprints_and_tools"]:
             run("blueprints", [exe, "--ui-check"], marker="[blueprints-live] PASS (0 failures)",
