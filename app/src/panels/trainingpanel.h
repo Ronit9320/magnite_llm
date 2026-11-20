@@ -36,6 +36,8 @@ class TrainingPanel : public BasePanel {
     Q_OBJECT
 
 public:
+    // True while a status poll awaits its answer; a new poll is ignored meanwhile (tests wait on this).
+    bool pollPending() const { return m_pollPending; }
     explicit TrainingPanel(QWidget *parent = nullptr);
 
     void setBackendClient(BackendClient *client);
