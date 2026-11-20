@@ -75,6 +75,18 @@ jobs:
           bash packaging/macos/build_dmg.sh > build/packaging/macos/hosted/dmg.log 2>&1
           version="$(python3 packaging/release_metadata.py --print-version)"
           bash packaging/macos/check_dmg.sh "dist/Magnite-$version-arm64.dmg" build/packaging/macos/hosted/dmg-smoke >> build/packaging/macos/hosted/dmg.log 2>&1
+      - name: Package and check the in-app update archive
+        run: |
+          version="$(python3 packaging/release_metadata.py --print-version)"
+          archive="dist/Magnite-$version-macos-arm64.zip"
+          # The same signed bundle as the DMG; installed apps update from this archive.
+          ditto -c -k --sequesterRsrc --keepParent build/packaging/macos/stage/Magnite.app "$archive"
+          check="$RUNNER_TEMP/update-archive-check"
+          rm -rf "$check" && mkdir -p "$check"
+          ditto -x -k "$archive" "$check"
+          codesign --verify --deep --strict --verbose=2 "$check/Magnite.app" > build/packaging/macos/hosted/update-archive.log 2>&1
+          test -x "$check/Magnite.app/Contents/MacOS/Magnite"
+          test -x "$check/Magnite.app/Contents/Resources/runtime/python/bin/python3"
       - name: Record exact tested package provenance
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -82,13 +94,14 @@ jobs:
           version="$(python3 packaging/release_metadata.py --print-version)"
           python3 packaging/package_evidence.py --platform macos --architecture arm64 --source-sha "$SOURCE_SHA" \
             --build-info build/packaging/macos/stage/Magnite.app/Contents/Resources/build-info --output dist \
-            "dist/Magnite-$version-arm64.dmg"
+            "dist/Magnite-$version-arm64.dmg" "dist/Magnite-$version-macos-arm64.zip"
           df -h > build/packaging/macos/hosted/disk-after.txt
       - uses: actions/upload-artifact@v4
         with:
           name: macos-preview-${{ inputs.source_sha }}
           path: |
             dist/*.dmg
+            dist/*-macos-arm64.zip
             dist/SHA256SUMS-macos-arm64
             dist/provenance-macos-arm64.json
           if-no-files-found: error
