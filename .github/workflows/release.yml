@@ -55,6 +55,11 @@ jobs:
             echo "::error::confirm_version '$CONFIRM' does not match RELEASE_VERSION '$version'."
             exit 1
           fi
+          # The notes become the release description; refuse stale ones.
+          if ! head -n 1 docs/release/RELEASE_NOTES.md | grep -qF "$version"; then
+            echo "::error::docs/release/RELEASE_NOTES.md must start with a heading that names $version."
+            exit 1
+          fi
           {
             echo "sha=$(git rev-parse HEAD)"
             echo "version=$version"
