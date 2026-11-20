@@ -16,6 +16,7 @@ themselves from those releases. The current release branch is
 | Push to `dev` or `master` | Build and test all three platforms | No |
 | Push to `release/**` | Build and test all three platforms | No |
 | Manual **Publish preview release** on `release/**` | Builds, tests, signs and publishes | **Yes**, after the checks below |
+| Push of a version tag on a `release/**` commit | Builds, tests, signs, creates a **draft** | Draft only; you publish it |
 | Manual run on any other branch | `release.yml` refuses | No |
 
 Documentation-only changes skip the automatic builds. `linux-preview.yml` is a
@@ -46,9 +47,16 @@ release branch's copy of the workflow.
    Update the version-specific user docs (README, INSTALL, first-launch guides,
    packaging `TESTING.md` files, CHANGELOG).
 5. Push the branch. The automatic runs must pass on all three platforms.
-6. Actions → **Publish preview release** → choose the release branch, type the
-   exact `RELEASE_VERSION` into `confirm_version`. Use `draft_only` to stop at a
-   draft and publish it from the GitHub UI after inspecting it.
+6. Start `release.yml` in one of two ways:
+   - **Tag push (works without the workflow on `master`):** tag the tested commit
+     of the release branch with the exact `RELEASE_VERSION` and push the tag, for
+     example `git tag -a v0.2-preview -m magnite-spacev0.2 && git push origin
+     v0.2-preview`. The run always stops at a draft; publish it on GitHub after
+     checking it. The guard refuses a tag that is not on a `release/**` branch or
+     does not match `RELEASE_VERSION`.
+   - **By hand:** Actions → **Publish preview release** → choose the release
+     branch and type the exact `RELEASE_VERSION` into `confirm_version`. Use
+     `draft_only` to stop at a draft.
 7. Install the published packages on real machines and check an update from the
    previous release (see the release checklist).
 

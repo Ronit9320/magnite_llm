@@ -17,8 +17,9 @@ expect rough edges and keep backups of anything you care about.
 The `update-*.json` files and their `.sig` signatures are for the in-app updater;
 you don't need to download them.
 
-All three packages run models on the CPU. Each bundles its own Python runtime;
-model weights are downloaded separately from Hugging Face.
+The Linux and Windows packages run models on the CPU. The macOS package uses the
+Apple GPU through Metal (chat) and MPS (training). Each bundles its own Python
+runtime; model weights are downloaded separately from Hugging Face.
 
 ## Warnings on first launch
 
@@ -87,8 +88,10 @@ come in a later, more stable release.
 
 ## Known limitations
 
-- CPU packages only; GPU acceleration is not part of these downloads, so QLoRA
-  (which needs a supported GPU) is not usable with them.
+- The Linux and Windows packages are CPU builds without CUDA, so QLoRA (which
+  needs a supported NVIDIA GPU) is not usable with them; QLoRA is not available
+  on macOS. macOS GPU use was checked on an M1 with small models; CI checks the
+  macOS package on the CPU.
 - vLLM and Ollama are not bundled. An Ollama service you already run can be
   connected.
 - Windows has no automatic rollback if an updated version fails to start.

@@ -1,9 +1,14 @@
 name: Publish preview release
-# The only publisher. It runs by hand on a release/** branch, builds and tests all
-# three platforms from one commit, then publishes them as one GitHub prerelease
-# with signed update metadata for every platform. Pushes never publish.
-# See docs/development/RELEASE_PIPELINE.md.
+# The only publisher. It builds and tests all three platforms from one commit on a
+# release/** branch, then publishes them as one GitHub prerelease with signed update
+# metadata for every platform. Two ways to start it:
+#  - push a version tag (vX.Y-preview…) on a commit of a release branch: always stops
+#    at a draft, which you publish on GitHub after checking it;
+#  - run it by hand on a release branch (needs this file on the default branch).
+# Branch pushes never publish. See docs/development/RELEASE_PIPELINE.md.
 on:
+  push:
+    tags: ['v*-preview*']
   workflow_dispatch:
     inputs:
       confirm_version:
@@ -32,27 +37,36 @@ jobs:
       version: ${{ steps.identity.outputs.version }}
       name: ${{ steps.identity.outputs.name }}
     steps:
-      - name: Only release branches publish
-        if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
+      - name: Only release branches and version tags publish
+        if: ${{ !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/tags/v') }}
         run: |
-          echo "::error::Run this workflow on a release/** branch, not ${GITHUB_REF}."
+          echo "::error::Run this workflow on a release/** branch or push a version tag, not ${GITHUB_REF}."
           exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: A version tag must sit on a release branch
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          git fetch --no-tags origin '+refs/heads/release/*:refs/remotes/origin/release/*'
+          if ! git branch -r --contains HEAD | grep -q 'origin/release/'; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on any release/** branch."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12.12'
       - name: Read and confirm the canonical identity
         id: identity
         env:
-          CONFIRM: ${{ inputs.confirm_version }}
+          # A tag push confirms the version by its name; a manual run by the typed input.
+          CONFIRM: ${{ github.event_name == 'push' && github.ref_name || inputs.confirm_version }}
         run: |
           test -z "$(git status --porcelain)"
           version="$(python3 packaging/release_metadata.py --print-version)"
           name="$(python3 -c "import runpy; v = runpy.run_path('backend/src/backend/_version.py'); print(v.get('RELEASE_NAME') or 'Magnite Space ' + v['RELEASE_VERSION'])")"
           if test "$CONFIRM" != "$version"; then
-            echo "::error::confirm_version '$CONFIRM' does not match RELEASE_VERSION '$version'."
+            echo "::error::'$CONFIRM' (tag or confirm_version) does not match RELEASE_VERSION '$version'."
             exit 1
           fi
           # The notes become the release description; refuse stale ones.
@@ -79,7 +93,9 @@ jobs:
             echo "::error::Could not confirm that $RELEASE_VERSION is unused."
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_VERSION" > /dev/null; then
+          # A manual run creates the tag itself; a tag push has already created it here.
+          if test "$GITHUB_EVENT_NAME" != push \
+              && git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_VERSION" > /dev/null; then
             echo "::error::Tag $RELEASE_VERSION exists without a release. Inspect it before publishing."
             exit 1
           fi
@@ -182,7 +198,8 @@ jobs:
           (cd dist && ls -1 | sort) > "$RUNNER_TEMP/expected"
           diff "$RUNNER_TEMP/expected" "$RUNNER_TEMP/uploaded"
       - name: Publish the prerelease
-        if: ${{ !inputs.draft_only }}
+        # Tag pushes always stop at a draft.
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.draft_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
@@ -190,7 +207,7 @@ jobs:
       - name: Summary
         env:
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
-          DRAFT_ONLY: ${{ inputs.draft_only }}
+          DRAFT_ONLY: ${{ github.event_name == 'push' || inputs.draft_only }}
         run: |
           {
             echo "### $RELEASE_VERSION"

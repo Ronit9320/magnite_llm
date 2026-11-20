@@ -26,7 +26,8 @@ and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance wo
 - Linux CI builds on Ubuntu 22.04 and gates ELF glibc requirements at 2.35.
   Broader native desktop/distro checks remain open.
 - Hosted checks do not establish clean consumer-machine installation, every OS
-  version, or physical GPU support. The packages are CPU builds.
+  version, or physical GPU support. Linux and Windows packages are CPU builds;
+  the macOS package uses Metal/MPS, checked on an M1 with small models.
 - Source installation depends on the checkout layout. Packaging uses isolated
   Python runtimes and platform dependency locks; editable source installs retain
   broad dependency bounds unless constraints are explicitly supplied.

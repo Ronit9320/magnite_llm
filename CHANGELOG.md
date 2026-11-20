@@ -40,7 +40,7 @@ First preview for Linux, macOS (Apple silicon) and Windows. See the
 
 - macOS build not notarized, Windows installer not code-signed.
 - No automatic rollback for a Windows update that installs but fails to start.
-- CPU packages only.
+- Linux and Windows packages are CPU-only; macOS uses Metal/MPS.
 
 ## v0.1-preview — Linux development preview
 

@@ -8,7 +8,8 @@ cloud training are excluded.
 **[magnite-spacev0.2 (v0.2-preview)](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.2-preview):**
 a development preview for Linux x86-64 (AppImage), macOS on Apple silicon (DMG)
 and Windows x86-64 (installer), with signed in-app updates on all three. The
-packages run models on the CPU. Blueprints and Tool mode are still in
+Linux and Windows packages run models on the CPU; the macOS package uses the
+Apple GPU (Metal/MPS). Blueprints and Tool mode are still in
 development and are not part of this release.
 
 The macOS build is not notarized and the Windows installer is not code-signed,

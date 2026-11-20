@@ -3,7 +3,7 @@
 The current release is **magnite-spacev0.2 (v0.2-preview)**, a development
 preview with packages for Linux, macOS and Windows on the
 [releases page](https://github.com/Ronit9320/magnite_llm/releases). Each package
-bundles Qt and its own Python runtime, runs models on the CPU, and updates itself
+bundles Qt and its own Python runtime and updates itself
 from Settings → Updates. Source builds are described below.
 
 ## Preview packages
@@ -17,7 +17,8 @@ from Settings → Updates. Source builds are described below.
 Compare each download with the release's `SHA256SUMS` before opening it. The
 macOS and Windows packages are not signed with Apple or Microsoft certificates
 yet, so both systems warn on first launch; the linked guides explain the steps.
-Blueprints and Tool mode are not included in v0.2-preview.
+Linux and Windows packages run models on the CPU; the macOS package uses the
+Apple GPU (Metal/MPS). Blueprints and Tool mode are not included in v0.2-preview.
 
 ## Requirements
 
