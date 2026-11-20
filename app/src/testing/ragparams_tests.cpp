@@ -110,6 +110,19 @@ void ragParamsChecks(const std::function<void(bool, const char *)> &check) {
     check(active->searchMode.isEmpty() && searchSummary(*active).isEmpty(),
           "rag params: a status without a search block keeps an empty mode and shows no line");
 
+    const auto ids = [](std::initializer_list<const char *> list) { QStringList out; for (const char *id : list) out << id; return out; };
+    const auto arr = [](std::initializer_list<const char *> list) { QJsonArray out; for (const char *id : list) out.append(id); return out; };
+    check(scopeAfterLibraryChange(arr({"a"}), ids({"a", "b"}), ids({"a", "b", "c"})) == arr({"a", "c"}),
+          "rag params: a document added after the user narrowed the sources is switched on, not left out of retrieval");
+    check(scopeAfterLibraryChange(arr({"a", "b"}), ids({"a", "b"}), ids({"a"})) == arr({"a"}),
+          "rag params: a removed document leaves the enabled-source list");
+    check(scopeAfterLibraryChange(arr({}), ids({"a"}), ids({"a", "b"})) == arr({"b"}),
+          "rag params: with every source off, a newly added document is the one that is on");
+    check(scopeAfterLibraryChange(arr({"a"}), ids({}), ids({"a", "b"})) == arr({"a"}),
+          "rag params: the first load only prunes: without a known list nothing counts as new");
+    check(scopeAfterLibraryChange(arr({"a", "c"}), ids({"a", "b"}), ids({"a", "b"})) == arr({"a"}),
+          "rag params: an unchanged library keeps its enabled sources (unknown ids are dropped)");
+
     check(formatDuration(30) == "under a minute" && formatDuration(25 * 60) == "about 25 minutes" &&
               formatDuration(3700) == "about an hour" && formatDuration(15000) == "about 4 hours",
           "rag params: durations read in plain language");

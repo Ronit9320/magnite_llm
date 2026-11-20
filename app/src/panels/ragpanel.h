@@ -124,5 +124,6 @@ private:
     quint64 m_collectionRevision = 0;
     QPushButton *m_queryButton = nullptr;
     QJsonValue m_documentScope;
+    QStringList m_knownDocIds;      // the documents the last listing showed, to tell new ones from narrowed-out ones
     QTimer *m_configTimer = nullptr;
 };

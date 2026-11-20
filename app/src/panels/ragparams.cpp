@@ -120,4 +120,14 @@ QString speedWarning(const Preset &preset, const Active &active) {
     return text;
 }
 
+QJsonArray scopeAfterLibraryChange(const QJsonArray &scope, const QStringList &known, const QStringList &current) {
+    QJsonArray out;
+    for (const QJsonValue &id : scope)                       // keep the user's order and choices
+        if (current.contains(id.toString())) out.append(id);
+    if (known.isEmpty()) return out;
+    for (const QString &id : current)
+        if (!known.contains(id)) out.append(id);             // added since the list was last seen: on by default
+    return out;
+}
+
 }  // namespace RagParams

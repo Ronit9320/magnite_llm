@@ -398,6 +398,12 @@ void RagPanel::refresh(bool preserveStatus) {
         }
         clearCards();
         const QJsonArray arr = doc.array();
+        QStringList current;
+        for (const auto &value : arr)
+            if (value.isObject()) current << value.toObject()["id"].toString();
+        if (m_documentScope.isArray())
+            m_documentScope = RagParams::scopeAfterLibraryChange(m_documentScope.toArray(), m_knownDocIds, current);
+        m_knownDocIds = current;
         for (const auto &value : arr) {
             if (!value.isObject()) continue;
             auto *card = new RagDocCard(value.toObject(), m_docHost);
@@ -640,6 +646,11 @@ void RagPanel::onTestQuery() {
     }
     const QString query = m_queryEdit->text().trimmed();
     if (query.isEmpty()) return;
+    if (m_documentScope.isArray() && m_documentScope.toArray().isEmpty()) {
+        m_resultLabel->setText("No sources are turned on. Turn on at least one source to search.");
+        setStatus("No sources are turned on.");
+        return;
+    }
     QJsonObject body;
     body["query"] = query;
     body["top_k"] = m_topKSpin->value();

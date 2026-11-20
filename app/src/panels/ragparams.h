@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <optional>
 
@@ -48,5 +49,10 @@ double speedFor(const Preset &preset, const Active &active);    // chunks/s, 0 =
 QString formatDuration(double seconds);
 QString searchSummary(const Active &active);                    // the one-line search mode text; empty = nothing to show
 QString speedWarning(const Preset &preset, const Active &active);  // empty unless slow
+
+// The enabled-source list after the library changed. Ids that are gone are dropped and documents added
+// since ``known`` are switched on, so a new document is never silently left out of retrieval just because
+// the user had narrowed the sources earlier. With no ``known`` list (first load) nothing counts as new.
+QJsonArray scopeAfterLibraryChange(const QJsonArray &scope, const QStringList &known, const QStringList &current);
 
 }  // namespace RagParams
