@@ -27,6 +27,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsOpacityEffect>
@@ -58,6 +59,19 @@ const QStringList titles = {"General",           "Appearance",    "Chat",       
 const QStringList icons = {"settings", "layers", "message-circle", "cpu",
                            "database", "box",    "file-text",      "refresh-cw", "user"};
 constexpr int kProfilePage = 8;
+// A one-line label that keeps its own font's line height as an explicit minimum, so a
+// layout that measured it before its stylesheet font applied can never squeeze it.
+class LineLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void changeEvent(QEvent* event) override {
+        QLabel::changeEvent(event);
+        if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange)
+            setMinimumHeight(fontMetrics().height() + contentsMargins().top() + contentsMargins().bottom());
+    }
+};
 QLabel* label(const QString& text, const char* name, QWidget* parent = nullptr) {
     auto* result = new QLabel(text, parent);
     result->setObjectName(name);
@@ -483,10 +497,10 @@ void SettingsPanel::setupUi() {
             head->addWidget(icon);
             head->addWidget(label(stat.title, "settingsHint"), 1);
             l->addLayout(head);
-            auto* value = label("—", "settingsProfileValue");
-            // A short number: without word wrap its minimum height is the full line, so the
-            // grid can't squeeze it (grid layouts ignore height-for-width of wrapped labels).
-            value->setWordWrap(false);
+            // A short number on one line; see LineLabel.
+            auto* value = new LineLabel("—");
+            value->setObjectName("settingsProfileValue");
+            value->setTextFormat(Qt::PlainText);
             value->setAccessibleName(stat.title);
             m_statValues.insert(stat.key, value);
             l->addWidget(value);

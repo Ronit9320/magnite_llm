@@ -283,6 +283,10 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         for (auto* tile : panel.findChildren<QFrame*>("settingsMetric"))
             if (tile->property("profileStat").isValid() && tile->isVisible()) ++tiles;
         check(tiles == (Features::blueprintsAndTools ? 8 : 6), "Profile shows every work statistic this build has");
+        bool valuesKeepLineHeight = true;
+        for (auto* value : panel.findChildren<QLabel*>("settingsProfileValue"))
+            valuesKeepLineHeight &= value->minimumHeight() >= value->fontMetrics().height();
+        check(valuesKeepLineHeight, "Profile numbers keep their full line height as a minimum");
         panel.selectCategory(0);
     }
     for (bool dark : {false, true}) {
