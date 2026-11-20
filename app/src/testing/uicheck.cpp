@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "build_features.h"
 #include "testing/blueprint_tests.h"
 #include "testing/modelhub_tests.h"
 #include "widgets/smoothwheel.h"
@@ -573,7 +574,14 @@ int runThemeFadeChecks() {
 int runUiCheck(const QString &captures) {
     if (qEnvironmentVariableIsSet("MAGNITE_THEMEFADE_CHECK")) return runThemeFadeChecks() ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_SMOOTHWHEEL_CHECK")) return runSmoothWheelChecks() ? 1 : 0;
-    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) return runLiveBlueprintChecks(captures) ? 1 : 0;
+    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) {
+        if (!Features::blueprintsAndTools) {
+            // The backend has no Blueprint routes in this build; there is nothing live to check.
+            std::printf("[blueprints-live] SKIP: Blueprints and Tool mode are switched off in this build\n");
+            return 0;
+        }
+        return runLiveBlueprintChecks(captures) ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return runBlueprintChecks(captures) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
         int hubFailures = 0;

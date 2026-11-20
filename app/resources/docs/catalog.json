@@ -110,7 +110,8 @@
     "blueprints": {
       "label": "Magnite Space · Blueprints and Tool mode",
       "url": "reference/BLUEPRINTS.md",
-      "kind": "Bundled reference"
+      "kind": "Bundled reference",
+      "requires": "blueprints_and_tools"
     }
   },
   "articles": [
@@ -135,12 +136,34 @@
         [
           "map",
           "A map of the sidebar",
-          "<table><thead><tr><th>Area</th><th>What you do there</th></tr></thead><tbody><tr><td><strong>Model hub</strong></td><td>Search Hugging Face, compare models, estimate memory and download.</td></tr><tr><td><strong>Library</strong></td><td>Manage downloaded and imported models, trained adapters and projects.</td></tr><tr><td><strong>Training</strong></td><td>Fine-tune a model on your own examples with LoRA, then review runs.</td></tr><tr><td><strong>Blueprints</strong></td><td>Build saved workflows from typed steps: models, data, search and tools.</td></tr><tr><td><strong>Docs</strong></td><td>This reference: app guides and the ideas behind them.</td></tr><tr><td><strong>Conversations</strong></td><td>Chat with a model, give tasks in Tool mode, run a Blueprint, and use your documents through Knowledge.</td></tr><tr><td><strong>Settings</strong></td><td>Appearance, chat behavior, runtime engine, storage, notifications and updates.</td></tr></tbody></table>"
+          "<table><thead><tr><th>Area</th><th>What you do there</th></tr></thead><tbody><tr><td><strong>Model hub</strong></td><td>Search Hugging Face, compare models, estimate memory and download.</td></tr><tr><td><strong>Library</strong></td><td>Manage downloaded and imported models, trained adapters and projects.</td></tr><tr><td><strong>Training</strong></td><td>Fine-tune a model on your own examples with LoRA, then review runs.</td></tr><tr><td><strong>Blueprints</strong></td><td>Build saved workflows from typed steps: models, data, search and tools.</td></tr><tr><td><strong>Docs</strong></td><td>This reference: app guides and the ideas behind them.</td></tr><tr><td><strong>Conversations</strong></td><td>Chat with a model, give tasks in Tool mode, run a Blueprint, and use your documents through Knowledge.</td></tr><tr><td><strong>Settings</strong></td><td>Appearance, chat behavior, runtime engine, storage, notifications and updates.</td></tr></tbody></table>",
+          {
+            "requires": "blueprints_and_tools"
+          }
+        ],
+        [
+          "map",
+          "A map of the sidebar",
+          "<table><thead><tr><th>Area</th><th>What you do there</th></tr></thead><tbody><tr><td><strong>Model hub</strong></td><td>Search Hugging Face, compare models, estimate memory and download.</td></tr><tr><td><strong>Library</strong></td><td>Manage downloaded and imported models, trained adapters and projects.</td></tr><tr><td><strong>Training</strong></td><td>Fine-tune a model on your own examples with LoRA, then review runs.</td></tr><tr><td><strong>Docs</strong></td><td>This reference: app guides and the ideas behind them.</td></tr><tr><td><strong>Conversations</strong></td><td>Chat with a model or adapter, and use your documents through Knowledge.</td></tr><tr><td><strong>Settings</strong></td><td>Appearance, chat behavior, runtime engine, storage, notifications and updates.</td></tr></tbody></table>",
+          {
+            "requires": "!blueprints_and_tools"
+          }
         ],
         [
           "path",
           "A first path through the app",
-          "<ol><li><a href=\"magnite-docs://article/first-model\">Download a small model</a> in Model hub and chat with it.</li><li>Add a few documents to <a href=\"magnite-docs://article/knowledge\">Knowledge</a> and ask about them.</li><li>Try <a href=\"magnite-docs://article/tool-mode\">Tool mode</a> to let the model request actions you approve.</li><li>Build a <a href=\"magnite-docs://article/blueprints\">Blueprint</a> that turns a repeated task into a saved workflow.</li><li><a href=\"magnite-docs://article/training-studio\">Train an adapter</a> when you have examples of the behavior you want.</li></ol><div class=\"concept-flow\"><span>Find a model</span><i>→</i><span>Use it</span><i>→</i><span>Combine it</span><i>→</i><span>Adapt it</span></div>"
+          "<ol><li><a href=\"magnite-docs://article/first-model\">Download a small model</a> in Model hub and chat with it.</li><li>Add a few documents to <a href=\"magnite-docs://article/knowledge\">Knowledge</a> and ask about them.</li><li>Try <a href=\"magnite-docs://article/tool-mode\">Tool mode</a> to let the model request actions you approve.</li><li>Build a <a href=\"magnite-docs://article/blueprints\">Blueprint</a> that turns a repeated task into a saved workflow.</li><li><a href=\"magnite-docs://article/training-studio\">Train an adapter</a> when you have examples of the behavior you want.</li></ol><div class=\"concept-flow\"><span>Find a model</span><i>→</i><span>Use it</span><i>→</i><span>Combine it</span><i>→</i><span>Adapt it</span></div>",
+          {
+            "requires": "blueprints_and_tools"
+          }
+        ],
+        [
+          "path",
+          "A first path through the app",
+          "<ol><li><a href=\"magnite-docs://article/first-model\">Download a small model</a> in Model hub and chat with it.</li><li>Add a few documents to <a href=\"magnite-docs://article/knowledge\">Knowledge</a> and ask about them.</li><li><a href=\"magnite-docs://article/training-studio\">Train an adapter</a> when you have examples of the behavior you want.</li><li>Load the adapter in a conversation and compare its replies with the base model.</li></ol><div class=\"concept-flow\"><span>Find a model</span><i>→</i><span>Use it</span><i>→</i><span>Ground it</span><i>→</i><span>Adapt it</span></div>",
+          {
+            "requires": "!blueprints_and_tools"
+          }
         ],
         [
           "help",
@@ -165,7 +188,18 @@
         [
           "choose",
           "Choose a model that fits",
-          "<p>Open <strong>Model hub</strong> and search for a model family, or browse the most downloaded models. Small instruction-tuned models (under about 2 billion parameters) load quickly and are a good first test.</p><p>Open a model to see its details. The memory estimate adds the weights and the context cache for the context length you choose and compares them with your device. Treat it as advice: other applications share the same memory.</p><div class=\"article-callout\"><strong>GGUF or Transformers?</strong>GGUF files run with llama.cpp and are ideal for chat. Training and Blueprint Model nodes need a Transformers checkpoint (Safetensors weights with a tokenizer).</div>"
+          "<p>Open <strong>Model hub</strong> and search for a model family, or browse the most downloaded models. Small instruction-tuned models (under about 2 billion parameters) load quickly and are a good first test.</p><p>Open a model to see its details. The memory estimate adds the weights and the context cache for the context length you choose and compares them with your device. Treat it as advice: other applications share the same memory.</p><div class=\"article-callout\"><strong>GGUF or Transformers?</strong>GGUF files run with llama.cpp and are ideal for chat. Training and Blueprint Model nodes need a Transformers checkpoint (Safetensors weights with a tokenizer).</div>",
+          {
+            "requires": "blueprints_and_tools"
+          }
+        ],
+        [
+          "choose",
+          "Choose a model that fits",
+          "<p>Open <strong>Model hub</strong> and search for a model family, or browse the most downloaded models. Small instruction-tuned models (under about 2 billion parameters) load quickly and are a good first test.</p><p>Open a model to see its details. The memory estimate adds the weights and the context cache for the context length you choose and compares them with your device. Treat it as advice: other applications share the same memory.</p><div class=\"article-callout\"><strong>GGUF or Transformers?</strong>GGUF files run with llama.cpp and are ideal for chat. Training needs a Transformers checkpoint (Safetensors weights with a tokenizer).</div>",
+          {
+            "requires": "!blueprints_and_tools"
+          }
         ],
         [
           "download",
@@ -253,7 +287,44 @@
           "History, projects and context",
           "<p>Conversations are saved on this computer and listed in the sidebar under <strong>Conversations</strong>, where you can search them. <strong>New conversation</strong> starts a fresh one. Move conversations into Library projects to keep related work together.</p><p>The context meter shows how full the model's context window is. When a long conversation approaches the limit, start a new one or let Settings → Chat compact older messages automatically.</p><div class=\"article-callout\"><strong>Your data</strong>Conversations stay in your data directory. Export or delete them all from Settings → Storage &amp; privacy.</div>"
         ]
-      ]
+      ],
+      "requires": "blueprints_and_tools"
+    },
+    {
+      "id": "conversations",
+      "title": "Conversations: chat with models and adapters",
+      "short": "Conversations",
+      "group": "Using Magnite Space",
+      "type": "GUIDE",
+      "icon": "message-circle",
+      "description": "Model settings, adapters, Knowledge and how conversations are kept.",
+      "sources": [
+        "workflow",
+        "privacy"
+      ],
+      "sections": [
+        [
+          "modes",
+          "Chat with a local model",
+          "<p>Choose a downloaded model from the model menu, load it, and send messages. Load an adapter to compare its replies with the base model, and open <strong>Knowledge</strong> to answer from your own documents.</p><p>This preview build has Chat only. Tool mode and Blueprints arrive in a later release.</p>"
+        ],
+        [
+          "settings",
+          "Model settings and adapters",
+          "<p>The gear icon opens <strong>Model settings</strong>: the engine (Auto follows Settings → Runtime), <strong>Temperature</strong> for how varied replies are, and <strong>Response tokens</strong> for the longest reply. The active adapter is shown here; <strong>Manage adapters</strong> opens Library → Adapters.</p><p>Activating an adapter reloads inference with its base model. Compare its replies with the base model on the same prompts to see what training changed.</p>"
+        ],
+        [
+          "knowledge",
+          "Answer from your documents",
+          "<p>The database icon opens <strong>Knowledge</strong>. Turn on <strong>Use in this conversation</strong> to add matching passages from your documents to each prompt; the passages used appear with the reply. See <a href=\"magnite-docs://article/knowledge\">Knowledge</a>.</p>"
+        ],
+        [
+          "history",
+          "History, projects and context",
+          "<p>Conversations are saved on this computer and listed in the sidebar under <strong>Conversations</strong>, where you can search them. <strong>New conversation</strong> starts a fresh one. Move conversations into Library projects to keep related work together.</p><p>The context meter shows how full the model's context window is. When a long conversation approaches the limit, start a new one or let Settings → Chat compact older messages automatically.</p><div class=\"article-callout\"><strong>Your data</strong>Conversations stay in your data directory. Export or delete them all from Settings → Storage &amp; privacy.</div>"
+        ]
+      ],
+      "requires": "!blueprints_and_tools"
     },
     {
       "id": "tool-mode",
@@ -289,7 +360,8 @@
           "Limits and workspace",
           "<p>A task can take at most six model turns and four actions. Commands get a direct argument list (no shell) and a 30-second time limit, and their output is returned to the model. The default working directory is <code>tool-workspace</code> inside the app's data folder.</p><p>The run record keeps inputs, outputs and a redacted log of decisions. Treat it as private data when you back up or share your profile.</p>"
         ]
-      ]
+      ],
+      "requires": "blueprints_and_tools"
     },
     {
       "id": "knowledge",
@@ -322,7 +394,10 @@
         [
           "blueprints",
           "Use Knowledge in workflows",
-          "<p>The <strong>Knowledge</strong> node in Blueprints searches the same documents and returns numbered passages ready for a Model prompt. See <a href=\"magnite-docs://article/blueprint-nodes\">the node reference</a> and <a href=\"magnite-docs://article/rag\">Retrieval, context and model knowledge</a> for the ideas behind it.</p><p>Select documents and choose <strong>Remove</strong>, or <strong>Clear all</strong>, to delete their index only; your files stay where they are.</p>"
+          "<p>The <strong>Knowledge</strong> node in Blueprints searches the same documents and returns numbered passages ready for a Model prompt. See <a href=\"magnite-docs://article/blueprint-nodes\">the node reference</a> and <a href=\"magnite-docs://article/rag\">Retrieval, context and model knowledge</a> for the ideas behind it.</p><p>Select documents and choose <strong>Remove</strong>, or <strong>Clear all</strong>, to delete their index only; your files stay where they are.</p>",
+          {
+            "requires": "blueprints_and_tools"
+          }
         ]
       ]
     },
@@ -364,7 +439,8 @@
           "Train a step",
           "<p>To specialize one Model step, open <strong>Training jobs…</strong> on a saved Model or Reasoning node and add examples with named inputs and outputs. When the job completes, select the new weights on an <strong>Adapter</strong> node connected to the model's LoRA adapter input.</p><div class=\"article-callout\"><strong>One run at a time</strong>Up to eight runs can wait in the queue; they execute one at a time and release the checkpoint when they finish.</div>"
         ]
-      ]
+      ],
+      "requires": "blueprints_and_tools"
     },
     {
       "id": "blueprint-nodes",
@@ -398,7 +474,8 @@
           "Ports and types",
           "<p>Ports carry text, numbers, booleans, arrays or objects. An integer output can feed a number input. Refine array and object schemas in the inspector, including item types and required fields. The key is used in connections and JSON; the label is what the canvas shows.</p>"
         ]
-      ]
+      ],
+      "requires": "blueprints_and_tools"
     },
     {
       "id": "training-studio",
@@ -498,7 +575,18 @@
         [
           "storage",
           "Where your data lives",
-          "<p>Conversations, datasets, adapters, Knowledge indexes and Blueprints live in the data directory (<code>~/.magnite</code> on Linux and macOS, <code>%APPDATA%/Magnite</code> on Windows). Downloaded Hub models live in the shared Hugging Face cache, which other tools can also use.</p><p>You can choose another data directory; the change applies after a restart and existing data is not moved.</p>"
+          "<p>Conversations, datasets, adapters, Knowledge indexes and Blueprints live in the data directory (<code>~/.magnite</code> on Linux and macOS, <code>%APPDATA%/Magnite</code> on Windows). Downloaded Hub models live in the shared Hugging Face cache, which other tools can also use.</p><p>You can choose another data directory; the change applies after a restart and existing data is not moved.</p>",
+          {
+            "requires": "blueprints_and_tools"
+          }
+        ],
+        [
+          "storage",
+          "Where your data lives",
+          "<p>Conversations, datasets, adapters and Knowledge indexes live in the data directory (<code>~/.magnite</code> on Linux and macOS, <code>%APPDATA%/Magnite</code> on Windows). Downloaded Hub models live in the shared Hugging Face cache, which other tools can also use.</p><p>You can choose another data directory; the change applies after a restart and existing data is not moved.</p>",
+          {
+            "requires": "!blueprints_and_tools"
+          }
         ],
         [
           "cleanup",

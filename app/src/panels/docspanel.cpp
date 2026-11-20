@@ -665,8 +665,12 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     primary->addLayout(concepts);
     auto *grid = new QGridLayout;
     grid->setSpacing(12);
-    const QStringList featured{"blueprints",     "tool-mode",    "knowledge",
-                               "model-learning", "data-quality", "lora"};
+    // Articles about switched-off features are not in the library; fill their places.
+    QStringList featured;
+    for (const auto &id : {"blueprints", "tool-mode", "knowledge", "model-learning", "data-quality", "lora",
+                           "training-studio", "rag"})
+        if (featured.size() < 6 && m_library.article(id))
+            featured << id;
     const int columns = mainWidth() >= 650 ? 2 : 1;
     for (int i = 0; i < featured.size(); ++i)
         if (const auto *a = m_library.article(featured[i]))
@@ -689,6 +693,8 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
                                      {"Is my validation data really unseen?", "data-distribution", "split"},
                                      {"How does retrieval differ from training?", "rag", "retrieval"}};
     for (const auto &p : prompts) {
+        if (!m_library.article(p[1]))
+            continue;
         auto *card = new DocsCard;
         card->setFlat(true);
         auto *row = new QHBoxLayout(card);

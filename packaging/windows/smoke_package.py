@@ -5,11 +5,17 @@ import argparse
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 import time
 
 import psutil
+
+
+def features():
+    """The build profile; runpy keeps this working under an isolated (-I) interpreter."""
+    return runpy.run_path(str(Path(__file__).resolve().parents[1] / "identity.py"))["features"]()
 
 
 def main():
@@ -49,8 +55,9 @@ def main():
         run("theme", [exe, "--theme-check"], marker="0 failure(s)")
         run("ui", [exe, "--ui-check"], marker="PASS (0 failures)")
         run("desktop", [exe, "--selftest"], marker="PASS (0 failures)")
-        run("blueprints", [exe, "--ui-check"], marker="[blueprints-live] PASS (0 failures)",
-            extra_env={"MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
+        if features()["blueprints_and_tools"]:
+            run("blueprints", [exe, "--ui-check"], marker="[blueprints-live] PASS (0 failures)",
+                extra_env={"MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
         sentinel = root / "data/preserved.txt"
         sentinel.write_text("persistent data outside the installation")
         run("upgrade", install_args)

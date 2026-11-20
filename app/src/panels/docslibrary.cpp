@@ -1,4 +1,5 @@
 #include "panels/docslibrary.h"
+#include "build_features.h"
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -17,6 +18,16 @@ QStringList strings(const QJsonValue &value) {
     return result;
 }
 bool validId(const QString &id) { return QRegularExpression("^[a-z0-9]+(?:-[a-z0-9]+)*$").match(id).hasMatch(); }
+// Catalog entries may name the build feature they describe: "requires":
+// "blueprints_and_tools" keeps them only when it is on, "!blueprints_and_tools"
+// only when it is off. Entries without a value are always shown.
+bool included(const QJsonValue &requirement) {
+    if (requirement.isUndefined() || requirement.isNull()) return true;
+    const QString value = requirement.toString();
+    if (value == "blueprints_and_tools") return Features::blueprintsAndTools;
+    if (value == "!blueprints_and_tools") return !Features::blueprintsAndTools;
+    return false; // An unknown feature is never shown.
+}
 } // namespace
 bool DocsLibrary::load(const QString &resource) {
     m_articles.clear();
@@ -41,8 +52,13 @@ bool DocsLibrary::load(const QString &resource) {
         return fail("The local reference library has an unsupported format.");
     const auto data = doc.object();
     const auto sources = data["sources"].toObject();
+    QSet<QString> omittedSources, omittedArticles;
     for (auto it = sources.begin(); it != sources.end(); ++it) {
         const auto o = it.value().toObject();
+        if (!included(o["requires"])) {
+            omittedSources.insert(it.key());
+            continue;
+        }
         const QString location = o["url"].toString();
         const bool local = location.startsWith("reference/");
         const QUrl url(location);
@@ -58,6 +74,10 @@ bool DocsLibrary::load(const QString &resource) {
     QSet<QString> ids;
     for (const auto &value : data["articles"].toArray()) {
         const auto o = value.toObject();
+        if (!included(o["requires"])) {
+            omittedArticles.insert(o["id"].toString());
+            continue;
+        }
         DocsArticle article;
         article.id = o["id"].toString();
         article.title = o["title"].toString();
@@ -68,14 +88,17 @@ bool DocsLibrary::load(const QString &resource) {
         article.description = o["description"].toString();
         article.sources = strings(o["sources"]);
         article.related = strings(related[article.id]);
+        article.sources.removeIf([&omittedSources](const QString &id) { return omittedSources.contains(id); });
         if (!validId(article.id) || ids.contains(article.id) || article.title.isEmpty() || article.group.isEmpty())
             return fail("An article identity is invalid.");
         ids.insert(article.id);
         QSet<QString> sections;
         for (const auto &v : o["sections"].toArray()) {
             const auto s = v.toArray();
-            if (s.size() != 3)
+            if (s.size() != 3 && !(s.size() == 4 && s[3].isObject()))
                 return fail("An article section is invalid.");
+            if (s.size() == 4 && !included(s[3].toObject()["requires"]))
+                continue;
             DocsSection section{s[0].toString(), s[1].toString(), s[2].toString(), {}};
             if (!validId(section.id) || sections.contains(section.id) || section.title.isEmpty())
                 return fail("An article section identity is invalid.");
@@ -108,6 +131,8 @@ bool DocsLibrary::load(const QString &resource) {
         };
         return rank(a.group) < rank(b.group);
     });
+    for (auto &article : m_articles)
+        article.related.removeIf([&](const QString &id) { return omittedArticles.contains(id) && !ids.contains(id); });
     for (const auto &article : m_articles)
         for (const auto &id : article.related)
             if (!ids.contains(id) || id == article.id)

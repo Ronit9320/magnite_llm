@@ -5,8 +5,14 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import runpy
 import subprocess
 import tempfile
+
+
+def features():
+    """The build profile; runpy keeps this working under an isolated (-I) interpreter."""
+    return runpy.run_path(str(Path(__file__).resolve().parents[0] / "identity.py"))["features"]()
 
 
 def main():
@@ -58,7 +64,8 @@ def main():
         check("theme", [launcher, "--theme-check"])
         check("ui", [launcher, "--ui-check"], 360)
         check("desktop", [launcher, "--selftest"])
-        check("blueprints", [launcher, "--ui-check"], environment={**env, "MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
+        if features()["blueprints_and_tools"]:
+            check("blueprints", [launcher, "--ui-check"], environment={**env, "MAGNITE_BLUEPRINTS_LIVE_CHECK": "1"})
         packaged_env = {**env, "LD_LIBRARY_PATH": str(appdir / "usr/lib")}
         check("bundled-pi", [python, "-I", "-B", repo / "packaging/smoke_pi.py"], environment=packaged_env)
         if args.features:

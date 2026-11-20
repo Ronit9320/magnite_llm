@@ -10,6 +10,7 @@ import stat
 import time
 
 from fastapi import APIRouter, HTTPException
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend._version import RELEASE_VERSION
 from backend.paths import app_home
 
@@ -182,8 +183,11 @@ def usage_stats():
         starts.append(counts.pop("first"))
         return counts
 
-    for name, read in (("models", models), ("training", training), ("adapters", adapters),
-                       ("datasets", datasets), ("knowledge", knowledge), ("blueprints", blueprints)):
+    sections = [("models", models), ("training", training), ("adapters", adapters),
+                ("datasets", datasets), ("knowledge", knowledge)]
+    if BLUEPRINTS_AND_TOOLS:
+        sections.append(("blueprints", blueprints))
+    for name, read in sections:
         section(name, read)
     stats["since"] = _earliest(starts)
     return stats

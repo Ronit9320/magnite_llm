@@ -1,3 +1,4 @@
+#include "build_features.h"
 #include "testing/settings_tests.h"
 #include "testing/textfit.h"
 #include "backend_client.h"
@@ -267,7 +268,7 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         int tiles = 0;
         for (auto* tile : panel.findChildren<QFrame*>("settingsMetric"))
             if (tile->property("profileStat").isValid() && tile->isVisible()) ++tiles;
-        check(tiles == 8, "Profile shows eight work statistics");
+        check(tiles == (Features::blueprintsAndTools ? 8 : 6), "Profile shows every work statistic this build has");
         panel.selectCategory(0);
     }
     for (bool dark : {false, true}) {

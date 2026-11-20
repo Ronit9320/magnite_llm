@@ -5,6 +5,7 @@
 #include "panels/greeting.h"
 #include "theme.h"
 #include "update_config.h"
+#include "build_features.h"
 #include "update_manager.h"
 #include "widgets/brandmark.h"
 #include "widgets/button.h"
@@ -453,6 +454,9 @@ void SettingsPanel::setupUi() {
         grid->setSpacing(10);
         int index = 0;
         for (const auto& stat : stats) {
+            const QString key = stat.key;
+            if (!Features::blueprintsAndTools && (key == "blueprints" || key == "tasks"))
+                continue; // Not part of this build.
             auto* tile = new QFrame;
             tile->setObjectName("settingsMetric");
             tile->setProperty("profileStat", stat.key);
@@ -836,7 +840,9 @@ void SettingsPanel::refreshProfile() {
             set("knowledge", count(num(k, "documents")),
                 num(k, "chunks") ? QString("%1 indexed %2").arg(count(num(k, "chunks")), plural(num(k, "chunks"), "passage")) : QString());
         }
-        if (missing("blueprints")) unavailable << "Blueprints";
+        if (!Features::blueprintsAndTools) {
+            // This build has no Blueprints or Tool mode, so there is nothing to count.
+        } else if (missing("blueprints")) unavailable << "Blueprints";
         else {
             const auto b = section("blueprints");
             set("blueprints", count(num(b, "blueprints")),

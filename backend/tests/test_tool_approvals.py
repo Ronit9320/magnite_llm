@@ -19,6 +19,7 @@ from backend.blueprints.store import BlueprintStore
 from backend.database import connection
 from backend.local_access import LocalAccessMiddleware
 from backend.routes.blueprints import blueprint_runner
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend.server import app
 from backend.tooling import pi_bridge
 from backend.tooling.actions import prepare
@@ -28,6 +29,7 @@ TOKEN = "approval-test-token"
 ROOT = "/blueprints/runs"
 
 
+@unittest.skipUnless(BLUEPRINTS_AND_TOOLS, "Blueprints and Tool mode are switched off in this build")
 class ToolApprovalTests(unittest.TestCase):
     def setUp(self):
         resources = ExitStack()
