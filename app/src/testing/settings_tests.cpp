@@ -196,6 +196,12 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                 for (int category = 0; category < pages->count(); ++category) {
                     panel.selectCategory(category);
                     pump(80);
+                    // Profile fills in from an asynchronous request; measure once it has answered
+                    // and Qt has run the layout pass for the new text (slow CI runners lag behind).
+                    for (int waited = 0; panel.profileLoading() && waited < 3000; waited += 20)
+                        pump(20);
+                    QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                    pump(20);
                     const auto found = TextFit::clippedText(&panel);
                     check(found.isEmpty(), qPrintable(TextFit::describe(QString("%1 %2").arg(TextFit::sizeName(size), dark ? "dark" : "light"),
                                                                        QString("settings category %1").arg(category), found)));
