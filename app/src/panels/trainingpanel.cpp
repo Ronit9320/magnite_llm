@@ -142,7 +142,9 @@ void TrainingPanel::setupUi() {
     m_workspaceTabs->addTab("Studio"); m_workspaceTabs->addTab("Observatory"); m_workspaceTabs->setProperty("compact",true); m_workspaceTabs->setFixedHeight(28);
     m_workspaceTabs->setAccessibleName("Training workspace view"); navigation->addWidget(m_workspaceTabs);
     contentLayout()->addLayout(navigation);
-    auto *heading=new QHBoxLayout(); heading->setSpacing(16);
+    // Title, then the actions; below 1000px wide the actions wrap under the title (updateResponsiveLayout).
+    auto *heading=new QBoxLayout(QBoxLayout::LeftToRight); heading->setSpacing(16); m_heading=heading;
+    auto *actions=new QHBoxLayout(); actions->setSpacing(16);
     auto *titles=new QVBoxLayout(); titles->setSpacing(7);
     auto *titleRow=new QHBoxLayout(); titleRow->setSpacing(18);
     m_pageTitle=label("Training studio","trainingPageTitle"); titleRow->addWidget(m_pageTitle);
@@ -162,11 +164,13 @@ void TrainingPanel::setupUi() {
     });
     auto *compareAction=new Button("Compare baseline",this); compareAction->setObjectName("trainingCompareAction"); compareAction->setMinimumWidth(125);
     connect(compareAction,&QPushButton::clicked,this,[this] { m_archiveToggle->setChecked(!m_archiveToggle->isChecked()); m_archive->setVisible(true); });
-    heading->addWidget(compareAction); compareAction->hide();
-    heading->addWidget(exportRun);
+    actions->addWidget(compareAction); compareAction->hide();
+    actions->addWidget(exportRun);
     auto *newRun=new Button("+ New run",this); newRun->setObjectName("primaryBtn");
-    newRun->setProperty("trainingAction",true); heading->addWidget(newRun); newRun->setMinimumWidth(96); newRun->setProperty("trainingHeaderAction",true);
+    newRun->setProperty("trainingAction",true); actions->addWidget(newRun); newRun->setMinimumWidth(96); newRun->setProperty("trainingHeaderAction",true);
     connect(newRun,&QPushButton::clicked,this,&TrainingPanel::openRunDialog);
+    actions->addStretch();   // keeps wrapped actions left-aligned; takes no room beside the title
+    heading->addLayout(actions);
     contentLayout()->addLayout(heading);
 
     auto *studio=new QWidget(this); studio->setObjectName("trainingStudio");
@@ -401,7 +405,8 @@ void TrainingPanel::setupUi() {
     auto *setup=m_setup;
     m_recipeInputs=new QWidget(this); m_recipeInputs->setObjectName("trainingRecipeEditors");
     auto *editorLayout=new QVBoxLayout(m_recipeInputs); editorLayout->setContentsMargins(0,0,0,0);
-    auto *inputs=new QHBoxLayout(); inputs->setSpacing(12); editorLayout->addLayout(inputs);
+    // Model, dataset and method side by side; stacked below 900px wide (updateResponsiveLayout).
+    auto *inputs=new QBoxLayout(QBoxLayout::LeftToRight); inputs->setSpacing(12); editorLayout->addLayout(inputs); m_recipeRow=inputs;
     recipe->addWidget(m_recipeInputs); m_recipeInputs->hide();
     auto *model = Surface::card(setup,"01 / BASE MODEL");
     model->parentWidget()->setObjectName("recipeNode");
@@ -646,11 +651,14 @@ void TrainingPanel::setupUi() {
     m_feedbackFrame=new QFrame(this); m_feedbackFrame->setObjectName("trainingFeedback");
     auto *feedbackRow=new QHBoxLayout(m_feedbackFrame); feedbackRow->setContentsMargins(12,6,6,6); feedbackRow->setSpacing(8);
     feedbackRow->addWidget(m_statusLabel,1); auto *dismiss=new Button("×",this); dismiss->setObjectName("trainingDismissStatus");
-    dismiss->setAccessibleName("Dismiss notification"); dismiss->setToolTip("Dismiss notification"); dismiss->setFlat(true); dismiss->setFixedWidth(28);
+    dismiss->setAccessibleName("Dismiss notification"); dismiss->setToolTip("Dismiss notification"); dismiss->setFlat(true); dismiss->setMinimumWidth(28);   // grows with the glyph at larger interface sizes
     feedbackRow->addWidget(dismiss); connect(dismiss,&QPushButton::clicked,this,[this] { setStatus({}, {},false); });
     contentLayout()->insertWidget(2,m_feedbackFrame); m_feedbackFrame->hide();
-    auto *footnote=label("MAGNITE / YOUR MODELS. YOUR MACHINE.                                               LOCAL TRAINING", "trainingTiny");
-    contentLayout()->addWidget(footnote); contentLayout()->addStretch(1);
+    // Two labels with flexible space between, so the footer never sets the page's minimum width.
+    auto *footnote=new QHBoxLayout(); footnote->setSpacing(24);
+    footnote->addWidget(label("MAGNITE / YOUR MODELS. YOUR MACHINE.", "trainingTiny")); footnote->addStretch(1);
+    footnote->addWidget(label("LOCAL TRAINING", "trainingTiny"));
+    contentLayout()->addLayout(footnote); contentLayout()->addStretch(1);
     m_pollTimer=new QTimer(this); m_pollTimer->setInterval(kPollMs); connect(m_pollTimer,&QTimer::timeout,this,&TrainingPanel::onPollStatus);
     connect(m_startButton,&QPushButton::clicked,this,&TrainingPanel::onStart); connect(m_stopButton,&QPushButton::clicked,this,&TrainingPanel::onStop);
     connect(m_workspaceTabs,&QTabBar::currentChanged,this,&TrainingPanel::setWorkspace);
@@ -1480,14 +1488,20 @@ void TrainingPanel::updateResponsiveLayout() {
     if (!m_workspaceGrid) return;
     const bool observatory=m_workspaceTabs->currentIndex()==1;
     const bool compact=width()<(observatory?1180:1000);
+    const bool narrow=width()<900;   // leaves room for platforms whose text renders wider
     m_workspaceGrid->removeWidget(m_indexCard); m_workspaceGrid->removeWidget(m_center); m_workspaceGrid->removeWidget(m_rail);
     m_indexCard->setVisible(observatory);
     for (int col=0;col<3;++col) { m_workspaceGrid->setColumnStretch(col,0); m_workspaceGrid->setColumnMinimumWidth(col,0); }
     m_rail->setMinimumWidth(0); m_rail->setMaximumWidth(QWIDGETSIZE_MAX);
+    m_indexCard->setMinimumWidth(0); m_indexCard->setMaximumWidth(QWIDGETSIZE_MAX);
     if (observatory && !compact) {
         m_indexCard->setFixedWidth(240); m_workspaceGrid->addWidget(m_indexCard,0,0,2,1);
         m_workspaceGrid->addWidget(m_center,0,1); m_workspaceGrid->addWidget(m_rail,0,2); m_rail->setFixedWidth(245);
         m_workspaceGrid->setColumnStretch(1,1);
+    } else if (observatory && narrow) {
+        // Experiments above the signals, so neither is squeezed.
+        m_workspaceGrid->addWidget(m_indexCard,0,0); m_workspaceGrid->addWidget(m_center,1,0);
+        m_workspaceGrid->addWidget(m_rail,2,0); m_workspaceGrid->setColumnStretch(0,1);
     } else if (observatory) {
         m_indexCard->setFixedWidth(200); m_workspaceGrid->addWidget(m_indexCard,0,0,2,1);
         m_workspaceGrid->addWidget(m_center,0,1); m_workspaceGrid->addWidget(m_rail,1,1); m_workspaceGrid->setColumnStretch(1,1);
@@ -1498,6 +1512,8 @@ void TrainingPanel::updateResponsiveLayout() {
         m_workspaceGrid->addWidget(m_center,0,0); m_workspaceGrid->addWidget(m_rail,1,0); m_workspaceGrid->setColumnStretch(0,1);
     }
     m_railLayout->setDirection(!observatory && compact ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+    if (m_heading) m_heading->setDirection(width()<1000 ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+    if (m_recipeRow) m_recipeRow->setDirection(narrow ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
     m_pageTitle->setText(observatory?"Run observatory":"Training studio");
     m_pageSubtitle->setText(observatory?"Follow the signals. Understand the difference between runs.":"Your next iteration starts with what you learned.");
     m_breadcrumb->setText(observatory?"Workspace   /   Training   /   Observatory":"Workspace   /   Training   /   Studio");

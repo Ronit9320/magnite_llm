@@ -141,6 +141,8 @@ private:
     QLabel *m_recipeFacts = nullptr;
     QLabel *m_budgetSummary = nullptr;
     QLabel *m_pageTitle = nullptr;
+    QBoxLayout *m_heading = nullptr;
+    QBoxLayout *m_recipeRow = nullptr;
     QLabel *m_pageSubtitle = nullptr;
     QLabel *m_breadcrumb = nullptr;
     QLabel *m_compareSummary = nullptr;
