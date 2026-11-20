@@ -399,7 +399,10 @@
             "requires": "blueprints_and_tools"
           }
         ]
-      ]
+      ],
+      "without_blueprints_and_tools": {
+        "description": "Add documents, tune how they are split and searched, and use them in conversations."
+      }
     },
     {
       "id": "blueprints",

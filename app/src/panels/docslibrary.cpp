@@ -86,6 +86,13 @@ bool DocsLibrary::load(const QString &resource) {
         article.type = o["type"].toString();
         article.icon = o["icon"].toString();
         article.description = o["description"].toString();
+        if (!Features::blueprintsAndTools) {
+            // Wording for builds without Blueprints and Tool mode.
+            const auto without = o["without_blueprints_and_tools"].toObject();
+            article.title = without["title"].toString(article.title);
+            article.shortTitle = without["short"].toString(article.shortTitle);
+            article.description = without["description"].toString(article.description);
+        }
         article.sources = strings(o["sources"]);
         article.related = strings(related[article.id]);
         article.sources.removeIf([&omittedSources](const QString &id) { return omittedSources.contains(id); });

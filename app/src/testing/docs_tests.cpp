@@ -76,10 +76,14 @@ int runDocsChecks(const QString &captures) {
                   QString("app guide %1 follows the build profile").arg(id).toUtf8().constData());
         if (!Features::blueprintsAndTools) {
             QStringList mentions;
-            for (const auto &article : docs.library().articles())
+            for (const auto &article : docs.library().articles()) {
+                for (const auto &text : {article.title, article.shortTitle, article.description})
+                    if (text.contains("Blueprint") || text.contains("Tool mode"))
+                        mentions << article.id;
                 for (const auto &section : article.sections)
                     if (section.text.contains("Blueprint") || section.text.contains("Tool mode"))
                         mentions << article.id + "/" + section.id;
+            }
             const QString title = docs.library().article("conversations")->title;
             check(mentions == QStringList{"conversations/modes"} && !title.contains("Blueprint"),
                   "switched-off builds describe only the features they ship");
