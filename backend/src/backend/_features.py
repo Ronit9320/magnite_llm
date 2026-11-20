@@ -8,4 +8,4 @@ this file with a regular expression.
 """
 
 # Blueprints, Tool mode, and the bundled Node.js + Pi worker that both use.
-BLUEPRINTS_AND_TOOLS = True
+BLUEPRINTS_AND_TOOLS = False

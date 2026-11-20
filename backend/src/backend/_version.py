@@ -1,8 +1,10 @@
 """Canonical application release identity; consumed by CMake and packaging too."""
 import re
 
-RELEASE_VERSION = "v0.1-preview"
-UPDATE_SEQUENCE = 1
+RELEASE_VERSION = "v0.2-preview"
+# The GitHub release title for this version.
+RELEASE_NAME = "magnite-spacev0.2"
+UPDATE_SEQUENCE = 2
 DATA_SCHEMA = 2
 
 # Python distribution metadata requires PEP 440; derive its spelling rather
