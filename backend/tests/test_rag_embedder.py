@@ -475,6 +475,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.json()["truncate_dim"], 512)
 
     async def test_config_change_of_truncate_dim_with_documents_is_409(self):
+        self.store.update_config({"model": QWEN})                 # a model that can truncate (MiniLM is refused earlier, with a 400)
         await self.client.post("/rag/documents", json={"name": "a.txt", "content": "hello world"})
         r = await self.client.post("/rag/config", json={"truncate_dim": 128})
         self.assertEqual(r.status_code, 409, r.text)

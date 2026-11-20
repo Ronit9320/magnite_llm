@@ -52,15 +52,19 @@ def sort_rows(rows: list, field: str, descending: bool, node_id: str) -> list:
 
 def search(query: str, top_k: int | None, min_score: float | None) -> tuple[list[dict], str]:
     """Search the Knowledge collection. No match returns empty results, not an error."""
+    from backend.rag.context import shape_query
+    from backend.textcheck import ensure_utf8
     from backend.rag.embeddings import embed_query, is_available
     from backend.rag.store import get_rag_store
 
+    ensure_utf8(query, "Query")
     store = get_rag_store()
     if store is None or not is_available():
         raise RuntimeError("Knowledge search needs the ML extras for embeddings")
     if store.count_chunks() == 0:
         raise ValueError("No documents are indexed. Add documents in the Knowledge panel first.")
     config = store.get_config()
+    query = shape_query(query)
     vector = embed_query(query, config.model, config.truncate_dim)
     chunks = store.search(vector, config.model, top_k=top_k or config.top_k,
                           min_score=config.min_score if min_score is None else min_score,

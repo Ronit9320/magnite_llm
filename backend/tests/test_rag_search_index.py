@@ -141,7 +141,7 @@ class FilterTests(IndexTestCase):
 
 
 class InvalidationTests(IndexTestCase):
-    def test_index_is_built_once_while_warm_and_rebuilt_after_a_write(self):
+    def test_index_is_built_once_and_a_write_does_not_rebuild_it(self):
         self.fill(docs=2, per_doc=5)
         q = unit(np.random.default_rng(2), 1, 64)[0]
         with patch.object(RagStore, "_build_index", autospec=True, side_effect=RagStore._build_index) as build:
@@ -150,7 +150,10 @@ class InvalidationTests(IndexTestCase):
             self.assertEqual(build.call_count, 1)
             self.store.add_document("late", "txt", "", MODEL, ["x"], unit(np.random.default_rng(4), 1, 64), 1.0, 64, 8)
             self.store.search(q, MODEL)
-            self.assertEqual(build.call_count, 2)
+            self.assertEqual(build.call_count, 1)                  # the warm index was extended, not dropped
+            self.store._invalidate()
+            self.store.search(q, MODEL)
+            self.assertEqual(build.call_count, 2)                  # an explicit invalidation still rebuilds
 
     def test_delete_invalidates_warm_cache(self):
         self.fill()

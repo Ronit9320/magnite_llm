@@ -99,9 +99,12 @@ class OctoberApiTests(unittest.IsolatedAsyncioTestCase):
                 path = self.root/('doc.'+kind)
                 path.write_text(content)
                 self.assertEqual(chunk_text(extract_content(content, kind)), chunk_text(extract_text(str(path), kind)))
-                for body in ({'name':path.name, 'kind':kind, 'content':content}, {'path':str(path)}):
+                for body, expected in (({'name':path.name, 'kind':kind, 'content':content}, 201), ({'path':str(path)}, 409)):
                     response = await self.client.post('/rag/documents', json=body)
-                    self.assertEqual(response.status_code, 201, response.text)
+                    # The path ingest yields the very same chunks as the raw one, so it is refused as a duplicate.
+                    self.assertEqual(response.status_code, expected, response.text)
+                    if expected == 409:
+                        self.assertIn('already in Knowledge', response.text)
             path = self.root/'broken.pdf'
             path.write_bytes(b'%PDF-1.7\ntruncated')
             response = await self.client.post('/rag/documents', json={'path':str(path)})

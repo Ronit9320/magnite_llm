@@ -5,6 +5,10 @@
 # surrogates, and FastAPI's 422 handler then crashes trying to echo them back (a 500).
 MAX_CONTENT_CHARS = 16_000_000
 
+# A document file on disk. Generous for text (16M characters is at most ~64 MB of UTF-8) and for PDFs,
+# and far below swapping the machine: the whole file is read into memory before it is chunked.
+MAX_FILE_BYTES = 64 * 1024 ** 2
+
 
 def ensure_utf8(text: str, what: str) -> None:
     """Raise ValueError naming the problem if ``text`` cannot be written as UTF-8.

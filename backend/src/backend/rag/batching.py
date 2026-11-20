@@ -12,6 +12,10 @@ from typing import Callable, Iterable, Optional
 import numpy as np
 
 
+NON_FINITE = ("The embedding model produced invalid numbers (NaN or infinity), so nothing was stored. "
+              "This can happen with half-precision on a GPU: set MAGNITE_RAG_DTYPE=float32 and try again.")
+
+
 class IngestCancelled(RuntimeError):
     """Raised between batches when the client went away or the operation was cancelled."""
 
@@ -36,6 +40,8 @@ def embed_batches(batches: Iterable[list], embed_fn: Callable[[list], np.ndarray
         if vectors.ndim != 2 or vectors.shape[0] != len(batch):
             raise ValueError(f"Embedder returned {vectors.shape[0] if vectors.ndim else 0} vectors "
                              f"for {len(batch)} texts")
+        if not np.isfinite(vectors).all():
+            raise ValueError(NON_FINITE)
         write(done, vectors)
         done += len(batch)
         if progress is not None:

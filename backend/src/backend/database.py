@@ -18,8 +18,8 @@ def add_notice(text: str) -> None:
 
 
 @contextmanager
-def connection(path):
-    conn = sqlite3.connect(path)
+def connection(path, timeout: float = 5.0):
+    conn = sqlite3.connect(path, timeout=timeout)
     conn.row_factory = sqlite3.Row
     try:
         with conn:

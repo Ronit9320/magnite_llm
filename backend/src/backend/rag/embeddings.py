@@ -4,7 +4,11 @@
 * ``Embedder``: embeds documents in guarded batches and queries with the right prompt; optional
   Matryoshka (MRL) truncation.
 * A registry that keeps **one** embedder loaded at a time, unloads the old one before a switch, and
-  unloads an idle one after ``MAGNITE_RAG_IDLE_UNLOAD_S`` seconds (default 300, 0 disables).
+  unloads an idle one after ``MAGNITE_RAG_IDLE_UNLOAD_S`` seconds (default 300, 0 disables). An embedder
+  that is in the middle of a call is never unloaded, however long the call takes.
+* ``pinned(model)``: a long run (reindex) keeps its target model loaded in a second slot while other
+  models are served from the normal slot, so neither side evicts the other. At most two models are
+  resident, and only while a pin is held; every load is still preflighted.
 
 ``sentence_transformers`` and ``torch`` are imported lazily, inside ``_load_encoder`` and
 ``_import_torch``, so the base backend starts without the ``[ml]`` extras. Every load and batch goes
@@ -12,6 +16,7 @@ through ``memguard`` so an embedding run can never drive the machine into swap.
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import os
@@ -208,6 +213,9 @@ class Embedder:
         self.dtype = dtype
         self._encoder = None
         self._native_dim = 0
+        self._busy = 0                   # calls in progress; an embedder in use is never unloaded
+        self._unload_pending = False
+        self._busy_lock = threading.Lock()
         self._guard_factory = guard_factory or (lambda: memguard.MemoryGuard(memguard.limits_from_env()))
 
     def set_truncate_dim(self, truncate_dim: int) -> None:
@@ -229,7 +237,34 @@ class Embedder:
             self.device, self.dtype = device, dtype
         return self._encoder
 
+    @property
+    def busy(self) -> bool:
+        return self._busy > 0
+
+    @contextlib.contextmanager
+    def _in_use(self):
+        with self._busy_lock:
+            self._busy += 1
+        try:
+            yield
+        finally:
+            with self._busy_lock:
+                self._busy -= 1
+                release = self._busy == 0 and self._unload_pending
+            if release:
+                self._release()
+
     def unload(self) -> None:
+        """Free the model now, or as soon as the calls running on it finish (the encode loop reloads a
+        model that disappears between batches, so freeing it under a running call would only cost a reload)."""
+        with self._busy_lock:
+            if self._busy:
+                self._unload_pending = True
+                return
+        self._release()
+
+    def _release(self) -> None:
+        self._unload_pending = False
         self._encoder = None
         memguard.release_accelerator_memory()
 
@@ -266,20 +301,38 @@ class Embedder:
             return np.zeros((0, self.dim), dtype=np.float32)
         guard = self._guard_factory()
         parts = []
-        for n, start in enumerate(range(0, len(texts), batch_size), 1):
-            parts.append(self._encode(list(texts[start:start + batch_size]), self.spec.document_prompt))
-            guard.check()
-            if n % RELEASE_EVERY == 0:
-                memguard.release_accelerator_memory()
-        memguard.release_accelerator_memory()
+        with self._in_use():
+            for n, start in enumerate(range(0, len(texts), batch_size), 1):
+                parts.append(self._encode(list(texts[start:start + batch_size]), self.spec.document_prompt))
+                guard.check()
+                if n % RELEASE_EVERY == 0:
+                    memguard.release_accelerator_memory()
+            memguard.release_accelerator_memory()
         _touch(self)
         return np.concatenate(parts, axis=0)
 
     def embed_query(self, text: str) -> np.ndarray:
         _touch(self)
-        vec = self._encode([text], self.spec.query_prompt)[0]
+        with self._in_use():
+            vec = self._encode([text], self.spec.query_prompt)[0]
         _touch(self)
         return vec
+
+    def unknown_token_ratio(self, texts: list) -> Optional[float]:
+        """Share of these texts' tokens the model's vocabulary does not know (its [UNK] token). None when
+        the tokenizer has no unknown token or cannot be asked. A text the model cannot read becomes only
+        [UNK] tokens, so every such chunk would get the same vector."""
+        tokenizer = getattr(self._encoder, "tokenizer", None)
+        unk = getattr(tokenizer, "unk_token_id", None)
+        if tokenizer is None or unk is None:
+            return None
+        try:
+            ids = tokenizer(list(texts), add_special_tokens=False, truncation=True,
+                            max_length=MAX_SEQ_TOKENS_CAP, verbose=False)["input_ids"]
+        except Exception:  # noqa: BLE001 - tokenizers differ; never fail an ingest over a diagnostic
+            return None
+        total = sum(len(x) for x in ids)
+        return sum(x.count(unk) for x in ids) / total if total else 0.0
 
     def count_tokens(self, texts: list) -> list:
         """Token counts as the model's own tokenizer sees them (word counts if it is not loaded)."""
@@ -301,6 +354,8 @@ def spec_is_known(spec: EmbedderSpec) -> bool:
 
 _lock = threading.RLock()
 _current: Optional[Embedder] = None
+_pinned_id: Optional[str] = None          # model id held by pinned() while a long run is active
+_pinned: Optional[Embedder] = None        # its embedder, once loaded (never idles out, never evicted by a query)
 _last_used = 0.0
 _timer: Optional[threading.Timer] = None
 
@@ -343,6 +398,8 @@ def get_embedder(model: str, truncate_dim: int = 0) -> Embedder:
     global _current
     with _lock:
         spec = spec_for(model)
+        if _pinned_id is not None and spec.model_id == _pinned_id:
+            return _get_pinned(spec, truncate_dim)
         if _current is not None and _current.spec.model_id == spec.model_id:
             _current.set_truncate_dim(truncate_dim)
             _touch(_current)
@@ -356,10 +413,66 @@ def get_embedder(model: str, truncate_dim: int = 0) -> Embedder:
         return _current
 
 
+def _get_pinned(spec: EmbedderSpec, truncate_dim: int) -> Embedder:
+    global _pinned
+    if _pinned is None:
+        candidate = Embedder(spec, truncate_dim)
+        memguard.preflight(spec.approx_ram_mb)
+        candidate._ensure_loaded()
+        _pinned = candidate
+    else:
+        _pinned.set_truncate_dim(truncate_dim)
+    return _pinned
+
+
+@contextlib.contextmanager
+def pinned(model: str):
+    """Keep ``model`` loaded for the whole ``with`` block (a reindex), whatever else is asked of the registry.
+
+    Calls for the pinned model use a second slot that nothing evicts or idles out; calls for any other
+    model keep using the normal slot. Nothing is loaded here. On success the pinned model becomes the
+    normal resident one (the library now uses it); on an error or cancellation it is freed instead.
+    """
+    global _pinned_id, _pinned, _current, _timer
+    model_id = spec_for(model).model_id
+    with _lock:
+        if _pinned_id is not None:
+            raise RuntimeError("Another long embedding run already holds the embedder")
+        _pinned_id = model_id
+        if _current is not None and _current.spec.model_id == model_id:
+            _pinned, _current = _current, None
+            if _timer is not None:
+                _timer.cancel()
+                _timer = None
+    try:
+        yield
+    except BaseException:
+        with _lock:
+            _pinned_id, held, _pinned = None, _pinned, None
+        if held is not None:
+            held.unload()
+        raise
+    else:
+        with _lock:
+            _pinned_id, held, _pinned = None, _pinned, None
+            if held is not None:
+                _unload_current()
+                _current = held
+                _touch(_current)
+
+
+def _resident(model_id: str) -> Optional[Embedder]:
+    """The loaded embedder for this model id, in either slot."""
+    for embedder in (_current, _pinned):
+        if embedder is not None and embedder.loaded and embedder.spec.model_id == model_id:
+            return embedder
+    return None
+
+
 def unload_if_idle(now: Optional[float] = None) -> bool:
     idle = _idle_seconds()
     with _lock:
-        if _current is None or idle <= 0:
+        if _current is None or idle <= 0 or _current.busy:
             return False
         now = time.monotonic() if now is None else now
         if now - _last_used >= idle:
@@ -368,12 +481,17 @@ def unload_if_idle(now: Optional[float] = None) -> bool:
         return False
 
 
-def loaded_info() -> Optional[dict]:
+def loaded_info(model: Optional[str] = None) -> Optional[dict]:
+    """What is loaded: the given model if it is resident in either slot, else the normal slot's model."""
     with _lock:
-        if _current is None or not _current.loaded:
+        if model is not None:
+            embedder = _resident(spec_for(model).model_id)
+        else:
+            embedder = _current if _current is not None and _current.loaded else _resident(_pinned_id or "")
+        if embedder is None:
             return None
-        return {"model": _current.spec.model_id, "max_seq_tokens": _current.max_seq_tokens,
-                "dim": _current.dim, "device": _current.device, "dtype": _current.dtype}
+        return {"model": embedder.spec.model_id, "max_seq_tokens": embedder.max_seq_tokens,
+                "dim": embedder.dim, "device": embedder.device, "dtype": embedder.dtype}
 
 
 # ---- measured speed (in memory only) ----------------------------------------------------------
@@ -405,9 +523,10 @@ def status_for(model: str, truncate_dim: int = 0) -> dict:
     """Describe the configured embedder without loading it."""
     spec = spec_for(model)
     with _lock:
-        if _current is not None and _current.loaded and _current.spec.model_id == spec.model_id:
-            return {"model": model, "label": spec.label, "max_seq_tokens": _current.max_seq_tokens,
-                    "dim": _current.dim, "loaded": True, "device": _current.device, "dtype": _current.dtype,
+        loaded = _resident(spec.model_id)
+        if loaded is not None:
+            return {"model": model, "label": spec.label, "max_seq_tokens": loaded.max_seq_tokens,
+                    "dim": loaded.dim, "loaded": True, "device": loaded.device, "dtype": loaded.dtype,
                     "measured_chunks_per_s": measured_speed(model)}
     declared = min(spec.max_seq_tokens, MAX_SEQ_TOKENS_CAP) if spec.max_seq_tokens else None
     dim = min(spec.dim, truncate_dim) if (spec.dim and truncate_dim) else (spec.dim or truncate_dim or None)
@@ -422,18 +541,28 @@ def max_seq_tokens(model: str) -> Optional[int]:
 def count_tokens(texts: list, model: str) -> Optional[list]:
     """Real token counts when this model is loaded, else None (never loads a model)."""
     with _lock:
-        if _current is not None and _current.loaded and _current.spec.model_id == spec_for(model).model_id:
-            return _current.count_tokens(texts)
+        loaded = _resident(spec_for(model).model_id)
+        if loaded is not None:
+            return loaded.count_tokens(texts)
+    return None
+
+
+def unknown_ratio(texts: list, model: str) -> Optional[float]:
+    """``Embedder.unknown_token_ratio`` for the loaded model, else None (never loads a model)."""
+    with _lock:
+        loaded = _resident(spec_for(model).model_id)
+        if loaded is not None:
+            return loaded.unknown_token_ratio(texts)
     return None
 
 
 def _reset_for_tests() -> None:
-    global _current, _timer
+    global _current, _timer, _pinned, _pinned_id
     with _lock:
         if _timer is not None:
             _timer.cancel()
             _timer = None
-        _current = None
+        _current = _pinned = _pinned_id = None
     _reset_measured_for_tests()
     clear = getattr(recommended_model, "cache_clear", None)
     if clear is not None:

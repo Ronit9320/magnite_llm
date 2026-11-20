@@ -12,7 +12,8 @@ from pydantic import ValidationError
 from backend.request_work import request_work, ClientDisconnected
 
 from backend.rag import embeddings, keyword
-from backend.rag.chunking import chunk_limit, chunk_text, detect_kind, extract_text, extract_content, fit_chunking
+from backend.rag.context import shape_query
+from backend.rag.chunking import chunk_limit, chunk_text, chunk_weight, detect_kind, extract_text, extract_content, fit_chunking
 from backend.rag.activity import exclusive, get_activity
 from backend.rag.batching import IngestCancelled, embed_batches
 from backend.rag.memguard import MemoryGuard, MemoryGuardTripped, limits_from_env
@@ -25,9 +26,9 @@ from backend.rag.schemas import (
     RagQueryResponse,
     RagReindexRequest,
 )
-from backend.rag.store import RagStore, get_rag_store, set_rag_store
+from backend.rag.store import RagStore, StoreBusy, get_rag_store, set_rag_store
 from backend.paths import app_home
-from backend.textcheck import MAX_CONTENT_CHARS, ensure_utf8
+from backend.textcheck import MAX_CONTENT_CHARS, MAX_FILE_BYTES, ensure_utf8
 
 rag_router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger("backend.rag")
@@ -87,8 +88,20 @@ def get_config():
 @rag_router.post("/config", response_model=RagConfig)
 def set_config(cfg: RagConfigUpdate):
     store = _get_store()
+    changes = cfg.model_dump(exclude_none=True)
     try:
-        return store.update_config(cfg.model_dump(exclude_none=True))
+        current = store.get_config()
+        merged = {**current.model_dump(), **changes}
+        spec = embeddings.spec_for(merged["model"])
+        if merged["truncate_dim"] and embeddings.spec_is_known(spec) and not spec.supports_truncation:
+            raise HTTPException(status_code=400, detail=f"{merged['model']} does not support embedding truncation; use truncate_dim 0")
+        new_model = changes.get("model")
+        if (new_model and new_model != current.model and store.count_chunks()
+                and embeddings.spec_for(new_model).model_id == embeddings.spec_for(current.model).model_id
+                and merged["truncate_dim"] == current.truncate_dim):
+            store.relabel_model(new_model)              # another spelling of the same model: nothing to re-embed
+            changes.pop("model")
+        return store.update_config(changes)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
@@ -125,8 +138,7 @@ class _SpeedMeter:
         self.chunks, self.seconds = 0, 0.0
 
     def _loaded(self) -> bool:
-        info = embeddings.loaded_info()
-        return bool(info) and info.get("model") == self.model_id
+        return embeddings.loaded_info(self.model_id) is not None
 
     def wrap(self, embed_fn):
         def timed(texts: list):
@@ -140,8 +152,18 @@ class _SpeedMeter:
         return timed
 
     def commit(self) -> None:
-        info = embeddings.loaded_info() or {}
+        info = embeddings.loaded_info(self.model_id) or {}
         embeddings.record_speed(self.model_id, self.chunks, self.seconds, info.get("device"), info.get("dtype"))
+
+
+class _UnreadableText(Exception):
+    """Most of this text is unknown to the embedding model, so its vectors would carry no meaning."""
+
+    def __init__(self, ratio: float):
+        self.ratio = ratio
+
+
+UNREADABLE_RATIO = 0.5
 
 
 class _NeedsSmallerChunks(Exception):
@@ -160,7 +182,7 @@ def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: i
     token counts; chunks over the limit raise ``_NeedsSmallerChunks`` with a size that will fit."""
     total, batch = len(chunks), _batch_size()
     progress.set_phase("embedding", total)
-    matrix = {"vectors": None, "checked": refit_limit is None}
+    matrix = {"vectors": None, "checked": refit_limit is None, "readable": False}
 
     def write(offset: int, vecs: np.ndarray) -> None:
         if matrix["vectors"] is None:
@@ -169,11 +191,18 @@ def _embed_all(chunks: list, cfg, refit_limit, chunk_size: int, chunk_overlap: i
 
     def embed(texts: list) -> np.ndarray:
         vecs = embeddings.embed_documents(texts, cfg.model, cfg.truncate_dim)
+        if not matrix["readable"]:                     # the first batch has loaded the model: ask its tokenizer
+            matrix["readable"] = True
+            sample = chunks[::max(1, len(chunks) // 50)][:50]
+            ratio = embeddings.unknown_ratio(sample, cfg.model)
+            # Unspaced CJK text is still findable through the keyword leg, so it is not refused.
+            if ratio is not None and ratio > UNREADABLE_RATIO and keyword.cjk_share(" ".join(sample)) < 0.5:
+                raise _UnreadableText(ratio)
         if not matrix["checked"]:
             matrix["checked"] = True
             counts = embeddings.count_tokens(chunks, cfg.model)
             if counts and max(counts) > refit_limit:
-                worst = max(n / max(1, len(c.split())) for n, c in zip(counts, chunks))
+                worst = max(n / max(1, chunk_weight(c)) for n, c in zip(counts, chunks))     # tokens per weight unit
                 size = max(16, min(chunk_size - 1, int((refit_limit - 2) / worst * 0.95)))
                 raise _NeedsSmallerChunks(size, min(chunk_overlap, size // 4))
         return vecs
@@ -190,7 +219,24 @@ def _batch_size() -> int:
         return 16
 
 
+MAX_NAME_CHARS = 255       # a file name on any common file system
+MAX_PATH_CHARS = 4096      # PATH_MAX
+
+
+def _check_ingest_text_fields(body: RagIngestRequest) -> None:
+    for label, value in (("Document name", body.name), ("Path", body.path), ("Kind", body.kind)):
+        try:
+            ensure_utf8(value, label)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if len(body.name) > MAX_NAME_CHARS:
+        raise HTTPException(status_code=400, detail=f"Document name too long ({len(body.name):,} characters; the limit is {MAX_NAME_CHARS})")
+    if len(body.path) > MAX_PATH_CHARS:
+        raise HTTPException(status_code=400, detail=f"Path too long ({len(body.path):,} characters; the limit is {MAX_PATH_CHARS:,})")
+
+
 def _ingest_document(body: RagIngestRequest, cancelled=None):
+    _check_ingest_text_fields(body)
     store = _get_store()
     if store.reindexing:
         raise HTTPException(status_code=409, detail="Reindex in progress")
@@ -211,6 +257,14 @@ def _ingest_document(body: RagIngestRequest, cancelled=None):
             return _ingest_locked(store, body, cancelled, progress)
     except IngestCancelled as exc:
         raise HTTPException(status_code=499, detail=f"Document ingestion cancelled: {exc}") from exc
+    except StoreBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _refuse_duplicate(store, chunks: list) -> None:
+    existing = store.find_duplicate(chunks)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail=f"This document is already in Knowledge as '{existing.name}'.")
 
 
 def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
@@ -230,6 +284,9 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
         path = os.path.abspath(body.path)
         if not os.path.isfile(path):
             raise HTTPException(status_code=400, detail=f"Document file not found: {body.path}")
+        if os.path.getsize(path) > MAX_FILE_BYTES:
+            raise HTTPException(status_code=413, detail=f"File too large ({os.path.getsize(path) / 1024 ** 2:,.0f} MB; "
+                                                        f"the limit is {MAX_FILE_BYTES // 1024 ** 2} MB)")
         kind = detect_kind(path, body.kind)
         try:
             text = extract_text(path, kind)
@@ -241,6 +298,8 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
         ensure_utf8(text, "Document")   # extraction (e.g. a PDF) can produce one too
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if len(text) > MAX_CONTENT_CHARS:   # a file or PDF can expand past the limit that pasted content has
+        raise HTTPException(status_code=413, detail=f"Document text too long (limit {MAX_CONTENT_CHARS:,} characters)")
     cfg = store.get_config()
     token_limit = embeddings.status_for(cfg.model, cfg.truncate_dim)["max_seq_tokens"]
     requested = (body.chunk_size or cfg.chunk_size,
@@ -260,10 +319,17 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             if not chunks:
                 raise HTTPException(status_code=400, detail="Document contains no usable text")
+            _refuse_duplicate(store, chunks)           # before any embedding work
             try:
                 vectors = _embed_all(chunks, cfg, token_limit if attempt < MAX_REFITS else None,
                                      chunk_size, chunk_overlap, cancelled, progress, meter)
                 break
+            except _UnreadableText as unreadable:
+                name = embeddings.spec_for(cfg.model).label
+                raise HTTPException(status_code=422, detail=(
+                    f"The embedding model ({cfg.model}, {name}) cannot read most of this text "
+                    f"({unreadable.ratio:.0%} of it is unknown to the model), so it could not be searched. "
+                    "Switch to a multilingual model such as BAAI/bge-m3 in the Knowledge settings.")) from None
             except _NeedsSmallerChunks as refit:
                 logger.info("Chunks exceed the %s-token limit; re-chunking at %d words (was %d)",
                             token_limit, refit.chunk_size, chunk_size)
@@ -277,6 +343,7 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
                                "were not embedded. Lower the chunk size.", over, len(counts), token_limit)
         if cancelled is not None and cancelled.is_set():
             raise IngestCancelled("before registration")
+        _refuse_duplicate(store, chunks)               # the final chunking (after any refit) may match too
         progress.set_phase("saving")
         rec = store.add_document(
             name=body.name.strip() or os.path.splitext(os.path.basename(path))[0],
@@ -288,13 +355,19 @@ def _ingest_locked(store, body: RagIngestRequest, cancelled, progress):
             size_kb=size_kb,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            cancelled=cancelled,
         )
+        if cancelled is not None and cancelled.is_set():
+            # The client left while the commit was running: the caller will report "cancelled", so the
+            # document must not exist.
+            store.delete_document(rec.id)
+            raise IngestCancelled("during saving")
         meter.commit()
     except (IngestCancelled, HTTPException):
         raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except MemoryGuardTripped as exc:
+    except (MemoryGuardTripped, StoreBusy) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Document embedding failed: {exc}") from exc
@@ -339,21 +412,30 @@ def _reindex(body: RagReindexRequest, cancelled=None):
     spec = embeddings.spec_for(model)
     if body.truncate_dim and embeddings.spec_is_known(spec) and not spec.supports_truncation:
         raise HTTPException(status_code=400, detail=f"{model} does not support embedding truncation; use truncate_dim 0")
+    current = store.get_config()
+    if (model != current.model and body.truncate_dim == current.truncate_dim and store.count_chunks()
+            and spec.model_id == embeddings.spec_for(current.model).model_id):
+        try:
+            return store.relabel_model(model)           # the same model under another name: no re-embedding
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not embeddings.is_available():
         raise HTTPException(status_code=503, detail="Embeddings unavailable; install the ML extras")
     try:
         meter = _SpeedMeter(model)
         with exclusive("reindex", model, cancelled) as progress:
             progress.set_phase("embedding", store.count_chunks())
-            result = store.reindex(
-                model, body.truncate_dim,
-                meter.wrap(lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim)),
-                cancelled=cancelled, progress=progress.advance, guard=MemoryGuard(limits_from_env()))
+            # Pinned: chat queries on the old model keep working without evicting the model being built.
+            with embeddings.pinned(model):
+                result = store.reindex(
+                    model, body.truncate_dim,
+                    meter.wrap(lambda texts: embeddings.embed_documents(texts, model, body.truncate_dim)),
+                    cancelled=cancelled, progress=progress.advance, guard=MemoryGuard(limits_from_env()))
         meter.commit()
         return result
     except IngestCancelled as exc:
         raise HTTPException(status_code=499, detail=str(exc)) from exc
-    except MemoryGuardTripped as exc:
+    except (MemoryGuardTripped, StoreBusy) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -370,6 +452,10 @@ def query_documents(body: RagQueryRequest):
     query = body.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="'query' is required")
+    try:
+        ensure_utf8(query, "Query")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not embeddings.is_available():
         raise HTTPException(status_code=503, detail="Embeddings unavailable")
 
@@ -377,11 +463,12 @@ def query_documents(body: RagQueryRequest):
     top_k = body.top_k or cfg.top_k
     min_score = body.min_score if body.min_score is not None else cfg.min_score
     try:
-        query_vec = embeddings.embed_query(query, cfg.model, cfg.truncate_dim)
+        search_text = shape_query(query)
+        query_vec = embeddings.embed_query(search_text, cfg.model, cfg.truncate_dim)
         results = store.search(query_vec, cfg.model, top_k=top_k, min_score=min_score,
-                               document_ids=body.document_ids, query_text=query,
+                               document_ids=body.document_ids, query_text=search_text,
                                mode=body.search_mode or cfg.search_mode)
-    except MemoryGuardTripped as exc:
+    except (MemoryGuardTripped, StoreBusy) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=409, detail=str(exc)) from exc

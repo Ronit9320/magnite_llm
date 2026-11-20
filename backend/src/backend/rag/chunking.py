@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import codecs
 import math
 import os
 import re
 from typing import Optional
-from html.parser import HTMLParser
+from html import unescape
 
 SUPPORTED_EXTS = ("txt", "md", "html", "pdf")
 
@@ -36,76 +37,155 @@ def extract_content(text: str, kind: str) -> str:
 
 
 def _read_text(path: str) -> str:
-    for enc in ("utf-8-sig", "latin-1"):
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as exc:
+        raise ValueError(f"Cannot read file: {path}") from exc
+    try:
+        return decode_text_bytes(data)
+    except ValueError as exc:
+        raise ValueError(f"{os.path.basename(path)}: {exc}") from None
+
+
+_BINARY = ("This looks like a binary file, not text. Supported types are PDF, TXT, MD and HTML; "
+           "export other formats (DOCX, images, ...) to PDF or plain text first.")
+
+
+def decode_text_bytes(data: bytes) -> str:
+    """Decode a text file: UTF-16 (with a byte order mark), UTF-8 (with or without one), else legacy
+    8-bit text. Raises ValueError for anything that is not text (NUL bytes, mostly control characters)."""
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         try:
-            with open(path, "r", encoding=enc) as f:
-                return f.read()
-        except (UnicodeDecodeError, OSError):
-            continue
-    raise ValueError(f"Cannot decode text file: {path}")
+            return data.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Cannot decode this UTF-16 text file") from exc
+    if b"\x00" in data:
+        raise ValueError(_BINARY)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    sample = text[:20_000]
+    control = sum(1 for ch in sample if (ch < " " and ch not in "\t\n\r\f") or "\x7f" <= ch <= "\x9f")
+    if control > 0.02 * max(1, len(sample)):
+        raise ValueError(_BINARY)
+    return text
 
 
-class _TextExtractor(HTMLParser):
-    """Visible text of an HTML document in one linear pass.
+# ---- HTML text extraction -----------------------------------------------------------------
+#
+# A hand-written single pass instead of ``html.parser.HTMLParser``: on Python builds without the 2025
+# fixes that parser is quadratic on malformed input (50 KB of "a<b" text took 7 s), cannot be interrupted,
+# and runs while the single ingest lock is held. Every ``find`` below starts where the previous construct
+# ended, and an unterminated construct hands the rest of the document over as text, so the work is O(n).
 
-    Every tag boundary becomes a space, <script>/<style> bodies are dropped, and character
-    references are unescaped. A script or style that is never closed keeps its text (a browser
-    would swallow the rest of the page; for retrieval, losing the document is worse).
-    """
+_TAG_NAME = re.compile(r"[A-Za-z][^\s/>]*")
+_QUOTE = re.compile("[\"']")
+_RAW_TEXT_END = {name: re.compile(r"</%s" % name, re.IGNORECASE) for name in ("script", "style")}
 
-    _SKIPPED = ("script", "style")
 
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self._out: list[str] = []
-        self._held: list[str] = []
-        self._skip: str | None = None
-
-    def handle_starttag(self, tag, attrs):
-        if self._skip is None and tag in self._SKIPPED:
-            self._skip = tag
-            self._held = []
-        self._out.append(" ")
-
-    def handle_endtag(self, tag):
-        if self._skip == tag:
-            self._skip = None
-            self._held = []
-        self._out.append(" ")
-
-    def handle_data(self, data):
-        (self._held if self._skip else self._out).append(data)
-
-    def handle_comment(self, data):
-        self._out.append(" ")
-
-    def handle_decl(self, decl):
-        self._out.append(" ")
-
-    def handle_pi(self, data):
-        self._out.append(" ")
-
-    def text(self) -> str:
-        self.close()
-        # Some Python releases hand the content of an unclosed <script>/<style> to handle_data at
-        # close(); others leave it unparsed in `rawdata`. Take whichever happened, never both.
-        unclosed = (self._held + [self.rawdata]) if self._skip and self.rawdata else self._held if self._skip else []
-        return "".join(self._out + unclosed)
+def _tag_end(text: str, pos: int) -> int:
+    """Index of the ``>`` that ends a tag whose name ended at ``pos``. ``>`` inside quoted attribute
+    values does not count; a quote that is never closed is ignored. -1 when there is no ``>``."""
+    gt = text.find(">", pos)
+    while gt >= 0:
+        quote = _QUOTE.search(text, pos, gt)
+        if quote is None:
+            return gt
+        close = text.find(quote.group(), quote.end())
+        if close < 0:
+            return gt
+        pos = close + 1
+        if close > gt:
+            gt = text.find(">", pos)
+    return -1
 
 
 def _strip_html(text: str) -> str:
-    extractor = _TextExtractor()
-    extractor.feed(text)
-    return extractor.text()
+    """Visible text of an HTML document in one linear pass.
+
+    Every tag boundary becomes a space, <script>/<style> bodies are dropped, comments, doctypes,
+    processing instructions and CDATA are dropped, and character references are unescaped. Anything
+    unterminated (a tag, a comment, a script) keeps its text: for retrieval, losing the rest of a
+    document is worse than keeping some markup.
+    """
+    out: list[str] = []
+    pos, n = 0, len(text)
+    while pos < n:
+        lt = text.find("<", pos)
+        if lt < 0:
+            out.append(unescape(text[pos:]))
+            break
+        if lt > pos:
+            out.append(unescape(text[pos:lt]))
+        nxt = text[lt + 1:lt + 2]
+        end = -1                                   # index of the last character of this construct
+        kind = ""
+        if nxt == "!":
+            if text.startswith("<!--", lt):
+                close = text.find("-->", lt + 4)
+                end = close + 2 if close >= 0 else -1
+            elif text.startswith("<![CDATA[", lt):
+                close = text.find("]]>", lt + 9)
+                end = close + 2 if close >= 0 else -1
+            else:
+                end = text.find(">", lt + 2)
+        elif nxt == "?":
+            end = text.find(">", lt + 2)
+        elif nxt == "/":
+            if _TAG_NAME.match(text, lt + 2):
+                end = _tag_end(text, lt + 2)
+            else:
+                end = text.find(">", lt + 2)
+        else:
+            match = _TAG_NAME.match(text, lt + 1)
+            if match:
+                kind = match.group().lower()
+                end = _tag_end(text, match.end())
+            else:                                  # "a < b", "1<2": not markup
+                out.append("<")
+                pos = lt + 1
+                continue
+        if end < 0:                                # nothing closes it: keep the rest as text
+            out.append(unescape(text[lt:]))
+            break
+        out.append(" ")
+        pos = end + 1
+        raw_end = _RAW_TEXT_END.get(kind)
+        if raw_end is not None and text[end - 1:end] != "/":
+            closer = raw_end.search(text, pos)
+            gt = text.find(">", closer.end()) if closer else -1
+            if gt < 0:                             # an unclosed script/style keeps its text
+                out.append(text[pos:])
+                break
+            out.append(" ")
+            pos = gt + 1
+    return "".join(out)
+
+
+_FRONT_MATTER = re.compile(r"\A---[ \t]*\n(?:[ \t]*[\w.-]+[ \t]*:.*\n|[ \t]+.*\n|[ \t]*-[ \t].*\n|[ \t]*\n)*?---[ \t]*(?:\n|\Z)")
+# Only real HTML element names: generics such as List<String> and comparisons are code, which is kept.
+_HTML_TAG = re.compile(r"</?(?:b|i|u|s|em|strong|br|hr|p|div|span|a|img|ul|ol|li|table|thead|tbody|tr|td|th|h[1-6]|pre|sup|sub|"
+                       r"details|summary|blockquote|center|font|del|ins|kbd|mark|small|big|figure|figcaption|section|article|"
+                       r"nav|header|footer)\b[^<>\n]{0,300}>", re.IGNORECASE)
+_TABLE_SEPARATOR = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*$", re.MULTILINE)
+_TABLE_ROW = re.compile(r"^[ \t]*\|(.*)\|[ \t]*$", re.MULTILINE)
 
 
 def _strip_markdown(text: str) -> str:
     # Preserve code: technical documents often contain their answers there.
+    text = _FRONT_MATTER.sub("", text, count=1)
     text = re.sub(r"^```[^\n]*$", "", text, flags=re.MULTILINE)
     text = text.replace("`", "")
     text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^ {0,3}\[[^\]\n]+\]:[ \t]+\S.*$", "", text, flags=re.MULTILINE)        # [1]: https://...
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)                                  # images before links
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(?<![\w\]\)])\[([^\]\n]+)\]\[[^\]\n]*\]", r"\1", text)             # [text][ref], not a[i][j]
+    text = _HTML_TAG.sub(" ", text)
+    text = _TABLE_SEPARATOR.sub("", text)
+    text = _TABLE_ROW.sub(lambda m: m.group(1).replace("|", " "), text)
     return text
 
 
@@ -184,6 +264,11 @@ def _split_token(token: str, size: int) -> list:
     return pieces
 
 
+def chunk_weight(text: str) -> int:
+    """The weight (the unit of chunk sizes) of a chunk of text: the sum of its whitespace-separated tokens'."""
+    return sum(_weight(token) for token in text.split())
+
+
 def _hard_split(tokens: list, size: int, overlap: int) -> list:
     """Fixed windows over one sentence that is longer than ``size`` (the old stepping, by weight)."""
     items = []                                   # (text, weight, glued to the previous piece)
@@ -208,7 +293,11 @@ def _hard_split(tokens: list, size: int, overlap: int) -> list:
             total += items[j][1]
             j += 1
         j = max(j, i + 1)
-        chunks.append(render(items[i:j]))
+        chunk = render(items[i:j])
+        while j > i + 1 and chunk_weight(chunk) > size:    # pieces glued back into one token can weigh more than their sum
+            j -= 1
+            chunk = render(items[i:j])
+        chunks.append(chunk)
         if j >= n:
             break
         k, shared = j, 0

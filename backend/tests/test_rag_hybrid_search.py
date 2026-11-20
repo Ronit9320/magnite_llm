@@ -84,9 +84,16 @@ class HybridTests(HybridStoreCase):
 
     def test_ties_go_to_higher_cosine_then_lower_id(self):
         self.build_id_library()
-        res = self.search("INV-77341", top_k=2)
+        res = self.search("invoice", top_k=2)             # a plain word: no identifier in the query
         self.assertEqual(res[0].match, "vector")          # rank 1 in one leg each: tie, higher cosine first
         self.assertEqual(res[1].match, "keyword")
+
+    def test_a_chunk_holding_the_queried_identifier_verbatim_outranks_the_rest(self):
+        self.build_id_library()
+        res = self.search("INV-77341", top_k=2)
+        self.assertEqual(res[0].match, "keyword")         # the identifier chunk, ahead of the closer-by-meaning filler
+        self.assertIn("INV-77341", res[0].text)
+        self.assertEqual(res[0].fused_score, round(1 / 61, 6))      # the reported value is still the two-leg RRF
 
     def test_min_score_filters_keyword_hits_by_cosine(self):
         self.build_id_library()
