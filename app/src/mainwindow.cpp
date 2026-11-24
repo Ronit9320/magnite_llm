@@ -1016,6 +1016,8 @@ void MainWindow::runSelfTest() {
                         inferenceSelfTest(failCount, finish);
                     } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_RAG")) {
                         ragSelfTest(failCount, finish);
+                    } else if (qEnvironmentVariableIsSet("MAGNITE_SELFTEST_TOOLMODE")) {
+                        toolModeSelfTest(failCount, finish);
                     } else {
                         chatErrorSelfTest(failCount, finish);
                     }
@@ -1692,4 +1694,137 @@ void MainWindow::changeEvent(QEvent *event) {
         syncThemeButton();
         m_sidebar->refreshIcons();
     }
+}
+
+namespace {
+
+ConversationRunPanel *visibleRunPanel(QWidget *root) {
+    for (auto *panel : root->findChildren<ConversationRunPanel *>())
+        if (panel->isVisible()) return panel;
+    return nullptr;
+}
+
+QAbstractButton *visibleButton(QWidget *root, const QString &text) {
+    for (auto *button : root->findChildren<QAbstractButton *>())
+        if (button->text() == text && button->isVisible()) return button;
+    return nullptr;
+}
+
+QString visibleText(QWidget *root) {
+    QStringList lines;
+    for (auto *label : root->findChildren<QLabel *>())
+        if (label->isVisible()) lines << label->text();
+    return lines.join("\n");
+}
+
+// Calls `done` every 250 ms until it returns true or the budget runs out, then `then(succeeded)`.
+void pollUntil(QObject *context, int budgetMs, std::function<bool()> done,
+               std::function<void(bool)> then, int waited = 0) {
+    if (done()) { then(true); return; }
+    if (waited >= budgetMs) { then(false); return; }
+    QTimer::singleShot(250, context, [=] { pollUntil(context, budgetMs, done, then, waited + 250); });
+}
+
+}  // namespace
+
+void MainWindow::toolModeSelfTest(std::shared_ptr<int> failCount, std::function<void()> finish) {
+    // Drives the real Tool mode tab: load a model, open the tab, type a task, press Send, decide
+    // the approval card the way a user would, then read what the transcript shows.
+    const QString model = qEnvironmentVariable("MAGNITE_SELFTEST_TOOLMODE_MODEL", "Qwen/Qwen3-0.6B");
+    const QString engine = qEnvironmentVariable("MAGNITE_SELFTEST_TOOLMODE_ENGINE", "torch");
+    const QString path = QDir::temp().filePath("magnite-selftest-toolmode.txt");
+    QFile note(path);
+    if (!note.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        ++(*failCount);
+        fprintf(stderr, "[selftest] FAIL: write tool mode file\n");
+        finish();
+        return;
+    }
+    note.write("The secret word is purple-walrus-42.\n");
+    note.close();
+
+    auto report = [failCount](bool ok, const QString &what) {
+        if (!ok) ++(*failCount);
+        fprintf(stderr, "[selftest] %s tool mode: %s\n", ok ? "ok:" : "FAIL:", qUtf8Printable(what));
+        return ok;
+    };
+
+    // One task: type it, send it, press `decision` on the approval card, wait for the run to settle.
+    auto runTask = [this, report](const QString &task, const QString &decision,
+                                  std::function<void(const QString &)> check, std::function<void()> next) {
+        auto *panel = visibleRunPanel(m_chatPanel);
+        if (!report(panel != nullptr, "Tool mode panel is showing")) { next(); return; }
+        auto *input = panel->findChild<QPlainTextEdit *>();
+        if (!report(input != nullptr, "composer found")) { next(); return; }
+        input->setPlainText(task);
+        pollUntil(this, 60000, [panel] {
+            auto *send = visibleButton(panel, "Send ↑");
+            return send && send->isEnabled();
+        }, [=](bool ready) {
+            if (!report(ready, "Send enabled for a loaded model")) { next(); return; }
+            visibleButton(panel, "Send ↑")->click();
+            pollUntil(this, 180000, [panel, decision] {
+                auto *button = visibleButton(panel, decision);
+                return button && button->isEnabled();
+            }, [=](bool shown) {
+                if (!report(shown, QString("approval card shows '%1'").arg(decision))) { next(); return; }
+                visibleButton(panel, decision)->click();
+                pollUntil(this, 180000, [panel] { return !panel->hasActiveTask(); }, [=](bool settled) {
+                    report(settled, "task finished after the decision");
+                    const auto text = visibleText(panel);
+                    fprintf(stderr, "[selftest] transcript after '%s':\n%s\n", qUtf8Printable(decision),
+                            qUtf8Printable(text.right(1200)));
+                    check(text);
+                    next();
+                });
+            });
+        });
+    };
+
+    QJsonObject body;
+    body["model"] = model;
+    body["engine"] = engine;
+    m_backendClient->post("/inference/load", body,
+        [=](int status, const QJsonDocument &doc) {
+            if (!report(status == 200, QString("load %1 (status=%2, %3)").arg(model).arg(status)
+                                           .arg(doc.object()["detail"].toString()))) {
+                finish();
+                return;
+            }
+            switchPanel(PanelChat);
+            auto *modeButton = visibleButton(m_chatPanel, "Tool mode");
+            if (!report(modeButton != nullptr, "Tool mode tab exists")) { finish(); return; }
+            modeButton->click();
+            runTask(QString("Read the file %1 and tell me the secret word.").arg(path), "Approve once",
+                [=](const QString &text) {
+                    report(text.contains("purple-walrus-42"), "approved read reached the model and its answer");
+                },
+                [=] {
+                    auto *panel = visibleRunPanel(m_chatPanel);
+                    auto *fresh = panel ? visibleButton(panel, "New task") : nullptr;
+                    if (!report(fresh && fresh->isEnabled(), "New task available")) { finish(); return; }
+                    fresh->click();
+                    runTask("Run the command python3 --version and tell me the output.", "Deny",
+                        [=](const QString &text) {
+                            report(!text.contains("Python 3.1"), "a denied command shows no command output");
+                        },
+                        [=] {
+                            auto *panel = visibleRunPanel(m_chatPanel);
+                            auto *again = panel ? visibleButton(panel, "New task") : nullptr;
+                            if (!report(again && again->isEnabled(), "New task available")) { finish(); return; }
+                            again->click();
+                            runTask("Run the command python3 --version and tell me the output.", "Approve once",
+                                [=](const QString &text) {
+                                    report(text.contains("Python 3."), "an approved command ran and its output reached the model");
+                                },
+                                [=] {
+                                    m_backendClient->post("/inference/unload", QJsonObject(),
+                                        [=](int unloaded, const QJsonDocument &) {
+                                            report(unloaded == 200, "unload");
+                                            finish();
+                                        });
+                                });
+                        });
+                });
+        });
 }

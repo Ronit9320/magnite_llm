@@ -28,10 +28,13 @@ MAGNITE_SELFTEST_INFERENCE=1  ./build/magnite-app --selftest        # load -> ch
 MAGNITE_SELFTEST_TRAINING=1   ./build/magnite-app --selftest        # LoRA job e2e
 MAGNITE_SELFTEST_ADAPTER=1   ./build/magnite-app --selftest        # train + hot-switch e2e
 MAGNITE_SELFTEST_RAG=1       ./build/magnite-app --selftest        # ingest -> query -> delete e2e
+MAGNITE_SELFTEST_TOOLMODE=1  ./build/magnite-app --selftest        # Tool mode tab: load -> send -> approve/deny e2e
 ./build/magnite-app --screenshot <dir>                             # capture panels, then exit
 ```
 
 Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; backend readiness takes ~13s. Pass prints `[selftest] PASS (0 failures)`.
+
+The Tool mode selftest needs Node 22.19+ and the Pi bridge packages (`npm ci --ignore-scripts --prefix backend/src/backend/tooling/pi`), and loads `Qwen/Qwen3-0.6B` with the torch engine (override with `MAGNITE_SELFTEST_TOOLMODE_MODEL` / `_ENGINE`).
 
 ## Branch workflow
 
