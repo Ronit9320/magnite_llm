@@ -1,0 +1,9 @@
+#pragma once
+// Generated from backend/src/backend/_features.py. Release branches can switch
+// unfinished features off; their code still compiles so tests keep covering it.
+#define MAGNITE_BLUEPRINTS_AND_TOOLS @MAGNITE_BLUEPRINTS_AND_TOOLS@
+
+namespace Features {
+// Blueprints, Tool mode and the bundled Node.js + Pi worker.
+constexpr bool blueprintsAndTools = MAGNITE_BLUEPRINTS_AND_TOOLS != 0;
+}

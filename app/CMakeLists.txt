@@ -37,10 +37,24 @@ if(NOT MAGNITE_RELEASE_REPOSITORY MATCHES "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     message(FATAL_ERROR "Invalid GitHub release repository")
 endif()
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/keys/update-public.pem" MAGNITE_UPDATE_PUBLIC_KEY)
+# Build-time feature profile shared with the backend and packaging.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_features.py" MAGNITE_TOOLS_LINE
+     REGEX "^BLUEPRINTS_AND_TOOLS = (True|False)$")
+if(NOT MAGNITE_TOOLS_LINE)
+    message(FATAL_ERROR "backend/src/backend/_features.py must set BLUEPRINTS_AND_TOOLS = True or False")
+endif()
+if(MAGNITE_TOOLS_LINE MATCHES "True$")
+    set(MAGNITE_BLUEPRINTS_AND_TOOLS 1)
+else()
+    set(MAGNITE_BLUEPRINTS_AND_TOOLS 0)
+endif()
+message(STATUS "Blueprints and Tool mode: ${MAGNITE_BLUEPRINTS_AND_TOOLS}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_version.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_features.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/keys/update-public.pem")
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
+configure_file(src/build_features.h.in generated/build_features.h @ONLY)
 
 set(MAGNITE_SOURCES
     src/testing/blueprint_tests.cpp

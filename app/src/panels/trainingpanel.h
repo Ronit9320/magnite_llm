@@ -36,6 +36,8 @@ class TrainingPanel : public BasePanel {
     Q_OBJECT
 
 public:
+    // True while a status poll awaits its answer; a new poll is ignored meanwhile (tests wait on this).
+    bool pollPending() const { return m_pollPending; }
     explicit TrainingPanel(QWidget *parent = nullptr);
 
     void setBackendClient(BackendClient *client);
@@ -141,6 +143,8 @@ private:
     QLabel *m_recipeFacts = nullptr;
     QLabel *m_budgetSummary = nullptr;
     QLabel *m_pageTitle = nullptr;
+    QBoxLayout *m_heading = nullptr;
+    QBoxLayout *m_recipeRow = nullptr;
     QLabel *m_pageSubtitle = nullptr;
     QLabel *m_breadcrumb = nullptr;
     QLabel *m_compareSummary = nullptr;

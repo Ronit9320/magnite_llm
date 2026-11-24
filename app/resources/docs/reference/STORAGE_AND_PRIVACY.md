@@ -8,12 +8,14 @@
 | Saved data-directory preference | Applied on next desktop start; MAGNITE_HOME takes precedence; does not move existing data |
 | Registry and datasets | SQLite databases and normalized dataset files under application data |
 | Training jobs and adapters | Durable job history and adapter files under application data |
-| RAG | SQLite/NumPy index under the application data `rag/` directory |
+| RAG | SQLite/NumPy index under the application data `rag/` directory; `rag.db` also holds a keyword (full-text) index of the chunk text |
 | Adapter imports/exports | Application data `adapters/imports/` and `adapters/exports/` |
 | vLLM logs | Application data `vllm.log` when that engine is used |
 | Hugging Face weights | huggingface_hub cache, separate from MAGNITE_HOME |
 | Qt preferences | QSettings under organization Magnite, application Magnite LLM; on Linux normally under XDG_CONFIG_HOME or `~/.config` |
-| Chat | Current conversation is in memory; durable chat save/restore is not implemented |
+| Chat | Desktop conversation history in the application data `chats/` directory |
+| Blueprints | Builds with Blueprints switched on only (not v0.2-preview). Saved revisions, run snapshots, traces, and approval audits in `blueprints.db`. Drafts, canvas layout, and reusable node templates live in profile-scoped Qt settings. |
+| Tool workspace | Builds with Tool mode switched on only. The default working directory for approved commands is `tool-workspace/` under application data. |
 
 The registry uses the Hub library's cache location: `HF_HUB_CACHE` (exact path),
 then legacy `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then
@@ -49,6 +51,13 @@ Keep it local and use operating-system account/storage protections as needed.
 Logs and exported adapter metadata may contain local paths, model identifiers,
 or error text. Inspect and redact them before sharing.
 
+Blueprint run history also keeps typed inputs and outputs, dataset snapshots,
+and local model and adapter paths. Removing a saved blueprint does not delete
+its recorded runs. The approval audit keeps decisions and outcomes. Exact
+pending tool details are available for review while a decision is pending, and
+the original task or step values can still contain sensitive data.
+[Workflow and permission guide](BLUEPRINTS.md)
+
 Settings → Updates checks GitHub for preview releases and downloads signed update
 metadata and application packages. Startup checks are enabled by default and can
 be disabled there. GitHub receives ordinary network request information such as
@@ -60,8 +69,8 @@ documents, model weights or authentication tokens are sent by the updater.
 Deleting a Hugging Face registry model uses cache-aware revision deletion; shared
 blobs may remain because another revision references them. This also applies to
 models automatically discovered from other applications' downloads: deletion
-removes the selected shared-cache revision, not just the Magnite Space listing. Deleting an Ollama
-model requests deletion from Ollama, not merely hiding it in Magnite Space. Active
+removes the selected shared-cache revision, not just the Magnite listing. Deleting an Ollama
+model requests deletion from Ollama, not merely hiding it in Magnite. Active
 inference/training references can block model deletion.
 
 Deleting an indexed RAG document removes its indexed content; the original source

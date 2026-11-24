@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from record_build import record_build
+from identity import features
 from prepare_pi import prepare_pi
 
 REPO = Path(__file__).resolve().parents[1]
@@ -111,7 +112,14 @@ def main():
     else:
         smoke += "import torch, transformers, peft, sentence_transformers, datasets; assert not torch.version.cuda; "
     run(python, "-I", "-B", "-c", smoke + f"print('{profile} runtime imports OK')", env=env)
-    tooling = prepare_pi(dest, python, REPO / "build/packaging/node-cache")
+    tooling = {}
+    if features()["blueprints_and_tools"]:
+        tooling = prepare_pi(dest, python, REPO / "build/packaging/node-cache")
+    else:
+        # A resumed runtime may still hold Node from an earlier full build.
+        for leftover in (dest / "runtime/node", dest / "licenses/node"):
+            shutil.rmtree(leftover, ignore_errors=True)
+        print("Blueprints and Tool mode are switched off: Node.js and Pi are not bundled")
     run(python, "-I", "-B", REPO / "packaging/smoke_pi.py", env=env)
     record_build(dest, profile=profile, tooling=tooling)
     notices = dest / "licenses"

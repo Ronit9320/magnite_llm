@@ -13,26 +13,25 @@ and the earlier baseline run `41081185134` are recorded in
 [the release plan](MULTIPLATFORM_RELEASE_PLAN.md).
 
 `native-packages.yml` is an **artifact-only** coordinator for pushes to
-`dev`/`master`, PRs targeting those branches, and manual runs on `release/**`.
-Automatic jobs use positive path filters for app, backend, packaging, workflows,
-license and third-party notices. Ordinary documentation-only pushes skip them;
-packaged documentation under `packaging/` still triggers checks. Working branches
-such as `mac` do not run on push. Keep the central workflow files tracked rather
-than deleting them on each platform branch. It has read-only
-repository permission, no publishing job, and no release signing secrets.
+`dev`, `master` and `release/**`, PRs targeting those branches, and manual runs on
+`release/**`. Automatic jobs use positive path filters for app, backend,
+packaging, workflows, license and third-party notices. Ordinary
+documentation-only pushes skip them; packaged documentation under `packaging/`
+still triggers checks. Feature branches do not run on push. Keep the central
+workflow files tracked rather than deleting them on each platform branch. It has
+read-only repository permission, no publishing job, and no release signing
+secrets. Publication is `release.yml`'s job, from a release branch, using the
+same reusable builders; see [the release pipeline](RELEASE_PIPELINE.md).
 The GitHub UI's **Run workflow** button requires the workflow file on the
-repository default branch (`master` at this inspection). Until the workflows
-reach that branch, use a PR targeting `dev` for automatic validation, or an
-authenticated API/CLI dispatch of the already registered workflow. See
-[GitHub's workflow_dispatch reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
-No default-branch setting is changed by this work.
+repository default branch (`master`).
+[GitHub's workflow_dispatch reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
 
 It checks one source SHA and passes that exact SHA to reusable native jobs:
 
 | Job | Native runner | Output |
 | --- | --- | --- |
 | `build-linux.yml` | Ubuntu 22.04 x86-64 | CPU AppImage, glibc ≤ 2.35 |
-| `build-macos.yml` | macOS 15 ARM (`uname -m` must be arm64) | Ad-hoc-signed app in a DMG, declared macOS 14 minimum |
+| `build-macos.yml` | macOS 15 ARM (`uname -m` must be arm64) | Ad-hoc-signed app in a DMG plus the same bundle zipped for in-app updates, declared macOS 14 minimum |
 | `build-windows.yml` | Windows Server 2022 x64, MSVC 2022 | Unsigned per-user CPU installer |
 
 Runner labels follow the
@@ -50,11 +49,10 @@ final acceptance job checks every required platform, identity, clean-source
 claim, size and full SHA-256. A missing or failed platform blocks that job.
 These manifests are build evidence, not the signed update metadata of Phase 5/6.
 
-Linux retains its pinned AppImage tools and portable CPU flags. The existing
-Linux preview workflow calls the same reusable builder and is manual-only.
-Its `publish` input defaults to false; only an explicit opt-in on `dev` can publish
-through that legacy Linux-only path. Normal verification/native CI has no publisher.
-The coordinated publisher remains Phase 6 work. Release branches never publish.
+Linux retains its pinned AppImage tools and portable CPU flags. The manual
+Linux preview workflow calls the same reusable builder and never publishes.
+Normal verification/native CI has no publisher; `release.yml` publishes all
+three platforms together, by hand, from a release branch.
 
 Mac and Windows host tooling uses setup-python 3.12.10 (3.12.12 is unavailable
 there); their isolated shipped runtime remains Python 3.12.12 through uv.

@@ -10,6 +10,13 @@ import sys
 from identity import identity
 
 REQUIRED = {("linux", "x86_64"), ("macos", "arm64"), ("windows", "x86_64")}
+# The tested files each platform publishes. macOS ships a disk image for first
+# installs and a zipped bundle that installed apps update from.
+PACKAGES = {
+    ("linux", "x86_64"): ["Magnite-{version}-linux-x86_64.AppImage"],
+    ("macos", "arm64"): ["Magnite-{version}-arm64.dmg", "Magnite-{version}-macos-arm64.zip"],
+    ("windows", "x86_64"): ["Magnite-{version}-windows-x86_64-setup.exe"],
+}
 
 
 def verify(root: Path, source_sha: str):
@@ -26,8 +33,9 @@ def verify(root: Path, source_sha: str):
                     "working_tree_modified": False}
         if any(info.get(k) != v for k, v in expected.items()):
             raise ValueError(f"Source identity mismatch: {path}")
-        if len(info.get("assets", [])) != 1:
-            raise ValueError(f"Expected exactly one tested package for {target}")
+        names = sorted(asset.get("name") for asset in info.get("assets", []))
+        if names != sorted(name.format(version=canonical["version"]) for name in PACKAGES[target]):
+            raise ValueError(f"Unexpected tested packages for {target}: {names}")
         for asset in info["assets"]:
             name = asset["name"]
             if Path(name).name != name or "/" in name or "\\" in name:

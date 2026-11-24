@@ -19,7 +19,7 @@ cmake --build build -j
 
 ## Verify
 
-CI in `.github/workflows/verify.yml` covers the base backend, CMake, theme/UI and desktop selftest. Automatic verification and three-platform artifact builds run for relevant code/packaging/workflow changes on `dev`/`master` pushes and PRs targeting them; ordinary documentation-only changes skip these jobs. Feature/platform branches do not run on push. Keep workflow files tracked and use branch filters. Manual native acceptance is available on `release/**`. `.github/workflows/linux-preview.yml` is a legacy manual-only Linux builder; publication requires an explicit `publish=true` dispatch on `dev`. Normal CI never publishes. Native package integration uses `.github/workflows/native-packages.yml` and reusable `build-{linux,macos,windows}.yml`; see `docs/development/NATIVE_PACKAGES.md` for current evidence and limitations. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
+CI in `.github/workflows/verify.yml` covers the base backend, CMake, theme/UI and desktop selftest; `native-packages.yml` builds and tests the Linux/macOS/Windows packages through reusable `build-{linux,macos,windows}.yml`. Both run automatically for relevant code/packaging/workflow changes on pushes to `dev`, `master` and `release/**` and on PRs targeting them; ordinary documentation-only changes skip them. Feature branches do not run on push. Keep workflow files tracked and use branch filters. Nothing publishes automatically: `release.yml` is the only publisher, run by hand on a `release/**` branch (see `docs/development/RELEASE_PIPELINE.md`). `linux-preview.yml` is a manual Linux-only build that never publishes. See `docs/development/NATIVE_PACKAGES.md` for current evidence and limitations. Offline backend regressions: `PYTHONPATH=backend/src .venv/bin/python -m unittest discover -s backend/tests -v`. UI and real-model verification use the binary's built-in tests:
 
 ```bash
 ./build/magnite-app --theme-check                                  # token/QSS/font/icon audit; prints "0 failure(s)"
@@ -35,14 +35,16 @@ Selftests download tiny toy models (e.g. `sshleifer/tiny-gpt2`) on first use; ba
 
 ## Branch workflow
 
-- Start ordinary changes on a new branch from `dev`. Release packaging/pipeline work uses `release/` branches; the owner selected the existing `release/v0.1-testing` branch for the first preview.
-- Merge completed work into `dev` for testing, then promote tested `dev` changes to `master`.
+- Start ordinary changes on a new branch from `dev`. Merge completed work into `dev` for testing, then promote tested `dev` changes to `master`.
+- Releases are cut from `dev` onto `release/<name>` branches (the current one is `release/magnite-spacev0.2`, v0.2-preview). Fixes reach a release branch by cherry-pick from `dev`; never merge a release branch back into `dev` or `master`.
 - Do not develop directly on `dev` or `master`. Delete completed branches only after verifying their commits are merged into `dev`; preserve unmerged work.
 
 ## Preview identity and updates
 
 - `backend/src/backend/_version.py` is the canonical release identity; CMake, backend metadata and packaging derive from it. Python distribution metadata uses a computed PEP 440 spelling.
-- To ship another preview, increase both `RELEASE_VERSION` and `UPDATE_SEQUENCE`. Published versions are never overwritten.
+- To ship another preview, increase both `RELEASE_VERSION` and `UPDATE_SEQUENCE` (and set `RELEASE_NAME`, the GitHub release title) on the release branch. Published versions are never overwritten; `release.yml` refuses a reused version or a sequence that is not higher than every published one.
+- `backend/src/backend/_features.py` is the build profile. `BLUEPRINTS_AND_TOOLS = False` (release branches) removes the Blueprints workspace, Tool/Blueprint conversation modes, their backend routes and the bundled Node.js/Pi; the code still builds and its tests still run on `dev`.
+- In-app updates read `update-<platform>-<arch>.json` (+ `.sig`) for Linux, macOS and Windows. The macOS update package is `Magnite-<version>-macos-arm64.zip`; Windows reuses the setup `.exe`. The post-exit install steps are `packaging/update_helper.cpp` (Linux), `packaging/macos/update_install.sh` and `packaging/windows/update_install.ps1`, bundled as Qt resources.
 - `DATA_SCHEMA` is an update compatibility contract, not a migration framework. Bump it when persistent formats change; the updater rejects schema changes.
 - Never commit `.release-secrets/` or replace the update public key without planning trust/key rotation. See `docs/development/RELEASE_PIPELINE.md` for architecture, signing and verification.
 

@@ -79,7 +79,7 @@ private:
         void paintEvent(QPaintEvent *) override {
             QPainter painter(this);
             painter.setRenderHint(QPainter::Antialiasing);
-            QPen pen(QColor(Theme::accentLabel()));
+            QPen pen{QColor(Theme::accentLabel())}; // braces: not a function declaration (MSVC, clang)
             pen.setWidthF(2.0);
             painter.setPen(pen);
             painter.setBrush(Qt::NoBrush);

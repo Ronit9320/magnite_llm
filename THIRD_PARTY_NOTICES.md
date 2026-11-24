@@ -78,6 +78,8 @@ The optional Pi bridge uses `@earendil-works/pi-agent-core` and
 [Pi license](https://github.com/earendil-works/pi/blob/main/LICENSE)
 The [npm lockfile](backend/src/backend/tooling/pi/package-lock.json) records
 the transitive packages and their declared licenses.
+Packages built with Tool mode switched off, including all v0.2-preview packages,
+contain neither Pi's npm dependencies nor Node.js.
 Native packages that include Pi bundle Node.js 22.23.5. The upstream Node
 license and third-party notices are included in `licenses/node/LICENSE`. The
 installed npm packages retain their own license files.

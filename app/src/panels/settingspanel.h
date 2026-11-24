@@ -24,6 +24,8 @@ class QGraphicsOpacityEffect;
 class SettingsPanel : public BasePanel {
     Q_OBJECT
   public:
+    // True while Profile statistics are being fetched (tests wait for it before measuring).
+    bool profileLoading() const { return m_profileBusy; }
     explicit SettingsPanel(QWidget* parent = nullptr);
     void setUpdateManager(UpdateManager* manager);
     void setBackendClient(BackendClient* client);

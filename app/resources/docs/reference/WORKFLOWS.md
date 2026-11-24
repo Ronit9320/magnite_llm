@@ -2,8 +2,11 @@
 
 These instructions describe the current app. Use the [example inputs](../examples/README.md)
 for a small walkthrough; they are format demonstrations, not a useful training corpus.
-The sidebar opens Model hub, Library, Training, Blueprints and Docs. Chat, Tool mode,
-Blueprint runs and Knowledge (document retrieval) live in Conversation.
+The sidebar opens Model hub, Library, Training and Docs; Chat and Knowledge
+(document retrieval) live in Conversation. That is what the v0.2-preview packages
+contain. Builds with Blueprints and Tool mode switched on (the `dev` branch) also
+show a Blueprints workspace and Tool mode and Blueprint runs in Conversation; see
+the [Blueprints guide](BLUEPRINTS.md).
 
 ## Download, load, and chat
 
@@ -50,7 +53,7 @@ QLoRA requires a working quantization backend and compatible hardware. The
 2. Chat and confirm the active adapter is shown.
 3. Clear/deactivate the adapter when finished. This unloads inference; load a
    base model again to continue without the adapter.
-4. Export an adapter archive and save it. Import expects a Magnite Space export ZIP
+4. Export an adapter archive and save it. Import expects a Magnite export ZIP
    with metadata and weights. Importing an already registered ID is rejected.
 
 Exported adapters do not include the full base model. The matching model must

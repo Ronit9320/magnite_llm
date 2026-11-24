@@ -21,9 +21,14 @@ public:
     QString status() const { return m_status; }
     QString availableVersion() const { return m_manifest.value("version").toString(); }
     bool canInstall() const;
+    // "linux-x86_64", "macos-arm64" or "windows-x86_64"; empty where no package is published.
+    static QString currentPlatform();
+    // The release asset that installs `version` on `platform`.
+    static QString packageName(const QString &platform, const QString &version);
     static bool verifyManifest(const QByteArray &payload, const QByteArray &signature,
                                const QByteArray &publicKey, const QString &repository,
-                               QJsonObject *result, QString *error);
+                               QJsonObject *result, QString *error,
+                               const QString &platform = currentPlatform());
 
 public slots:
     void check();
@@ -43,7 +48,12 @@ private:
     void fetchSmall(const QUrl &url, qsizetype limit,
                     std::function<void(QByteArray, QString)> done);
     void fetchManifest(const QJsonObject &release);
+    // The installed AppImage, .app bundle or installation folder this process can replace.
     QString imagePath() const;
+    QString installHint() const;
+    QString stagingParent() const;
+    void startInstaller();
+    void awaitInstallerReady(const QString &helper);
 
     QNetworkAccessManager m_network;
     QNetworkReply *m_reply = nullptr;

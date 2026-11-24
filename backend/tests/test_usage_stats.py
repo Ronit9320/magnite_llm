@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.blueprints.store import BlueprintStore
 from backend.database import connection
 from backend.routes import system
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend.server import app
 
 
@@ -50,8 +51,9 @@ class StatsRoute(unittest.TestCase):
         response = TestClient(app).get("/system/stats")
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        for name in ("models", "training", "adapters", "datasets", "knowledge", "blueprints"):
+        for name in ("models", "training", "adapters", "datasets", "knowledge"):
             self.assertIn(name, body)
+        self.assertEqual("blueprints" in body, BLUEPRINTS_AND_TOOLS)
         self.assertIn("since", body)
 
     def test_since_is_the_earliest_stamp(self):

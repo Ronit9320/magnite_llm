@@ -9,8 +9,11 @@ The platform branch had source-build scripts but no installer or updater.
 This implementation chooses a **per-user Inno Setup installer**: it supports
 explicit install/upgrade/uninstall and Restart Manager file-lock handling,
 without an administrator account or a resident service. The same stable AppId
-is used across versions. No installed-app updater or Authenticode signing is
-implied; those are Phase 5 work. See
+is used across versions, which is what lets installed apps update: the client
+verifies a newer installer and runs it silently through
+`packaging/windows/update_install.ps1` (see the
+[release pipeline](../../docs/development/RELEASE_PIPELINE.md)). The installer is
+not Authenticode-signed yet. See
 [Inno Setup parameters](https://jrsoftware.org/ishelp/topic_setupcmdline.htm).
 
 From an x64 VS developer shell, install pinned tools and dependencies as in
@@ -39,7 +42,7 @@ The installation root is `%LOCALAPPDATA%/Programs/Magnite`; user data stays in
 
 All display labels derive from `_version.py`. Native numeric fields map the
 canonical major/minor/patch (missing patch becomes zero) plus UPDATE_SEQUENCE:
-`v0.1-preview`, sequence 1 → `0.1.0.1`. Each field is limited to 65535.
+`v0.2-preview`, sequence 2 → `0.2.0.2`. Each field is limited to 65535.
 The executable version resource and installer numeric version use this mapping.
 Stable identity parsing remains Phase 4.
 
@@ -48,8 +51,9 @@ disposable path with spaces. It exercises theme/UI/startup with poisoned host
 Python, reinstallation/upgrade and external-data preservation, force-killed GUI
 backend cleanup, restart, and uninstall. Use it on disposable runners: Qt
 preferences use the current runner's user account. Real cross-version upgrades,
-busy-file cancellation/recovery, signing and updater transactions need later
-native acceptance; reinstallation of the candidate is not evidence for all of
+busy-file cancellation/recovery and signing need later native acceptance; the
+smoke test runs the in-app update script against the candidate installer, which
+is an upgrade to the same version; reinstallation of the candidate is not evidence for all of
 those scenarios.
 
 Backend lifetime uses a Windows Job Object with kill-on-close; normal Windows

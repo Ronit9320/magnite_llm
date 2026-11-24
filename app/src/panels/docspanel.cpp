@@ -624,7 +624,10 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     featureLayout->addWidget(text("Your first hour in Magnite Space.", "docsFeatureTitle"));
     featureLayout->addWidget(text("Follow these in order, or jump to the part you need.", "docsCardDescription"));
     featureLayout->addSpacing(6);
-    const QStringList path{"welcome", "first-model", "conversations", "knowledge", "blueprints", "training-studio"};
+    // Builds without Blueprints visit Model hub & Library in that step instead.
+    const QStringList path = m_library.article("blueprints")
+        ? QStringList{"welcome", "first-model", "conversations", "knowledge", "blueprints", "training-studio"}
+        : QStringList{"welcome", "first-model", "hub-library", "conversations", "knowledge", "training-studio"};
     int step = 0;
     for (const auto &id : path) {
         const auto *a = m_library.article(id);
@@ -665,8 +668,12 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
     primary->addLayout(concepts);
     auto *grid = new QGridLayout;
     grid->setSpacing(12);
-    const QStringList featured{"blueprints",     "tool-mode",    "knowledge",
-                               "model-learning", "data-quality", "lora"};
+    // Articles about switched-off features are not in the library; fill their places.
+    QStringList featured;
+    for (const auto &id : {"blueprints", "tool-mode", "knowledge", "model-learning", "data-quality", "lora",
+                           "training-studio", "rag"})
+        if (featured.size() < 6 && m_library.article(id))
+            featured << id;
     const int columns = mainWidth() >= 650 ? 2 : 1;
     for (int i = 0; i < featured.size(); ++i)
         if (const auto *a = m_library.article(featured[i]))
@@ -689,6 +696,8 @@ void DocsPanel::renderOverview(QVBoxLayout *body) {
                                      {"Is my validation data really unseen?", "data-distribution", "split"},
                                      {"How does retrieval differ from training?", "rag", "retrieval"}};
     for (const auto &p : prompts) {
+        if (!m_library.article(p[1]))
+            continue;
         auto *card = new DocsCard;
         card->setFlat(true);
         auto *row = new QHBoxLayout(card);

@@ -1,4 +1,4 @@
-# macOS packaging (v0.1 testing build)
+# macOS packaging (preview builds)
 
 Scripts here build a self-contained `Magnite.app` for **Apple Silicon (arm64)**
 and wrap it in a testing `.dmg`. They are re-runnable from scratch and do not
@@ -6,7 +6,7 @@ touch the Linux packaging, the developer virtualenv or `~/.magnite`.
 
 The integrated build takes its display identity from
 `backend/src/backend/_version.py`. The numeric short version pads an omitted
-patch with zero (`v0.1-preview` → `0.1.0`); `CFBundleVersion` uses the monotonic
+patch with zero (`v0.2-preview` → `0.2.0`); `CFBundleVersion` uses the monotonic
 `UPDATE_SEQUENCE` (`1` for that preview). CMake's `MagniteBuildLabel`, backend,
 build provenance and DMG filename share the canonical display identity.
 Existing Mac verification records describe older builds and must be rerun for
@@ -21,8 +21,8 @@ export MAGNITE_QT_ROOT=/path/to/Qt/6.8.3/macos
 bash packaging/macos/build_app.sh            # ends with verify_bundle.py: "0 failure(s)"
 ditto build/packaging/macos/stage/Magnite.app "$TMPDIR/try/Magnite.app"
 bash packaging/macos/smoke_bundle.sh "$TMPDIR/try/Magnite.app"
-bash packaging/macos/build_dmg.sh             # -> dist/Magnite-v0.1-preview-arm64.dmg
-bash packaging/macos/check_dmg.sh dist/Magnite-v0.1-preview-arm64.dmg
+bash packaging/macos/build_dmg.sh             # -> dist/Magnite-v0.2-preview-arm64.dmg
+bash packaging/macos/check_dmg.sh dist/Magnite-v0.2-preview-arm64.dmg
 ```
 
 The plan, current status and evidence live in [`docs/release/macos/`](../../docs/release/macos/):
@@ -57,4 +57,8 @@ Planned contents:
 Requirements on the build host: Command Line Tools, CMake, `uv`, and the pinned
 official Qt referenced by `MAGNITE_QT_ROOT` (see
 `docs/release/macos/adr/0006-qt-provenance.md`). Builds are **unsigned testing
-builds**: ad-hoc signed only, not notarized, and not fit for public distribution.
+builds**: ad-hoc signed only and not notarized. They are published as previews
+with a [first-launch guide](../../docs/MACOS_FIRST_LAUNCH.md); Developer ID signing
+and notarization are still deferred. CI also zips the bundle
+(`Magnite-<version>-macos-arm64.zip`) for in-app updates, installed by
+`update_install.sh`.

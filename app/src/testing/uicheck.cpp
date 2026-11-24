@@ -1,4 +1,5 @@
 #include "testing/uicheck.h"
+#include "build_features.h"
 #include "testing/blueprint_tests.h"
 #include "testing/modelhub_tests.h"
 #include "widgets/smoothwheel.h"
@@ -118,6 +119,14 @@ void pump(int ms = 80) {
 bool waitUntil(const std::function<bool()> &done,int timeoutMs = 4000) {
     for (int waited = 0; !done() && waited < timeoutMs; waited += 20) pump(20);
     return done();
+}
+// Poll training status and wait for its answer. The panel ignores a poll while another is
+// pending, so a fixed pause can silently drop the poll on a slow machine.
+void pollTraining(TrainingPanel &panel) {
+    waitUntil([&] { return !panel.pollPending(); });
+    QMetaObject::invokeMethod(&panel, "onPollStatus");
+    waitUntil([&] { return !panel.pollPending(); });
+    pump();
 }
 void key(QWidget *widget,int code,Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
     QKeyEvent press(QEvent::KeyPress,code,modifiers), release(QEvent::KeyRelease,code,modifiers);
@@ -573,7 +582,14 @@ int runThemeFadeChecks() {
 int runUiCheck(const QString &captures) {
     if (qEnvironmentVariableIsSet("MAGNITE_THEMEFADE_CHECK")) return runThemeFadeChecks() ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_SMOOTHWHEEL_CHECK")) return runSmoothWheelChecks() ? 1 : 0;
-    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) return runLiveBlueprintChecks(captures) ? 1 : 0;
+    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_LIVE_CHECK")) {
+        if (!Features::blueprintsAndTools) {
+            // The backend has no Blueprint routes in this build; there is nothing live to check.
+            std::printf("[blueprints-live] SKIP: Blueprints and Tool mode are switched off in this build\n");
+            return 0;
+        }
+        return runLiveBlueprintChecks(captures) ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return runBlueprintChecks(captures) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
         int hubFailures = 0;
@@ -924,7 +940,7 @@ int runUiCheck(const QString &captures) {
         QApplication::sendEvent(innerBar,&barHover);
         check(!innerBar->property("scrollActive").toBool(),"hovering an idle inner track does not reveal its handle");
         const auto originalLog=log->toPlainText();
-        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(150);
+        pollTraining(training);
         check(log->toPlainText()==originalLog,"unchanged polling does not duplicate events");
         logSearch->setText("validation");
         check(!log->toPlainText().isEmpty() && log->toPlainText().split('\n').size()<originalLog.split('\n').size(),"log filter narrows recorded events");
@@ -978,7 +994,7 @@ int runUiCheck(const QString &captures) {
         for(int i=0;i<index->count();++i) if(index->item(i)->data(Qt::UserRole)=="past-job") past=index->item(i);
         QMetaObject::invokeMethod(index,"itemClicked",Q_ARG(QListWidgetItem *,past)); pump(150);
         check(training.findChild<QLabel *>("trainingBadge")->text().contains("Completed"),"selecting history displays that run's status");
-        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(150);
+        pollTraining(training);
         check(training.findChild<QLabel *>("trainingBadge")->text().contains("Completed"),"live polling does not replace a selected historical run");
         const auto savedRecipe=training.settingsJson();
         QCheckBox *rawToggle=nullptr;
@@ -988,7 +1004,7 @@ int runUiCheck(const QString &captures) {
         auto *raw=training.findChild<QPlainTextEdit *>("trainingRawData"); auto cursor=raw->textCursor();
         cursor.setPosition(10); cursor.setPosition(30,QTextCursor::KeepAnchor); raw->setTextCursor(cursor); raw->verticalScrollBar()->setValue(30);
         const auto selection=raw->textCursor().selectedText(); const int rawScroll=raw->verticalScrollBar()->value();
-        pump(1100); QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        pump(1100); pollTraining(training);
         check(raw->textCursor().selectedText()==selection && raw->verticalScrollBar()->value()==rawScroll,"raw job updates preserve text selection and scroll position");
         rawToggle->setChecked(true);
         for (int i=0;i<index->count();++i) if (index->item(i)->data(Qt::UserRole)=="past-job") {
@@ -1025,7 +1041,7 @@ int runUiCheck(const QString &captures) {
         dialog->findChild<QPushButton *>("trainingDraftSave")->click(); pump(100);
         auto *dialogStatus=dialog->findChild<QLabel *>("trainingDialogStatus");
         check(dialog->isVisible() && dialogStatus->property("state")=="error" && dataset->property("invalid").toBool(),"invalid dataset is explained and highlighted in the modal");
-        const auto validationMessage=dialogStatus->text(); QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        const auto validationMessage=dialogStatus->text(); pollTraining(training);
         check(dialogStatus->text()==validationMessage,"live job polling does not replace modal validation feedback");
         dialog->reject(); pump(100); check(training.settingsJson()==savedRecipe,"cancelled modal draft leaves the next recipe unchanged");
         configure->click(); pump(350);
@@ -1043,9 +1059,9 @@ int runUiCheck(const QString &captures) {
         check(training.findChild<QPushButton *>("trainingFollowActive")->isVisible(),"historical selection offers a direct return to the active run");
         training.findChild<QPushButton *>("trainingFollowActive")->click(); pump(100);
         fixture.deferTrainingCancellation=true; QMetaObject::invokeMethod(&training,"onStop"); pump(100);
-        QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100); QMetaObject::invokeMethod(&training,"onStop"); pump(80);
+        pollTraining(training); QMetaObject::invokeMethod(&training,"onStop"); pump(80);
         check(fixture.trainingCancels==1 && !training.findChild<QPushButton *>("trainingStopRun")->isEnabled(),"pending cancellation stays disabled across status polls and duplicate stops");
-        fixture.trainingState="cancelled"; QMetaObject::invokeMethod(&training,"onPollStatus"); pump(100);
+        fixture.trainingState="cancelled"; pollTraining(training);
         check(training.findChild<QLabel *>("trainingBadge")->text()=="Stopped","terminal cancellation replaces the stopping state");
         fixture.serveActiveTraining=false; workspace->setCurrentIndex(0);
         configure->click(); pump(350); fixture.failTraining=true;
@@ -2013,7 +2029,7 @@ int runUiCheck(const QString &captures) {
     check(!training.findChild<QWidget *>("trainingObservatorySignals")->isVisible(),
           "Studio restores the focused primary signal view");
     check(fixture.trainingRequest["dropout"].toDouble()==0.12 && fixture.trainingRequest["validation_split"].toDouble()==0.1,"training sends configured dropout and validation fraction");
-    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    pollTraining(training);
     check(lossChart->sampleCount()==6,"repeated status polls do not duplicate chart samples");
     pump(600);
     capture(&training,"training-running");
@@ -2027,15 +2043,15 @@ int runUiCheck(const QString &captures) {
     Theme::setDark(true); training.resize(1104,628); pump();
     check(training.findChild<QWidget *>("trainingCharts")->isVisible(),"Studio keeps the selected chart visible in a compact window");
     fixture.trainingStatusCode=503;
-    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    pollTraining(training);
     check(!start->isEnabled() && lossChart->sampleCount()==6,"status outage keeps run tracked and preserves measurements");
     fixture.trainingStatusCode=200;
     fixture.omitTrainingHistory=true;
-    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    pollTraining(training);
     check(lossChart->sampleCount()==0,"absent telemetry stays empty without fabricated samples");
     fixture.omitTrainingHistory=false;
-    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
-    QMetaObject::invokeMethod(&training,"onStop"); pump(); QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    pollTraining(training);
+    QMetaObject::invokeMethod(&training,"onStop"); pump(); pollTraining(training);
     check(start->isEnabled() && completed==0 && training.findChild<QLabel *>("metricValue")->text()=="Training stopped","cancelled training resets controls without reporting completion");
     auto *reuse=training.findChild<QPushButton *>("trainingReuseRun");
     check(reuse->isEnabled() && lossChart->sampleCount()==6,"stopped run retains measurements and can seed another recipe");
@@ -2060,7 +2076,7 @@ int runUiCheck(const QString &captures) {
     check(!start->isEnabled() && lossChart->sampleCount()==6,"training page reconnects to an existing active backend job");
     fixture.serveActiveTraining=false;
     QMetaObject::invokeMethod(&training,"onStop"); pump();
-    QMetaObject::invokeMethod(&training,"onPollStatus"); pump();
+    pollTraining(training);
     check(start->isEnabled() && completed==1,"reattached run supports cancellation");
     settingsToggle->setChecked(true);
     training.resize(848,628); pump();
@@ -4333,7 +4349,9 @@ int runUiCheck(const QString &captures) {
     // Deliver pending callbacks while their panels still exist.
     client.abortAll(); pump();
     failures += runModelHubChecks(captures);
-    failures += runBlueprintChecks(captures);
+    // Blueprints are not part of switched-off builds; dev builds keep covering them.
+    if (Features::blueprintsAndTools) failures += runBlueprintChecks(captures);
+    else std::printf("[blueprints] SKIP: switched off in this build\n");
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

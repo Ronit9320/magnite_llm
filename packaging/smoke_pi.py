@@ -5,6 +5,7 @@ import sys
 from threading import Event
 from unittest.mock import patch
 
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend.tooling import pi_bridge
 
 
@@ -18,6 +19,14 @@ def unexpected_action(proposal):
 
 def main():
     os.environ["PATH"] = ""
+    if not BLUEPRINTS_AND_TOOLS:
+        from backend.server import app
+        node = Path(sys.prefix).parent / "node"
+        assert not node.exists(), f"{node} is bundled although Tool mode is switched off"
+        paths = set(app.openapi()["paths"])
+        assert "/inference/tool-runs" not in paths and "/blueprints" not in paths, "tool routes are mounted"
+        print("Bundled Node and Pi bridge OK: switched off in this build, nothing bundled")
+        return
     node = Path(pi_bridge.node_path())
     assert node.parent == Path(sys.prefix).parent / "node", node
     with patch.object(pi_bridge, "_local_reply", reply):

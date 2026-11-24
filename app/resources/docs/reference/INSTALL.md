@@ -1,17 +1,24 @@
-# Installation from source
+# Installation
 
-Source installation uses the checkout layout below. A bundled Linux x86-64
-AppImage is available for v0.1-preview. Mac ARM DMG and Windows x86-64 CPU
-installer candidates passed hosted native integration checks on 2026-10-30;
-they remain testing artifacts rather than public releases. See
-[native packages and remaining acceptance gaps](development/NATIVE_PACKAGES.md).
+The current release is **magnite-spacev0.2 (v0.2-preview)**, a development
+preview with packages for Linux, macOS and Windows on the
+[releases page](https://github.com/Ronit9320/magnite_llm/releases). Each package
+bundles Qt and its own Python runtime and updates itself
+from Settings → Updates. Source builds are described below.
 
-## Linux preview package
+## Preview packages
 
-The first package identity is v0.1-preview. The AppImage includes Qt and isolated
-Python; see [tester instructions](../packaging/TESTING.md) and
-[release/update setup](development/RELEASE_PIPELINE.md) for availability and
-verification status. Source builds remain available below.
+| Platform | Package | First launch |
+| --- | --- | --- |
+| Linux x86-64, glibc 2.35+ | `Magnite-v0.2-preview-linux-x86_64.AppImage` | `chmod +x` it, keep it in a folder you can write to, and run it. Without FUSE, run it with `--appimage-extract-and-run`. [Tester notes](../packaging/TESTING.md) |
+| macOS 14+, Apple silicon | `Magnite-v0.2-preview-arm64.dmg` | Drag it to Applications, then approve it once. [First launch on macOS](MACOS_FIRST_LAUNCH.md) |
+| Windows 10 (1809+) / 11, x64 | `Magnite-v0.2-preview-windows-x86_64-setup.exe` | Per-user installer; approve it once. [First launch on Windows](WINDOWS_FIRST_LAUNCH.md) |
+
+Compare each download with the release's `SHA256SUMS` before opening it. The
+macOS and Windows packages are not signed with Apple or Microsoft certificates
+yet, so both systems warn on first launch; the linked guides explain the steps.
+Linux and Windows packages run models on the CPU; the macOS package uses the
+Apple GPU (Metal/MPS). Blueprints and Tool mode are not included in v0.2-preview.
 
 ## Requirements
 
@@ -55,6 +62,13 @@ platform-specific `requirements-*.txt` and full `constraints-*.txt` locks under
 jobs installed and tested those locked runtimes. This does not lock an
 unconstrained editable install or establish every GPU configuration.
 
+Blueprints and Tool mode are switched off on release branches such as
+`release/magnite-spacev0.2` (see `backend/src/backend/_features.py`). On `dev`,
+Tool mode in a source checkout needs Node 22.19 or later and
+`npm ci --ignore-scripts --prefix backend/src/backend/tooling/pi`; packages
+built with the features on include their own Node and Pi.
+[Blueprints and Tool mode](BLUEPRINTS.md)
+
 Run from this layout: `<repo>/build/magnite-app` and `<repo>/.venv/bin/python`.
 The app looks for `backend/src` relative to the executable. On POSIX it prefers
 `.venv/bin/python`, with `python3` as fallback. Windows probes `.venv312` and
@@ -95,12 +109,23 @@ See [local API examples](LOCAL_API.md).
 
 ## Updating
 
-For a writable Linux AppImage, use Settings → Updates. Finish active work before
-restarting. Preview update checks need public GitHub release access. For source
-builds, follow the rebuild procedure below.
+Packaged builds update from **Settings → Updates**: check, download, then choose
+**Restart to install** when your work is finished. Every update is verified
+against a signature built into the app and its SHA-256 before it is installed,
+and your data stays where it is.
 
+- **Linux:** the AppImage must be writable, in a writable folder, and not a
+  symlink. A version that doesn't start is rolled back.
+- **macOS:** open the app from Applications (or another writable folder), not from
+  the disk image. A version that doesn't start is rolled back. macOS may ask to
+  allow App Management once.
+- **Windows:** updates need the copy made by the installer. The new installer runs
+  silently over it; a version that installs but doesn't start is reported, not
+  rolled back.
+- v0.1-preview cannot update to v0.2-preview in place (the data format changed).
+  Download the new AppImage; it opens your existing data.
 
-Stop running jobs and close the app before updating. Back up the application
+For source builds: stop running jobs and close the app. Back up the application
 store and note cache locations first. Reinstall the editable backend and rebuild
 the client after pulling a reviewed revision. Database migration/rollback across
-future releases has not yet been established; retain your backup.
+releases has not yet been established; retain your backup.
