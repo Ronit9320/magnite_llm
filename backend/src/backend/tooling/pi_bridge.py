@@ -337,6 +337,21 @@ def _generate(messages: list[dict], tools: list[dict], engine, stop: Event, nati
     return asyncio.run(_stream_text(stream, stop))
 
 
+def _context_window(engine) -> int:
+    try:
+        return int(engine.context_size())
+    except (AttributeError, RuntimeError, ValueError, TypeError):
+        return 8192
+
+
+def _hit_token_cap(engine, raw: str) -> bool:
+    """Whether a reply ran into the per-turn token cap. Engines stream text without a finish reason."""
+    try:
+        return engine.count_tokens(raw) >= TURN_TOKENS
+    except (AttributeError, RuntimeError, ValueError):
+        return False
+
+
 def receipt_text(result: dict) -> str:
     """Describe an action outcome for the model."""
     status = result.get("status")
@@ -402,7 +417,7 @@ def run(value, engine, approve, stop: Event, *, instructions: str = "",
 
         try:
             send({"type": "start", "messages": history, "tools": TOOLS if approve is not None else [],
-                  "maxTurns": MAX_TURNS})
+                  "maxTurns": MAX_TURNS, "maxTokens": TURN_TOKENS, "contextWindow": _context_window(engine)})
             turns = proposals = 0
             deadline = monotonic() + 900
             while not stop.is_set() and monotonic() < deadline:
@@ -422,6 +437,11 @@ def run(value, engine, approve, stop: Event, *, instructions: str = "",
                         tools = frame.get("tools") or []
                         raw = _generate(frame["messages"], tools, engine, stop, native)
                         text, calls = parse_reply(raw, bool(tools) and approve is not None)
+                        if not calls and _hit_token_cap(engine, raw):
+                            if "<tool_call>" in raw or _strip_thinking(raw).startswith("{"):
+                                raise RuntimeError(f"The model's reply was cut off at {TURN_TOKENS} tokens "
+                                                   "before its tool call finished")
+                            text = f"{text}\n\n[The reply was cut off at {TURN_TOKENS} tokens.]".strip()
                         if not text and not calls:
                             text = "The model returned an empty reply."
                         send({"type": "generation", "text": text, "calls": calls})

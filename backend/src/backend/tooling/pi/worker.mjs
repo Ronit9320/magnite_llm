@@ -20,12 +20,15 @@ const exchange = async (frame, type) => {
   return result
 }
 
-const model = {
+// Limits come from Magnite's start frame so they cannot drift from the Python side.
+const modelFor = ({ contextWindow, maxTokens }) => ({
   id: "magnite-local", name: "Magnite local model", api: "openai-completions",
   provider: "magnite", baseUrl: "", input: ["text"], reasoning: false,
-  contextWindow: 8192, maxTokens: 768,
+  contextWindow: Number.isInteger(contextWindow) ? contextWindow : 8192,
+  maxTokens: Number.isInteger(maxTokens) ? maxTokens : 768,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-}
+})
+let model = modelFor({})
 const usage = {
   input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
@@ -40,8 +43,9 @@ const text = (message) => typeof message.content === "string" ? message.content
   : message.content.filter(block => block.type === "text").map(block => block.text).join("\n")
 
 // Pi context → OpenAI/Hugging Face chat messages with tool calls and tool results.
-function toChat(system, messages) {
-  const chat = system ? [{ role: "system", content: system }] : []
+// The Agent owns the leading system message (see systemPrompt below), so none is added here.
+function toChat(messages) {
+  const chat = []
   for (const message of messages) {
     if (message.role === "toolResult") {
       chat.push({ role: "tool", tool_call_id: message.toolCallId, name: message.toolName, content: text(message) })
@@ -60,6 +64,7 @@ function toChat(system, messages) {
 try {
   const start = await read()
   if (start.type !== "start") throw new Error("Invalid Pi start frame")
+  model = modelFor(start)
   const declared = Array.isArray(start.tools) ? start.tools : []
   const maxTurns = Number.isInteger(start.maxTurns) ? start.maxTurns : 6
   const system = start.messages.filter(message => message.role === "system").map(message => message.content).join("\n\n")
@@ -72,14 +77,14 @@ try {
   }))
   let turns = 0
   const agent = new Agent({
-    initialState: { model, tools },
+    initialState: { model, tools, systemPrompt: system },
     toolExecution: "sequential",
     async streamFn(_model, context) {
       turns += 1
       if (turns > maxTurns) throw new Error("Pi reached the turn limit")
       // On the last turn, withhold tools so the model has to answer.
       const offered = turns < maxTurns ? declared : []
-      const reply = await exchange({ type: "generate", messages: toChat(system, context.messages), tools: offered },
+      const reply = await exchange({ type: "generate", messages: toChat(context.messages), tools: offered },
                                    "generation")
       const calls = Array.isArray(reply.calls) ? reply.calls : []
       const content = []
