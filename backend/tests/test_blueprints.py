@@ -93,7 +93,7 @@ class BlueprintApiTests(unittest.TestCase):
     def setUp(self):
         resources = ExitStack()
         self.addCleanup(resources.close)
-        self.home = Path(resources.enter_context(tempfile.TemporaryDirectory()))
+        self.home = Path(resources.enter_context(tempfile.TemporaryDirectory())).resolve()
         resources.enter_context(patch.dict(os.environ, {"MAGNITE_HOME": str(self.home)}))
         resources.enter_context(patch("backend.runtime_packages.activate"))
         self.session = ExitStack()
