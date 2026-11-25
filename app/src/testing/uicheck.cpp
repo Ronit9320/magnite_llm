@@ -1,6 +1,7 @@
 #include "testing/uicheck.h"
 #include "build_features.h"
 #include "testing/blueprint_tests.h"
+#include "testing/blueprint_editor_tests.h"
 #include "testing/modelhub_tests.h"
 #include "widgets/smoothwheel.h"
 #include "systemappearance.h"
@@ -590,7 +591,7 @@ int runUiCheck(const QString &captures) {
         }
         return runLiveBlueprintChecks(captures) ? 1 : 0;
     }
-    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return runBlueprintChecks(captures) ? 1 : 0;
+    if (qEnvironmentVariableIsSet("MAGNITE_BLUEPRINTS_DESIGN_CHECK")) return (runBlueprintChecks(captures) + runBlueprintEditorChecks(captures)) ? 1 : 0;
     if (qEnvironmentVariableIsSet("MAGNITE_MODELHUB_DESIGN_CHECK")) {
         int hubFailures = 0;
         const bool original = Theme::isDark();
@@ -4350,7 +4351,7 @@ int runUiCheck(const QString &captures) {
     client.abortAll(); pump();
     failures += runModelHubChecks(captures);
     // Blueprints are not part of switched-off builds; dev builds keep covering them.
-    if (Features::blueprintsAndTools) failures += runBlueprintChecks(captures);
+    if (Features::blueprintsAndTools) failures += runBlueprintChecks(captures) + runBlueprintEditorChecks(captures);
     else std::printf("[blueprints] SKIP: switched off in this build\n");
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;

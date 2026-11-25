@@ -59,6 +59,9 @@ configure_file(src/build_features.h.in generated/build_features.h @ONLY)
 set(MAGNITE_SOURCES
     src/testing/blueprint_tests.cpp
     src/testing/blueprint_tests.h
+    src/testing/blueprint_test_support.h
+    src/testing/blueprint_editor_tests.cpp
+    src/testing/blueprint_editor_tests.h
     src/panels/blueprintpanel.cpp
     src/panels/blueprintnodedialog.cpp
     src/panels/blueprintnodedialog.h
@@ -68,6 +71,8 @@ set(MAGNITE_SOURCES
     src/panels/blueprintpreview.h
     src/widgets/blueprintcanvas.cpp
     src/widgets/blueprintcanvas.h
+    src/widgets/blueprintstyle.cpp
+    src/widgets/blueprintstyle.h
     src/panels/modelhubpanel.cpp
     src/panels/modelhubpanel.h
     src/testing/modelhub_tests.cpp
