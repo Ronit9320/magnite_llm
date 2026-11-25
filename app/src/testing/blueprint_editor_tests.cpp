@@ -2,7 +2,9 @@
 
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
+#include "panels/blueprinttopbar.h"
 #include "testing/blueprint_test_support.h"
+#include "testing/textfit.h"
 #include "theme.h"
 #include "widgets/blueprintminimap.h"
 #include "widgets/blueprintscene.h"
@@ -11,6 +13,11 @@
 #include "widgets/floatingpanel.h"
 
 #include <QContextMenuEvent>
+#include <QDir>
+#include <QMenu>
+#include <QRegularExpression>
+#include <QTabWidget>
+#include <QTreeWidget>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -656,7 +663,7 @@ void checkPanelCanvas(BlueprintPreview &preview) {
     // Moving a wire is one edit: one save, old edge replaced, and a declined prompt stores nothing.
     const auto openNamed = [&](const QJsonObject &blueprint) -> BlueprintView * {
         preview.saveBlueprint(blueprint);
-        if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+        if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
         pump();
         for (auto *button : panel.findChildren<QPushButton *>())
             if (button->isVisible() && button->text() == "Open"
@@ -801,10 +808,160 @@ void checkOverlays(BlueprintPreview &preview) {
     pump(50);
     check(mini && view.viewport()->geometry().right() - mini->geometry().right() <= 16, "overlays follow a resize");
 }
+// The texts of the menu a button opens (the popup closes again).
+QStringList menuTexts(QPushButton *button) {
+    QStringList texts;
+    if (!button) return texts;
+    QTimer::singleShot(0, button, [&texts] {
+        if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+            for (const auto *action : menu->actions())
+                if (action->isVisible() && !action->isSeparator()) texts << action->text();
+            menu->close();
+        }
+    });
+    button->click();
+    pump();
+    return texts;
+}
+
+void checkShell(BlueprintPreview &preview, const QString &captures) {
+    Theme::setDark(true);  // the captures are of the dark editor
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    const auto example = preview.example();
+    preview.saveBlueprint(example);
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Order intake")) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    if (!view || !view->isVisible()) {
+        check(false, "the shell check opens the example");
+        return;
+    }
+    bool tabs = false;
+    for (auto *tab : panel.findChildren<QTabWidget *>()) tabs |= tab->isVisible();
+    check(!tabs && visibleButton(panel, "Build") && visibleButton(panel, "Test cases") && visibleButton(panel, "Run history")
+              && visibleButton(panel, "Run"),
+          "a segmented control replaces the editor tabs");
+    auto *bar = panel.findChild<QWidget *>("blueprintTopBar");
+    auto *validation = bar ? bar->findChild<QPushButton *>("blueprintValidation") : nullptr;
+    const QRegularExpression issueCount("^\\d+ issues?$");
+    check(bar && bar->isVisible() && visibleText(*bar, "Order intake") && validation && validation->isVisible()
+              && (validation->accessibleName() == "Ready to run" || issueCount.match(validation->text()).hasMatch()),
+          "the top bar shows the name and live validation");
+    check(bar && view->isAncestorOf(bar), "in Build the top bar floats over the canvas");
+    auto *inspector = panel.findChild<FloatingPanel *>("blueprintInspector");
+    check(inspector && !inspector->isVisible(), "the inspector is hidden with nothing selected");
+
+    const auto select = [&](const QString &id) {
+        auto *item = view->graphScene()->node(id);
+        if (item) click(view->viewport(), viewPoint(*view, item->sceneBoundingRect().center()));
+        pump(50);
+    };
+    const auto first = example["nodes"].toArray().first().toObject()["id"].toString();
+    select(first);
+    const QRect viewport = view->viewport()->geometry();
+    check(view->selection() == first && inspector && inspector->isVisible()
+              && qAbs(viewport.right() - inspector->geometry().right()) <= 16,
+          "selecting a node floats the inspector in on the right");
+    check(inspector && bar && inspector->geometry().top() >= bar->geometry().bottom() - 2 * FloatingPanel::shadowMargin(),
+          "the inspector starts below the top bar");
+    FloatingPanel *dock = view->findChild<FloatingPanel *>("blueprintDock");
+    check(dock && inspector && dock->geometry().adjusted(16, 16, -16, -16).right()
+                                   < inspector->geometry().adjusted(16, 16, -16, -16).left(),
+          "the bottom dock stays clear of the inspector");
+    if (!captures.isEmpty()) {
+        QDir().mkpath(captures);
+        pump(200);
+        panel.grab().save(QDir(captures).filePath("blueprint-editor-shell-dark.png"));
+    }
+
+    const auto more = menuTexts(bar ? visibleNamed<QPushButton>(*bar, "More blueprint actions") : nullptr);
+    check(more.contains("Edit details…") && more.contains("Duplicate") && more.contains("Delete blueprint…")
+              && !more.contains("Back to Conversation"),
+          "the ⋯ menu holds blueprint actions");
+
+    // The segmented control switches views; the bar sits above the other views' pages.
+    if (auto *tests = visibleButton(panel, "Test cases")) tests->click();
+    pump(50);
+    check(!view->isVisible() && bar && bar->isVisible() && !view->isAncestorOf(bar) && visibleButton(panel, "Start run"),
+          "Test cases shows its page under the top bar");
+    if (auto *history = visibleButton(panel, "Run history")) history->click();
+    pump(50);
+    check(bar && bar->isVisible() && visibleText(panel, "Run history") && !view->isVisible(), "Run history is reached from the top bar");
+    if (auto *build = visibleButton(panel, "Build")) build->click();
+    pump(50);
+    check(view->isVisible() && bar && view->isAncestorOf(bar), "Build returns the bar to the canvas");
+
+    // The library dock (node tree for now) is the Left overlay, driven by the dock toggle.
+    auto *library = visibleButton(*view, "Show node library");
+    auto *tree = panel.findChild<QTreeWidget *>("blueprintNodeTree");
+    if (library && !library->isChecked()) library->click();
+    pump(50);
+    check(library && library->isChecked() && tree && tree->isVisible() && view->isAncestorOf(tree),
+          "the library toggle shows the node tree over the canvas");
+    if (library) library->click();
+    pump(50);
+    check(tree && !tree->isVisible(), "the library toggle hides it again");
+    if (library) library->click();
+    pump(50);
+
+    panel.resize(782, 628);
+    pump(50);
+    select(example["nodes"].toArray().at(1).toObject()["id"].toString());
+    pump(50);
+    check(view->freeArea().width() >= 240, "the compact window keeps a usable canvas beside the inspector");
+    check(library && !library->isChecked() && tree && !tree->isVisible(),
+          "a crowded compact canvas closes the library and unchecks its toggle");
+    panel.resize(1120, 720);
+    pump(50);
+    check(library && !library->isChecked() && tree && !tree->isVisible(), "the library does not reopen by itself");
+    panel.resize(782, 628);
+    pump(50);
+    const auto clipped = bar ? TextFit::clippedText(bar) : QStringList{"no top bar"};
+    check(clipped.isEmpty(), qPrintable("the compact top bar shows its text in full" +
+                                        (clipped.isEmpty() ? QString() : " — " + clipped.join("; "))));
+    if (!captures.isEmpty()) {
+        pump(200);
+        panel.grab().save(QDir(captures).filePath("blueprint-editor-shell-compact-dark.png"));
+    }
+    // Live drafts add Publish, Reload and Open in Conversation; at the narrowest live check width the bar
+    // folds the least important of them into the ⋯ menu instead of cutting text.
+    if (auto *topBar = qobject_cast<BlueprintTopBar *>(bar)) {
+        topBar->setActions(true, true, true, false);
+        panel.resize(740, 620);
+        pump(50);
+        const auto crowded = TextFit::clippedText(bar);
+        const auto folded = menuTexts(visibleNamed<QPushButton>(*bar, "More blueprint actions"));
+        check(crowded.isEmpty() && visibleButton(*bar, "Publish")
+                  && (visibleNamed<QPushButton>(*bar, "Open in Conversation") || folded.contains("Open in Conversation"))
+                  && (visibleNamed<QPushButton>(*bar, "Discard draft edits") || folded.contains("Discard draft edits…")),
+              qPrintable("a crowded bar folds actions into the ⋯ menu instead of cutting text" +
+                         (crowded.isEmpty() ? QString() : " — " + crowded.join("; "))));
+        topBar->setActions(false, false, false, false);
+    } else check(false, "the top bar is a BlueprintTopBar");
+    panel.resize(1120, 720);
+    pump(50);
+
+    if (auto *full = bar ? visibleNamed<QPushButton>(*bar, "Fullscreen canvas") : nullptr) full->click();
+    pump(50);
+    const bool fullscreen = view->window() != &panel && view->window()->isFullScreen() && bar
+                            && view->window()->isAncestorOf(bar) && inspector && view->window()->isAncestorOf(inspector);
+    if (auto *exit = bar ? visibleNamed<QPushButton>(*bar, "Exit fullscreen") : nullptr) exit->click();
+    pump(50);
+    check(fullscreen && view->window() == &panel && view->isVisible() && bar && view->isAncestorOf(bar),
+          "the view, its panels and the top bar move into fullscreen and back");
+    preview.deleteBlueprint(example["id"].toString());
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
-    Q_UNUSED(captures);
     g_failures = 0;
     const bool original = Theme::isDark();
     Theme::setDark(true);
@@ -815,6 +972,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkConnecting(preview);
     checkPanelCanvas(preview);
     checkOverlays(preview);
+    checkShell(preview, captures);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

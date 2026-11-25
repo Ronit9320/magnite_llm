@@ -80,6 +80,7 @@ void BlueprintView::buildDock() {
     };
     auto *library = iconButton("layers", "Show node library");
     library->setCheckable(true);
+    m_libraryToggle = library;
     auto *add = new Button("Add node", dock);
     add->setFlat(true);
     add->setAccessibleName("Add node");
@@ -113,11 +114,89 @@ void BlueprintView::addOverlay(QWidget *widget, OverlayEdge edge, int margin) {
     placeOverlays();
 }
 
+void BlueprintView::removeOverlay(QWidget *widget) {
+    for (int i = 0; i < m_overlays.size(); ++i)
+        if (m_overlays.at(i).widget == widget) {
+            widget->removeEventFilter(this);
+            m_overlays.removeAt(i);
+            break;
+        }
+}
+
+void BlueprintView::setLibraryShown(bool shown) {
+    if (m_libraryToggle) m_libraryToggle->setChecked(shown);
+}
+
+bool BlueprintView::libraryShown() const { return m_libraryToggle && m_libraryToggle->isChecked(); }
+
+namespace {
+bool shownOverlay(const QWidget *w) { return !(w->isHidden() && w->testAttribute(Qt::WA_WState_ExplicitShowHide)); }
+}  // namespace
+
+// Where every overlay goes. Top overlays that expand horizontally span the view; Left and Right overlays
+// fill the height below the top row; Top and Bottom overlays centre in the room between the side overlays.
+QHash<QWidget *, QRect> BlueprintView::overlayLayout() const {
+    const QRect area = viewport()->geometry();
+    QHash<QWidget *, QRect> boxes;
+    const auto pad = [](const QWidget *w) { return qobject_cast<const FloatingPanel *>(w) ? FloatingPanel::shadowMargin() : 0; };
+    const auto sizeOf = [](const QWidget *w) {
+        QSize size = w->sizeHint().expandedTo(w->minimumSizeHint()).expandedTo(w->minimumSize());
+        if (w->minimumSize() == w->maximumSize()) size = w->minimumSize();
+        return size;
+    };
+    // Pass 1: the top row, which side overlays start below.
+    int sideTop = area.top();
+    for (const auto &overlay : m_overlays) {
+        if (overlay.edge != OverlayEdge::Top || !shownOverlay(overlay.widget)) continue;
+        if (!(overlay.widget->sizePolicy().horizontalPolicy() & QSizePolicy::ExpandFlag)) continue;
+        const int m = overlay.margin - pad(overlay.widget);
+        const QRect box(area.left() + m, area.top() + m, area.width() - 2 * m, sizeOf(overlay.widget).height());
+        boxes.insert(overlay.widget, box);
+        sideTop = qMax(sideTop, box.bottom() - pad(overlay.widget) + 1);
+    }
+    // Pass 2: the side overlays, and the room they leave.
+    int left = area.left(), right = area.right();
+    for (const auto &overlay : m_overlays) {
+        if (overlay.edge != OverlayEdge::Left && overlay.edge != OverlayEdge::Right) continue;
+        const int m = overlay.margin - pad(overlay.widget);
+        const int width = sizeOf(overlay.widget).width();
+        const int top = sideTop + m;
+        const int x = overlay.edge == OverlayEdge::Left ? area.left() + m : area.right() + 1 - m - width;
+        const QRect box(x, top, width, area.bottom() + 1 - m - top);
+        boxes.insert(overlay.widget, box);
+        if (!overlay.widget->isVisibleTo(this)) continue;
+        if (overlay.edge == OverlayEdge::Left) left = qMax(left, box.right() - pad(overlay.widget) + overlay.margin + 1);
+        else right = qMin(right, box.left() + pad(overlay.widget) - overlay.margin - 1);
+    }
+    // Pass 3: everything else.
+    for (const auto &overlay : m_overlays) {
+        if (boxes.contains(overlay.widget)) continue;
+        const int m = overlay.margin - pad(overlay.widget);
+        const QSize size = sizeOf(overlay.widget);
+        QPoint at;
+        switch (overlay.edge) {
+        case OverlayEdge::TopLeft: case OverlayEdge::BottomLeft: at.setX(area.left() + m); break;
+        case OverlayEdge::TopRight: case OverlayEdge::BottomRight: at.setX(area.right() + 1 - m - size.width()); break;
+        default: at.setX(left + (right + 1 - left - size.width()) / 2); break;
+        }
+        switch (overlay.edge) {
+        case OverlayEdge::BottomLeft: case OverlayEdge::Bottom: case OverlayEdge::BottomRight: at.setY(area.bottom() + 1 - m - size.height()); break;
+        default: at.setY(area.top() + m); break;
+        }
+        boxes.insert(overlay.widget, QRect(at, size));
+    }
+    return boxes;
+}
+
 QRect BlueprintView::freeArea() const {
+    // Computed from the layout rather than the widgets' geometry, so it is right before a queued placement runs.
     QRect area = viewport()->geometry();
+    const auto boxes = overlayLayout();
     for (const auto &overlay : m_overlays) {
         if (!overlay.widget->isVisibleTo(this)) continue;
-        const QRect box = overlay.widget->geometry();
+        // The panel body, not its shadow, is what covers the canvas.
+        const int pad = qobject_cast<const FloatingPanel *>(overlay.widget) ? FloatingPanel::shadowMargin() : 0;
+        const QRect box = boxes.value(overlay.widget).adjusted(pad, pad, -pad, -pad);
         if (overlay.edge == OverlayEdge::Left) area.setLeft(qMax(area.left(), box.right() + overlay.margin + 1));
         if (overlay.edge == OverlayEdge::Right) area.setRight(qMin(area.right(), box.left() - overlay.margin - 1));
     }
@@ -127,30 +206,11 @@ QRect BlueprintView::freeArea() const {
 void BlueprintView::placeOverlays() {
     if (m_placing) return;
     m_placing = true;
-    const QRect area = viewport()->geometry();
+    const auto boxes = overlayLayout();
     for (const auto &overlay : m_overlays) {
-        QWidget *w = overlay.widget;
-        if (w->isHidden() && w->testAttribute(Qt::WA_WState_ExplicitShowHide)) continue;  // hidden on purpose
-        // A panel's body sits margin pixels from the edge; its shadow extends beyond that.
-        const int pad = qobject_cast<FloatingPanel *>(w) ? FloatingPanel::shadowMargin() : 0;
-        const int m = overlay.margin - pad;
-        const bool side = overlay.edge == OverlayEdge::Left || overlay.edge == OverlayEdge::Right;
-        QSize size = w->sizeHint().expandedTo(w->minimumSizeHint()).expandedTo(w->minimumSize());
-        if (w->minimumSize() == w->maximumSize()) size = w->minimumSize();
-        if (side) size.setHeight(area.height() - 2 * m);
-        QPoint at;
-        switch (overlay.edge) {
-        case OverlayEdge::TopLeft: case OverlayEdge::Left: case OverlayEdge::BottomLeft: at.setX(area.left() + m); break;
-        case OverlayEdge::TopRight: case OverlayEdge::Right: case OverlayEdge::BottomRight: at.setX(area.right() + 1 - m - size.width()); break;
-        default: at.setX(area.left() + (area.width() - size.width()) / 2); break;
-        }
-        switch (overlay.edge) {
-        case OverlayEdge::TopLeft: case OverlayEdge::Top: case OverlayEdge::TopRight: at.setY(area.top() + m); break;
-        case OverlayEdge::BottomLeft: case OverlayEdge::Bottom: case OverlayEdge::BottomRight: at.setY(area.bottom() + 1 - m - size.height()); break;
-        default: at.setY(area.top() + m); break;
-        }
-        w->setGeometry(QRect(at, size));
-        w->raise();
+        if (!shownOverlay(overlay.widget)) continue;  // hidden on purpose
+        overlay.widget->setGeometry(boxes.value(overlay.widget));
+        overlay.widget->raise();
     }
     m_placing = false;
 }

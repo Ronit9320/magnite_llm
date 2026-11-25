@@ -45,6 +45,30 @@ using namespace BlueprintTest;
 
 namespace {
 
+// The workflow node tree, shown or not: the compact rule may have closed the library it sits in.
+QTreeWidget *nodeTree(QWidget &panel) {
+    for (auto *tree : panel.findChildren<QTreeWidget *>())
+        if (tree->accessibleName() == "Workflow nodes and connections") return tree;
+    return nullptr;
+}
+
+// The texts of the top bar's ⋯ menu (the popup closes again).
+QStringList moreActions(QWidget &panel) {
+    QStringList texts;
+    auto *more = visibleNamed<QPushButton>(panel, "More blueprint actions");
+    if (!more) return texts;
+    QTimer::singleShot(0, more, [&texts] {
+        if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+            for (const auto *action : menu->actions())
+                if (action->isVisible() && !action->isSeparator()) texts << action->text();
+            menu->close();
+        }
+    });
+    more->click();
+    pump();
+    return texts;
+}
+
 QString modelId(QString repo) {
     return "huggingface:" + repo.replace("/", "--");
 }
@@ -64,7 +88,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
         return 0;
     };
     const auto back = [&] {
-        if (auto *button = visibleNamed<QPushButton>(panel, "Blueprint library")) button->click();
+        if (auto *button = visibleNamed<QPushButton>(panel, "Back to library")) button->click();
         pump();
     };
     back();
@@ -100,7 +124,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     };
     back();
     if (!check(open(), "the draft reopens from the native library")) return false;
-    auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+    auto *tree = nodeTree(panel);
     if (!tree || tree->topLevelItemCount() != 3)
         return check(false, "the Model node appears in the workflow tree");
     tree->setCurrentItem(tree->topLevelItem(1));
@@ -134,7 +158,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     QObject::disconnect(bindingDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(1).toObject()["model"] == modelId(model),
                "the Model node binds the local checkpoint in the desktop picker")) return false;
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(waitFor([&] { return publishedRevision(id) == 1 && visibleText(panel, "Revision 1"); }),
                "the model graph publishes revision 1")) return false;
 
@@ -252,7 +276,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (!session.saveBlueprint(linked)) return false;
     back();
     if (!open()) return false;
-    tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+    tree = nodeTree(panel);
     if (!check(tree && tree->topLevelItemCount() == 4 && tree->topLevelItem(3)->childCount() == 1,
                "the workflow tree shows the Adapter node and its outgoing link")) return false;
     tree->setCurrentItem(tree->topLevelItem(3));
@@ -273,7 +297,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     QObject::disconnect(adapterDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(3).toObject()["adapter"] == adapter,
                "the Adapter node can select the real trained weights")) return false;
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(waitFor([&] { return publishedRevision(id) == 3 && visibleText(panel, "Revision 3"); }),
                "the LoRA link persists on a new revision")) return false;
     pump();
@@ -399,7 +423,7 @@ int runBlueprintChecks(const QString &captures) {
         const auto node = initialNodes.first().toObject();
         firstNodeId = node["id"].toString();
         const auto port = node["out"].toArray().first().toObject();
-        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        auto *tree = nodeTree(panel);
         check(tree && tree->topLevelItemCount() == 1 && tree->currentItem() == tree->topLevelItem(0),
               "the new node appears selected in the workflow tree");
         check(node["name"].toString() == "Input" && port["name"].toString() == "Payload"
@@ -444,7 +468,7 @@ int runBlueprintChecks(const QString &captures) {
         check(preview.blueprint(blankId)["nodes"].toArray().isEmpty(), "deleting the final node returns to the empty canvas");
     }
 
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     pump();
     if (auto *newGraph = visibleButton(panel, "Create new")) newGraph->click();
     pump();
@@ -517,14 +541,14 @@ int runBlueprintChecks(const QString &captures) {
 
     panel.resize(1120, 720);
     preview.saveBlueprint(preview.example());
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     for (auto *button : panel.findChildren<QPushButton *>()) {
         if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Order intake")) {
             button->click();
             break;
         }
     }
-    if (auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections"))
+    if (auto *tree = nodeTree(panel))
         tree->setCurrentItem(tree->topLevelItem(1));
     pump();
     auto *adapter = visibleNamed<QComboBox>(panel, "Node adapter");
@@ -582,7 +606,7 @@ int runBlueprintChecks(const QString &captures) {
     const QJsonObject badEdge{{"from", "input"}, {"out", "text"}, {"to", "lookup"}, {"in", "index"}};
     check(preview.connectionError(graph, badEdge).contains("Text cannot connect to Integer"),
           "editor rejects incompatible typed ports");
-    if (auto *runButton = visibleButton(panel, "Run blueprint")) runButton->click();
+    if (auto *runButton = visibleButton(panel, "Run")) runButton->click();
     pump();
     auto *start = visibleButton(panel, "Start run");
     auto *scenario = visibleNamed<QComboBox>(panel, "Fixture scenario");
@@ -624,7 +648,7 @@ int runBlueprintChecks(const QString &captures) {
     capture(chat, "tool-task-approval");
     panel.openRun(toolId);
     pump();
-    check(visibleText(panel, "Working directory") && visibleButton(panel, "Back to Conversation"),
+    check(visibleText(panel, "Working directory") && moreActions(panel).contains("Back to Conversation"),
           "the exact chat run shares the approval view in Blueprints");
     if (auto *deny = visibleButton(panel, "Deny")) deny->click();
     pump();
@@ -671,7 +695,7 @@ int runBlueprintChecks(const QString &captures) {
         pump(300);
         capture(flows, "conversation-blueprint-new");
     }
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     pump();
     for (auto *remove : panel.findChildren<QPushButton *>()) {
         if (!remove->isVisible() || remove->accessibleName() != "Delete blueprint" ||
@@ -878,6 +902,8 @@ int runLiveBlueprintChecks(const QString &captures) {
           "compact light canvas fits with reduced motion enabled");
     capture(panel, "live-canvas-compact-light");
 
+    if (auto *tree = nodeTree(panel); tree && tree->topLevelItemCount()) tree->setCurrentItem(tree->topLevelItem(0));
+    pump();
     if (auto *test = visibleButton(panel, "Test this node")) test->click();
     if (check(until([&] {
         const auto *start = visibleButton(panel, "Test node");
@@ -890,7 +916,7 @@ int runLiveBlueprintChecks(const QString &captures) {
               "isolated draft node returns the supplied typed input");
     }
 
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(until([&] { return !session.published().isEmpty() && visibleText(panel, "Revision 1"); }),
                "saving publishes a backend revision from the native editor")) return failures;
     check(until([&] {
@@ -1021,14 +1047,14 @@ int runLiveBlueprintChecks(const QString &captures) {
             }, 30000), "a Pi follow-up sends the previous prompt and answer as context");
 
 
-            if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+            if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
             if (auto *triage = visibleButton(panel, "Request triage example")) triage->click();
             const auto triageDraft = [&] {
                 for (const auto &value : session.saved())
                     if (value.toObject()["name"] == "Request triage") return value.toObject()["id"].toString();
                 return QString{};
             }();
-            if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Save revision"); }),
+            if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Publish"); }),
                       "the desktop opens the editable request triage example")) {
                 // The example's Model node starts unbound; bind the cached checkpoint and reopen it.
                 QJsonObject draft;
@@ -1042,7 +1068,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                 }
                 draft["nodes"] = nodes;
                 session.saveBlueprint(draft);
-                if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+                if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
                 pump();
                 for (auto *button : panel.findChildren<QPushButton *>()) {
                     if (button->isVisible() && button->text() == "Open"
@@ -1051,13 +1077,13 @@ int runLiveBlueprintChecks(const QString &captures) {
                         break;
                     }
                 }
-                until([&] { return visibleButton(panel, "Save revision"); });
+                until([&] { return visibleButton(panel, "Publish"); });
                 pump();
                 capture(panel, "live-triage-graph");
-                visibleButton(panel, "Save revision")->click();
+                visibleButton(panel, "Publish")->click();
                 if (check(until([&] { return visibleText(panel, "Revision 1"); }),
                           "the Model node, constant, and object builder publish together")) {
-                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
+                    if (auto *tests = visibleButton(panel, "Test cases")) tests->click();
                     if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
                         message->setPlainText("Please send replacement labels for order 245.");
                     if (auto *start = visibleButton(panel, "Start run")) start->click();
@@ -1069,7 +1095,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                                !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
                     }, 60000), "the triage Model node returns text and builds the review record");
                     capture(panel, "live-triage-result");
-                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(2);
+                    if (auto *history = visibleButton(panel, "Run history")) history->click();
                     pump(300);
                     capture(panel, "live-run-history");
                     if (auto *mode = visibleButton(chat, "Blueprint")) mode->click();
@@ -1090,7 +1116,7 @@ int runLiveBlueprintChecks(const QString &captures) {
             nodes.append(session.makeNode(operations[i], QString("n%1").arg(i), (i % 3) * 230, (i / 3) * 170));
         tour["nodes"] = nodes;
         session.saveBlueprint(tour);
-        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
         pump();
         for (auto *button : panel.findChildren<QPushButton *>()) {
             if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Dialog tour")) {
@@ -1119,7 +1145,7 @@ int runLiveBlueprintChecks(const QString &captures) {
             QObject::disconnect(connection);
             return seen;
         };
-        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        auto *tree = nodeTree(panel);
         int captured = 0;
         for (int i = 0; tree && i < operations.size(); ++i) {
             tree->setCurrentItem(tree->topLevelItem(i));
@@ -1144,7 +1170,7 @@ int runLiveBlueprintChecks(const QString &captures) {
         capture(panel, "dialog-tour-canvas");
         check(captured == int(operations.size()) + 4, "every editor dialog opens and closes in the dialog tour");
         session.deleteBlueprint(tour["id"].toString());
-        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
         pump();
     }
 

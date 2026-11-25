@@ -657,16 +657,21 @@ QPushButton#blueprintStep {
 QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background: @surfaceFillHover; }
 QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
 QWidget#blueprintStepDetail { background: @surfaceFill; }
-QPushButton#blueprintFullscreen { padding: 0; }
 QGraphicsView#blueprintView { background: @canvasBackground; border: none; }
 /* Floating panels paint their own fill (@blueprintPanelFill) and shadow; no border. */
 QFrame#blueprintFloating { background: transparent; border: none; }
+/* Editor top bar: name, pills, the Build · Test cases · Run history segments, validation and Run ▾. */
+QLabel#blueprintBarName { font-family: @headingFont; font-size: 16px; font-weight: 600; color: @textPrimary; }
+QLabel#blueprintBarMeta { font-size: 12px; color: @textMuted; }
+QLabel#blueprintPill { font-size: 11px; font-weight: 500; color: @textSecondary; background: @surfaceFillHover; border: none; border-radius: 9px; padding: 2px 8px; }
+QFrame#blueprintSegments { background: @canvasBackground; border: none; border-radius: 10px; }
+QPushButton#blueprintSegment { padding: 5px 12px; min-height: 18px; }
+QPushButton#blueprintValidation { padding: 5px 8px; min-height: 18px; }
+QPushButton#blueprintRunMenu { padding: 0; }
 QLabel#blueprintDropMessage { color: @textPrimary; background: @blueprintPanelFill; border: 1px solid @statusError; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
-QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
 QFrame#blueprintCreateForm { background: @surfaceFill; border: none; border-radius: 8px; }
-QTreeWidget#blueprintNodeTree { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; }
-QPushButton#blueprintIconButton, QPushButton#blueprintEdit, QPushButton#blueprintDuplicate,
-QPushButton#blueprintDelete { padding: 0; }
+QTreeWidget#blueprintNodeTree { background: transparent; border: none; }
+QPushButton#blueprintIconButton { padding: 0; }
 QLabel#blueprintNodeIcon, QFrame#blueprintBinding { background: @canvasBackground; border: none; border-radius: 7px; }
 QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 500; }
 QLabel#blueprintRevision {

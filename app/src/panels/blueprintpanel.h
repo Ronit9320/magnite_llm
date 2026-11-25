@@ -1,11 +1,14 @@
 #pragma once
 
+#include "panels/blueprinttopbar.h"
+
 #include <QHash>
 #include <QJsonObject>
 #include <QWidget>
 #include <optional>
 
 class BlueprintView;
+class FloatingPanel;
 class QTreeWidget;
 class BlueprintPreview;
 class Button;
@@ -17,7 +20,6 @@ class QPlainTextEdit;
 class QProgressBar;
 class QScrollArea;
 class QStackedWidget;
-class TabWidget;
 class QVBoxLayout;
 
 class BlueprintPanel : public QWidget {
@@ -36,7 +38,6 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    void updateCanvasFooter();
     void showRecentRuns();
     void refreshLibrary();
     void openBlueprint(const QString &id);
@@ -52,6 +53,14 @@ private:
     bool saveGraph(QJsonObject graph, bool revision = true);
     void setupEditor();
     void refreshEditor(bool fit = false);
+    void refreshBar();
+    void showView(BlueprintTopBar::View view);
+    // The bar floats over the canvas in Build (and fullscreen) and sits above the page otherwise.
+    void placeBar();
+    void checkValidation(int issue);
+    void showRunMenu(const QPoint &globalPosition);
+    // With a node selected, a canvas narrower than 240px between the panels closes the library.
+    void applyCompactRule();
     void refreshInspector();
     void refreshNodeTree();
     void openNodePicker(std::optional<QPointF> position = {});
@@ -78,8 +87,7 @@ private:
     void changeNode(const QJsonObject &node, bool reconcilePorts = false);
     void toggleFullscreen();
     void leaveFullscreen();
-    void refreshCanvasActions();
-    void setupRun();
+    QWidget *setupRun();
     void showTest(const QString &node = {});
     void startRun();
     void refreshRunOptions();
@@ -105,30 +113,19 @@ private:
     QPlainTextEdit *m_newDescription;
     QLabel *m_createError;
     QVBoxLayout *m_libraryBody;
-    QLabel *m_title;
-    QLabel *m_revision;
-    QLabel *m_description;
     QLabel *m_service;
-    Button *m_publish;
-    Button *m_reload;
-    Button *m_openInConversation;
-    Button *m_backToChat;
-    TabWidget *m_tabs;
-    QVBoxLayout *m_canvasHome;
-    QWidget *m_canvasPanel;
+    BlueprintTopBar *m_bar;
+    QVBoxLayout *m_barSlot;
+    QStackedWidget *m_views;  // Build · Test cases · Run history, in BlueprintTopBar::View order
+    bool m_canGoBack = false;  // the open run came from Conversation
     QTreeWidget *m_nodeTree;
+    FloatingPanel *m_libraryPanel;
     QStackedWidget *m_canvasPages;
     BlueprintView *m_canvas;
-    Button *m_connect;
-    Button *m_addNode;
+    QWidget *m_emptyCanvas;
     Button *m_emptyAdd;
-    Button *m_fullscreen;
-    QLabel *m_zoom;
-    QLabel *m_gestureHint;
-    QWidget *m_zoomControls;
-    QLabel *m_canvasCount;
-    Button *m_validation;
     QDialog *m_fullscreenDialog = nullptr;
+    FloatingPanel *m_inspectorPanel;
     QVBoxLayout *m_inspector;
 
     QScrollArea *m_runSetup;

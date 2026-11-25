@@ -37,11 +37,18 @@ public:
     QPointF centerInGraph() const;
     // Moves the camera to a graph point; like panning, it ends automatic fitting.
     void centerAt(const QPointF &graphPoint);
-    // Pins a widget over the canvas, margin pixels from its edge. Left and Right overlays are as tall as
-    // the view; panels are inset by their shadow. Overlays follow resizes and their own show, hide and layout.
+    // Pins a widget over the canvas, margin pixels from its edge; panels are inset by their shadow. A Top
+    // overlay with an expanding width spans the view, Left and Right overlays fill the height below it, and
+    // Top and Bottom overlays centre between the visible side overlays. Overlays follow resizes and their
+    // own show, hide and layout.
     void addOverlay(QWidget *widget, OverlayEdge edge, int margin = 12);
+    // Takes a widget out of the overlay layout; it stays parented to the view until reparented.
+    void removeOverlay(QWidget *widget);
     // The viewport minus the visible Left and Right overlays.
     QRect freeArea() const;
+    // Checks or unchecks the dock's "Show node library" toggle (libraryToggled reports the change).
+    void setLibraryShown(bool shown);
+    bool libraryShown() const;
     void setRunStates(const QHash<QString, QString> &statusByNode, const QString &activeNode);
     void clearRunStates();
     // Returns why an edge cannot be dropped, or an empty string when it can.
@@ -98,6 +105,7 @@ private:
         OverlayEdge edge;
         int margin;
     };
+    QHash<QWidget *, QRect> overlayLayout() const;
     void placeOverlays();
     void buildDock();
     qreal zoom() const { return transform().m11(); }
@@ -106,6 +114,7 @@ private:
     QList<Overlay> m_overlays;
     bool m_placing = false;
     QLabel *m_zoomLabel = nullptr;
+    Button *m_libraryToggle = nullptr;
     QString m_selected;
     QHash<QString, QString> m_status;
     QString m_activeNode;
