@@ -75,7 +75,8 @@ public:
     NodeItem(const QJsonObject &node, const QJsonObject &operation, const BlueprintPreview &preview);
 
     QString id() const { return m_node["id"].toString(); }
-    QJsonObject node() const;
+    QJsonObject node() const { return m_node; }
+    QString family() const { return m_family; }
     PinItem *pin(bool output, const QString &portId) const;
     QList<PinItem *> pins() const { return m_pins; }
     void setWarning(const QString &text);

@@ -225,12 +225,9 @@ NodeItem::NodeItem(const QJsonObject &node, const QJsonObject &operation, const 
     setZValue(1);
     setPos(node["x"].toDouble(), node["y"].toDouble());
     const auto kind = operation["kind"].toString(node["kind"].toString());
-    const auto code = BlueprintPreview::operationId(node);
     m_family = BlueprintStyle::nodeFamily(kind);
-    m_icon = BlueprintStyle::nodeIcon(code == "selector" || code == "extractor" ? code : kind);
+    m_icon = BlueprintStyle::nodeIcon(kind);
     m_operationLabel = operation["label"].toString();
-    const QString exampleSuffix = " (order example)";
-    if (m_operationLabel.endsWith(exampleSuffix)) m_operationLabel.chop(exampleSuffix.size());
     if (m_operationLabel.isEmpty()) m_operationLabel = preview.nodeKindLabel(kind);
     m_previewText = previewLine(node);
     for (const bool output : {false, true}) {
@@ -241,13 +238,6 @@ NodeItem::NodeItem(const QJsonObject &node, const QJsonObject &operation, const 
             m_pins << item;
         }
     }
-}
-
-QJsonObject NodeItem::node() const {
-    auto result = m_node;
-    result["x"] = qRound(pos().x());
-    result["y"] = qRound(pos().y());
-    return result;
 }
 
 PinItem *NodeItem::pin(bool output, const QString &portId) const {

@@ -3,6 +3,7 @@
 #include "panels/blueprintpreview.h"
 
 #include <QJsonArray>
+#include <algorithm>
 
 BlueprintScene::BlueprintScene(const BlueprintPreview &preview, QObject *parent)
     : QGraphicsScene(parent), m_preview(preview) {}
@@ -46,16 +47,7 @@ void BlueprintScene::setGraph(const QJsonObject &graph) {
     refreshWarnings();
 }
 
-QJsonObject BlueprintScene::graph() const {
-    auto result = m_graph;
-    QJsonArray nodes;
-    for (auto *item : m_order) nodes.append(item->node());
-    QJsonArray edges;
-    for (auto *wire : m_wires) edges.append(wire->edge());
-    result["nodes"] = nodes;
-    if (m_graph.contains("edges") || !edges.isEmpty()) result["edges"] = edges;
-    return result;
-}
+QJsonObject BlueprintScene::graph() const { return m_graph; }
 
 void BlueprintScene::refreshWarnings() {
     const auto issues = m_preview.issues(m_graph);

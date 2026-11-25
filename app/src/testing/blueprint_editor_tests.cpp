@@ -73,8 +73,29 @@ void checkScene(const BlueprintPreview &preview) {
           "inputs sit on the left edge and outputs on the right");
     scene.setGraph({{"nodes", QJsonArray{b}}});
     check(!scene.node("b")->warning().isEmpty(), "an unconnected input shows a warning mark");
+    check(scene.node("b")->warning().contains(preview.portLabel(b["in"].toArray().first().toObject()) + " is not connected"),
+          "the warning names the unconnected port");
+    {
+        auto bare = b;
+        bare.remove("x");
+        bare.remove("y");
+        const QJsonObject loose{{"nodes", QJsonArray{a, bare}},
+                                {"edges", QJsonArray{edge("a", "text", "b", "value"), edge("a", "text", "ghost", "value")}}};
+        scene.setGraph(loose);
+        check(scene.graph() == loose, "the scene returns the graph exactly as given, with dangling edges and no x/y");
+        check(scene.node("b")->warning().isEmpty(), "a fully connected node has no warning");
+        auto bad = preview.makeNode("parse-json", "p", 0, 200);
+        const auto name = bad["name"].toString();
+        bad["name"] = name;
+        QString issueLine;
+        for (const auto &line : preview.issues({{"nodes", QJsonArray{a, bad}}}))
+            if (line.startsWith(name + " ")) issueLine = line;
+        scene.setGraph({{"nodes", QJsonArray{a, bad}}});
+        check(!issueLine.isEmpty() && scene.node("p")->warning().contains(issueLine),
+              "a validation issue for a node appears in its warning");
+    }
     scene.setGraph(preview.example());
-    scene.wires().first()->setActive(true);
+    if (!scene.wires().isEmpty()) scene.wires().first()->setActive(true);
     scene.nodes().first()->setRunStatus("running");
     QImage frame(900, 600, QImage::Format_ARGB32_Premultiplied);
     frame.fill(Qt::black);
@@ -89,6 +110,7 @@ void checkScene(const BlueprintPreview &preview) {
           "the legacy order example renders every node");
     auto odd = preview.makeNode("output", "odd", 0, 0);
     odd["kind"] = "unheard-of";
+    odd["operation"] = "unheard-of";
     auto in = odd["in"].toArray();
     auto p = in[0].toObject();
     p["type"] = "mystery";
@@ -96,6 +118,9 @@ void checkScene(const BlueprintPreview &preview) {
     odd["in"] = in;
     scene.setGraph({{"nodes", QJsonArray{odd}}});
     check(scene.node("odd") && scene.node("odd")->pin(false, "value"), "unknown kinds and port types still render");
+    check(scene.node("odd")->family() == "transform"
+              && scene.node("odd")->boundingRect().isValid(),
+          "an unknown kind renders as a Transform node");
 }
 }  // namespace
 
