@@ -3,9 +3,13 @@
 #include "panels/blueprintpreview.h"
 #include "testing/blueprint_test_support.h"
 #include "theme.h"
+#include "widgets/blueprintscene.h"
 #include "widgets/blueprintstyle.h"
 
 #include <QColor>
+#include <QImage>
+#include <QJsonArray>
+#include <QPainter>
 #include <QtMath>
 #include <cstdio>
 
@@ -55,6 +59,44 @@ void checkStyle() {
         check(distinct, "every family has a valid colour");
     }
 }
+
+void checkScene(const BlueprintPreview &preview) {
+    BlueprintScene scene(preview);
+    auto a = preview.makeNode("input", "a", 0, 0), b = preview.makeNode("output", "b", 300, 0);
+    scene.setGraph({{"nodes", QJsonArray{a, b}}, {"edges", QJsonArray{edge("a", "text", "b", "value")}}});
+    check(scene.nodes().size() == 2 && scene.wires().size() == 1, "the scene builds one item per node and edge");
+    auto *w = scene.wires().first();
+    check(qAbs(w->path().boundingRect().height()) <= 1.0, "a wire between aligned pins stays straight");
+    check(w->pen().color() == BlueprintStyle::typeColor("text"), "wires take the colour of their data type");
+    check(scene.node("b")->pin(false, "value")->anchor().x() < scene.node("b")->sceneBoundingRect().center().x()
+              && scene.node("a")->pin(true, "text")->anchor().x() > scene.node("a")->sceneBoundingRect().center().x(),
+          "inputs sit on the left edge and outputs on the right");
+    scene.setGraph({{"nodes", QJsonArray{b}}});
+    check(!scene.node("b")->warning().isEmpty(), "an unconnected input shows a warning mark");
+    scene.setGraph(preview.example());
+    scene.wires().first()->setActive(true);
+    scene.nodes().first()->setRunStatus("running");
+    QImage frame(900, 600, QImage::Format_ARGB32_Premultiplied);
+    frame.fill(Qt::black);
+    QPainter painter(&frame);
+    scene.render(&painter);
+    painter.end();
+    bool painted = false;
+    for (int y = 0; y < frame.height() && !painted; ++y)
+        for (int x = 0; x < frame.width() && !painted; ++x) painted = frame.pixel(x, y) != QColor(Qt::black).rgba();
+    check(painted, "the scene paints nodes, pins and wires");
+    check(scene.nodes().size() == preview.example()["nodes"].toArray().size(),
+          "the legacy order example renders every node");
+    auto odd = preview.makeNode("output", "odd", 0, 0);
+    odd["kind"] = "unheard-of";
+    auto in = odd["in"].toArray();
+    auto p = in[0].toObject();
+    p["type"] = "mystery";
+    in[0] = p;
+    odd["in"] = in;
+    scene.setGraph({{"nodes", QJsonArray{odd}}});
+    check(scene.node("odd") && scene.node("odd")->pin(false, "value"), "unknown kinds and port types still render");
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
@@ -63,8 +105,8 @@ int runBlueprintEditorChecks(const QString &captures) {
     const bool original = Theme::isDark();
     Theme::setDark(true);
     BlueprintPreview preview(nullptr, false);
-    Q_UNUSED(preview);
     checkStyle();
+    checkScene(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;
