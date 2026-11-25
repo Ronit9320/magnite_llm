@@ -346,6 +346,119 @@ void checkView(BlueprintPreview &preview) {
     for (int k = 0; k < 60; ++k) view.viewport()->repaint();
     check(timer.elapsed() < 1500, "a 40-node graph repaints 60 times in under 1.5 s");
 }
+
+QJsonObject findPort(const QJsonObject &graph, const QString &node, const QString &side, const QString &port) {
+    for (const auto &n : graph["nodes"].toArray())
+        if (n.toObject()["id"] == node)
+            for (const auto &p : n.toObject()[side].toArray())
+                if (p.toObject()["id"] == port) return p.toObject();
+    return {};
+}
+
+void checkConnecting(BlueprintPreview &preview) {
+    auto in = preview.makeNode("input", "in", 0, 0), cnt = preview.makeNode("count", "cnt", 0, 200),
+         out = preview.makeNode("output", "out", 320, 0);
+    QJsonObject g{{"nodes", QJsonArray{in, cnt, out}}, {"edges", QJsonArray{edge("in", "text", "out", "value")}}};
+    check(preview.dropError(g, edge("in", "text", "cnt", "value")).contains("Text cannot connect to Array"),
+          "dropping on an incompatible pin explains why with the existing text");
+    check(preview.choosesType(out, "in", "value") && !preview.choosesType(cnt, "in", "value")
+              && preview.choosesType(in, "out", "text"),
+          "chooseType is read from the operation spec");
+    int dropped = -1;
+    auto r = preview.connectGraph(g, edge("cnt", "value", "out", "value"), &dropped);
+    check(r["edges"].toArray().size() == 1 && r["edges"].toArray().first().toObject()["from"] == "cnt",
+          "dropping on an occupied input replaces its wire");
+    check(findPort(r, "out", "in", "value")["type"] == "integer" && dropped == 0,
+          "a port that chooses its type adopts the wire's type");
+    check(findPort(r, "out", "in", "value")["schema"].toObject()["type"] == "integer" && g["nodes"].toArray().size() == 3
+              && findPort(g, "out", "in", "value")["type"] == "text",
+          "the adopted port carries the contract schema and the input graph is untouched");
+    // the target adopts the source type, and wires the retyped node can no longer hold are dropped
+    auto parse = preview.makeNode("parse-json", "pj", 0, 400);
+    QJsonObject h{{"nodes", QJsonArray{in, out, parse}},
+                  {"edges", QJsonArray{edge("in", "text", "pj", "value"), edge("pj", "value", "out", "value")}}};
+    dropped = -1;
+    r = preview.connectGraph(h, edge("pj", "value", "out", "value"), &dropped);
+    check(!r.isEmpty() && dropped == 0 && findPort(r, "out", "in", "value")["type"] == "object",
+          "adopting a type keeps wires that stay valid");
+    QJsonObject cycle{{"nodes", QJsonArray{in, cnt, out}}, {"edges", QJsonArray{}}};
+    QString error;
+    r = preview.connectGraph(cycle, edge("cnt", "value", "cnt", "value"), nullptr, &error);
+    check(r.isEmpty() && !error.isEmpty(), "an invalid connection returns an empty graph and the reason");
+
+    BlueprintView view(preview);
+    view.resize(900, 600);
+    view.show();
+    view.setDropValidator([&](const QJsonObject &e) { return preview.dropError(g, e); });
+    view.setGraph(g);
+    pump();
+    auto *viewport = view.viewport();
+    const auto pinPoint = [&](const char *node, bool output, const char *port) {
+        return viewPoint(view, view.graphScene()->node(node)->pin(output, port)->anchor());
+    };
+    QJsonObject asked;
+    QObject::connect(&view, &BlueprintView::connectRequested, [&](const QJsonObject &e) { asked = e; });
+    drag(viewport, pinPoint("cnt", true, "value"), pinPoint("out", false, "value"));
+    check(asked == edge("cnt", "value", "out", "value"), "dragging from an output to an input asks to connect");
+    asked = {};
+    drag(viewport, pinPoint("in", true, "text"), pinPoint("cnt", false, "value"));
+    check(asked.isEmpty() && visibleText(view, "cannot connect"),
+          "an incompatible drop connects nothing and shows the reason");
+    bool named = false;
+    for (auto *label : view.findChildren<QLabel *>()) named |= label->isVisible() && label->objectName() == "blueprintDropMessage";
+    check(named, "the reason is shown in the themed drop message label");
+    QPointF emptyPoint = viewPoint(view, QPointF(160, 150));
+    check(view.items(emptyPoint.toPoint()).isEmpty(), "the empty drop point is empty canvas");
+    bool canvasDrop = false;
+    QObject::connect(&view, &BlueprintView::wireDropped,
+                     [&](const QString &from, const QString &, const QPoint &, const QPointF &) { canvasDrop = from == "cnt"; });
+    drag(viewport, pinPoint("cnt", true, "value"), emptyPoint);
+    check(canvasDrop, "dropping a wire on empty canvas is reported");
+    // highlights while dragging
+    {
+        QMouseEvent press(QEvent::MouseButtonPress, pinPoint("in", true, "text"), viewport->mapToGlobal(pinPoint("in", true, "text").toPoint()),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &press);
+        const auto *countIn = view.graphScene()->node("cnt")->pin(false, "value");
+        const auto *outIn = view.graphScene()->node("out")->pin(false, "value");
+        check(countIn->highlight() == PinItem::Highlight::Dimmed && outIn->highlight() == PinItem::Highlight::Compatible,
+              "pressing an output highlights compatible inputs and dims the others");
+        QMouseEvent release(QEvent::MouseButtonRelease, emptyPoint, viewport->mapToGlobal(emptyPoint.toPoint()),
+                            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &release);
+        check(countIn->highlight() == PinItem::Highlight::None && outIn->highlight() == PinItem::Highlight::None,
+              "releasing clears the pin highlights");
+    }
+    // picking up a wired input
+    QJsonObject removedByDrag, reconnected;
+    QObject::connect(&view, &BlueprintView::disconnectRequested, [&](const QJsonObject &e) { removedByDrag = e; });
+    QObject::connect(&view, &BlueprintView::connectRequested, [&](const QJsonObject &e) { reconnected = e; });
+    drag(viewport, pinPoint("out", false, "value"), emptyPoint);
+    check(removedByDrag == edge("in", "text", "out", "value") && reconnected.isEmpty(),
+          "dragging a wire off its input and dropping on empty canvas disconnects it");
+    removedByDrag = {};
+    drag(viewport, pinPoint("out", false, "value"), pinPoint("out", false, "value"));
+    check(removedByDrag.isEmpty() && reconnected.isEmpty(), "dropping a picked-up wire back on its own input changes nothing");
+    check(view.graphScene()->wires().first()->isVisible(), "a cancelled pick-up leaves the wire visible");
+    // wire selection and removal
+    QStringList selected;
+    QObject::connect(&view, &BlueprintView::nodeSelected, [&](const QString &id) { selected << id; });
+    view.setSelection("cnt");
+    selected.clear();
+    QJsonObject removed;
+    QObject::disconnect(&view, &BlueprintView::disconnectRequested, nullptr, nullptr);
+    QObject::connect(&view, &BlueprintView::disconnectRequested, [&](const QJsonObject &e) { removed = e; });
+    int deletes = 0;
+    QObject::connect(&view, &BlueprintView::deleteRequested, [&](const QString &) { ++deletes; });
+    click(viewport, viewPoint(view, view.graphScene()->wires().first()->path().pointAtPercent(0.5)));
+    check(selected == QStringList{""} && view.selection().isEmpty(), "selecting a wire clears the node selection");
+    key(viewport, Qt::Key_Delete);
+    check(removed == edge("in", "text", "out", "value") && deletes == 0, "a selected wire is removed with Delete");
+    click(viewport, viewPoint(view, view.graphScene()->node("cnt")->pos() + QPointF(40, 12)));
+    removed = {};
+    key(viewport, Qt::Key_Delete);
+    check(view.selection() == "cnt" && removed.isEmpty() && deletes == 1, "selecting a node deselects the wire and Delete removes the node");
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
@@ -357,6 +470,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkStyle();
     checkScene(preview);
     checkView(preview);
+    checkConnecting(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

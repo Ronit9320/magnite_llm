@@ -1,14 +1,18 @@
 #include "widgets/blueprintview.h"
 
 #include "theme.h"
+#include "widgets/blueprintstyle.h"
 
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QCursor>
+#include <QGraphicsPathItem>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QTimer>
 #include <QWheelEvent>
 #include <QtMath>
 #include <cmath>
@@ -58,8 +62,10 @@ QPointF BlueprintView::centerInGraph() const {
 
 void BlueprintView::setGraph(const QJsonObject &graph) {
     const QString previous = m_selected;
+    cancelConnect();
     m_quiet = true;
     m_dragged = nullptr;
+    m_wire = nullptr;
     m_scene->setGraph(graph);
     m_quiet = false;
     if (auto *item = m_scene->node(previous)) {
@@ -80,6 +86,7 @@ void BlueprintView::setSelection(const QString &nodeId) {
     m_quiet = true;
     m_scene->clearSelection();
     m_selected.clear();
+    m_wire = nullptr;
     if (auto *item = m_scene->node(nodeId)) {
         item->setSelected(true);
         m_selected = nodeId;
@@ -100,14 +107,28 @@ void BlueprintView::onSelectionChanged() {
         m_quiet = false;
     }
     QString id;
+    m_wire = nullptr;
     for (auto *node : m_scene->nodes())
         if (node->isSelected()) {
             id = node->id();
             break;
         }
+    for (auto *wire : m_scene->wires())
+        if (wire->isSelected()) {
+            m_wire = wire;
+            break;
+        }
     if (id == m_selected) return;
     m_selected = id;
     emit nodeSelected(id);
+}
+
+void BlueprintView::selectWire(WireItem *wire) {
+    m_quiet = true;
+    m_scene->clearSelection();
+    wire->setSelected(true);
+    m_quiet = false;
+    onSelectionChanged();
 }
 
 void BlueprintView::fit() {
@@ -216,6 +237,30 @@ void BlueprintView::mousePressEvent(QMouseEvent *event) {
         return;
     }
     setFocus(Qt::MouseFocusReason);
+    if (m_source) {  // a wire drag is in progress; ignore other buttons
+        event->accept();
+        return;
+    }
+    if (left) {
+        // The top-most pin or wire under the cursor wins over panning; nodes keep their own handling.
+        for (auto *item : items(event->position().toPoint())) {
+            if (item == m_temporary) continue;
+            if (auto *pin = dynamic_cast<PinItem *>(item)) {
+                if (beginConnect(pin)) {
+                    updateConnect(event->position());
+                    event->accept();
+                    return;
+                }
+                break;
+            }
+            if (auto *wire = dynamic_cast<WireItem *>(item)) {
+                selectWire(wire);
+                event->accept();
+                return;
+            }
+            break;
+        }
+    }
     auto *node = left ? nodeAt(event->position().toPoint()) : nullptr;
     if (node) {
         m_dragged = node;
@@ -238,6 +283,11 @@ void BlueprintView::mousePressEvent(QMouseEvent *event) {
 }
 
 void BlueprintView::mouseMoveEvent(QMouseEvent *event) {
+    if (m_source) {
+        updateConnect(event->position());
+        event->accept();
+        return;
+    }
     if (m_panning) {
         const QPointF delta = event->position() - m_pressPos;
         if (!m_panMoved && delta.manhattanLength() >= QApplication::startDragDistance()) {
@@ -257,6 +307,11 @@ void BlueprintView::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void BlueprintView::mouseReleaseEvent(QMouseEvent *event) {
+    if (m_source) {
+        if (event->button() == Qt::LeftButton) finishConnect(event->position().toPoint());
+        event->accept();
+        return;
+    }
     if (m_panning) {
         if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
             m_panning = false;
@@ -284,6 +339,123 @@ void BlueprintView::mouseDoubleClickEvent(QMouseEvent *event) {
         return;
     }
     QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+namespace {
+QPainterPath wirePath(const QPointF &a, const QPointF &b) {
+    QPainterPath path(a);
+    const qreal reach = qMax<qreal>(48, qAbs(b.x() - a.x()) * 0.5);
+    path.cubicTo(a + QPointF(reach, 0), b - QPointF(reach, 0), b);
+    return path;
+}
+}  // namespace
+
+bool BlueprintView::beginConnect(PinItem *pin) {
+    WireItem *picked = nullptr;
+    PinItem *source = pin;
+    if (!pin->isOutput()) {
+        for (auto *wire : m_scene->wires())
+            if (wire->to() == pin) picked = wire;
+        if (!picked) return false;
+        source = picked->from();
+    }
+    m_source = source;
+    m_pickedUp = picked;
+    if (picked) picked->hide();
+    m_temporary = new QGraphicsPathItem;
+    m_temporary->setZValue(2);
+    m_temporary->setAcceptedMouseButtons(Qt::NoButton);
+    QPen pen(BlueprintStyle::typeColor(source->portType()), 2);
+    pen.setCapStyle(Qt::RoundCap);
+    m_temporary->setPen(pen);
+    m_scene->addItem(m_temporary);
+    for (auto *node : m_scene->nodes())
+        for (auto *input : node->pins()) {
+            if (input->isOutput()) continue;
+            const QJsonObject candidate{{"from", source->nodeId()}, {"out", source->portId()},
+                                        {"to", input->nodeId()}, {"in", input->portId()}};
+            const bool allowed = !m_validator || m_validator(candidate).isEmpty();
+            input->setHighlight(allowed ? PinItem::Highlight::Compatible : PinItem::Highlight::Dimmed);
+        }
+    viewport()->setCursor(Qt::CrossCursor);
+    return true;
+}
+
+void BlueprintView::updateConnect(const QPointF &viewPosition) {
+    if (m_temporary) m_temporary->setPath(wirePath(m_source->anchor(), mapToScene(viewPosition.toPoint())));
+}
+
+void BlueprintView::cancelConnect() {
+    if (!m_source) return;
+    for (auto *node : m_scene->nodes())
+        for (auto *pin : node->pins()) pin->setHighlight(PinItem::Highlight::None);
+    if (m_pickedUp) m_pickedUp->show();
+    delete m_temporary;
+    m_temporary = nullptr;
+    m_source = nullptr;
+    m_pickedUp = nullptr;
+    viewport()->unsetCursor();
+}
+
+void BlueprintView::finishConnect(const QPoint &viewPosition) {
+    PinItem *target = nullptr;
+    bool overNode = false;
+    for (auto *item : items(viewPosition)) {
+        if (item == m_temporary) continue;
+        if (auto *pin = dynamic_cast<PinItem *>(item)) {
+            if (!pin->isOutput()) target = pin;
+            overNode = true;
+            break;
+        }
+        if (dynamic_cast<WireItem *>(item)) continue;
+        overNode = true;
+        break;
+    }
+    const QString fromNode = m_source->nodeId(), outPort = m_source->portId();
+    const QJsonObject old = m_pickedUp ? m_pickedUp->edge() : QJsonObject();
+    const bool picked = m_pickedUp != nullptr;
+    const bool samePin = picked && target && m_pickedUp->to() == target;
+    QJsonObject next;
+    QString error;
+    if (target && !samePin) {
+        next = QJsonObject{{"from", fromNode}, {"out", outPort}, {"to", target->nodeId()}, {"in", target->portId()}};
+        error = m_validator ? m_validator(next) : QString();
+    }
+    const QPointF messageAt = target ? target->anchor() : QPointF();
+    cancelConnect();  // restores any picked-up wire and clears highlights before signals can rebuild the scene
+    if (target && !samePin) {
+        if (!error.isEmpty()) {
+            showDropMessage(error, messageAt);
+            return;
+        }
+        if (picked) emit disconnectRequested(old);
+        emit connectRequested(next);
+    } else if (!overNode) {
+        if (picked) emit disconnectRequested(old);
+        else emit wireDropped(fromNode, outPort, viewport()->mapToGlobal(viewPosition), mapToScene(viewPosition));
+    }
+}
+
+void BlueprintView::showDropMessage(const QString &text, const QPointF &scenePosition) {
+    if (!m_dropMessage) {
+        m_dropMessage = new QLabel(viewport());
+        m_dropMessage->setObjectName("blueprintDropMessage");
+        m_dropMessage->setWordWrap(true);
+        m_dropMessage->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_dropTimer = new QTimer(this);
+        m_dropTimer->setSingleShot(true);
+        m_dropTimer->setInterval(2500);
+        connect(m_dropTimer, &QTimer::timeout, m_dropMessage, &QLabel::hide);
+    }
+    m_dropMessage->setText(text);
+    m_dropMessage->setFixedWidth(qMin(300, viewport()->width() - 16));
+    m_dropMessage->setFixedHeight(m_dropMessage->heightForWidth(m_dropMessage->width()));
+    const QPoint at = mapFromScene(scenePosition) + QPoint(14, 14);
+    m_dropMessage->move(qBound(8, at.x(), qMax(8, viewport()->width() - m_dropMessage->width() - 8)),
+                        qBound(8, at.y(), qMax(8, viewport()->height() - m_dropMessage->height() - 8)));
+    m_dropMessage->show();
+    m_dropMessage->raise();
+    m_dropTimer->start();
 }
 
 void BlueprintView::contextMenuEvent(QContextMenuEvent *event) {
@@ -331,10 +503,18 @@ void BlueprintView::keyPressEvent(QKeyEvent *event) {
         return;
     }
     switch (event->key()) {
+    case Qt::Key_Escape:
+        if (!m_source) { QGraphicsView::keyPressEvent(event); return; }
+        cancelConnect();
+        break;
     case Qt::Key_Plus: case Qt::Key_Equal: zoomBy(1.2); break;
     case Qt::Key_Minus: zoomBy(1 / 1.2); break;
     case Qt::Key_Home: case Qt::Key_F: fit(); break;
     case Qt::Key_Delete: case Qt::Key_Backspace:
+        if (m_wire) {
+            emit disconnectRequested(m_wire->edge());
+            break;
+        }
         if (m_selected.isEmpty()) { event->ignore(); return; }
         emit deleteRequested(m_selected);
         break;

@@ -72,6 +72,11 @@ public:
     static QJsonObject inputContracts(const QJsonObject &graph, const QString &target);
     QStringList issues(const QJsonObject &blueprint) const;
     QString connectionError(const QJsonObject &blueprint, const QJsonObject &edge) const;
+    bool choosesType(const QJsonObject &node, const QString &side, const QString &portId) const;
+    QJsonObject withPortType(const QJsonObject &node, const QString &side, const QString &portId, const QString &type) const;
+    QJsonObject connectGraph(const QJsonObject &blueprint, const QJsonObject &edge, int *droppedEdges = nullptr,
+                             QString *error = nullptr) const;
+    QString dropError(const QJsonObject &blueprint, const QJsonObject &edge) const;
     QJsonObject makeNode(const QString &kind, const QString &id, int x, int y) const;
     static QString id();
     static QString statusLabel(const QString &status);

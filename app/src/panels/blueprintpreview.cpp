@@ -579,6 +579,97 @@ QJsonObject BlueprintPreview::makeNode(const QString &operationKey, const QStrin
 
 QString BlueprintPreview::id() { return QUuid::createUuid().toString(QUuid::Id128); }
 
+bool BlueprintPreview::choosesType(const QJsonObject &node, const QString &side, const QString &portId) const {
+    return findById(operation(operationId(node))[side].toArray(), portId)["chooseType"].toBool();
+}
+
+QJsonObject BlueprintPreview::withPortType(const QJsonObject &node, const QString &side, const QString &portId,
+                                           const QString &type) const {
+    const QJsonValue schema = m_fixtures["contracts"].toObject().value(type).toObject()["schema"];
+    auto result = node;
+    auto ports = node[side].toArray();
+    for (int i = 0; i < ports.size(); ++i) {
+        auto port = ports.at(i).toObject();
+        if (port["id"].toString() != portId) continue;
+        port["type"] = type;
+        port["schema"] = schema;
+        ports.replace(i, port);
+    }
+    result[side] = ports;
+    return result;
+}
+
+QJsonObject BlueprintPreview::connectGraph(const QJsonObject &blueprint, const QJsonObject &edge, int *droppedEdges,
+                                           QString *error) const {
+    if (droppedEdges) *droppedEdges = 0;
+    if (error) error->clear();
+    const auto from = edge["from"].toString(), to = edge["to"].toString();
+    const auto out = edge["out"].toString(), in = edge["in"].toString();
+    QJsonObject graph = blueprint;
+    QJsonArray edges;
+    for (const auto &value : blueprint["edges"].toArray()) {
+        const auto existing = value.toObject();
+        if (existing["to"].toString() == to && existing["in"].toString() == in) continue;  // replaced
+        edges.append(existing);
+    }
+    auto nodes = blueprint["nodes"].toArray();
+    const auto indexOf = [&](const QString &id) {
+        for (int i = 0; i < nodes.size(); ++i)
+            if (nodes.at(i).toObject()["id"].toString() == id) return i;
+        return -1;
+    };
+    const int source = indexOf(from), target = indexOf(to);
+    if (source >= 0 && target >= 0) {
+        const auto sourceNode = nodes.at(source).toObject(), targetNode = nodes.at(target).toObject();
+        const auto sourceType = findById(sourceNode["out"].toArray(), out)["type"].toString();
+        const auto targetType = findById(targetNode["in"].toArray(), in)["type"].toString();
+        const auto contracts = m_fixtures["contracts"].toObject();
+        bool sourceWired = false;
+        for (const auto &value : edges)
+            sourceWired |= value.toObject()["from"].toString() == from && value.toObject()["out"].toString() == out;
+        QString retyped;
+        if (sourceType != targetType && !sourceType.isEmpty() && !targetType.isEmpty()) {
+            if (choosesType(targetNode, "in", in) && contracts.contains(sourceType)) {
+                nodes.replace(target, withPortType(targetNode, "in", in, sourceType));
+                retyped = to;
+            } else if (choosesType(sourceNode, "out", out) && !sourceWired && contracts.contains(targetType)) {
+                // An output that already feeds other inputs keeps its type; only a free one adopts the target's.
+                nodes.replace(source, withPortType(sourceNode, "out", out, targetType));
+                retyped = from;
+            }
+        }
+        graph["nodes"] = nodes;
+        if (!retyped.isEmpty()) {
+            for (int i = edges.size() - 1; i >= 0; --i) {
+                const auto other = edges.at(i).toObject();
+                if (other["from"].toString() != retyped && other["to"].toString() != retyped) continue;
+                auto without = edges;
+                without.removeAt(i);
+                auto probe = graph;
+                probe["edges"] = without;
+                if (connectionError(probe, other).isEmpty()) continue;
+                edges = without;
+                if (droppedEdges) ++*droppedEdges;
+            }
+        }
+    }
+    graph["edges"] = edges;
+    const auto problem = connectionError(graph, edge);
+    if (!problem.isEmpty()) {
+        if (error) *error = problem;
+        return {};
+    }
+    edges.append(edge);
+    graph["edges"] = edges;
+    return graph;
+}
+
+QString BlueprintPreview::dropError(const QJsonObject &blueprint, const QJsonObject &edge) const {
+    QString error;
+    connectGraph(blueprint, edge, nullptr, &error);
+    return error;
+}
+
 QString BlueprintPreview::connectionError(const QJsonObject &blueprint, const QJsonObject &edge) const {
     const auto from = edge["from"].toString();
     const auto to = edge["to"].toString();
