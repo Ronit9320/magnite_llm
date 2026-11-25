@@ -7,7 +7,8 @@
 #include "panels/blueprintpreview.h"
 #include "panels/chatpanel.h"
 #include "theme.h"
-#include "widgets/blueprintcanvas.h"
+#include "widgets/blueprintscene.h"
+#include "widgets/blueprintview.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -322,49 +323,27 @@ int runBlueprintChecks(const QString &captures) {
     };
     auto capture = [&](QWidget &widget, const QString &name) {
         if (captures.isEmpty()) return;
+        pump(200);  // let deferred layouts (the inspector's scroll area) settle before grabbing
         QDir().mkpath(captures);
         check(widget.grab().save(QDir(captures).filePath(name + ".png")), "saved reference capture");
     };
     const bool original = Theme::isDark();
     Theme::setDark(true);
     BlueprintPreview preview(nullptr, false);
-    {
-        BlueprintCanvas cable;
-        cable.resize(600, 250);
-        auto graph = QJsonObject{{"nodes", QJsonArray{
-            preview.makeNode("input", "first", 0, 0), preview.makeNode("output", "second", 203, 0)}}};
-        cable.setGraph(graph, preview.fixtures());
-        const auto before = cable.grab().toImage();
-        graph["edges"] = QJsonArray{edge("first", "text", "second", "value")};
-        cable.setGraph(graph, preview.fixtures());
-        const auto after = cable.grab().toImage();
-        QRect difference;
-        for (int y = 0; y < before.height(); ++y)
-            for (int x = 0; x < before.width(); ++x)
-                if (before.pixel(x, y) != after.pixel(x, y))
-                    difference = difference.united(QRect(x, y, 1, 1));
-        check(!difference.isEmpty() && difference.height() <= qCeil(4 * after.devicePixelRatio()),
-              "a short link between aligned ports stays straight");
-        bool gridVisible = false;
-        for (int y = 0; y < qCeil(30 * after.devicePixelRatio()); ++y)
-            for (int x = 0; x < qCeil(30 * after.devicePixelRatio()); ++x)
-                gridVisible |= after.pixelColor(x, y) != QColor(Theme::canvasBackground());
-        check(gridVisible, "canvas dots remain visible when the canvas contains nodes");
-    }
     BlueprintPanel panel(&preview);
     panel.resize(1120, 720);
     panel.show();
     pump();
 
     auto *create = visibleButton(panel, "Create new");
-    check(create && !panel.findChild<BlueprintCanvas *>()->isVisible(), "library starts with Create new and no open graph");
+    check(create && !panel.findChild<BlueprintView *>()->isVisible(), "library starts with Create new and no open graph");
     capture(panel, "blueprints-library-dark");
     if (create) {
         create->click();
         pump();
         auto *name = visibleNamed<QLineEdit>(panel, "Name");
         auto *submit = visibleButton(panel, "Create blueprint");
-        check(name && submit && !submit->isEnabled() && !panel.findChild<BlueprintCanvas *>()->isVisible(),
+        check(name && submit && !submit->isEnabled() && !panel.findChild<BlueprintView *>()->isVisible(),
               "Create new opens an in-workspace form and requires a name");
         if (name) name->setText("Blank workflow");
         capture(panel, "blueprints-create-dark");
@@ -376,7 +355,7 @@ int runBlueprintChecks(const QString &captures) {
           "naming a blueprint opens an empty canvas and saves it");
 
     const auto blankId = preview.saved().isEmpty() ? QString{} : preview.saved().first().toObject()["id"].toString();
-    auto *canvas = panel.findChild<BlueprintCanvas *>();
+    auto *canvas = panel.findChild<BlueprintView *>();
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
     auto *picker = visibleNamed<QDialog>(panel, "Add node picker");
@@ -426,7 +405,8 @@ int runBlueprintChecks(const QString &captures) {
         check(node["name"].toString() == "Input" && port["name"].toString() == "Payload"
                   && port["type"].toString() == "object",
               "a generic Input accepts a named and typed output without requiring a node name");
-        const QPoint center = canvas->rect().center();
+        auto *surface = canvas->viewport();
+        const QPoint center = surface->rect().center();
         bool nodeMenu = false;
         QTimer::singleShot(0, &panel, [&] {
             if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
@@ -437,10 +417,10 @@ int runBlueprintChecks(const QString &captures) {
                 menu->close();
             }
         });
-        QContextMenuEvent context(QContextMenuEvent::Mouse, center, canvas->mapToGlobal(center));
-        QCoreApplication::sendEvent(canvas, &context);
+        QContextMenuEvent context(QContextMenuEvent::Mouse, center, surface->mapToGlobal(center));
+        QCoreApplication::sendEvent(surface, &context);
         check(nodeMenu, "right-clicking a node offers configuration, rename, reuse, and deletion");
-        drag(canvas, center, QPointF(-120, -120), 80);
+        drag(surface, center, QPointF(-120, -120), 80);
         pump();
         const auto moved = preview.blueprint(blankId)["nodes"].toArray().first().toObject();
         check(moved["x"].toInt() < 0 && moved["y"].toInt() < 0,
@@ -563,32 +543,33 @@ int runBlueprintChecks(const QString &captures) {
     pump();
     check(canvas->window() != &panel && canvas->window()->isFullScreen(), "canvas opens in a native fullscreen window");
     if (canvas->isVisible()) {
-        const QPointF point = canvas->rect().center();
+        auto *surface = canvas->viewport();
+        const QPointF point = surface->rect().center();
         int percent = 0;
-        const auto observation = QObject::connect(canvas, &BlueprintCanvas::zoomChanged, &panel, [&](int value) { percent = value; });
+        const auto observation = QObject::connect(canvas, &BlueprintView::zoomChanged, &panel, [&](int value) { percent = value; });
         canvas->fit();
         const int fitted = percent;
-        QWheelEvent wheel(point, canvas->mapToGlobal(point.toPoint()), {}, QPoint(0, 120),
+        QWheelEvent wheel(point, surface->mapToGlobal(point.toPoint()), {}, QPoint(0, 120),
             Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-        QCoreApplication::sendEvent(canvas, &wheel);
+        QCoreApplication::sendEvent(surface, &wheel);
         check(wheel.isAccepted() && percent > fitted, "wheel zooms the fullscreen canvas");
         const auto before = canvas->centerInGraph();
         const auto savedBeforePan = preview.saved();
         const auto nodes = preview.example()["nodes"].toArray();
         std::optional<QPointF> background;
-        for (int y = 4; y < canvas->height() && !background; y += 12) {
-            for (int x = 4; x < canvas->width(); x += 12) {
+        for (int y = 4; y < surface->height() && !background; y += 12) {
+            for (int x = 4; x < surface->width(); x += 12) {
                 const QPointF candidate(x, y);
-                const auto position = before + (candidate - QRectF(canvas->rect()).center()) / (percent / 100.0);
+                const auto position = canvas->mapToScene(candidate.toPoint());
                 if (std::none_of(nodes.cbegin(), nodes.cend(), [&](const auto &node) {
-                    return BlueprintCanvas::nodeRect(node.toObject()).adjusted(-16, -8, 16, 8).contains(position);
+                    return BlueprintScene::nodeRect(node.toObject()).adjusted(-16, -8, 16, 8).contains(position);
                 })) {
                     background = candidate;
                     break;
                 }
             }
         }
-        if (background) drag(canvas, *background, *background + QPointF(63, 29));
+        if (background) drag(surface, *background, *background + QPointF(63, 29));
         check(background && before != canvas->centerInGraph() && savedBeforePan == preview.saved(),
               "left-dragging the background moves the camera without editing node positions");
         QObject::disconnect(observation);
@@ -789,7 +770,7 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     if (auto *open = visibleButton(panel, "Open")) open->click();
     pump();
-    check(panel.findChild<BlueprintCanvas *>()->isVisible() && visibleText(panel, "Draft"),
+    check(panel.findChild<BlueprintView *>()->isVisible() && visibleText(panel, "Draft"),
           "canvas distinguishes an unpublished draft");
     {
         // New transform nodes: built by the editor's factory, mapped by apiNode, run by the backend.
@@ -893,7 +874,7 @@ int runLiveBlueprintChecks(const QString &captures) {
     panel.resize(740, 620);
     Theme::setDark(false);
     pump();
-    check(panel.width() == 740 && panel.findChild<BlueprintCanvas *>()->isVisible(),
+    check(panel.width() == 740 && panel.findChild<BlueprintView *>()->isVisible(),
           "compact light canvas fits with reduced motion enabled");
     capture(panel, "live-canvas-compact-light");
 

@@ -5,7 +5,7 @@
 #include <QWidget>
 #include <optional>
 
-class BlueprintCanvas;
+class BlueprintView;
 class QTreeWidget;
 class BlueprintPreview;
 class Button;
@@ -63,6 +63,8 @@ private:
     void renameNode(const QString &id);
     void connectPorts(const QString &inputNode = {}, const QString &inputPort = {});
     bool addConnection(const QJsonObject &edge, QWidget *parent);
+    bool dropConnection(const QJsonObject &edge);
+    bool removeConnection(const QJsonObject &edge);
     void editBinding();
     void editLiveBinding();
     void saveTrainingRecipe();
@@ -85,8 +87,6 @@ private:
     BlueprintPreview *m_preview;
     QJsonObject m_graph;
     QString m_selected;
-    QString m_outputNode;
-    QString m_outputPort;
     QString m_runId;
     QString m_traceId;
     QString m_traceStatus;
@@ -116,7 +116,7 @@ private:
     QWidget *m_canvasPanel;
     QTreeWidget *m_nodeTree;
     QStackedWidget *m_canvasPages;
-    BlueprintCanvas *m_canvas;
+    BlueprintView *m_canvas;
     Button *m_connect;
     Button *m_addNode;
     Button *m_emptyAdd;

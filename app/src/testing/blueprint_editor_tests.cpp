@@ -1,5 +1,6 @@
 #include "testing/blueprint_editor_tests.h"
 
+#include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
 #include "testing/blueprint_test_support.h"
 #include "theme.h"
@@ -511,6 +512,120 @@ void checkConnecting(BlueprintPreview &preview) {
     key(viewport, Qt::Key_Delete);
     check(view.selection() == "cnt" && removed.isEmpty() && deletes == 1, "selecting a node deselects the wire and Delete removes the node");
 }
+bool hasEdge(const QJsonObject &graph, const QJsonObject &wanted) {
+    for (const auto &value : graph["edges"].toArray())
+        if (value.toObject() == wanted) return true;
+    return false;
+}
+
+void checkPanelCanvas(BlueprintPreview &preview) {
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    const auto example = preview.example();
+    const auto id = example["id"].toString();
+    preview.saveBlueprint(example);
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>()) {
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Order intake")) {
+            button->click();
+            break;
+        }
+    }
+    pump(100);
+    const auto before = preview.saved();
+    auto *view = panel.findChild<BlueprintView *>();
+    check(view && view->isVisible(), "the editor shows the graphics canvas");
+    if (!view || !view->isVisible()) return;
+    view->fit();
+    const QPointF centre(view->viewport()->width() / 2.0, view->viewport()->height() / 2.0);
+    wheel(view->viewport(), centre, 120);
+    std::optional<QPointF> empty;
+    for (int y = 4; y < view->viewport()->height() && !empty; y += 12)
+        for (int x = 4; x < view->viewport()->width(); x += 12)
+            if (view->items(QPoint(x, y)).isEmpty()) {
+                empty = QPointF(x, y);
+                break;
+            }
+    if (empty) drag(view->viewport(), *empty, *empty + QPointF(40, 20));
+    pump(200);
+    check(empty && preview.saved() == before, "opening, fitting, zooming and panning never re-save the graph");
+    view->fit();
+    pump();
+    const auto fitted = view->centerInGraph();
+    view->revealNode(example["nodes"].toArray().first().toObject()["id"].toString());
+    check(view->centerInGraph() == fitted, "revealing a node that is already in view keeps the camera");
+
+    // The example's nodes abut, stacking each input pin over the output pin beside it; move the first
+    // node aside (a user edit) so its output can be picked up on its own.
+    view->fit();
+    pump();
+    const auto first = example["nodes"].toArray().first().toObject()["id"].toString();
+    if (auto *item = view->graphScene()->node(first)) {
+        const QPointF centre = viewPoint(*view, item->sceneBoundingRect().center());
+        drag(view->viewport(), centre, centre - QPointF(120, 0), 30);
+        pump();
+    }
+    view->fit();
+    pump();
+    // An output that can replace an existing wire on its (occupied) input without dropping other wires,
+    // at view points where each pin is the top-most item.
+    const auto hitPoint = [&](const QString &node, bool output, const QString &port) -> std::optional<QPointF> {
+        auto *item = view->graphScene()->node(node);
+        auto *pin = item ? item->pin(output, port) : nullptr;
+        if (!pin) return std::nullopt;
+        const QPointF anchor = viewPoint(*view, pin->anchor());
+        for (auto *hit : view->items(anchor.toPoint()))
+            if (auto *top = dynamic_cast<PinItem *>(hit)) return top == pin ? std::optional(anchor) : std::nullopt;
+        return std::nullopt;
+    };
+    const auto graph = preview.blueprint(id);
+    QJsonObject replaced, added;
+    std::optional<QPointF> from, to;
+    for (const auto &edgeValue : graph["edges"].toArray()) {
+        const auto existing = edgeValue.toObject();
+        for (const auto &nodeValue : graph["nodes"].toArray()) {
+            const auto node = nodeValue.toObject();
+            for (const auto &portValue : node["out"].toArray()) {
+                const auto candidate = edge(node["id"].toString(), portValue.toObject()["id"].toString(),
+                                            existing["to"].toString(), existing["in"].toString());
+                if (candidate["from"] == existing["from"] && candidate["out"] == existing["out"]) continue;
+                int dropped = -1;
+                if (preview.connectGraph(graph, candidate, &dropped).isEmpty() || dropped != 0) continue;
+                from = hitPoint(candidate["from"].toString(), true, candidate["out"].toString());
+                to = hitPoint(candidate["to"].toString(), false, candidate["in"].toString());
+                if (!from || !to) continue;
+                replaced = existing;
+                added = candidate;
+                break;
+            }
+            if (!added.isEmpty()) break;
+        }
+        if (!added.isEmpty()) break;
+    }
+    check(!added.isEmpty(), "the example has an occupied input another output can replace");
+    if (added.isEmpty()) return;
+    drag(view->viewport(), *from, *to);
+    pump(50);
+    const auto connected = preview.blueprint(id);
+    check(hasEdge(connected, added) && !hasEdge(connected, replaced)
+              && connected["edges"].toArray().size() == graph["edges"].toArray().size(),
+          "dropping on an occupied input replaces its wire in the saved graph");
+
+    WireItem *wire = nullptr;
+    for (auto *item : view->graphScene()->wires())
+        if (item->edge() == added) wire = item;
+    check(wire, "the new wire is on the canvas");
+    if (!wire) return;
+    click(view->viewport(), viewPoint(*view, wire->path().pointAtPercent(0.5)));
+    key(view->viewport(), Qt::Key_Delete);
+    pump(50);
+    const auto removed = preview.blueprint(id);
+    check(!hasEdge(removed, added) && removed["edges"].toArray().size() == graph["edges"].toArray().size() - 1,
+          "Delete removes the selected wire from the saved graph");
+    preview.deleteBlueprint(id);
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
@@ -523,6 +638,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkScene(preview);
     checkView(preview);
     checkConnecting(preview);
+    checkPanelCanvas(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

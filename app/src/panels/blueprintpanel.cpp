@@ -5,7 +5,9 @@
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
-#include "widgets/blueprintcanvas.h"
+#include "widgets/blueprintscene.h"
+#include "widgets/blueprintstyle.h"
+#include "widgets/blueprintview.h"
 #include "widgets/brandmark.h"
 #include "widgets/button.h"
 #include "widgets/combobox.h"
@@ -433,7 +435,7 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     });
     connect(m_preview, &BlueprintPreview::optionsChanged, this, [this] {
         if (!m_graph.isEmpty()) {
-            m_canvas->setGraph(m_graph, m_preview->fixtures());
+            m_canvas->setGraph(m_graph);
             refreshRunOptions();
         }
     });
@@ -804,8 +806,6 @@ void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     if (m_graph.isEmpty()) return;
     const auto nodes = m_graph["nodes"].toArray();
     m_selected = nodes.isEmpty() ? QString{} : nodes.first().toObject()["id"].toString();
-    m_outputNode.clear();
-    m_outputPort.clear();
     const auto recent = m_preview->runs(id);
     m_runId = recent.isEmpty() ? QString{} : recent.first().toObject()["id"].toString();
     m_comparison = false;
@@ -891,7 +891,8 @@ void BlueprintPanel::setupEditor() {
 
     m_canvasPages = new QStackedWidget;
     body->addWidget(m_canvasPages, 1);
-    m_canvas = new BlueprintCanvas;
+    m_canvas = new BlueprintView(*m_preview);
+    m_canvas->setDropValidator([this](const QJsonObject &e) { return m_preview->dropError(m_graph, e); });
     m_canvasPages->addWidget(m_canvas);
     auto *empty = new QWidget;
     empty->setObjectName("blueprintEmptyCanvas");
@@ -965,10 +966,10 @@ void BlueprintPanel::setupEditor() {
         refreshInspector();
     });
 
-    connect(m_canvas, &BlueprintCanvas::zoomChanged, this, [this](int percent) { m_zoom->setText(QString("%1%").arg(percent)); });
+    connect(m_canvas, &BlueprintView::zoomChanged, this, [this](int percent) { m_zoom->setText(QString("%1%").arg(percent)); });
     connect(minus, &Button::clicked, this, [this] { m_canvas->zoomBy(1 / 1.2); });
     connect(plus, &Button::clicked, this, [this] { m_canvas->zoomBy(1.2); });
-    connect(fit, &Button::clicked, m_canvas, &BlueprintCanvas::fit);
+    connect(fit, &Button::clicked, m_canvas, &BlueprintView::fit);
     connect(m_validation, &Button::clicked, this, [this] {
         if (m_preview->live()) {
             m_preview->validateLive(m_graph, [self = QPointer(this)](const auto &caps, const auto &error) {
@@ -991,13 +992,13 @@ void BlueprintPanel::setupEditor() {
         Ui::showNotice(this, "Workflow validation", issues.isEmpty()
             ? QString("The workflow has compatible bindings and connected inputs.") : issues.join('\n'));
     });
-    connect(m_canvas, &BlueprintCanvas::nodeSelected, this, [this](const QString &id) {
+    connect(m_canvas, &BlueprintView::nodeSelected, this, [this](const QString &id) {
         m_selected = id;
         refreshInspector();
     });
-    connect(m_canvas, &BlueprintCanvas::nodeMenuRequested, this, &BlueprintPanel::showNodeMenu);
-    connect(m_canvas, &BlueprintCanvas::deleteRequested, this, &BlueprintPanel::removeNode);
-    connect(m_canvas, &BlueprintCanvas::nodeMoved, this, [this](const QString &id, const QPoint &position) {
+    connect(m_canvas, &BlueprintView::nodeMenuRequested, this, &BlueprintPanel::showNodeMenu);
+    connect(m_canvas, &BlueprintView::deleteRequested, this, &BlueprintPanel::removeNode);
+    connect(m_canvas, &BlueprintView::nodeMoved, this, [this](const QString &id, const QPoint &position) {
         if (m_preview->live()) {
             auto graph = m_graph;
             auto nodes = graph["nodes"].toArray();
@@ -1021,19 +1022,15 @@ void BlueprintPanel::setupEditor() {
         node["y"] = position.y();
         changeNode(node);
     });
-    connect(m_canvas, &BlueprintCanvas::portSelected, this, [this](const QString &node, bool output, const QString &port) {
-        if (output) {
-            if (m_outputNode == node && m_outputPort == port) {
-                m_outputNode.clear();
-                m_outputPort.clear();
-            } else {
-                m_outputNode = node;
-                m_outputPort = port;
-            }
-            refreshInspector();
-        } else if (m_outputNode.isEmpty()) connectPorts(node, port);
-        else addConnection({{"from", m_outputNode}, {"out", m_outputPort}, {"to", node}, {"in", port}}, m_canvasPanel);
-    });
+    connect(m_canvas, &BlueprintView::connectRequested, this, &BlueprintPanel::dropConnection);
+    connect(m_canvas, &BlueprintView::disconnectRequested, this, &BlueprintPanel::removeConnection);
+    // The quick-add popup replaces the node picker for these in a later task.
+    connect(m_canvas, &BlueprintView::wireDropped, this,
+            [this](const QString &, const QString &, const QPoint &, const QPointF &graph) { openNodePicker(graph); });
+    connect(m_canvas, &BlueprintView::quickAddRequested, this,
+            [this](const QPoint &, const QPointF &graph) { openNodePicker(graph); });
+    connect(m_canvas, &BlueprintView::canvasMenuRequested, this,
+            [this](const QPoint &, const QPointF &graph) { openNodePicker(graph); });
     refreshCanvasActions();
 }
 
@@ -1062,7 +1059,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
     const auto fixtures = m_preview->fixtures();
     const auto nodes = m_graph["nodes"].toArray();
     m_canvasPages->setCurrentIndex(nodes.isEmpty() ? 1 : 0);
-    m_canvas->setGraph(m_graph, fixtures);
+    m_canvas->setGraph(m_graph);
     if (fit) m_canvas->fit();
     m_connect->setVisible(!nodes.isEmpty());
     m_connect->setEnabled(nodes.size() > 1);
@@ -1093,7 +1090,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
 }
 
 void BlueprintPanel::refreshInspector() {
-    m_canvas->setSelection(m_selected, m_outputNode, m_outputPort);
+    m_canvas->setSelection(m_selected);
     clear(m_inspector);
     auto *header = new QHBoxLayout;
     header->addWidget(label("Node inspector", "headingLabel"), 1);
@@ -1118,7 +1115,6 @@ void BlueprintPanel::refreshInspector() {
             }
         }
     }
-    if (!m_outputNode.isEmpty()) m_inspector->addWidget(wrapped("Select a matching input port."));
     const auto node = findById(nodes, m_selected);
     if (node.isEmpty()) {
         m_inspector->addWidget(wrapped("Select a node to see its settings and contracts."));
@@ -1136,7 +1132,7 @@ void BlueprintPanel::refreshInspector() {
     icon->setFixedSize(34, 34);
     icon->setAlignment(Qt::AlignCenter);
     icon->setObjectName("blueprintNodeIcon");
-    icon->setPixmap(Theme::coloredIcon(BlueprintCanvas::nodeIcon(iconKind), BlueprintCanvas::nodeAccent(iconKind), 19).pixmap(19, 19));
+    icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(iconKind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(iconKind)), 19).pixmap(19, 19));
     identity->addWidget(icon);
     auto *names = new QVBoxLayout;
     names->setSpacing(3);
@@ -1292,8 +1288,6 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
             if (removed && !Ui::confirmAction(m_canvasPanel, "Update node",
                     QString("This change will remove %1.").arg(countOf(removed, "incompatible connection")), "Save changes")) return;
             graph["edges"] = retained;
-            m_outputNode.clear();
-            m_outputPort.clear();
         }
         if (!saveGraph(graph)) refreshEditor();
         return;
@@ -1316,7 +1310,7 @@ void BlueprintPanel::refreshNodeTree() {
         const auto kind = node["kind"].toString();
         auto *item = new QTreeWidgetItem(m_nodeTree, {node["name"].toString()});
         item->setData(0, Qt::UserRole, id);
-        item->setIcon(0, Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind), 15));
+        item->setIcon(0, Theme::coloredIcon(BlueprintStyle::nodeIcon(kind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(kind)), 15));
         nodes.insert(id, node);
         items.insert(id, item);
     }
@@ -1389,7 +1383,7 @@ void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
         header->setSpacing(iconGap);
         auto *icon = label({});
         icon->setFixedSize(iconSize, iconSize);
-        icon->setPixmap(Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind),
+        icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(kind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(kind)),
                                            iconSize).pixmap(iconSize, iconSize));
         auto *name = label(title, "headingLabel");
         name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -1505,7 +1499,7 @@ void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
         } else {
             node["id"] = BlueprintPreview::id();
         }
-        const auto size = BlueprintCanvas::nodeRect(node).size();
+        const auto size = BlueprintScene::nodeRect(node).size();
         const auto point = (position.value_or(m_canvas->centerInGraph()) - QPointF(size.width(), size.height()) / 2).toPoint();
         node["x"] = point.x();
         node["y"] = point.y();
@@ -1541,12 +1535,12 @@ void BlueprintPanel::addNode(const QJsonObject &source) {
     auto graph = m_graph;
     auto nodes = graph["nodes"].toArray();
     auto node = source;
-    auto bounds = BlueprintCanvas::nodeRect(node);
+    auto bounds = BlueprintScene::nodeRect(node);
     const auto start = bounds.topLeft();
     qreal rowHeight = bounds.height();
     QList<QRectF> occupied;
     for (const auto &value : nodes) {
-        const auto box = BlueprintCanvas::nodeRect(value.toObject());
+        const auto box = BlueprintScene::nodeRect(value.toObject());
         rowHeight = qMax(rowHeight, box.height());
         occupied.append(box.adjusted(-18, -18, 18, 18));
     }
@@ -1583,10 +1577,6 @@ void BlueprintPanel::removeNode(const QString &id) {
     graph["edges"] = edges;
     if (!saveGraph(graph)) return;
     if (m_selected == id) m_selected.clear();
-    if (m_outputNode == id) {
-        m_outputNode.clear();
-        m_outputPort.clear();
-    }
     refreshInspector();
 }
 
@@ -1606,7 +1596,7 @@ void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPositio
     QMenu menu(m_canvasPanel);
     if (node.isEmpty()) {
         menu.addAction("Add node…", this, [this, graphPosition] { openNodePicker(graphPosition); });
-        menu.addAction("Fit canvas", m_canvas, &BlueprintCanvas::fit);
+        menu.addAction("Fit canvas", m_canvas, &BlueprintView::fit);
         menu.exec(screenPosition);
         return;
     }
@@ -1668,7 +1658,7 @@ void BlueprintPanel::connectPorts(const QString &inputNode, const QString &input
             }
         }
     };
-    addPorts(out, "out", m_outputNode, m_outputPort);
+    addPorts(out, "out", {}, {});
     addPorts(in, "in", inputNode, inputPort);
     Surface::field(body, "Output port", out);
     Surface::field(body, "Input port", in);
@@ -1698,12 +1688,10 @@ void BlueprintPanel::connectPorts(const QString &inputNode, const QString &input
     body->addWidget(remove, 0, Qt::AlignLeft);
     connect(existing, &QListWidget::currentRowChanged, &dialog, [remove](int row) { remove->setEnabled(row >= 0); });
     connect(remove, &Button::clicked, &dialog, [&] {
-        if (existing->currentRow() < 0) return;
-        auto graph = m_graph;
-        auto edges = graph["edges"].toArray();
-        edges.removeAt(existing->currentRow());
-        graph["edges"] = edges;
-        if (saveGraph(graph)) refresh();
+        const int row = existing->currentRow();
+        const auto edges = m_graph["edges"].toArray();
+        if (row < 0 || row >= edges.size()) return;
+        if (removeConnection(edges.at(row).toObject())) refresh();
     });
     auto *buttons = dialogButtons(&dialog, body, "Connect");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
@@ -1728,9 +1716,46 @@ bool BlueprintPanel::addConnection(const QJsonObject &edge, QWidget *parent) {
     auto edges = graph["edges"].toArray();
     edges.append(edge);
     graph["edges"] = edges;
-    m_outputNode.clear();
-    m_outputPort.clear();
     return saveGraph(graph);
+}
+
+bool BlueprintPanel::dropConnection(const QJsonObject &edge) {
+    int dropped = 0;
+    QString error;
+    const auto graph = m_preview->connectGraph(m_graph, edge, &dropped, &error);
+    if (graph.isEmpty()) {
+        Ui::showNotice(m_canvasPanel, "Connect ports", error);
+        refreshEditor();
+        return false;
+    }
+    if (dropped > 0 && !Ui::confirmAction(m_canvasPanel, "Update node",
+            QString("This change will remove %1.").arg(countOf(dropped, "incompatible connection")), "Save changes")) {
+        refreshEditor();
+        return false;
+    }
+    if (saveGraph(graph)) return true;
+    refreshEditor();
+    return false;
+}
+
+bool BlueprintPanel::removeConnection(const QJsonObject &edge) {
+    auto graph = m_graph;
+    QJsonArray edges;
+    bool found = false;
+    for (const auto &value : graph["edges"].toArray()) {
+        const auto existing = value.toObject();
+        if (!found && existing["from"] == edge["from"] && existing["out"] == edge["out"]
+                && existing["to"] == edge["to"] && existing["in"] == edge["in"]) {
+            found = true;
+            continue;
+        }
+        edges.append(existing);
+    }
+    if (!found) return false;
+    graph["edges"] = edges;
+    if (saveGraph(graph)) return true;
+    refreshEditor();
+    return false;
 }
 
 void BlueprintPanel::editBinding() {

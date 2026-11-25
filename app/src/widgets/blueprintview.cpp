@@ -60,6 +60,12 @@ QPointF BlueprintView::centerInGraph() const {
     return mapToScene(QPoint(viewport()->width() / 2, viewport()->height() / 2));
 }
 
+BlueprintView::~BlueprintView() {
+    // The scene is a child, so it is cleared after this object's members are gone; its last
+    // selectionChanged must not reach the half-destroyed view.
+    m_scene->disconnect(this);
+}
+
 void BlueprintView::setGraph(const QJsonObject &graph) {
     const QString previous = m_selected;
     cancelConnect();
@@ -83,6 +89,8 @@ void BlueprintView::setGraph(const QJsonObject &graph) {
 QString BlueprintView::selection() const { return m_selected; }
 
 void BlueprintView::setSelection(const QString &nodeId) {
+    // Callers echo nodeSelected back; an unchanged node selection keeps a selected wire.
+    if (nodeId == m_selected) return;
     m_quiet = true;
     m_scene->clearSelection();
     m_selected.clear();
@@ -166,10 +174,13 @@ void BlueprintView::panBy(const QPointF &viewDelta) {
 }
 
 void BlueprintView::revealNode(const QString &id) {
-    if (auto *item = m_scene->node(id)) {
-        m_autoFit = false;
-        centerOn(QRectF(item->pos(), NodeItem::sizeFor(item->node())).center());
-    }
+    auto *item = m_scene->node(id);
+    if (!item) return;
+    const QRectF box(item->pos(), NodeItem::sizeFor(item->node()));
+    // Only move the camera when the node is not already fully in view.
+    if (mapToScene(viewport()->rect().adjusted(5, 5, -5, -5)).boundingRect().contains(box)) return;
+    m_autoFit = false;
+    centerOn(box.center());
 }
 
 void BlueprintView::setRunStates(const QHash<QString, QString> &statusByNode, const QString &activeNode) {

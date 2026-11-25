@@ -17,6 +17,7 @@ class BlueprintView : public QGraphicsView {
     Q_OBJECT
 public:
     explicit BlueprintView(const BlueprintPreview &preview, QWidget *parent = nullptr);
+    ~BlueprintView() override;
 
     BlueprintScene *graphScene() const { return m_scene; }
     void setGraph(const QJsonObject &graph);
