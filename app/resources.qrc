@@ -49,6 +49,7 @@
         <file alias="icons/message-circle.svg">resources/icons/message-circle.svg</file>
         <file alias="icons/play.svg">resources/icons/play.svg</file>
         <file alias="icons/plus.svg">resources/icons/plus.svg</file>
+        <file alias="icons/minus.svg">resources/icons/minus.svg</file>
         <file alias="icons/refresh-cw.svg">resources/icons/refresh-cw.svg</file>
         <file alias="icons/search.svg">resources/icons/search.svg</file>
         <file alias="icons/chevron-up.svg">resources/icons/chevron-up.svg</file>

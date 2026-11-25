@@ -659,6 +659,8 @@ QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
 QWidget#blueprintStepDetail { background: @surfaceFill; }
 QPushButton#blueprintFullscreen { padding: 0; }
 QGraphicsView#blueprintView { background: @canvasBackground; border: none; }
+/* Floating panels paint their own fill (@blueprintPanelFill) and shadow; no border. */
+QFrame#blueprintFloating { background: transparent; border: none; }
 QLabel#blueprintDropMessage { color: @textPrimary; background: @blueprintPanelFill; border: 1px solid @statusError; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
 QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
 QFrame#blueprintCreateForm { background: @surfaceFill; border: none; border-radius: 8px; }

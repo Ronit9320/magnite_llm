@@ -1,12 +1,16 @@
 #include "widgets/blueprintview.h"
 
 #include "theme.h"
+#include "widgets/blueprintminimap.h"
+#include "widgets/button.h"
+#include "widgets/floatingpanel.h"
 #include "widgets/blueprintstyle.h"
 
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QCursor>
 #include <QGraphicsPathItem>
+#include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
@@ -52,6 +56,113 @@ BlueprintView::BlueprintView(const BlueprintPreview &preview, QWidget *parent)
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
     setCacheMode(QGraphicsView::CacheBackground);
     connect(m_scene, &QGraphicsScene::selectionChanged, this, &BlueprintView::onSelectionChanged);
+    buildDock();
+    addOverlay(new BlueprintMinimap(this), OverlayEdge::BottomRight);
+}
+
+void BlueprintView::buildDock() {
+    auto *dock = new FloatingPanel;
+    dock->setObjectName("blueprintDock");
+    auto *row = new QHBoxLayout(dock);
+    row->setContentsMargins(dock->contentsMargins());
+    row->setSpacing(2);
+    auto iconButton = [dock, row](const QString &icon, const QString &name) {
+        auto *button = new Button(dock);
+        button->setFlat(true);
+        button->setObjectName("blueprintIconButton");
+        button->setAccessibleName(name);
+        button->setToolTip(name);
+        button->setFixedSize(32, 32);
+        button->setProperty("themeIcon", icon);
+        button->setIcon(Theme::coloredIcon(icon, QColor(Theme::textSecondary()), 16));
+        row->addWidget(button);
+        return button;
+    };
+    auto *library = iconButton("layers", "Show node library");
+    library->setCheckable(true);
+    auto *add = new Button("Add node", dock);
+    add->setFlat(true);
+    add->setAccessibleName("Add node");
+    add->setIcon(Theme::coloredIcon("plus", QColor(Theme::textSecondary()), 16));
+    add->setProperty("themeIcon", "plus");
+    row->addWidget(add);
+    row->addSpacing(6);
+    auto *out = iconButton("minus", "Zoom out");
+    m_zoomLabel = new QLabel("100%", dock);
+    m_zoomLabel->setObjectName("blueprintCode");
+    m_zoomLabel->setAccessibleName("Zoom level");
+    m_zoomLabel->setAlignment(Qt::AlignCenter);
+    m_zoomLabel->setMinimumWidth(44);
+    row->addWidget(m_zoomLabel);
+    auto *in = iconButton("plus", "Zoom in");
+    auto *fitButton = iconButton("expand", "Fit graph");
+    connect(library, &QAbstractButton::toggled, this, &BlueprintView::libraryToggled);
+    connect(add, &QAbstractButton::clicked, this, &BlueprintView::addNodeClicked);
+    connect(out, &QAbstractButton::clicked, this, [this] { zoomBy(1 / 1.2); });
+    connect(in, &QAbstractButton::clicked, this, [this] { zoomBy(1.2); });
+    connect(fitButton, &QAbstractButton::clicked, this, &BlueprintView::fit);
+    connect(this, &BlueprintView::zoomChanged, m_zoomLabel, [this](int percent) { m_zoomLabel->setText(QString("%1%").arg(percent)); });
+    addOverlay(dock, OverlayEdge::Bottom);
+}
+
+void BlueprintView::addOverlay(QWidget *widget, OverlayEdge edge, int margin) {
+    widget->setParent(this);
+    widget->installEventFilter(this);
+    m_overlays.append({widget, edge, margin});
+    widget->show();  // overlays start visible; hide() one to take it out of the layout
+    placeOverlays();
+}
+
+QRect BlueprintView::freeArea() const {
+    QRect area = viewport()->geometry();
+    for (const auto &overlay : m_overlays) {
+        if (!overlay.widget->isVisibleTo(this)) continue;
+        const QRect box = overlay.widget->geometry();
+        if (overlay.edge == OverlayEdge::Left) area.setLeft(qMax(area.left(), box.right() + overlay.margin + 1));
+        if (overlay.edge == OverlayEdge::Right) area.setRight(qMin(area.right(), box.left() - overlay.margin - 1));
+    }
+    return area;
+}
+
+void BlueprintView::placeOverlays() {
+    if (m_placing) return;
+    m_placing = true;
+    const QRect area = viewport()->geometry();
+    for (const auto &overlay : m_overlays) {
+        QWidget *w = overlay.widget;
+        if (w->isHidden() && w->testAttribute(Qt::WA_WState_ExplicitShowHide)) continue;  // hidden on purpose
+        // A panel's body sits margin pixels from the edge; its shadow extends beyond that.
+        const int pad = qobject_cast<FloatingPanel *>(w) ? FloatingPanel::shadowMargin() : 0;
+        const int m = overlay.margin - pad;
+        const bool side = overlay.edge == OverlayEdge::Left || overlay.edge == OverlayEdge::Right;
+        QSize size = w->sizeHint().expandedTo(w->minimumSizeHint()).expandedTo(w->minimumSize());
+        if (w->minimumSize() == w->maximumSize()) size = w->minimumSize();
+        if (side) size.setHeight(area.height() - 2 * m);
+        QPoint at;
+        switch (overlay.edge) {
+        case OverlayEdge::TopLeft: case OverlayEdge::Left: case OverlayEdge::BottomLeft: at.setX(area.left() + m); break;
+        case OverlayEdge::TopRight: case OverlayEdge::Right: case OverlayEdge::BottomRight: at.setX(area.right() + 1 - m - size.width()); break;
+        default: at.setX(area.left() + (area.width() - size.width()) / 2); break;
+        }
+        switch (overlay.edge) {
+        case OverlayEdge::TopLeft: case OverlayEdge::Top: case OverlayEdge::TopRight: at.setY(area.top() + m); break;
+        case OverlayEdge::BottomLeft: case OverlayEdge::Bottom: case OverlayEdge::BottomRight: at.setY(area.bottom() + 1 - m - size.height()); break;
+        default: at.setY(area.top() + m); break;
+        }
+        w->setGeometry(QRect(at, size));
+        w->raise();
+    }
+    m_placing = false;
+}
+
+bool BlueprintView::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::LayoutRequest)
+        for (const auto &overlay : m_overlays)
+            if (overlay.widget == watched) {
+                QMetaObject::invokeMethod(this, [this] { placeOverlays(); }, Qt::QueuedConnection);
+                break;
+            }
+    return QGraphicsView::eventFilter(watched, event);
 }
 
 int BlueprintView::zoomPercent() const { return qRound(zoom() * 100); }
@@ -170,6 +281,11 @@ void BlueprintView::zoomBy(qreal factor) {
     zoomAt(factor, QPointF(viewport()->width() / 2.0, viewport()->height() / 2.0));
 }
 
+void BlueprintView::centerAt(const QPointF &graphPoint) {
+    m_autoFit = false;
+    centerOn(graphPoint);
+}
+
 void BlueprintView::panBy(const QPointF &viewDelta) {
     m_autoFit = false;
     centerOn(centerInGraph() - viewDelta / zoom());
@@ -217,6 +333,7 @@ void BlueprintView::drawBackground(QPainter *painter, const QRectF &rect) {
 
 void BlueprintView::resizeEvent(QResizeEvent *event) {
     QGraphicsView::resizeEvent(event);
+    placeOverlays();
     if (m_autoFit) fit();
 }
 

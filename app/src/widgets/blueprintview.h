@@ -5,12 +5,19 @@
 #include <QGraphicsView>
 #include <QHash>
 #include <QJsonObject>
+#include <QList>
 #include <functional>
 
+class BlueprintMinimap;
 class BlueprintPreview;
+class Button;
+class FloatingPanel;
 class QGraphicsPathItem;
 class QLabel;
 class QTimer;
+
+// Where an overlay widget sits on the view.
+enum class OverlayEdge { TopLeft, Top, TopRight, Left, Right, BottomLeft, Bottom, BottomRight };
 
 // The Blueprints canvas: camera (pan, zoom, fit), selection, node moving and the outward signals.
 class BlueprintView : public QGraphicsView {
@@ -28,6 +35,13 @@ public:
     int zoomPercent() const;
     void revealNode(const QString &id);
     QPointF centerInGraph() const;
+    // Moves the camera to a graph point; like panning, it ends automatic fitting.
+    void centerAt(const QPointF &graphPoint);
+    // Pins a widget over the canvas, margin pixels from its edge. Left and Right overlays are as tall as
+    // the view; panels are inset by their shadow. Overlays follow resizes and their own show, hide and layout.
+    void addOverlay(QWidget *widget, OverlayEdge edge, int margin = 12);
+    // The viewport minus the visible Left and Right overlays.
+    QRect freeArea() const;
     void setRunStates(const QHash<QString, QString> &statusByNode, const QString &activeNode);
     void clearRunStates();
     // Returns why an edge cannot be dropped, or an empty string when it can.
@@ -37,6 +51,8 @@ public:
 
 signals:
     void zoomChanged(int percent);
+    void libraryToggled(bool shown);
+    void addNodeClicked();
     void nodeSelected(const QString &id);
     void nodeMenuRequested(const QString &id, const QPoint &screenPosition, const QPointF &graphPosition);
     void canvasMenuRequested(const QPoint &screenPosition, const QPointF &graphPosition);
@@ -61,6 +77,7 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     bool event(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void changeEvent(QEvent *event) override;
 
 private:
@@ -76,9 +93,19 @@ private:
     void cancelConnect();
     void showDropMessage(const QString &text, const QPointF &scenePosition);
     void selectWire(WireItem *wire);
+    struct Overlay {
+        QWidget *widget;
+        OverlayEdge edge;
+        int margin;
+    };
+    void placeOverlays();
+    void buildDock();
     qreal zoom() const { return transform().m11(); }
 
     BlueprintScene *m_scene;
+    QList<Overlay> m_overlays;
+    bool m_placing = false;
+    QLabel *m_zoomLabel = nullptr;
     QString m_selected;
     QHash<QString, QString> m_status;
     QString m_activeNode;

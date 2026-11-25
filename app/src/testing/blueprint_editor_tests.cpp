@@ -4,9 +4,11 @@
 #include "panels/blueprintpreview.h"
 #include "testing/blueprint_test_support.h"
 #include "theme.h"
+#include "widgets/blueprintminimap.h"
 #include "widgets/blueprintscene.h"
 #include "widgets/blueprintstyle.h"
 #include "widgets/blueprintview.h"
+#include "widgets/floatingpanel.h"
 
 #include <QContextMenuEvent>
 #include <QLineEdit>
@@ -235,7 +237,7 @@ void checkView(BlueprintPreview &preview) {
     QPointF addAt;
     QObject::connect(&view, &BlueprintView::quickAddRequested, [&](const QPoint &, const QPointF &g) { ++adds; addAt = g; });
     key(view.viewport(), Qt::Key_Space, {}, " ");
-    key(view.viewport(), Qt::Key_Tab);
+    key(&view, Qt::Key_Tab);  // the focused widget is the view; the dock's buttons make the viewport path a focus move
     check(adds == 2, "Space and Tab ask for quick add");
     if (empty) {
         QMouseEvent dbl(QEvent::MouseButtonDblClick, *empty, view.viewport()->mapToGlobal(empty->toPoint()),
@@ -296,10 +298,13 @@ void checkView(BlueprintPreview &preview) {
         int innerAdds = 0;
         QObject::connect(&inner, &BlueprintView::quickAddRequested, [&](const QPoint &, const QPointF &) { ++innerAdds; });
         inner.setFocus();
-        key(inner.viewport(), Qt::Key_Tab, Qt::ControlModifier);
-        check(innerAdds == 0 && host.focusWidget() == after, "Ctrl+Tab moves focus forward out of the canvas");
+        key(&inner, Qt::Key_Tab, Qt::ControlModifier);
+        const bool inDock = host.focusWidget() && host.focusWidget() != &inner && inner.isAncestorOf(host.focusWidget());
+        check(innerAdds == 0 && inDock, "Ctrl+Tab moves focus forward off the canvas into the dock");
+        for (int i = 0; i < 12 && host.focusWidget() != after; ++i) key(host.focusWidget(), Qt::Key_Tab);
+        check(host.focusWidget() == after, "the dock leads on to the next widget");
         inner.setFocus();
-        key(inner.viewport(), Qt::Key_Backtab, Qt::ShiftModifier);
+        key(&inner, Qt::Key_Backtab, Qt::ShiftModifier);
         check(innerAdds == 0 && host.focusWidget() == before, "Shift+Tab moves focus back out of the canvas");
         check(inner.accessibleDescription().contains("Control+Tab") && inner.accessibleDescription().contains("Shift+Tab"),
               "the accessible description names the focus keys");
@@ -719,6 +724,80 @@ void checkPanelCanvas(BlueprintPreview &preview) {
     } else check(false, "the decline check graph opens in the editor");
     preview.deleteBlueprint("move-decline");
 }
+
+void checkOverlays(BlueprintPreview &preview) {
+    BlueprintView view(preview);
+    view.resize(900, 600);
+    view.show();
+    view.setGraph(preview.example());
+    pump(50);
+    const QStringList names = {"Add node", "Zoom in", "Zoom out", "Fit graph", "Show node library"};
+    bool all = true;
+    for (const auto &name : names) all &= visibleButton(view, name) != nullptr;
+    check(all, "the bottom dock carries add, zoom and fit");
+    check(!visibleButton(view, "Undo") && !visibleButton(view, "Redo"), "the dock has no undo or redo buttons");
+
+    auto *mini = view.findChild<BlueprintMinimap *>();
+    const QRect viewport = view.viewport()->geometry();
+    check(mini && mini->isVisible() && mini->size() == QSize(180, 112)
+              && (viewport.bottomRight() - mini->geometry().bottomRight()).manhattanLength() <= 32
+              && viewport.right() - mini->geometry().right() <= 16 && viewport.bottom() - mini->geometry().bottom() <= 16,
+          "the minimap sits in the bottom-right corner");
+    FloatingPanel *dock = nullptr;
+    for (auto *panel : view.findChildren<FloatingPanel *>())
+        if (panel->isVisible()) dock = panel;
+    const int shadow = FloatingPanel::shadowMargin();
+    check(dock && qAbs(dock->geometry().center().x() - viewport.center().x()) <= 1
+              && qAbs(viewport.bottom() - dock->geometry().adjusted(shadow, shadow, -shadow, -shadow).bottom() - 12) <= 1,
+          "the dock is centred along the bottom edge");
+
+    const auto c0 = view.centerInGraph();
+    if (mini) click(mini, QPointF(10, 10));
+    check(view.centerInGraph() != c0, "clicking the minimap moves the view");
+    const int before = view.zoomPercent();
+    if (auto *in = visibleButton(view, "Zoom in")) in->click();
+    check(view.zoomPercent() > before, "Zoom in zooms");
+    if (auto *out = visibleButton(view, "Zoom out")) out->click();
+    check(view.zoomPercent() == before, "Zoom out undoes it");
+    auto *label = visibleNamed<QLabel>(view, "Zoom level");
+    check(label && label->text() == QString("%1%").arg(view.zoomPercent()), "the dock shows the zoom percentage");
+
+    bool toggled = false, added = false;
+    QObject::connect(&view, &BlueprintView::libraryToggled, [&](bool on) { toggled = on; });
+    QObject::connect(&view, &BlueprintView::addNodeClicked, [&] { added = true; });
+    if (auto *library = visibleButton(view, "Show node library")) library->click();
+    if (auto *add = visibleButton(view, "Add node")) add->click();
+    check(toggled && added, "the library toggle and Add node report to the view's signals");
+
+    // No border: sample just inside the panel's top edge, away from rounded corners.
+    if (dock) {
+        const QImage image = dock->grab().toImage();
+        const int margin = FloatingPanel::shadowMargin();
+        const QColor fill(Theme::blueprintPanelFill());
+        const QPoint edge(image.width() / 2, margin + 1);
+        const QPoint outside(image.width() / 2, margin - 1);
+        check(image.pixelColor(edge) != QColor(Theme::canvasBackground()) && image.pixelColor(edge) != QColor(Theme::surfaceBorder()),
+              "a floating panel's edge is not a border line");
+        check(image.pixelColor(QPoint(margin + 40, image.height() / 2)).rgb() != QColor(Theme::canvasBackground()).rgb()
+                  && image.pixelColor(outside) != QColor(Theme::surfaceBorder()),
+              "floating panels are filled and have no border");
+        Q_UNUSED(fill);
+    }
+
+    // The free area excludes visible side overlays and follows their visibility.
+    auto *side = new QWidget;
+    side->setFixedWidth(200);
+    view.addOverlay(side, OverlayEdge::Left);
+    pump(30);
+    check(view.freeArea().left() >= 200 && view.freeArea().right() == view.viewport()->geometry().right(),
+          "freeArea excludes a visible left overlay");
+    side->hide();
+    pump(30);
+    check(view.freeArea() == view.viewport()->geometry(), "freeArea ignores a hidden overlay");
+    view.resize(700, 500);
+    pump(50);
+    check(mini && view.viewport()->geometry().right() - mini->geometry().right() <= 16, "overlays follow a resize");
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
@@ -732,6 +811,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkView(preview);
     checkConnecting(preview);
     checkPanelCanvas(preview);
+    checkOverlays(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;
