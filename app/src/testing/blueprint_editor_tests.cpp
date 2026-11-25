@@ -386,6 +386,20 @@ void checkConnecting(BlueprintPreview &preview) {
     r = preview.connectGraph(cycle, edge("cnt", "value", "cnt", "value"), nullptr, &error);
     check(r.isEmpty() && !error.isEmpty(), "an invalid connection returns an empty graph and the reason");
 
+    // free chooseType source adopts the target's type
+    QJsonObject free{{"nodes", QJsonArray{in, cnt, out}}, {"edges", QJsonArray{}}};
+    check(preview.dropError(free, edge("in", "text", "cnt", "value")).isEmpty(), "an unwired chooseType output may drop on a typed input");
+    r = preview.connectGraph(free, edge("in", "text", "cnt", "value"));
+    check(findPort(r, "in", "out", "text")["type"] == "array" && findPort(r, "in", "out", "text")["schema"].toObject()["type"] == "array",
+          "a free output that chooses its type adopts the target's type");
+    // retyping prunes other edges on the node that stop being valid
+    auto cnt2 = preview.makeNode("count", "cnt2", 640, 0);
+    QJsonObject stale{{"nodes", QJsonArray{in, cnt, out, cnt2}}, {"edges", QJsonArray{edge("out", "value", "cnt2", "value")}}};
+    dropped = -1;
+    r = preview.connectGraph(stale, edge("cnt", "value", "out", "value"), &dropped);
+    check(dropped == 1 && r["edges"].toArray().size() == 1 && r["edges"].toArray().first().toObject()["from"] == "cnt",
+          "retyping drops other edges on the node that become invalid and counts them");
+    // (no fixture node can reach this from valid graphs: only a chooseType input retypes, and its sole edge is the replaced one)
     BlueprintView view(preview);
     view.resize(900, 600);
     view.show();
@@ -440,6 +454,44 @@ void checkConnecting(BlueprintPreview &preview) {
     drag(viewport, pinPoint("out", false, "value"), pinPoint("out", false, "value"));
     check(removedByDrag.isEmpty() && reconnected.isEmpty(), "dropping a picked-up wire back on its own input changes nothing");
     check(view.graphScene()->wires().first()->isVisible(), "a cancelled pick-up leaves the wire visible");
+    // Esc cancels a drag
+    {
+        const int itemsBefore = view.graphScene()->items().size();
+        asked = {};
+        canvasDrop = false;
+        const QPointF from = pinPoint("cnt", true, "value");
+        QMouseEvent press(QEvent::MouseButtonPress, from, viewport->mapToGlobal(from.toPoint()), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &press);
+        check(view.graphScene()->items().size() == itemsBefore + 1, "a wire drag adds a temporary wire");
+        key(viewport, Qt::Key_Escape);
+        const auto *outIn = view.graphScene()->node("out")->pin(false, "value");
+        check(view.graphScene()->items().size() == itemsBefore && outIn->highlight() == PinItem::Highlight::None,
+              "Escape removes the temporary wire and clears the highlights");
+        QMouseEvent release(QEvent::MouseButtonRelease, emptyPoint, viewport->mapToGlobal(emptyPoint.toPoint()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &release);
+        check(asked.isEmpty() && !canvasDrop, "a cancelled drag emits nothing");
+    }
+    // moving a picked-up wire to another valid input
+    {
+        auto out2 = preview.makeNode("output", "out2", 320, 200);
+        QJsonObject g2{{"nodes", QJsonArray{in, out, out2}}, {"edges", QJsonArray{edge("in", "text", "out", "value")}}};
+        view.setDropValidator([&](const QJsonObject &e) { return preview.dropError(g2, e); });
+        view.setGraph(g2);
+        pump();
+        QStringList order;
+        QJsonObject gone, added;
+        QObject::disconnect(&view, &BlueprintView::disconnectRequested, nullptr, nullptr);
+        QObject::disconnect(&view, &BlueprintView::connectRequested, nullptr, nullptr);
+        QObject::connect(&view, &BlueprintView::disconnectRequested, [&](const QJsonObject &e) { order << "disconnect"; gone = e; });
+        QObject::connect(&view, &BlueprintView::connectRequested, [&](const QJsonObject &e) { order << "connect"; added = e; });
+        drag(viewport, pinPoint("out", false, "value"), pinPoint("out2", false, "value"));
+        check(order == QStringList({"disconnect", "connect"}) && gone == edge("in", "text", "out", "value")
+                  && added == edge("in", "text", "out2", "value"),
+              "moving a picked-up wire to another input disconnects the old edge then connects the new one");
+        view.setDropValidator([&](const QJsonObject &e) { return preview.dropError(g, e); });
+        view.setGraph(g);
+        pump();
+    }
     // wire selection and removal
     QStringList selected;
     QObject::connect(&view, &BlueprintView::nodeSelected, [&](const QString &id) { selected << id; });

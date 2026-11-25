@@ -341,15 +341,6 @@ void BlueprintView::mouseDoubleClickEvent(QMouseEvent *event) {
     QGraphicsView::mouseDoubleClickEvent(event);
 }
 
-namespace {
-QPainterPath wirePath(const QPointF &a, const QPointF &b) {
-    QPainterPath path(a);
-    const qreal reach = qMax<qreal>(48, qAbs(b.x() - a.x()) * 0.5);
-    path.cubicTo(a + QPointF(reach, 0), b - QPointF(reach, 0), b);
-    return path;
-}
-}  // namespace
-
 bool BlueprintView::beginConnect(PinItem *pin) {
     WireItem *picked = nullptr;
     PinItem *source = pin;
@@ -359,6 +350,7 @@ bool BlueprintView::beginConnect(PinItem *pin) {
         if (!picked) return false;
         source = picked->from();
     }
+    if (m_dropMessage) m_dropMessage->hide();
     m_source = source;
     m_pickedUp = picked;
     if (picked) picked->hide();
@@ -382,7 +374,7 @@ bool BlueprintView::beginConnect(PinItem *pin) {
 }
 
 void BlueprintView::updateConnect(const QPointF &viewPosition) {
-    if (m_temporary) m_temporary->setPath(wirePath(m_source->anchor(), mapToScene(viewPosition.toPoint())));
+    if (m_temporary) m_temporary->setPath(WireItem::pathBetween(m_source->anchor(), mapToScene(viewPosition.toPoint())));
 }
 
 void BlueprintView::cancelConnect() {

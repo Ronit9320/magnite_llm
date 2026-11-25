@@ -53,6 +53,7 @@ public:
     PinItem *from() const { return m_from; }
     PinItem *to() const { return m_to; }
     void updatePath();
+    static QPainterPath pathBetween(const QPointF &from, const QPointF &to);
     void setActive(bool active);
     bool active() const { return m_active; }
 

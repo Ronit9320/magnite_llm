@@ -159,8 +159,7 @@ WireItem::WireItem(const QJsonObject &edge, PinItem *from, PinItem *to)
 
 WireItem::~WireItem() { delete m_dash; }
 
-void WireItem::updatePath() {
-    const QPointF a = m_from->anchor(), b = m_to->anchor();
+QPainterPath WireItem::pathBetween(const QPointF &a, const QPointF &b) {
     QPainterPath path(a);
     if (qAbs(a.y() - b.y()) < 0.5) {
         path.lineTo(b);
@@ -168,6 +167,11 @@ void WireItem::updatePath() {
         const qreal reach = qMax<qreal>(48, qAbs(b.x() - a.x()) * 0.5);
         path.cubicTo(a + QPointF(reach, 0), b - QPointF(reach, 0), b);
     }
+    return path;
+}
+
+void WireItem::updatePath() {
+    const auto path = pathBetween(m_from->anchor(), m_to->anchor());
     prepareGeometryChange();
     setPath(path);
 }
