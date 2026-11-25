@@ -1,4 +1,5 @@
 #include "widgets/blueprintcanvas.h"
+#include "widgets/blueprintstyle.h"
 
 #include "theme.h"
 
@@ -51,19 +52,7 @@ QPainterPath roundedCable(std::initializer_list<QPointF> points) {
 }
 
 QString BlueprintCanvas::nodeIcon(const QString &kind) {
-    if (kind == "input") return "message-circle";
-    if (kind == "dataset") return "database";
-    if (kind == "model") return "layers";
-    if (kind == "adapter") return "box";
-    if (kind == "knowledge") return "search";
-    if (kind == "reasoning") return "brain";
-    if (kind == "agent") return "message-circle";
-    if (kind == "output") return "file-down";
-    if (kind == "selector") return "search";
-    if (kind == "extractor") return "layers";
-    if (kind == "pricing") return "check";
-    if (kind == "tool") return "settings";
-    return "cpu";
+    return BlueprintStyle::nodeIcon(kind);
 }
 
 QColor BlueprintCanvas::nodeAccent(const QString &kind) {
