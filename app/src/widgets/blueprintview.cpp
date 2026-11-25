@@ -30,7 +30,8 @@ BlueprintView::BlueprintView(const BlueprintPreview &preview, QWidget *parent)
     setAccessibleName("Workflow graph");
     setAccessibleDescription("Drag the background to pan and drag a node to move it. Scroll to zoom. "
                              "Use the arrow keys to pan, plus or minus to zoom, and F or Home to fit. "
-                             "Press Delete to remove the selected node, Space or Tab to add a node, and I for its details.");
+                             "Press Delete to remove the selected node, Space or Tab to add a node, and I for its details. "
+                             "Press Control+Tab to move focus forward out of the graph and Shift+Tab to move it back.");
     setScene(m_scene);
     m_scene->setSceneRect(-sceneExtent, -sceneExtent, 2 * sceneExtent, 2 * sceneExtent);
     setFocusPolicy(Qt::StrongFocus);
@@ -88,6 +89,16 @@ void BlueprintView::setSelection(const QString &nodeId) {
 
 void BlueprintView::onSelectionChanged() {
     if (m_quiet) return;
+    // Selection is single-valued: keep the node being pressed (or the first), drop the rest.
+    const auto selected = m_scene->selectedItems();
+    if (selected.size() > 1) {
+        QGraphicsItem *keep = selected.first();
+        if (m_dragged && m_dragged->isSelected()) keep = m_dragged;
+        m_quiet = true;
+        for (auto *item : selected)
+            if (item != keep) item->setSelected(false);
+        m_quiet = false;
+    }
     QString id;
     for (auto *node : m_scene->nodes())
         if (node->isSelected()) {
@@ -209,7 +220,14 @@ void BlueprintView::mousePressEvent(QMouseEvent *event) {
     if (node) {
         m_dragged = node;
         m_dragStart = node->pos();
-        QGraphicsView::mousePressEvent(event);
+        // Ctrl/Shift must not extend the selection: it is always one node.
+        QMouseEvent plain(event->type(), event->position(), event->scenePosition(), event->globalPosition(),
+                          event->button(), event->buttons(), Qt::NoModifier);
+        m_quiet = true;  // Qt clears then selects; report the result once
+        QGraphicsView::mousePressEvent(&plain);
+        m_quiet = false;
+        onSelectionChanged();
+        event->setAccepted(plain.isAccepted());
         return;
     }
     m_panning = true;
@@ -248,7 +266,10 @@ void BlueprintView::mouseReleaseEvent(QMouseEvent *event) {
         }
         return;
     }
-    QGraphicsView::mouseReleaseEvent(event);
+    QMouseEvent plain(event->type(), event->position(), event->scenePosition(), event->globalPosition(),
+                      event->button(), event->buttons(), Qt::NoModifier);  // Ctrl+release would toggle the selection
+    QGraphicsView::mouseReleaseEvent(&plain);
+    event->setAccepted(plain.isAccepted());
     if (m_dragged && event->button() == Qt::LeftButton) {
         NodeItem *node = std::exchange(m_dragged, nullptr);
         viewport()->unsetCursor();
@@ -287,11 +308,16 @@ void BlueprintView::requestQuickAdd() {
 }
 
 bool BlueprintView::event(QEvent *event) {
-    // Tab adds a node here; Shift+Tab still leaves the canvas.
+    // Tab adds a node here; Ctrl+Tab and Shift+Tab move focus out of the canvas.
     if (event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
         if (key->key() == Qt::Key_Tab && key->modifiers() == Qt::NoModifier) {
             requestQuickAdd();
+            key->accept();
+            return true;
+        }
+        if (key->key() == Qt::Key_Tab && key->modifiers() == Qt::ControlModifier) {
+            focusNextChild();
             key->accept();
             return true;
         }
@@ -300,6 +326,10 @@ bool BlueprintView::event(QEvent *event) {
 }
 
 void BlueprintView::keyPressEvent(QKeyEvent *event) {
+    if (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
+        QGraphicsView::keyPressEvent(event);
+        return;
+    }
     switch (event->key()) {
     case Qt::Key_Plus: case Qt::Key_Equal: zoomBy(1.2); break;
     case Qt::Key_Minus: zoomBy(1 / 1.2); break;

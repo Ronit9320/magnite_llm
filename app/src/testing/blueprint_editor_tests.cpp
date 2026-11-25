@@ -8,6 +8,8 @@
 #include "widgets/blueprintview.h"
 
 #include <QContextMenuEvent>
+#include <QLineEdit>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 #include <optional>
 
@@ -254,6 +256,53 @@ void checkView(BlueprintPreview &preview) {
     key(view.viewport(), Qt::Key_Right);
     key(view.viewport(), Qt::Key_Home);
     check(view.zoomPercent() == fitted, "Home fits the graph");
+    // single selection: Ctrl-click never extends it
+    {
+        const auto ids = graph["nodes"].toArray();
+        const QString a = ids.at(0).toObject()["id"].toString(), b = ids.at(1).toObject()["id"].toString();
+        view.fit();
+        pump();
+        QStringList seenIds;
+        const auto conn = QObject::connect(&view, &BlueprintView::nodeSelected, [&](const QString &id) { seenIds << id; });
+        click(view.viewport(), centreOf(a), Qt::ControlModifier);
+        click(view.viewport(), centreOf(b), Qt::ControlModifier);
+        int selectedCount = 0;
+        for (auto *node : view.graphScene()->nodes()) selectedCount += node->isSelected();
+        check(selectedCount == 1 && view.selection() == b && view.graphScene()->node(b)->isSelected()
+                  && !seenIds.isEmpty() && seenIds.last() == b,
+              "Ctrl-clicking a second node selects only that node");
+        QObject::disconnect(conn);
+        deleted.clear();
+        key(view.viewport(), Qt::Key_Delete);
+        check(deleted == b, "Delete acts on the single selected node");
+        key(view.viewport(), Qt::Key_Delete, Qt::ControlModifier);
+        key(view.viewport(), Qt::Key_I, Qt::AltModifier, "i");
+        key(view.viewport(), Qt::Key_Left, Qt::ControlModifier);
+        check(deleted == b && detailed == first, "bare-key shortcuts ignore Ctrl and Alt combinations");
+    }
+    // focus keys leave the canvas instead of quick add
+    {
+        QWidget host;
+        auto *layout = new QVBoxLayout(&host);
+        auto *before = new QLineEdit, *after = new QLineEdit;
+        BlueprintView inner(preview);
+        layout->addWidget(before);
+        layout->addWidget(&inner);
+        layout->addWidget(after);
+        host.resize(500, 600);
+        host.show();
+        pump();
+        int innerAdds = 0;
+        QObject::connect(&inner, &BlueprintView::quickAddRequested, [&](const QPoint &, const QPointF &) { ++innerAdds; });
+        inner.setFocus();
+        key(inner.viewport(), Qt::Key_Tab, Qt::ControlModifier);
+        check(innerAdds == 0 && host.focusWidget() == after, "Ctrl+Tab moves focus forward out of the canvas");
+        inner.setFocus();
+        key(inner.viewport(), Qt::Key_Backtab, Qt::ShiftModifier);
+        check(innerAdds == 0 && host.focusWidget() == before, "Shift+Tab moves focus back out of the canvas");
+        check(inner.accessibleDescription().contains("Control+Tab") && inner.accessibleDescription().contains("Shift+Tab"),
+              "the accessible description names the focus keys");
+    }
     // menus
     QString menuNode;
     int canvasMenus = 0;
