@@ -77,6 +77,8 @@ set(MAGNITE_SOURCES
     src/widgets/blueprintscene.h
     src/widgets/blueprintstyle.cpp
     src/widgets/blueprintstyle.h
+    src/widgets/blueprintview.cpp
+    src/widgets/blueprintview.h
     src/panels/modelhubpanel.cpp
     src/panels/modelhubpanel.h
     src/testing/modelhub_tests.cpp

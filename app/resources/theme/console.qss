@@ -658,6 +658,7 @@ QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background:
 QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
 QWidget#blueprintStepDetail { background: @surfaceFill; }
 QPushButton#blueprintFullscreen { padding: 0; }
+QGraphicsView#blueprintView { background: @canvasBackground; border: none; }
 QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
 QFrame#blueprintCreateForm { background: @surfaceFill; border: none; border-radius: 8px; }
 QTreeWidget#blueprintNodeTree { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; }

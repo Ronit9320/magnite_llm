@@ -1,6 +1,7 @@
 #pragma once
 
 #include "panels/blueprintpreview.h"
+#include "widgets/blueprintview.h"
 
 #include <QApplication>
 #include <QDialog>
@@ -102,6 +103,10 @@ inline void key(QWidget *w, int key, Qt::KeyboardModifiers modifiers = {}, const
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
     QCoreApplication::sendEvent(w, &press);
     QCoreApplication::sendEvent(w, &release);
+}
+
+inline QPointF viewPoint(BlueprintView &view, QPointF scenePoint) {
+    return QPointF(view.mapFromScene(scenePoint));
 }
 
 }  // namespace BlueprintTest

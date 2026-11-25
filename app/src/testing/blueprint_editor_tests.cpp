@@ -5,6 +5,11 @@
 #include "theme.h"
 #include "widgets/blueprintscene.h"
 #include "widgets/blueprintstyle.h"
+#include "widgets/blueprintview.h"
+
+#include <QContextMenuEvent>
+#include <QWheelEvent>
+#include <optional>
 
 #include <QColor>
 #include <QImage>
@@ -122,6 +127,176 @@ void checkScene(const BlueprintPreview &preview) {
               && scene.node("odd")->boundingRect().isValid(),
           "an unknown kind renders as a Transform node");
 }
+
+void wheel(QWidget *w, QPointF at, int delta) {
+    QWheelEvent event(at, w->mapToGlobal(at.toPoint()), {}, QPoint(0, delta), Qt::NoButton, Qt::NoModifier,
+                      Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(w, &event);
+}
+
+void checkView(BlueprintPreview &preview) {
+    BlueprintView view(preview);
+    view.resize(900, 600);
+    view.show();
+    pump();
+    const auto graph = preview.example();
+    view.setGraph(graph);
+    pump();
+    check(view.graphScene()->graph() == graph && view.zoomPercent() > 0 && view.zoomPercent() <= 100,
+          "the view fits a new graph on first show without rewriting it");
+    view.fit();
+    pump();
+    const int fitted = view.zoomPercent();
+    int emitted = 0;
+    QObject::connect(&view, &BlueprintView::zoomChanged, [&](int) { ++emitted; });
+    const QPointF centre(view.viewport()->width() / 2.0, view.viewport()->height() / 2.0);
+    const QPointF cursor = centre + QPointF(150, 90);
+    const QPointF underCursor = view.mapToScene(cursor.toPoint());
+    wheel(view.viewport(), cursor, 120);
+    check(view.zoomPercent() > fitted && emitted > 0, "wheel zooms the canvas");
+    check((view.mapToScene(cursor.toPoint()) - underCursor).manhattanLength() < 2, "wheel zooms about the cursor");
+    for (int i = 0; i < 40; ++i) wheel(view.viewport(), centre, 120);
+    check(view.zoomPercent() == 250, "zoom stops at 2.5x");
+    for (int i = 0; i < 80; ++i) wheel(view.viewport(), centre, -120);
+    check(view.zoomPercent() == 25, "zoom out stops at 0.25x");
+    view.fit();
+    wheel(view.viewport(), centre, 120);
+    // an empty point, found like the old fullscreen check
+    const auto nodeBoxes = [&] {
+        QList<QRectF> boxes;
+        for (const auto &node : graph["nodes"].toArray())
+            boxes << BlueprintScene::nodeRect(node.toObject()).adjusted(-16, -16, 16, 16);
+        return boxes;
+    }();
+    std::optional<QPointF> empty;
+    for (int y = 4; y < view.viewport()->height() && !empty; y += 12)
+        for (int x = 4; x < view.viewport()->width(); x += 12) {
+            const QPointF scene = view.mapToScene(QPoint(x, y));
+            if (std::none_of(nodeBoxes.cbegin(), nodeBoxes.cend(), [&](const QRectF &r) { return r.contains(scene); })) {
+                empty = QPointF(x, y);
+                break;
+            }
+        }
+    QHash<QString, int> moves;
+    QObject::connect(&view, &BlueprintView::nodeMoved, [&](const QString &id, const QPoint &) { ++moves[id]; });
+    const QPointF before = view.centerInGraph();
+    check(empty.has_value(), "the example leaves empty canvas to drag");
+    if (empty) drag(view.viewport(), *empty, *empty + QPointF(63, 29));
+    check(view.centerInGraph() != before && moves.isEmpty(), "dragging the background pans without moving nodes");
+    view.fit();
+    pump();
+    const QString first = graph["nodes"].toArray().first().toObject()["id"].toString();
+    const auto centreOf = [&](const QString &id) {
+        return viewPoint(view, view.graphScene()->node(id)->sceneBoundingRect().center());
+    };
+    QString picked;
+    QObject::connect(&view, &BlueprintView::nodeSelected, [&](const QString &id) { picked = id; });
+    const QPointF from = centreOf(first);
+    const QPointF startPos = view.graphScene()->node(first)->pos();
+    const QJsonObject savedGraph = view.graphScene()->graph();
+    drag(view.viewport(), from, from + QPointF(40, 0), 30);
+    check(moves.size() == 1 && moves.value(first) == 1, "dragging a node reports one move on release");
+    check(view.graphScene()->node(first)->pos() != startPos && view.graphScene()->graph() == savedGraph,
+          "the node moves in the scene while the stored graph stays untouched");
+    check(picked == first && view.selection() == first, "pressing a node selects it");
+    // a click without movement reports no move
+    click(view.viewport(), centreOf(first));
+    check(moves.value(first) == 1, "clicking a node without moving it reports no move");
+    // setGraph keeps selection and camera, and does not refit after the user zoomed
+    const QPointF cam = view.centerInGraph();
+    const int zoomBefore = view.zoomPercent();
+    view.setGraph(graph);
+    check(view.selection() == first && view.zoomPercent() == zoomBefore && (view.centerInGraph() - cam).manhattanLength() < 1,
+          "a rebuild keeps selection and camera once the user has moved the view");
+    // setSelection is quiet; clearing by background click emits an empty id
+    picked = "unset";
+    view.setSelection(QString());
+    check(view.selection().isEmpty() && picked == "unset", "setSelection changes the selection without a signal");
+    view.setSelection(first);
+    if (empty) click(view.viewport(), *empty);
+    check(view.selection().isEmpty() && picked.isEmpty(), "clicking the background clears the selection");
+    // keys
+    view.setSelection("input");
+    QString deleted, detailed;
+    QObject::connect(&view, &BlueprintView::deleteRequested, [&](const QString &id) { deleted = id; });
+    QObject::connect(&view, &BlueprintView::detailsRequested, [&](const QString &id) { detailed = id; });
+    view.setSelection(first);
+    key(view.viewport(), Qt::Key_Delete);
+    check(deleted == first, "Delete asks to remove the selected node");
+    deleted.clear();
+    key(view.viewport(), Qt::Key_Backspace);
+    check(deleted == first, "Backspace asks to remove the selected node");
+    key(view.viewport(), Qt::Key_I, {}, "i");
+    check(detailed == first, "I asks for the selected node's details");
+    int adds = 0;
+    QPointF addAt;
+    QObject::connect(&view, &BlueprintView::quickAddRequested, [&](const QPoint &, const QPointF &g) { ++adds; addAt = g; });
+    key(view.viewport(), Qt::Key_Space, {}, " ");
+    key(view.viewport(), Qt::Key_Tab);
+    check(adds == 2, "Space and Tab ask for quick add");
+    if (empty) {
+        QMouseEvent dbl(QEvent::MouseButtonDblClick, *empty, view.viewport()->mapToGlobal(empty->toPoint()),
+                        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(view.viewport(), &dbl);
+        check(adds == 3 && (addAt - view.mapToScene(empty->toPoint())).manhattanLength() < 1,
+              "double-clicking the background asks for quick add at that point");
+    }
+    const int z = view.zoomPercent();
+    key(view.viewport(), Qt::Key_Plus, {}, "+");
+    check(view.zoomPercent() > z, "+ zooms in");
+    key(view.viewport(), Qt::Key_Minus, {}, "-");
+    check(view.zoomPercent() == z || qAbs(view.zoomPercent() - z) <= 1, "- zooms out");
+    const QPointF panFrom = view.centerInGraph();
+    key(view.viewport(), Qt::Key_Left);
+    check(view.centerInGraph().x() < panFrom.x(), "arrow keys pan");
+    key(view.viewport(), Qt::Key_F);
+    check(view.zoomPercent() == fitted, "F fits the graph");
+    key(view.viewport(), Qt::Key_Right);
+    key(view.viewport(), Qt::Key_Home);
+    check(view.zoomPercent() == fitted, "Home fits the graph");
+    // menus
+    QString menuNode;
+    int canvasMenus = 0;
+    QObject::connect(&view, &BlueprintView::nodeMenuRequested, [&](const QString &id, const QPoint &, const QPointF &) { menuNode = id; });
+    QObject::connect(&view, &BlueprintView::canvasMenuRequested, [&](const QPoint &, const QPointF &) { ++canvasMenus; });
+    const QPoint onNode = centreOf(first).toPoint();
+    QContextMenuEvent menu(QContextMenuEvent::Mouse, onNode, view.viewport()->mapToGlobal(onNode));
+    QCoreApplication::sendEvent(view.viewport(), &menu);
+    check(menuNode == first && view.selection() == first, "right-clicking a node opens its menu and selects it");
+    if (empty) {
+        QContextMenuEvent bg(QContextMenuEvent::Mouse, empty->toPoint(), view.viewport()->mapToGlobal(empty->toPoint()));
+        QCoreApplication::sendEvent(view.viewport(), &bg);
+        check(canvasMenus == 1, "right-clicking the background opens the canvas menu");
+    }
+    // run states
+    view.setRunStates({{first, "running"}}, first);
+    check(view.graphScene()->node(first)->runStatus() == "running", "run states reach the nodes");
+    view.setGraph(graph);
+    check(view.graphScene()->node(first)->runStatus() == "running", "run states survive a rebuild");
+    view.clearRunStates();
+    check(view.graphScene()->node(first)->runStatus().isEmpty(), "clearing run states resets the nodes");
+    check(view.accessibleName() == "Workflow graph" && view.accessibleDescription().contains("Delete"),
+          "the canvas has an accessible name and description");
+    // background dots
+    view.fit();
+    pump();
+    const QImage shot = view.viewport()->grab().toImage();
+    bool dots = false;
+    for (int y = 0; y < 30 && !dots; ++y)
+        for (int x = 0; x < 30 && !dots; ++x) dots = QColor(shot.pixel(x, y)) != QColor(Theme::canvasBackground());
+    check(dots, "canvas dots stay visible");
+    // performance
+    QJsonArray nodes, edges;
+    for (int i = 0; i < 40; ++i)
+        nodes << preview.makeNode(i % 2 ? "count" : "input", QString("n%1").arg(i), (i % 8) * 260, (i / 8) * 160);
+    for (int i = 0; i < 60; ++i) edges << edge(QString("n%1").arg(i % 40), "value", QString("n%1").arg((i + 1) % 40), "value");
+    view.setGraph({{"nodes", nodes}, {"edges", edges}});
+    QElapsedTimer timer;
+    timer.start();
+    view.fit();
+    for (int k = 0; k < 60; ++k) view.viewport()->repaint();
+    check(timer.elapsed() < 1500, "a 40-node graph repaints 60 times in under 1.5 s");
+}
 }  // namespace
 
 int runBlueprintEditorChecks(const QString &captures) {
@@ -132,6 +307,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     BlueprintPreview preview(nullptr, false);
     checkStyle();
     checkScene(preview);
+    checkView(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;
