@@ -44,8 +44,10 @@ class SpeedHintTests(unittest.IsolatedAsyncioTestCase):
             out = np.stack([np.full(n, float(i + 1)) for i in range(len(texts))]).astype(np.float32)
             return out / np.linalg.norm(out, axis=1, keepdims=True)
 
-        def loaded_info():
+        def loaded_info(model=None):
             if self.loaded["model"] is None:
+                return None
+            if model is not None and embeddings.spec_for(model).model_id != self.loaded["model"]:
                 return None
             return {"model": self.loaded["model"], "max_seq_tokens": 256, "dim": 384,
                     "device": "cpu", "dtype": "float32"}

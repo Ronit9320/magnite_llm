@@ -324,7 +324,7 @@ class SerializationTests(IngestTestCase):
         t1 = threading.Thread(target=lambda: rag._ingest_document(self.request(64 * 20, name="a.txt")))
         t1.start()
         self.assertTrue(await asyncio.to_thread(started.wait, 5))
-        t2 = threading.Thread(target=lambda: rag._ingest_document(self.request(64 * 20, name="b.txt")))
+        t2 = threading.Thread(target=lambda: rag._ingest_document(self.request(64 * 21, name="b.txt")))   # not a duplicate of a
         t2.start()
         await asyncio.sleep(0.3)
         self.assertEqual(len(self.calls), 1)                      # b has not embedded anything yet

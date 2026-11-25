@@ -335,7 +335,10 @@ class PiBridgeTests(unittest.TestCase):
     def setUp(self):
         try:
             pi_bridge.node_path()
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
+            # CI sets MAGNITE_REQUIRE_PI so a missing runtime is a failure, not a silent skip.
+            if os.environ.get("MAGNITE_REQUIRE_PI"):
+                self.fail(f"MAGNITE_REQUIRE_PI is set but the Pi runtime is unavailable: {exc}")
             self.skipTest("Install the optional pinned Pi runtime to exercise its subprocess")
 
     def test_native_tool_calls_round_trip_with_output_and_four_proposal_limit(self):
@@ -366,6 +369,52 @@ class PiBridgeTests(unittest.TestCase):
             result = pi_bridge.run("Which Python do I have?", object(), approve, Event(), working_directory="/work")
         self.assertEqual(result, "You have Python 3.13.1.")
         self.assertEqual(calls, [{"action": "command", "executable": "python3", "arguments": ["--version"]}])
+
+    def test_every_tool_turn_has_exactly_one_leading_system_message(self):
+        # Pi adds its own empty system message unless it is given the prompt; templates
+        # such as Mistral and Gemma reject a second system message.
+        turns = []
+
+        def generate(messages, tools, engine, stop, native):
+            turns.append(messages)
+            if len(turns) == 1:
+                return '{"name":"read_file","arguments":{"path":"notes.md"}}'
+            return "Done."
+
+        approve = lambda proposal: {"status": "completed", "outcome": "completed", "output": "text"}
+        with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
+            pi_bridge.run("Read my notes", object(), approve, Event(), working_directory="/work")
+        self.assertEqual(len(turns), 2)
+        for messages in turns:
+            self.assertEqual(sum(m["role"] == "system" for m in messages), 1)
+            self.assertEqual(messages[0]["role"], "system")
+            self.assertIn("/work", messages[0]["content"])
+
+    def test_a_tool_call_cut_off_at_the_token_cap_is_reported_not_answered(self):
+        engine = SimpleNamespace(count_tokens=lambda text: pi_bridge.TURN_TOKENS)
+        cut = '<tool_call>\n{"name": "run_command", "arguments": {"command": "python3 -'
+        approve = lambda proposal: self.fail("a cut-off call must never be proposed")
+        with patch("backend.tooling.pi_bridge._generate", return_value=cut):
+            with self.assertRaisesRegex(RuntimeError, "cut off"):
+                pi_bridge.run("Check Python", engine, approve, Event())
+
+    def test_a_json_protocol_call_cut_off_at_the_token_cap_is_reported(self):
+        engine = SimpleNamespace(count_tokens=lambda text: pi_bridge.TURN_TOKENS)
+        with patch("backend.tooling.pi_bridge._generate", return_value='{"name":"read_file","arguments":{"pa'):
+            with self.assertRaisesRegex(RuntimeError, "cut off"):
+                pi_bridge.run("Read it", engine, lambda proposal: self.fail("no proposal"), Event())
+
+    def test_a_long_answer_cut_off_at_the_token_cap_says_so(self):
+        engine = SimpleNamespace(count_tokens=lambda text: pi_bridge.TURN_TOKENS)
+        with patch("backend.tooling.pi_bridge._generate", return_value="The first half of a long answer"):
+            result = pi_bridge.run("Explain", engine, lambda proposal: {}, Event())
+        self.assertTrue(result.startswith("The first half of a long answer"))
+        self.assertIn("cut off", result)
+
+    def test_an_answer_under_the_cap_is_returned_unchanged(self):
+        engine = SimpleNamespace(count_tokens=lambda text: 12)
+        with patch("backend.tooling.pi_bridge._generate", return_value="Short answer."):
+            self.assertEqual(pi_bridge.run("Explain", engine, lambda proposal: {}, Event()), "Short answer.")
 
     def test_denials_continue_until_the_action_budget_and_then_answer(self):
         turns = []

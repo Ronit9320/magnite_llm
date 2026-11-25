@@ -44,9 +44,15 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -e backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Install the Pi bridge packages
+        run: npm ci --ignore-scripts --prefix backend/src/backend/tooling/pi
       - name: Offline backend regressions
         env:
           PYTHONPATH: backend/src
+          MAGNITE_REQUIRE_PI: '1'
         run: .venv/bin/python -m unittest discover -s backend/tests -v
       - name: Build client
         run: |
@@ -57,7 +63,7 @@ jobs:
       - name: Update verification and installer recovery
         run: |
           ctest --test-dir build --output-on-failure
-          python3 -m unittest discover -s packaging/tests -v
+          PYTHONPATH=backend/src MAGNITE_REQUIRE_PI=1 .venv/bin/python -m unittest discover -s packaging/tests -v
       - name: UI interaction and layout checks
         run: ./build/magnite-app --ui-check
       - name: Desktop and IPC selftest
