@@ -19,7 +19,7 @@ namespace {
 constexpr qreal nodePadding = 8;
 constexpr qreal shadowMargin = 18;
 constexpr qreal shadowOffset = 6;
-constexpr qreal pinHitRadius = BlueprintStyle::pinRadius + 6;
+using BlueprintStyle::pinHitRadius;
 
 QPointF portCenter(const QJsonObject &node, bool output, int index) {
     const QSizeF size = NodeItem::sizeFor(node);
@@ -164,7 +164,9 @@ QPainterPath WireItem::pathBetween(const QPointF &a, const QPointF &b) {
     if (qAbs(a.y() - b.y()) < 0.5) {
         path.lineTo(b);
     } else {
-        const qreal reach = qMax<qreal>(48, qAbs(b.x() - a.x()) * 0.5);
+        // Backward wires (into an input left of the output) bend by the vertical gap, capped, so they stay near the nodes.
+        const qreal reach = b.x() < a.x() ? qBound<qreal>(48, qAbs(b.y() - a.y()) * 0.5, 120)
+                                          : qMax<qreal>(48, qAbs(b.x() - a.x()) * 0.5);
         path.cubicTo(a + QPointF(reach, 0), b - QPointF(reach, 0), b);
     }
     return path;

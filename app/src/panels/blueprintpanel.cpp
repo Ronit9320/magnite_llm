@@ -94,6 +94,24 @@ void clear(QLayout *layout) {
     }
 }
 
+// The graph without the first edge matching all four fields of edge; found reports whether one matched.
+QJsonObject withoutEdge(QJsonObject graph, const QJsonObject &edge, bool *found = nullptr) {
+    QJsonArray edges;
+    bool matched = false;
+    for (const auto &value : graph["edges"].toArray()) {
+        const auto existing = value.toObject();
+        if (!matched && existing["from"] == edge["from"] && existing["out"] == edge["out"]
+                && existing["to"] == edge["to"] && existing["in"] == edge["in"]) {
+            matched = true;
+            continue;
+        }
+        edges.append(existing);
+    }
+    graph["edges"] = edges;
+    if (found) *found = matched;
+    return graph;
+}
+
 QFrame *rule() {
     auto *line = new QFrame;
     line->setObjectName("blueprintRule");
@@ -892,7 +910,9 @@ void BlueprintPanel::setupEditor() {
     m_canvasPages = new QStackedWidget;
     body->addWidget(m_canvasPages, 1);
     m_canvas = new BlueprintView(*m_preview);
-    m_canvas->setDropValidator([this](const QJsonObject &e) { return m_preview->dropError(m_graph, e); });
+    m_canvas->setDropValidator([this](const QJsonObject &e) {
+        return m_preview->dropError(withoutEdge(m_graph, m_canvas->movingEdge()), e);
+    });
     m_canvasPages->addWidget(m_canvas);
     auto *empty = new QWidget;
     empty->setObjectName("blueprintEmptyCanvas");
@@ -1024,6 +1044,7 @@ void BlueprintPanel::setupEditor() {
     });
     connect(m_canvas, &BlueprintView::connectRequested, this, &BlueprintPanel::dropConnection);
     connect(m_canvas, &BlueprintView::disconnectRequested, this, &BlueprintPanel::removeConnection);
+    connect(m_canvas, &BlueprintView::wireMoved, this, &BlueprintPanel::moveConnection);
     // The quick-add popup replaces the node picker for these in a later task.
     connect(m_canvas, &BlueprintView::wireDropped, this,
             [this](const QString &, const QString &, const QPoint &, const QPointF &graph) { openNodePicker(graph); });
@@ -1056,7 +1077,6 @@ void BlueprintPanel::refreshEditor(bool fit) {
     m_reload->setEnabled(m_preview->connected());
     m_description->setText(m_graph["description"].toString().trimmed());
     m_description->setVisible(!m_description->text().isEmpty());
-    const auto fixtures = m_preview->fixtures();
     const auto nodes = m_graph["nodes"].toArray();
     m_canvasPages->setCurrentIndex(nodes.isEmpty() ? 1 : 0);
     m_canvas->setGraph(m_graph);
@@ -1591,15 +1611,10 @@ void BlueprintPanel::renameNode(const QString &id) {
     changeNode(node);
 }
 
-void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPosition, const QPointF &graphPosition) {
+void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPosition, const QPointF &) {
     const auto node = findById(m_graph["nodes"].toArray(), id);
+    if (node.isEmpty()) return;
     QMenu menu(m_canvasPanel);
-    if (node.isEmpty()) {
-        menu.addAction("Add node…", this, [this, graphPosition] { openNodePicker(graphPosition); });
-        menu.addAction("Fit canvas", m_canvas, &BlueprintView::fit);
-        menu.exec(screenPosition);
-        return;
-    }
     m_selected = id;
     refreshInspector();
     menu.addAction("Configure node…", this, [this, id] { configureNode(id); });
@@ -1720,9 +1735,19 @@ bool BlueprintPanel::addConnection(const QJsonObject &edge, QWidget *parent) {
 }
 
 bool BlueprintPanel::dropConnection(const QJsonObject &edge) {
+    return saveConnected(m_graph, edge);
+}
+
+bool BlueprintPanel::moveConnection(const QJsonObject &oldEdge, const QJsonObject &newEdge) {
+    return saveConnected(withoutEdge(m_graph, oldEdge), newEdge);
+}
+
+// Connects edge into base and saves the result once. On an error, a declined prompt or a failed save
+// nothing is stored and the canvas returns to the stored graph.
+bool BlueprintPanel::saveConnected(const QJsonObject &base, const QJsonObject &edge) {
     int dropped = 0;
     QString error;
-    const auto graph = m_preview->connectGraph(m_graph, edge, &dropped, &error);
+    const auto graph = m_preview->connectGraph(base, edge, &dropped, &error);
     if (graph.isEmpty()) {
         Ui::showNotice(m_canvasPanel, "Connect ports", error);
         refreshEditor();
@@ -1739,20 +1764,9 @@ bool BlueprintPanel::dropConnection(const QJsonObject &edge) {
 }
 
 bool BlueprintPanel::removeConnection(const QJsonObject &edge) {
-    auto graph = m_graph;
-    QJsonArray edges;
     bool found = false;
-    for (const auto &value : graph["edges"].toArray()) {
-        const auto existing = value.toObject();
-        if (!found && existing["from"] == edge["from"] && existing["out"] == edge["out"]
-                && existing["to"] == edge["to"] && existing["in"] == edge["in"]) {
-            found = true;
-            continue;
-        }
-        edges.append(existing);
-    }
+    const auto graph = withoutEdge(m_graph, edge, &found);
     if (!found) return false;
-    graph["edges"] = edges;
     if (saveGraph(graph)) return true;
     refreshEditor();
     return false;

@@ -65,6 +65,8 @@ private:
     bool addConnection(const QJsonObject &edge, QWidget *parent);
     bool dropConnection(const QJsonObject &edge);
     bool removeConnection(const QJsonObject &edge);
+    bool moveConnection(const QJsonObject &oldEdge, const QJsonObject &newEdge);
+    bool saveConnected(const QJsonObject &base, const QJsonObject &edge);
     void editBinding();
     void editLiveBinding();
     void saveTrainingRecipe();

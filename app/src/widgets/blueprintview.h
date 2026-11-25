@@ -32,6 +32,8 @@ public:
     void clearRunStates();
     // Returns why an edge cannot be dropped, or an empty string when it can.
     void setDropValidator(std::function<QString(const QJsonObject &edge)> validator) { m_validator = std::move(validator); }
+    // The edge of the wire being moved off its input, or empty. Validators judge drops against the graph without it.
+    QJsonObject movingEdge() const;
 
 signals:
     void zoomChanged(int percent);
@@ -44,6 +46,8 @@ signals:
     void nodeMoved(const QString &id, const QPoint &position);
     void connectRequested(const QJsonObject &edge);
     void disconnectRequested(const QJsonObject &edge);
+    // A picked-up wire was dropped on another input: one edit replacing oldEdge with newEdge.
+    void wireMoved(const QJsonObject &oldEdge, const QJsonObject &newEdge);
     void wireDropped(const QString &fromNode, const QString &outPort, const QPoint &screen, const QPointF &graph);
 
 protected:

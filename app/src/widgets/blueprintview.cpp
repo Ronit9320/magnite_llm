@@ -88,6 +88,8 @@ void BlueprintView::setGraph(const QJsonObject &graph) {
 
 QString BlueprintView::selection() const { return m_selected; }
 
+QJsonObject BlueprintView::movingEdge() const { return m_pickedUp ? m_pickedUp->edge() : QJsonObject(); }
+
 void BlueprintView::setSelection(const QString &nodeId) {
     // Callers echo nodeSelected back; an unchanged node selection keeps a selected wire.
     if (nodeId == m_selected) return;
@@ -431,8 +433,8 @@ void BlueprintView::finishConnect(const QPoint &viewPosition) {
             showDropMessage(error, messageAt);
             return;
         }
-        if (picked) emit disconnectRequested(old);
-        emit connectRequested(next);
+        if (picked) emit wireMoved(old, next);
+        else emit connectRequested(next);
     } else if (!overNode) {
         if (picked) emit disconnectRequested(old);
         else emit wireDropped(fromNode, outPort, viewport()->mapToGlobal(viewPosition), mapToScene(viewPosition));

@@ -400,6 +400,16 @@ void checkConnecting(BlueprintPreview &preview) {
     r = preview.connectGraph(stale, edge("cnt", "value", "out", "value"), &dropped);
     check(dropped == 1 && r["edges"].toArray().size() == 1 && r["edges"].toArray().first().toObject()["from"] == "cnt",
           "retyping drops other edges on the node that become invalid and counts them");
+    {
+        const QPointF from(600, 0), to(0, 300);
+        const QRectF bounds = WireItem::pathBetween(from, to).boundingRect();
+        check(bounds.left() >= to.x() - 130 && bounds.right() <= from.x() + 130,
+              "a backward wire stays within 130px beyond its endpoints");
+        const auto forward = WireItem::pathBetween(QPointF(0, 0), QPointF(600, 300));
+        const auto straight = WireItem::pathBetween(QPointF(0, 40), QPointF(300, 40));
+        check(forward.elementAt(1).x == 300 && straight.elementCount() == 2,
+              "forward wires keep their reach and aligned wires stay straight");
+    }
     // (no fixture node can reach this from valid graphs: only a chooseType input retypes, and its sole edge is the replaced one)
     BlueprintView view(preview);
     view.resize(900, 600);
@@ -480,15 +490,27 @@ void checkConnecting(BlueprintPreview &preview) {
         view.setGraph(g2);
         pump();
         QStringList order;
-        QJsonObject gone, added;
+        QJsonObject gone, added, moving;
         QObject::disconnect(&view, &BlueprintView::disconnectRequested, nullptr, nullptr);
         QObject::disconnect(&view, &BlueprintView::connectRequested, nullptr, nullptr);
-        QObject::connect(&view, &BlueprintView::disconnectRequested, [&](const QJsonObject &e) { order << "disconnect"; gone = e; });
-        QObject::connect(&view, &BlueprintView::connectRequested, [&](const QJsonObject &e) { order << "connect"; added = e; });
+        QObject::connect(&view, &BlueprintView::disconnectRequested, [&](const QJsonObject &) { order << "disconnect"; });
+        QObject::connect(&view, &BlueprintView::connectRequested, [&](const QJsonObject &) { order << "connect"; });
+        QObject::connect(&view, &BlueprintView::wireMoved, [&](const QJsonObject &from, const QJsonObject &to) {
+            order << "move";
+            gone = from;
+            added = to;
+        });
+        view.setDropValidator([&](const QJsonObject &e) {
+            moving = view.movingEdge();
+            return preview.dropError(g2, e);
+        });
         drag(viewport, pinPoint("out", false, "value"), pinPoint("out2", false, "value"));
-        check(order == QStringList({"disconnect", "connect"}) && gone == edge("in", "text", "out", "value")
+        check(order == QStringList({"move"}) && gone == edge("in", "text", "out", "value")
                   && added == edge("in", "text", "out2", "value"),
-              "moving a picked-up wire to another input disconnects the old edge then connects the new one");
+              "moving a picked-up wire to another input is one wireMoved(old, new), not a disconnect and connect");
+        check(moving == edge("in", "text", "out", "value") && view.movingEdge().isEmpty(),
+              "validators see the picked-up edge while it moves, and nothing after the drop");
+        QObject::disconnect(&view, &BlueprintView::wireMoved, nullptr, nullptr);
         view.setDropValidator([&](const QJsonObject &e) { return preview.dropError(g, e); });
         view.setGraph(g);
         pump();
@@ -557,18 +579,18 @@ void checkPanelCanvas(BlueprintPreview &preview) {
     view->revealNode(example["nodes"].toArray().first().toObject()["id"].toString());
     check(view->centerInGraph() == fitted, "revealing a node that is already in view keeps the camera");
 
-    // The example's nodes abut, stacking each input pin over the output pin beside it; move the first
-    // node aside (a user edit) so its output can be picked up on its own.
+    // Saved layouts space nodes 219px apart; at the node width no input pin may sit within reach of another
+    // node's output pin, or pressing the output would pick up the input's wire instead.
     view->fit();
     pump();
-    const auto first = example["nodes"].toArray().first().toObject()["id"].toString();
-    if (auto *item = view->graphScene()->node(first)) {
-        const QPointF centre = viewPoint(*view, item->sceneBoundingRect().center());
-        drag(view->viewport(), centre, centre - QPointF(120, 0), 30);
-        pump();
-    }
-    view->fit();
-    pump();
+    bool apart = true;
+    for (auto *a : view->graphScene()->nodes())
+        for (auto *b : view->graphScene()->nodes())
+            for (auto *out : a->pins())
+                for (auto *in : b->pins())
+                    if (a != b && out->isOutput() && !in->isOutput())
+                        apart &= QLineF(out->anchor(), in->anchor()).length() >= BlueprintStyle::pinHitRadius;
+    check(apart, "no input pin in the example lies within the pin hit radius of another node's output pin");
     // An output that can replace an existing wire on its (occupied) input without dropping other wires,
     // at view points where each pin is the top-most item.
     const auto hitPoint = [&](const QString &node, bool output, const QString &port) -> std::optional<QPointF> {
@@ -625,6 +647,77 @@ void checkPanelCanvas(BlueprintPreview &preview) {
     check(!hasEdge(removed, added) && removed["edges"].toArray().size() == graph["edges"].toArray().size() - 1,
           "Delete removes the selected wire from the saved graph");
     preview.deleteBlueprint(id);
+
+    // Moving a wire is one edit: one save, old edge replaced, and a declined prompt stores nothing.
+    const auto openNamed = [&](const QJsonObject &blueprint) -> BlueprintView * {
+        preview.saveBlueprint(blueprint);
+        if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+        pump();
+        for (auto *button : panel.findChildren<QPushButton *>())
+            if (button->isVisible() && button->text() == "Open"
+                    && visibleText(*button->parentWidget(), blueprint["name"].toString())) {
+                button->click();
+                break;
+            }
+        pump(100);
+        auto *opened = panel.findChild<BlueprintView *>();
+        if (!opened || !opened->graphScene()->node("o2")) return nullptr;
+        opened->fit();
+        pump();
+        return opened;
+    };
+    const auto pinAt = [](BlueprintView *v, const QString &node, bool output, const QString &port) {
+        return viewPoint(*v, v->graphScene()->node(node)->pin(output, port)->anchor());
+    };
+    int saves = 0;
+    QObject::connect(&preview, &BlueprintPreview::savedChanged, &panel, [&] { ++saves; });
+    const auto cnt = preview.makeNode("count", "cnt", 0, 0), o2 = preview.makeNode("output", "o2", 320, 0),
+               out = preview.makeNode("output", "out", 320, 200);
+    auto moving = preview.connectGraph(QJsonObject{{"id", "move-check"}, {"name", "Move check"}, {"revision", 1},
+                                                   {"nodes", QJsonArray{cnt, o2, out}}, {"edges", QJsonArray{}}},
+                                       edge("cnt", "value", "o2", "value"));
+    if (auto *v = openNamed(moving)) {
+        saves = 0;
+        drag(v->viewport(), pinAt(v, "o2", false, "value"), pinAt(v, "out", false, "value"));
+        pump(50);
+        const auto stored = preview.blueprint("move-check");
+        check(saves == 1 && stored["edges"].toArray() == QJsonArray{edge("cnt", "value", "out", "value")},
+              "moving a wire to another input saves once and replaces the old edge");
+    } else check(false, "the move check graph opens in the editor");
+    preview.deleteBlueprint("move-check");
+
+    // No valid fixture graph makes a move drop wires (retyping touches only the dropped-on input), so the
+    // prompt is reached through a stored graph with a stale, already incompatible edge on that input's node.
+    auto stale = moving;
+    stale["id"] = "move-decline";
+    stale["name"] = "Move decline";
+    auto staleNodes = stale["nodes"].toArray();
+    staleNodes.append(preview.makeNode("count", "cnt2", 640, 200));
+    stale["nodes"] = staleNodes;
+    auto staleEdges = stale["edges"].toArray();
+    staleEdges.append(edge("out", "value", "cnt2", "value"));
+    stale["edges"] = staleEdges;
+    int wouldDrop = 0;
+    preview.connectGraph(QJsonObject{{"nodes", staleNodes}, {"edges", QJsonArray{staleEdges.at(1)}}},
+                         edge("cnt", "value", "out", "value"), &wouldDrop);
+    check(wouldDrop == 1, "the stale graph's move would drop one connection");
+    if (auto *v = openNamed(stale)) {
+        const auto storedBefore = preview.blueprint("move-decline");
+        saves = 0;
+        bool prompted = false;
+        QTimer::singleShot(0, &panel, [&] {
+            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
+                prompted = visibleText(*dialog, "This change will remove 1 incompatible connection.");
+                dialog->reject();
+            }
+        });
+        drag(v->viewport(), pinAt(v, "o2", false, "value"), pinAt(v, "out", false, "value"));
+        pump(50);
+        check(prompted && saves == 0 && preview.blueprint("move-decline") == storedBefore,
+              "declining the remove-connections prompt for a moved wire leaves the stored graph unchanged");
+        check(v->graphScene()->wires().size() == 2, "after a declined move the canvas shows the stored wires again");
+    } else check(false, "the decline check graph opens in the editor");
+    preview.deleteBlueprint("move-decline");
 }
 }  // namespace
 

@@ -9,12 +9,13 @@
 namespace BlueprintStyle {
 
 // Node geometry in scene units.
-constexpr qreal nodeWidth = 220;
+constexpr qreal nodeWidth = 190;  // the old canvas width: saved layouts space nodes 219px apart
 constexpr qreal headerHeight = 36;
 constexpr qreal pinRowHeight = 24;
 constexpr qreal previewHeight = 22;
 constexpr qreal cornerRadius = 10;
 constexpr qreal pinRadius = 5;
+constexpr qreal pinHitRadius = pinRadius + 6;
 // Opacity of the family colour washed over the node header.
 constexpr qreal headerTintAlpha = 0.22;
 
