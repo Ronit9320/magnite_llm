@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QImage>
 #include <QString>
 #include <QStringList>
 
@@ -30,5 +31,8 @@ QStringList families();
 QColor familyColor(const QString &family);
 
 QString nodeIcon(const QString &kind);
+
+// Blurs the alpha of a black image in place with three box-blur passes (shadow silhouettes).
+void blurAlpha(QImage &image, int radius);
 
 }  // namespace BlueprintStyle

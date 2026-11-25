@@ -301,7 +301,7 @@ void checkView(BlueprintPreview &preview) {
         key(&inner, Qt::Key_Tab, Qt::ControlModifier);
         const bool inDock = host.focusWidget() && host.focusWidget() != &inner && inner.isAncestorOf(host.focusWidget());
         check(innerAdds == 0 && inDock, "Ctrl+Tab moves focus forward off the canvas into the dock");
-        for (int i = 0; i < 12 && host.focusWidget() != after; ++i) key(host.focusWidget(), Qt::Key_Tab);
+        for (int i = 0; i < 12 && host.focusWidget() && host.focusWidget() != after; ++i) key(host.focusWidget(), Qt::Key_Tab);
         check(host.focusWidget() == after, "the dock leads on to the next widget");
         inner.setFocus();
         key(&inner, Qt::Key_Backtab, Qt::ShiftModifier);
@@ -769,19 +769,22 @@ void checkOverlays(BlueprintPreview &preview) {
     if (auto *add = visibleButton(view, "Add node")) add->click();
     check(toggled && added, "the library toggle and Add node report to the view's signals");
 
-    // No border: sample just inside the panel's top edge, away from rounded corners.
+    // No border: the body's edge pixels are the panel fill, like the pixels just inside them.
     if (dock) {
         const QImage image = dock->grab().toImage();
-        const int margin = FloatingPanel::shadowMargin();
+        const int m = FloatingPanel::shadowMargin();
         const QColor fill(Theme::blueprintPanelFill());
-        const QPoint edge(image.width() / 2, margin + 1);
-        const QPoint outside(image.width() / 2, margin - 1);
-        check(image.pixelColor(edge) != QColor(Theme::canvasBackground()) && image.pixelColor(edge) != QColor(Theme::surfaceBorder()),
-              "a floating panel's edge is not a border line");
-        check(image.pixelColor(QPoint(margin + 40, image.height() / 2)).rgb() != QColor(Theme::canvasBackground()).rgb()
-                  && image.pixelColor(outside) != QColor(Theme::surfaceBorder()),
-              "floating panels are filled and have no border");
-        Q_UNUSED(fill);
+        const int cx = image.width() / 2, cy = image.height() / 2;
+        const QPoint topEdge(cx, m), topInside(cx, m + 3), leftEdge(m, cy), leftInside(m + 3, cy);
+        const QPoint topOut(cx, m - 1), leftOut(m - 1, cy);
+        const QColor border(Theme::surfaceBorder());
+        check(image.pixelColor(topEdge) == fill && image.pixelColor(topInside) == fill
+                  && image.pixelColor(leftEdge) == fill && image.pixelColor(leftInside) == fill,
+              "a floating panel's edge pixels equal its fill");
+        check(image.pixelColor(topOut) != border && image.pixelColor(leftOut) != border,
+              "floating panels have no border line");
+        const int pad = dock->contentsMargins().top() + dock->contentsMargins().bottom();
+        check(dock->height() <= 32 + pad + 4, "the dock is not padded twice");
     }
 
     // The free area excludes visible side overlays and follows their visibility.

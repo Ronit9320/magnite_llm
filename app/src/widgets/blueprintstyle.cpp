@@ -73,4 +73,32 @@ QString nodeIcon(const QString &kind) {
     return "cpu";
 }
 
+// Blurs the alpha of a black image in place with a few box-blur passes.
+void blurAlpha(QImage &image, int radius) {
+    const int w = image.width(), h = image.height();
+    QVector<quint8> a(w * h), b(w * h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) a[y * w + x] = qAlpha(image.pixel(x, y));
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            int sum = 0;
+            for (int x = -radius; x <= radius; ++x) sum += a[y * w + qBound(0, x, w - 1)];
+            for (int x = 0; x < w; ++x) {
+                b[y * w + x] = sum / (2 * radius + 1);
+                sum += a[y * w + qMin(w - 1, x + radius + 1)] - a[y * w + qMax(0, x - radius)];
+            }
+        }
+        for (int x = 0; x < w; ++x) {
+            int sum = 0;
+            for (int y = -radius; y <= radius; ++y) sum += b[qBound(0, y, h - 1) * w + x];
+            for (int y = 0; y < h; ++y) {
+                a[y * w + x] = sum / (2 * radius + 1);
+                sum += b[qMin(h - 1, y + radius + 1) * w + x] - b[qMax(0, y - radius) * w + x];
+            }
+        }
+    }
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) image.setPixel(x, y, qRgba(0, 0, 0, a[y * w + x]));
+}
+
 }  // namespace BlueprintStyle

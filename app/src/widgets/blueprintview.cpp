@@ -39,7 +39,7 @@ BlueprintView::BlueprintView(const BlueprintPreview &preview, QWidget *parent)
     setAccessibleDescription("Drag the background to pan and drag a node to move it. Scroll to zoom. "
                              "Use the arrow keys to pan, plus or minus to zoom, and F or Home to fit. "
                              "Press Delete to remove the selected node, Space or Tab to add a node, and I for its details. "
-                             "Press Control+Tab to move focus forward out of the graph and Shift+Tab to move it back.");
+                             "Press Control+Tab to move focus forward into the bottom dock and on out of the graph, and Shift+Tab to move it back.");
     setScene(m_scene);
     m_scene->setSceneRect(-sceneExtent, -sceneExtent, 2 * sceneExtent, 2 * sceneExtent);
     setFocusPolicy(Qt::StrongFocus);
@@ -64,7 +64,7 @@ void BlueprintView::buildDock() {
     auto *dock = new FloatingPanel;
     dock->setObjectName("blueprintDock");
     auto *row = new QHBoxLayout(dock);
-    row->setContentsMargins(dock->contentsMargins());
+    row->setContentsMargins(0, 0, 0, 0);  // the panel's own contentsMargins leave room for the shadow
     row->setSpacing(2);
     auto iconButton = [dock, row](const QString &icon, const QString &name) {
         auto *button = new Button(dock);
