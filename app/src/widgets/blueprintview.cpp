@@ -19,6 +19,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QTimer>
+#include <QVariantAnimation>
 #include <QWheelEvent>
 #include <QtMath>
 #include <cmath>
@@ -226,13 +227,36 @@ void BlueprintView::placeOverlays() {
     const auto boxes = overlayLayout();
     for (const auto &overlay : m_overlays) {
         if (!shownOverlay(overlay.widget)) continue;  // hidden on purpose
-        overlay.widget->setGeometry(boxes.value(overlay.widget));
+        QRect box = boxes.value(overlay.widget);
+        // A panel still sliding in keeps its offset; the animation carries it to the new spot.
+        if (auto *slide = m_slides.value(overlay.widget); slide && slide->state() == QAbstractAnimation::Running)
+            box.translate(qRound(slide->currentValue().toReal() * (box.width() + overlay.margin)), 0);
+        overlay.widget->setGeometry(box);
         overlay.widget->raise();
     }
     m_placing = false;
 }
 
+void BlueprintView::slideIn(QWidget *widget) {
+    auto *slide = m_slides.value(widget);
+    if (!slide) {
+        slide = new QVariantAnimation(this);
+        slide->setStartValue(1.0);
+        slide->setEndValue(0.0);
+        slide->setDuration(Theme::motionStandardMs() + 60);
+        slide->setEasingCurve(QEasingCurve::OutCubic);
+        connect(slide, &QVariantAnimation::valueChanged, this, [this] { placeOverlays(); });
+        m_slides.insert(widget, slide);
+    }
+    slide->stop();
+    slide->start();
+    placeOverlays();
+}
+
 bool BlueprintView::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::Show && watched->property("slideIn").toBool())
+        for (const auto &overlay : m_overlays)
+            if (overlay.widget == watched && overlay.edge == OverlayEdge::Right) slideIn(overlay.widget);
     if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::LayoutRequest)
         for (const auto &overlay : m_overlays)
             if (overlay.widget == watched) {

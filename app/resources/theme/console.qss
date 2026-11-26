@@ -21,7 +21,7 @@ QLabel#heroKicker { font-size: 12px; font-weight: 500; letter-spacing: 1px; }
 QPushButton { background: @fieldFill; border: 1px solid transparent; border-radius: 8px; padding: 7px 12px; min-height: 20px; font-weight: 500; }
 QPushButton:hover { background: @fieldFillHover; border-color: transparent; }
 QPushButton:pressed { background: @surfaceFillActive; }
-QPushButton:focus { border-color: @accentLabel; }
+QPushButton:focus { background: @fieldFillHover; }
 QPushButton:disabled { color: @textMuted; background: @insetBackground; border-color: transparent; }
 QPushButton#navBtn { padding: 8px 10px; border: 1px solid transparent; background: transparent; text-align: left; border-radius: 8px; color: @textSecondary; }
 QPushButton#navBtn:hover { background: @surfaceFillHover; }
@@ -87,7 +87,7 @@ QDoubleSpinBox:focus { border-color: @accentLabel; }
 QTextEdit:focus { border-color: @accentLabel; }
 QPlainTextEdit:focus { border-color: @accentLabel; }
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
-QTextEdit:disabled, QPlainTextEdit:disabled { background: @insetBackground; color: @textMuted; }
+QTextEdit:disabled, QPlainTextEdit:disabled { background: transparent; color: @textMuted; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: none; width: 30px; background: transparent; }
 QComboBox::down-arrow { image: none; }
 QComboBox QAbstractItemView { background: @surfaceFill; color: @textPrimary; border: 1px solid transparent; border-radius: 8px; padding: 4px; outline: 0; selection-background-color: @accentPrimary; selection-color: @accentText; }
@@ -679,10 +679,11 @@ QLabel#blueprintRevision {
 }
 QLabel#blueprintRevision[state="warn"] { color: @statusWarning; }
 QPushButton#blueprintPortContract {
-    background: @canvasBackground; text-align: left; border: 1px solid transparent;
-    border-radius: 6px; min-height: 20px; padding: 4px 8px; font-size: 12px;
+    background: transparent; text-align: left; border: none; border-radius: 8px; min-height: 32px; padding: 0;
 }
-QPushButton#blueprintPortContract:hover { background: @surfaceFillHover; }
+QPushButton#blueprintPortContract:hover { background: @fieldFillHover; }
+QPushButton#blueprintPortContract:focus { border: 1px solid @accentLabel; }
+QPushButton#blueprintPortContract:disabled { background: transparent; }
 QPushButton#blueprintStartCard {
     background: @surfaceFill; border: 1px solid transparent; border-radius: 10px; text-align: left; padding: 0;
 }
@@ -729,3 +730,12 @@ QListWidget#blueprintQuickAddList { background: transparent; border: none; font-
 QFrame#blueprintQuickAddFoot { background: @insetBackground; border: none; border-radius: 8px; }
 QLabel#blueprintQuickAddHint { font-size: 11px; color: @textMuted; }
 QLabel#blueprintKbd { font-family: @monoFont; font-size: 11px; color: @textSecondary; background: @surfaceFillActive; border-radius: 4px; padding: 0 5px; }
+/* Node inspector: header, sections and pin rows. */
+QLabel#blueprintInspectorTitle { font-family: @headingFont; font-size: 16px; font-weight: 600; color: @textPrimary; }
+QLabel#blueprintInspectorSubtitle { font-size: 12px; color: @textMuted; }
+QLabel#blueprintInspectorSection { font-size: 12px; font-weight: 500; color: @textMuted; }
+QFrame#blueprintPortRow { background: @fieldFill; border: none; border-radius: 8px; }
+QLabel#blueprintPortName { font-size: 13px; color: @textPrimary; }
+QLabel#blueprintPortType { font-family: @monoFont; font-size: 11px; color: @textMuted; }
+QLabel#blueprintPortWire { font-size: 12px; color: @textSecondary; }
+QLabel#blueprintPortMissing { font-size: 12px; color: @statusWarning; }

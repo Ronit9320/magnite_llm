@@ -57,6 +57,8 @@ configure_file(src/update_config.h.in generated/update_config.h @ONLY)
 configure_file(src/build_features.h.in generated/build_features.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/widgets/wheelguard.cpp
+    src/widgets/wheelguard.h
     src/testing/blueprint_tests.cpp
     src/testing/blueprint_tests.h
     src/testing/blueprint_test_support.h

@@ -585,9 +585,14 @@ int runBlueprintChecks(const QString &captures) {
         tree->setCurrentRow(1);
     pump();
     auto *adapter = visibleNamed<QComboBox>(panel, "Node adapter");
-    check(canvas->isVisible() && visibleText(panel, "Node inspector") && adapter &&
+    check(canvas->isVisible() && visibleNamed<QWidget>(panel, "Node inspector") && adapter &&
               adapter->currentText() == "order-selector-v2" && adapter->findData("extractor") < 0,
           "a saved legacy graph opens and shows its model inspector");
+    if (auto *scroll = panel.findChild<QScrollArea *>("blueprintInspectorScroll")) {
+        pump(320);
+        check(scroll->widget() && scroll->widget()->width() <= scroll->viewport()->width(),
+              "the model inspector fits its panel without running off the right edge");
+    } else check(false, "the model inspector fits its panel without running off the right edge");
     capture(panel, "blueprints-canvas-dark");
     panel.resize(782, 628);
     pump();

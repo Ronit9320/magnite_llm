@@ -1,3 +1,4 @@
+#include "widgets/wheelguard.h"
 #include "theme.h"
 #include "systemappearance.h"
 
@@ -178,6 +179,7 @@ void Theme::loadFonts() {
 
 void Theme::setupApplicationTheme() {
     loadFonts();
+    WheelGuard::install();
     // Start the refined dark-first design in dark mode once, then remember the switch.
     QSettings appearance;
     if (!appearance.value("appearance/darkRefinementApplied", false).toBool()) {

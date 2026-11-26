@@ -157,7 +157,7 @@ void BlueprintNodeFields::loadOptions() {
     if (m_bindingShown && m_preview.live() && (code == "generate" || code == "reason" || code == "lora")) {
         m_binding = new ComboBox;
         m_binding->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        m_binding->setMinimumContentsLength(20);
+        m_binding->setMinimumContentsLength(12);
         const bool adapter = code == "lora";
         const QString key = adapter ? "adapter" : "model";
         refreshBindings(m_original["kind"] == spec["kind"] ? m_original[key].toString() : QString{});
@@ -208,8 +208,20 @@ void BlueprintNodeFields::loadOptions() {
         if (ports.isEmpty()) continue;
         const QString direction = side == "in" ? "Input" : "Output";
         const bool editable = editableKeys(code, side);
-        body->addWidget(caption(direction + " ports", "headingLabel"));
-        if (editable) body->addWidget(caption("Key, display label, and data type."));
+        const bool dataPorts = std::any_of(ports.begin(), ports.end(), [](const QJsonValue &value) {
+            return value.toObject()["type"] != "adapter-ref";
+        });
+        if (!dataPorts && !m_helpShown) {
+            // Only the LoRA connection: nothing to edit here, the Inputs and Outputs rows show it.
+            for (const auto &value : ports) {
+                m_resourcePort = sameOperation ? findPort(m_original[side].toArray(), value.toObject()["id"].toString()) : QJsonObject{};
+                if (m_resourcePort.isEmpty()) m_resourcePort = value.toObject();
+                m_resourceSide = side;
+            }
+            continue;
+        }
+        body->addWidget(caption(direction + " ports", m_helpShown ? "headingLabel" : "cardMeta"));
+        if (editable && m_helpShown) body->addWidget(caption("Key, display label, and data type."));
         auto *rows = new QVBoxLayout;
         body->addLayout(rows);
         for (const auto &value : ports) {
@@ -217,9 +229,9 @@ void BlueprintNodeFields::loadOptions() {
             auto port = sameOperation ? findPort(m_original[side].toArray(), definition["id"].toString()) : QJsonObject{};
             if (port.isEmpty()) port = definition;
             if (port["type"] == "adapter-ref") {
-                auto *note = caption(side == "in" ? "Optional connection from an Adapter node."
-                                                   : "Connect this LoRA output to a Model or Reasoning node.");
-                rows->addWidget(note);
+                if (m_helpShown)
+                    rows->addWidget(caption(side == "in" ? "Optional connection from an Adapter node."
+                                                         : "Connect this LoRA output to a Model or Reasoning node."));
                 m_resourcePort = port;
                 m_resourceSide = side;
                 continue;
@@ -312,7 +324,7 @@ void BlueprintNodeFields::appendPort(QVBoxLayout *rows, const QString &side, con
     }
     auto *name = new QLineEdit(port["name"].toString());
     name->setMaxLength(60);
-    name->setPlaceholderText(port["name"].toString());
+    name->setPlaceholderText(m_preview.portLabel(port));
     name->setAccessibleName(direction + " port name");
     layout->addWidget(name, 1);
     watchLine(name);
@@ -451,6 +463,13 @@ QJsonObject BlueprintNodeFields::build(QString *error, QWidget **focus) const {
 }
 
 QWidget *BlueprintNodeFields::firstField() const { return m_operation; }
+
+void BlueprintNodeFields::setHelpShown(bool shown) {
+    if (m_helpShown == shown) return;
+    m_helpShown = shown;
+    m_detail->setVisible(shown);
+    loadOptions();
+}
 
 void BlueprintNodeFields::setBindingShown(bool shown) {
     if (m_bindingShown == shown) return;

@@ -68,7 +68,7 @@ BlueprintBindingFields::BlueprintBindingFields(BlueprintPreview &preview, const 
 
     for (auto *combo : {m_models, m_adapters}) {
         combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        combo->setMinimumContentsLength(22);
+        combo->setMinimumContentsLength(12);
     }
     Surface::field(body, "Base checkpoint", m_models);
     Surface::field(body, "Direct LoRA adapter", m_adapters);
@@ -218,7 +218,7 @@ BlueprintDatasetFields::BlueprintDatasetFields(BlueprintPreview &preview, const 
     body->setContentsMargins(0, 0, 0, 0);
     m_datasets = new ComboBox;
     m_datasets->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    m_datasets->setMinimumContentsLength(22);
+    m_datasets->setMinimumContentsLength(12);
     populate();
     connect(&m_preview, &BlueprintPreview::optionsChanged, this, &BlueprintDatasetFields::populate);
     m_preview.refreshOptions();

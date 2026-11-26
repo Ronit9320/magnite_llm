@@ -883,10 +883,13 @@ void checkShell(BlueprintPreview &preview, const QString &captures) {
     };
     const auto first = example["nodes"].toArray().first().toObject()["id"].toString();
     select(first);
+    const int sliding = inspector ? inspector->geometry().left() : 0;
+    pump(320);
     const QRect viewport = view->viewport()->geometry();
     check(view->selection() == first && inspector && inspector->isVisible()
               && qAbs(viewport.right() - inspector->geometry().right()) <= 16,
           "selecting a node floats the inspector in on the right");
+    check(inspector && sliding > inspector->geometry().left(), "the inspector slides in from the right edge");
     check(inspector && bar && inspector->geometry().top() >= bar->geometry().bottom() - 2 * FloatingPanel::shadowMargin(),
           "the inspector starts below the top bar");
     FloatingPanel *dock = view->findChild<FloatingPanel *>("blueprintDock");
@@ -1113,7 +1116,7 @@ void checkInspector(BlueprintPreview &preview) {
     select("out");
     QPushButton *disconnect = nullptr;
     for (auto *button : inspector->findChildren<QPushButton *>())
-        if (button->isVisible() && button->text() == "Disconnect") disconnect = button;
+        if (button->isVisible() && button->accessibleName().startsWith("Disconnect ")) disconnect = button;
     if (disconnect) disconnect->click();
     pump(50);
     check(disconnect && !hasEdge(edge("in", "text", "out", "value")), "Disconnect removes a wire from the inspector");
@@ -1575,7 +1578,7 @@ void checkPolish(BlueprintPreview &preview, const QString &captures) {
     };
     const auto select = [&](const QString &id) {
         click(view->viewport(), viewPoint(*view, view->graphScene()->node(id)->sceneBoundingRect().center()));
-        pump(50);
+        pump(320);  // the inspector's slide-in
     };
     const auto openQuickAdd = [&] {
         QCursor::setPos(view->viewport()->mapToGlobal(view->freeArea().center()));

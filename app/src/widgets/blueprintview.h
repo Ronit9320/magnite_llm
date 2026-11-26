@@ -114,11 +114,14 @@ private:
     };
     QHash<QWidget *, QRect> overlayLayout() const;
     void placeOverlays();
+    // Slides a right-edge overlay in from beyond the canvas edge when it is shown.
+    void slideIn(QWidget *widget);
     void buildDock();
     qreal zoom() const { return transform().m11(); }
 
     BlueprintScene *m_scene;
     QList<Overlay> m_overlays;
+    QHash<QWidget *, QVariantAnimation *> m_slides;
     bool m_placing = false;
     QLabel *m_zoomLabel = nullptr;
     Button *m_libraryToggle = nullptr;

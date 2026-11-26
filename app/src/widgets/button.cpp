@@ -2,6 +2,7 @@
 #include "motion.h"
 #include "theme.h"
 #include <QEnterEvent>
+#include <QFocusEvent>
 #include <QPainter>
 #include <QStyleOptionButton>
 #include <QHelpEvent>
@@ -98,6 +99,10 @@ bool Button::textFits() const {
     return fontMetrics().size(Qt::TextShowMnemonic,text()).width()<=available;
 }
 bool Button::event(QEvent *event) {
+    if (event->type()==QEvent::FocusIn) {
+        const auto reason=static_cast<QFocusEvent *>(event)->reason();
+        m_keyboardFocus=reason==Qt::TabFocusReason || reason==Qt::BacktabFocusReason || reason==Qt::ShortcutFocusReason;
+    }
     if (event->type()==QEvent::ToolTip && m_truncated && toolTip().isEmpty()) {
         auto *help=static_cast<QHelpEvent *>(event);
         QToolTip::showText(help->globalPos(),"<qt>"+text().toHtmlEscaped().replace('\n',"<br/>")+"</qt>",this);
@@ -124,7 +129,7 @@ void Button::paintEvent(QPaintEvent *) {
     if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Qt::transparent); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
     if (hasFocus() && isEnabled()) {
         if (!isDown() && !isChecked()) fill=hover;
-        border=QColor(primary?Theme::accentText():Theme::accentLabel());
+        if (m_keyboardFocus) border=QColor(primary?Theme::accentText():Theme::accentLabel());
     }
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
     painter.setBrush(fill);
