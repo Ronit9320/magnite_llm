@@ -119,7 +119,7 @@ WireItem::WireItem(const QJsonObject &edge, PinItem *from, PinItem *to)
     setFlag(ItemIsSelectable);
     setZValue(0);
     m_dash->setStartValue(0.0);
-    m_dash->setEndValue(8.0);
+    m_dash->setEndValue(6.0);  // one period of the {3, 3} dash pattern, so the loop doesn't hitch
     m_dash->setDuration(600);
     m_dash->setLoopCount(-1);
     QObject::connect(m_dash, &QVariantAnimation::valueChanged, [this] { update(); });
@@ -159,13 +159,22 @@ void WireItem::setActive(bool active) {
 }
 
 QPainterPath WireItem::shape() const {
-    QPainterPathStroker stroker;
-    stroker.setWidth(12);
-    stroker.setCapStyle(Qt::RoundCap);
-    return stroker.createStroke(path());
+    // Stroked once per path change: Qt asks for the shape and bounds far more often than wires move.
+    if (m_shapeFor != path()) {
+        QPainterPathStroker stroker;
+        stroker.setWidth(12);
+        stroker.setCapStyle(Qt::RoundCap);
+        m_shape = stroker.createStroke(path());
+        m_bounds = m_shape.boundingRect().adjusted(-6, -6, 6, 6);
+        m_shapeFor = path();
+    }
+    return m_shape;
 }
 
-QRectF WireItem::boundingRect() const { return shape().boundingRect().adjusted(-6, -6, 6, 6); }
+QRectF WireItem::boundingRect() const {
+    shape();
+    return m_bounds;
+}
 
 void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
     painter->setRenderHint(QPainter::Antialiasing);
@@ -253,6 +262,14 @@ QVariant NodeItem::itemChange(GraphicsItemChange change, const QVariant &value) 
     return QGraphicsObject::itemChange(change, value);
 }
 
+QPixmap NodeItem::glyph(const QString &icon, const QColor &color, int size) const {
+    // Rendering an SVG per node per paint is the slow part of a large graph; keep the result.
+    const auto key = QString("%1|%2|%3|%4").arg(icon, color.name(QColor::HexArgb)).arg(size).arg(Theme::isDark());
+    auto it = m_glyphs.constFind(key);
+    if (it == m_glyphs.constEnd()) it = m_glyphs.insert(key, Theme::coloredIcon(icon, color, size).pixmap(size, size));
+    return *it;
+}
+
 QRectF NodeItem::infoRect() const {
     qreal right = m_size.width() - 10;
     if (!m_warning.isEmpty()) right -= 20;
@@ -338,12 +355,12 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     }
 
     if (infoShown()) {
-        Theme::coloredIcon("info", QColor(Theme::textSecondary()), 14).paint(painter, infoRect().toRect());
+        painter->drawPixmap(infoRect().toRect(), glyph("info", QColor(Theme::textSecondary()), 14));
         markRight -= 20;
     }
 
     const QRectF glyph(10, (BlueprintStyle::headerHeight - 16) / 2, 16, 16);
-    Theme::coloredIcon(m_icon, family, 16).paint(painter, glyph.toRect());
+    painter->drawPixmap(glyph.toRect(), this->glyph(m_icon, family, 16));
     const qreal textLeft = 34, textWidth = markRight - textLeft;
     QFont title(Theme::headingFont());
     title.setPixelSize(13);

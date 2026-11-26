@@ -607,6 +607,16 @@ QJsonObject BlueprintPreview::withPortType(const QJsonObject &node, const QStrin
         ports.replace(i, port);
     }
     result[side] = ports;
+    // An operation that returns the type it receives keeps its single input and output in step.
+    const auto other = side == "in" ? QString("out") : QString("in");
+    auto paired = result[other].toArray();
+    if (operation(operationId(node))["sameType"].toBool() && ports.size() == 1 && paired.size() == 1) {
+        auto port = paired.first().toObject();
+        port["type"] = type;
+        port["schema"] = schema;
+        paired.replace(0, port);
+        result[other] = paired;
+    }
     return result;
 }
 

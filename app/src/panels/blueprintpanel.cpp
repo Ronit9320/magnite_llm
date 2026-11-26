@@ -1954,12 +1954,17 @@ void BlueprintPanel::startRun() {
                 if (!self) return;
                 self->m_starting = false;
                 self->refreshRunOptions();
+                // A canvas run is one start; whatever happens, the next run starts fresh.
+                const bool onCanvas = std::exchange(self->m_runOnCanvas, false);
                 if (nav != self->m_navigation) return;
                 self->m_runError->setText(error);
                 self->m_runError->setVisible(!error.isEmpty());
-                if (run.isEmpty()) return;
+                if (run.isEmpty()) {
+                    if (onCanvas && !error.isEmpty()) Ui::showNotice(self->m_canvas, "Run blueprint", error);
+                    return;
+                }
                 self->m_runId = run["id"].toString();
-                if (std::exchange(self->m_runOnCanvas, false)) {
+                if (onCanvas) {
                     self->m_canvasRunId = self->m_runId;
                     self->showCanvasRun(run);
                 }

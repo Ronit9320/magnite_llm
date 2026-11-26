@@ -363,10 +363,13 @@ void checkView(BlueprintPreview &preview) {
     check(dots, "canvas dots stay visible");
     // performance
     QJsonArray nodes, edges;
+    // Count nodes have a value pin on both sides, so every one of the 60 edges resolves to a wire.
     for (int i = 0; i < 40; ++i)
-        nodes << preview.makeNode(i % 2 ? "count" : "input", QString("n%1").arg(i), (i % 8) * 260, (i / 8) * 160);
-    for (int i = 0; i < 60; ++i) edges << edge(QString("n%1").arg(i % 40), "value", QString("n%1").arg((i + 1) % 40), "value");
+        nodes << preview.makeNode("count", QString("n%1").arg(i), (i % 8) * 260, (i / 8) * 160);
+    for (int i = 0; i < 39; ++i) edges << edge(QString("n%1").arg(i), "value", QString("n%1").arg(i + 1), "value");
+    for (int i = 0; i < 21; ++i) edges << edge(QString("n%1").arg(i), "value", QString("n%1").arg(i + 2), "value");
     view.setGraph({{"nodes", nodes}, {"edges", edges}});
+    check(view.graphScene()->wires().size() == 60, "the performance graph draws all 60 wires");
     QElapsedTimer timer;
     timer.start();
     view.fit();
@@ -1683,6 +1686,78 @@ void checkPolish(BlueprintPreview &preview, const QString &captures) {
     preview.deleteBlueprint("polish-check");
 }
 
+void checkReviewFixes(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    // A port that takes a wire's type keeps a same-type operation's other port in step.
+    const auto cnt = preview.makeNode("count", "cnt", 0, 0), out = preview.makeNode("output", "out", 320, 0);
+    const auto connected = preview.connectGraph(QJsonObject{{"nodes", QJsonArray{cnt, out}}, {"edges", QJsonArray{}}},
+                                                edge("cnt", "value", "out", "value"));
+    QJsonObject retyped;
+    for (const auto &value : connected["nodes"].toArray())
+        if (value.toObject()["id"] == "out") retyped = value.toObject();
+    check(retyped["in"].toArray().first().toObject()["type"] == "integer"
+              && retyped["out"].toArray().first().toObject()["type"] == "integer",
+          "a wire that retypes a same-type input retypes its output too");
+    BlueprintNodeFields same(preview, "output", out);
+    same.show();
+    pump();
+    auto *inputType = visibleNamed<QComboBox>(same, "Input port type");
+    // Read the node the moment the edit is reported, as the inspector saves it.
+    QJsonObject edited;
+    QObject::connect(&same, &BlueprintNodeFields::edited, [&] { if (edited.isEmpty()) edited = same.node(); });
+    if (inputType) inputType->setCurrentIndex(inputType->findData("object"));
+    check(inputType && edited["in"].toArray().first().toObject()["type"] == "object"
+              && edited["out"].toArray().first().toObject()["type"] == "object",
+          "changing a same-type input in the fields changes its output too");
+
+    // Editing a node the catalog doesn't know keeps what it is.
+    auto odd = preview.makeNode("output", "odd", 0, 0);
+    odd["kind"] = "unheard";
+    odd["operation"] = "mystery-op";
+    BlueprintNodeFields unknown(preview, "unheard", odd);
+    unknown.show();
+    pump();
+    if (auto *name = visibleNamed<QLineEdit>(unknown, "Name (optional)")) name->setText("Renamed");
+    const auto kept = unknown.node();
+    check(kept["name"] == "Renamed" && kept["operation"] == "mystery-op" && kept["kind"] == "unheard"
+              && kept["in"] == odd["in"] && kept["out"] == odd["out"],
+          "renaming a node of an unknown kind keeps its kind, operation and ports");
+
+    // Edits don't refit the camera once a graph is open.
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    auto example = preview.example();
+    example["id"] = "refit-check";
+    example["name"] = "Refit check";
+    preview.saveBlueprint(example);
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Refit check")) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    const auto first = example["nodes"].toArray().at(0).toObject()["id"].toString();
+    if (view && view->graphScene()->node(first)) {
+        click(view->viewport(), viewPoint(*view, view->graphScene()->node(first)->sceneBoundingRect().center()));
+        pump(50);
+        const int zoom = view->zoomPercent();
+        const auto centre = view->centerInGraph();
+        if (auto *name = visibleNamed<QLineEdit>(panel, "Name (optional)")) {
+            name->setText("Renamed message");
+            name->setModified(true);
+            emit name->editingFinished();
+        }
+        pump(50);
+        check(view->zoomPercent() == zoom && view->centerInGraph() == centre, "saving an edit does not refit the camera");
+    } else check(false, "the refit check opens its graph");
+    preview.deleteBlueprint("refit-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1702,6 +1777,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkCanvasRun(preview);
     checkDetails(preview);
     checkPolish(preview, captures);
+    checkReviewFixes(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

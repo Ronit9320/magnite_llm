@@ -243,6 +243,8 @@ BlueprintView::~BlueprintView() {
 
 void BlueprintView::setGraph(const QJsonObject &graph) {
     const QString previous = m_selected;
+    // Only a newly opened graph fits itself; edits to the open one keep the camera where it is.
+    const bool newGraph = graph["id"] != m_scene->graph()["id"] || m_scene->nodes().isEmpty();
     cancelConnect();
     m_quiet = true;
     m_dragged = nullptr;
@@ -258,7 +260,7 @@ void BlueprintView::setGraph(const QJsonObject &graph) {
         emit nodeSelected({});
     }
     applyRunStates();
-    if (m_autoFit) fit();
+    if (m_autoFit && newGraph) fit();
 }
 
 QString BlueprintView::selection() const { return m_selected; }

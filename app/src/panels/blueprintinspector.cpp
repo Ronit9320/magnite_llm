@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <utility>
 
 namespace {
 QLabel *text(const QString &value, const char *style = "cardMeta", bool wrap = true) {
@@ -159,6 +160,7 @@ void BlueprintInspector::rebuild() {
     }
     m_fields = nullptr;
     m_binding = nullptr;
+    m_bindingPending = false;
     m_dataset = nullptr;
     m_bindingError = nullptr;
     m_content = new QWidget;
@@ -223,6 +225,9 @@ void BlueprintInspector::rebuild() {
         m_bindingError->hide();
         body->addWidget(m_bindingError);
         connect(m_binding, &BlueprintBindingFields::edited, this, &BlueprintInspector::commitBinding);
+        connect(m_binding, &BlueprintBindingFields::readyChanged, this, [this](bool ready) {
+            if (ready && std::exchange(m_bindingPending, false)) commitBinding();
+        });
         if (liveModel) {
             auto *train = new Button("Training jobs…");
             train->setFlat(true);
@@ -324,7 +329,11 @@ void BlueprintInspector::commitNodeFields() {
 }
 
 void BlueprintInspector::commitBinding() {
-    if (!m_binding || !m_binding->ready()) return;
+    if (!m_binding) return;
+    if (!m_binding->ready()) {
+        m_bindingPending = true;
+        return;
+    }
     const auto error = m_binding->error();
     m_bindingError->setText(error);
     m_bindingError->setVisible(!error.isEmpty());

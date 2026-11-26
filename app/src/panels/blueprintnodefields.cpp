@@ -54,6 +54,8 @@ BlueprintNodeFields::BlueprintNodeFields(BlueprintPreview &preview, const QStrin
         const auto entry = value.toObject();
         m_kind->addItem(entry["label"].toString(), entry["id"].toString());
     }
+    // A kind the catalog no longer lists stays selected, so editing never turns the node into another one.
+    if (!kind.isEmpty() && m_kind->findData(kind) < 0) m_kind->addItem("Unavailable · " + kind, kind);
     m_kind->setCurrentIndex(qMax(0, m_kind->findData(kind)));
     Surface::field(body, "Node kind", m_kind);
     Surface::field(body, "What it does", m_operation);
@@ -121,6 +123,9 @@ void BlueprintNodeFields::loadOperations(const QString &preferred) {
         if (spec["kind"].toString() != kind || (spec["legacyOnly"].toBool() && id != preferred)) continue;
         m_operation->addItem(spec["label"].toString(), id);
     }
+    if (!preferred.isEmpty() && m_operation->findData(preferred) < 0
+        && kind == m_original["kind"].toString(m_preview.operation(preferred)["kind"].toString()))
+        m_operation->addItem("Unavailable · " + preferred, preferred);
     m_operation->setCurrentIndex(qMax(0, m_operation->findData(preferred)));
     m_name->setPlaceholderText(defaultName());
     loadOptions();
@@ -371,7 +376,10 @@ QJsonObject BlueprintNodeFields::build(QString *error, QWidget **focus) const {
         }
     }
     const auto contracts = m_preview.fixtures()["contracts"].toObject();
+    // An operation the catalog doesn't describe has no port editors; its ports stay as they were.
+    const bool knownOperation = !m_preview.operation(code).isEmpty();
     for (const auto &direction : {QString("in"), QString("out")}) {
+        if (!knownOperation) continue;
         QJsonArray ports;
         QSet<QString> usedNames, usedKeys;
         for (const auto &editor : m_ports) {
@@ -404,6 +412,16 @@ QJsonObject BlueprintNodeFields::build(QString *error, QWidget **focus) const {
             return fail("Keep at least one " + QString(direction == "in" ? "input" : "output") + " data port.");
         if (direction == m_resourceSide && !m_resourcePort.isEmpty()) ports.append(m_resourcePort);
         node[direction] = ports;
+    }
+    if (m_preview.operation(code)["sameType"].toBool() && node["in"].toArray().size() == 1 && node["out"].toArray().size() == 1) {
+        // The output takes the input's type, whatever order the type pickers reported in.
+        auto outputs = node["out"].toArray();
+        auto output = outputs.first().toObject();
+        const auto input = node["in"].toArray().first().toObject();
+        output["type"] = input["type"];
+        output["schema"] = input["schema"];
+        outputs.replace(0, output);
+        node["out"] = outputs;
     }
     if (code == "validate") {
         // The rules define both ports, so a connection shows the validated shape.

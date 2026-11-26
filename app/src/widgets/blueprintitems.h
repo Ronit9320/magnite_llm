@@ -3,6 +3,8 @@
 #include <QGraphicsObject>
 #include <QGraphicsPathItem>
 #include <QJsonObject>
+#include <QPixmap>
+#include <QHash>
 #include <QList>
 #include <QSizeF>
 #include <QString>
@@ -67,6 +69,9 @@ private:
     PinItem *m_to;
     bool m_active = false;
     QVariantAnimation *m_dash;
+    mutable QPainterPath m_shapeFor;
+    mutable QPainterPath m_shape;
+    mutable QRectF m_bounds;
 };
 
 // One node: header tinted by family, input/output pins, and an optional one-line preview.
@@ -112,5 +117,7 @@ private:
     QList<PinItem *> m_pins;
     QSizeF m_size;
     bool m_hover = false;
+    mutable QHash<QString, QPixmap> m_glyphs;
+    QPixmap glyph(const QString &icon, const QColor &color, int size) const;
     const BlueprintPreview &m_preview;
 };

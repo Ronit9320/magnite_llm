@@ -56,4 +56,6 @@ private:
     QPointer<BlueprintBindingFields> m_binding;
     QPointer<BlueprintDatasetFields> m_dataset;
     QPointer<QLabel> m_bindingError;
+    // A binding edit made while the live checkpoint check runs; saved once the check finishes.
+    bool m_bindingPending = false;
 };
