@@ -30,6 +30,7 @@ CREATE INDEX IF NOT EXISTS tool_approvals_by_run ON tool_approvals (run_id);
 
 _ACTIVE = ("pending", "approved", "executing")
 MAX_REJECTED_RUNS = 50
+MAX_OUTPUT_RUNS = 50
 ApprovalStatus = Literal["pending", "approved", "executing", "completed", "failed",
                          "denied", "expired", "cancelled", "interrupted", "rejected"]
 ApprovalDecision = Literal["approve_once", "deny"]
@@ -55,6 +56,8 @@ class Approval(BaseModel):
     decided_at: datetime | None = None
     outcome: str | None = None
     action: dict | None = None
+    output: str | None = None
+    exit_code: int | None = None
 
 
 class ApprovalConflict(ValueError):
@@ -79,7 +82,7 @@ def _records(conn, run_id) -> list[Approval]:
 
 def _write(conn, audit) -> None:
     audit.updated_at = _now()
-    payload = audit.model_dump_json(exclude={"action"}, exclude_none=True)
+    payload = audit.model_dump_json(exclude={"action", "output", "exit_code"}, exclude_none=True)
     conn.execute("INSERT INTO tool_approvals VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET audit = excluded.audit",
                  (audit.id, audit.run_id, payload))
     conn.execute("INSERT INTO events (run_id, kind, payload) VALUES (?, 'approval', ?)", (audit.run_id, payload))
@@ -103,6 +106,8 @@ class ToolBroker:
         self._pending: dict[str, _Pending] = {}
         # Refused attempts are shown to the user but never stored: no database row, no event.
         self._rejected: OrderedDict[str, list[Approval]] = OrderedDict()
+        # What commands and reads produced, by run and approval. Kept for the user, never stored.
+        self._outputs: OrderedDict[str, dict[str, tuple[str, int | None]]] = OrderedDict()
 
     def reject(self, run_id: str, node_id: str, kind: str, action: dict, reason: str) -> None:
         """Remember an attempt that was refused before it could be offered for approval."""
@@ -116,6 +121,13 @@ class ToolBroker:
             while len(self._rejected) > MAX_REJECTED_RUNS:
                 self._rejected.popitem(last=False)
 
+    def _keep_output(self, run_id: str, approval_id: str, output: str, exit_code: int | None) -> None:
+        with self._condition:
+            self._outputs.setdefault(run_id, {})[approval_id] = (output, exit_code)
+            self._outputs.move_to_end(run_id)
+            while len(self._outputs) > MAX_OUTPUT_RUNS:
+                self._outputs.popitem(last=False)
+
     def list(self, run_id: str) -> list[Approval]:
         with self._condition, connection(self.db) as conn:
             result = _records(conn, run_id)
@@ -123,6 +135,8 @@ class ToolBroker:
                 pending = self._pending.get(item.id)
                 if item.status == "pending" and pending is not None:
                     item.action = pending.action.display()
+                elif item.status not in _ACTIVE and item.id in self._outputs.get(run_id, {}):
+                    item.output, item.exit_code = self._outputs[run_id][item.id]
             return sorted([*result, *self._rejected.get(run_id, [])], key=lambda item: item.created_at)
 
     @staticmethod
@@ -181,6 +195,9 @@ class ToolBroker:
                     outcome = result.outcome
                 except (OSError, ValueError, RuntimeError):
                     outcome = "dispatch_failed"
+                # Before the final status: clients refetch the list when that event arrives.
+                if result is not None and result.output is not None and action.action in ("command", "read"):
+                    self._keep_output(run_id, item.id, result.output, result.exit_code)
                 with connection(self.db) as conn:
                     conn.execute("BEGIN IMMEDIATE")
                     current = self._read(conn, item.run_id, item.id)

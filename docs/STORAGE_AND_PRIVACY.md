@@ -59,6 +59,11 @@ the original task or step values can still contain sensitive data. The content o
 a file a tool asks to write is shown while approval is pending and kept in the
 app's memory until it closes. The approval audit stores neither that content nor
 its path. Attempts refused before approval are kept in memory only.
+What an approved command or read produced is shown on its card from memory and is
+not written to the approval audit or its events. A Blueprint run's step history
+still keeps the Tool approval node's receipt, output included, and a model's
+answer may repeat parts of it. Output can contain serial numbers, user names or
+file contents, so check screenshots before sharing them.
 [Workflow and permission guide](BLUEPRINTS.md)
 
 Settings → Updates checks GitHub for preview releases and downloads signed update

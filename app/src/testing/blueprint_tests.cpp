@@ -1020,9 +1020,16 @@ int runLiveBlueprintChecks(const QString &captures) {
     check(session.run(runId)["decisions"].toArray().first().toObject()["status"] == "denied",
           "the persisted approval audit records the denial");
 
+    const auto outputShows = [&](const QString &expected) {
+        for (const auto *box : panel.findChildren<QPlainTextEdit *>("blueprintCode"))
+            if (box->isVisible() && box->isReadOnly() && box->accessibleName() == "Action output"
+                && box->toPlainText().contains(expected)) return true;
+        return false;
+    };
+
     const auto python = QStandardPaths::findExecutable("python3");
     if (!python.isEmpty()) {
-        // The only command the check can approve prints Python's version.
+        // The commands the check approves only print Python's version or exit with a code.
         if (auto *target = visibleNamed<QComboBox>(panel, "Run target")) target->setCurrentIndex(0);
         if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
             message->setPlainText(BlueprintPreview::jsonText(QJsonObject{{"request",
@@ -1036,6 +1043,16 @@ int runLiveBlueprintChecks(const QString &captures) {
             check(waitForState(session, approvedId, "passed") &&
                 session.run(approvedId)["decisions"].toArray().first().toObject()["status"] == "completed",
                 "Approve once completes the exact command through the broker");
+            // No "Show action details" click: the result is there to be checked.
+            check(until([&] { return outputShows("Python 3") && visibleText(panel, "--version"); }),
+                  "a finished command shows what ran and what it printed");
+            for (auto *box : panel.findChildren<QPlainTextEdit *>("blueprintCode")) {
+                if (!box->isVisible() || box->accessibleName() != "Action output") continue;
+                for (auto *parent = box->parentWidget(); parent; parent = parent->parentWidget())
+                    if (auto *area = qobject_cast<QScrollArea *>(parent)) { area->ensureWidgetVisible(box); break; }
+            }
+            pump();
+            capture(panel, "live-command-output-dark");
         }
     }
 
@@ -1081,11 +1098,32 @@ int runLiveBlueprintChecks(const QString &captures) {
             Theme::setDark(false);
             pump();
             capture(panel, "live-replace-approval-light");
-            visibleButton(panel, "Deny")->click();
+            // The theme switch can leave the card hidden for a few milliseconds.
+            if (check(until([&] { return visibleButton(panel, "Deny"); }), "the card is still there after a theme switch"))
+                visibleButton(panel, "Deny")->click();
             check(waitForState(session, id, "failed") && contents(file) == "from magnite space",
                   "a denied replacement leaves the file unchanged");
             Theme::setDark(true);
             pump();
+        }
+
+        if (!python.isEmpty()) {
+            submit({{"action", "command"}, {"executable", python},
+                    {"arguments", QJsonArray{"-c", "raise SystemExit(3)"}}});
+            const bool offered = until([&] { return visibleButton(panel, "Approve once") && visibleText(panel, "SystemExit"); });
+            check(offered, "a command that will fail waits for approval");
+            if (offered) {
+                visibleButton(panel, "Approve once")->click();
+                check(until([&] { return outputShows("(no output)") && visibleText(panel, "Output · exit code 3"); }),
+                      "a failed command that printed nothing says so with its exit code");
+                for (auto *box : panel.findChildren<QPlainTextEdit *>("blueprintCode")) {
+                    if (!box->isVisible() || box->accessibleName() != "Action output") continue;
+                    for (auto *parent = box->parentWidget(); parent; parent = parent->parentWidget())
+                        if (auto *area = qobject_cast<QScrollArea *>(parent)) { area->ensureWidgetVisible(box); break; }
+                }
+                pump(600);
+                capture(panel, "live-command-failed-dark");
+            }
         }
 
         submit({{"action", "read"}, {"target", scratch.filePath("missing.txt")}});

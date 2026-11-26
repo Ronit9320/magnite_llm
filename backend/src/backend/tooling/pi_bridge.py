@@ -244,7 +244,7 @@ _JSON_PROTOCOL = "\n".join([
 
 def _plain_messages(messages: list[dict], tools: list[dict]) -> list[ChatMessage]:
     """Flatten tool history for models without a native tool format."""
-    flat = []
+    flat, previous = [], None
     for message in messages:
         role, content = message["role"], message.get("content") or ""
         if role == "system" and tools:
@@ -253,7 +253,12 @@ def _plain_messages(messages: list[dict], tools: list[dict]) -> list[ChatMessage
             content = "\n".join(json.dumps(call["function"]) for call in message["tool_calls"])
         elif role == "tool":
             role, content = "user", f"Tool result for {message.get('name', 'the tool')}:\n{content}"
-        flat.append({"role": role, "content": content})
+        # Results of several calls in one reply share a turn: many templates reject two user turns in a row.
+        if message["role"] == previous == "tool":
+            flat[-1]["content"] += f"\n\n{content}"
+        else:
+            flat.append({"role": role, "content": content})
+        previous = message["role"]
     return _MESSAGES.validate_python(flat)
 
 
@@ -311,40 +316,72 @@ def _call(value) -> dict | None:
     return {"name": name, "arguments": arguments}
 
 
-def _python_call(text: str) -> dict | None:
-    """Parse ``name(key='value')`` or ``[name(key='value')]``, the Llama 3.2 style."""
-    match = re.fullmatch(r"\[?\s*(\w+)\s*\((.*)\)\s*\]?", text.strip().strip("`"), flags=re.S)
-    if not match or match.group(1) not in _TOOL_NAMES:
-        return None
+def _python_calls(text: str) -> list[dict]:
+    """Parse ``name(key='value')`` or ``[a(...), b(...)]``, the Llama 3.2 style.
+
+    Empty unless every part of the reply is a call to a tool with text arguments.
+    """
+    body = text.strip().strip("`").strip()
+    if not re.match(r"\[?\s*\w+\s*\(", body):
+        return []
+    body = body.removeprefix("[").removesuffix("]")
     try:
-        call = ast.parse(f"f({match.group(2)})", mode="eval").body
-        arguments = {item.arg: ast.literal_eval(item.value) for item in call.keywords if item.arg}
-    except (SyntaxError, ValueError):
-        return None
-    if call.args or not all(isinstance(value, str) for value in arguments.values()):
-        return None
-    return {"name": match.group(1), "arguments": arguments}
+        items = ast.parse(f"[{body}]", mode="eval").body.elts
+        calls = []
+        for item in items:
+            if not (isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+                    and item.func.id in _TOOL_NAMES and not item.args):
+                return []
+            arguments = {word.arg: ast.literal_eval(word.value) for word in item.keywords if word.arg}
+            if not all(isinstance(value, str) for value in arguments.values()):
+                return []
+            calls.append({"name": item.func.id, "arguments": arguments})
+    except (AttributeError, SyntaxError, TypeError, ValueError):
+        return []
+    return calls
 
 
-def _named_call(text: str) -> dict | None:
-    """Parse a tool name on one line followed by its JSON arguments; return the first such call.
+def _objects(text: str) -> list[dict]:
+    """The JSON objects a reply consists of, or none when it holds anything else. A code fence is allowed."""
+    rest = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip()).strip()
+    values = []
+    while rest:
+        try:
+            value, end = json.JSONDecoder().raw_decode(rest)
+        except ValueError:
+            return []
+        if not isinstance(value, dict):
+            return []
+        values.append(value)
+        rest = rest[end:].strip()
+    return values
+
+
+def _named_calls(text: str) -> list[dict]:
+    """Parse tool names each on a line followed by their JSON arguments.
 
     The whole reply must be made of these blocks, so an answer that shows one as an example stays text.
     """
-    rest, first = text.strip(), None
+    rest, calls = text.strip(), []
     while rest:
         match = re.match(r"(\w+)[ \t]*\r?\n\s*(?=\{)", rest)
         if not match or match.group(1) not in _TOOL_NAMES:
-            return None
+            return []
         try:
             arguments, end = json.JSONDecoder().raw_decode(rest, match.end())
         except ValueError:
-            return None
+            return []
         call = _call({"name": match.group(1), "arguments": arguments})
         if call is None:
-            return None
-        first, rest = first or call, rest[end:].strip()
-    return first
+            return []
+        calls.append(call)
+        rest = rest[end:].strip()
+    return calls
+
+
+def _unique(calls: list[dict]) -> list[dict]:
+    """Drop exact repeats within one reply, keeping the order."""
+    return list({json.dumps(call, sort_keys=True): call for call in calls}.values())
 
 
 def parse_reply(raw: str, tools: bool) -> tuple[str, list[dict]]:
@@ -355,12 +392,19 @@ def parse_reply(raw: str, tools: bool) -> tuple[str, list[dict]]:
         answer = re.sub(r"<tool_call>.*?(?:</tool_call>|$)", "", text, flags=re.S).strip()
         if not tools:
             return answer, []
-        calls = [call for block in tagged for call in map(_call, _json_values(block)) if call][:1]
+        # One call per block: _json_values can read the same object from a block twice.
+        found = (next(filter(None, map(_call, _json_values(block))), None) for block in tagged)
+        calls = _unique([call for call in found if call])
         if calls:
             return answer, calls
         return text, []
-    if tools and (call := _python_call(text) or _named_call(text)):
-        return "", [call]
+    if tools:
+        if calls := _python_calls(text) or _named_calls(text):
+            return "", _unique(calls)
+        # One object is read below, which also allows words before it. Several must be the whole reply.
+        values = _objects(text)
+        if len(values) > 1 and all(calls := [_call(value) for value in values]):
+            return "", _unique(calls)
     for value in _json_values(text):
         if tools and (call := _call(value)):
             return "", [call]
@@ -382,8 +426,8 @@ def call_problem(raw: str, offered: bool) -> tuple[str, str] | None:
     """
     text = _strip_thinking(raw)
     tagged = re.findall(_TAGGED, text, flags=re.S)
-    if not tagged and not offered and (call := _named_call(text)):
-        return "action_limit", call["name"]
+    if not tagged and not offered and (calls := _named_calls(text)):
+        return "action_limit", calls[0]["name"]
     body = tagged[0] if tagged else re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
     if not tagged and not body.startswith("{"):
         return None
@@ -392,6 +436,11 @@ def call_problem(raw: str, offered: bool) -> tuple[str, str] | None:
         # Read the leading object, so words after an answer do not make it look broken.
         with suppress(ValueError):
             value, _ = json.JSONDecoder().raw_decode(body)
+    if not tagged:
+        # A run of calls is refused as a whole when one of them cannot run, so name that one.
+        values = _objects(text)
+        if len(values) > 1 and all("name" in item and "arguments" in item for item in values):
+            value = next((item for item in values if _call(item) is None), value)
     if not isinstance(value, dict):
         cut_off = tagged or re.match(r'\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"(?:arguments|parameters)"', body)
         return ("incomplete_call", "") if cut_off else None
@@ -523,9 +572,7 @@ def receipt_text(result: dict) -> str:
     if result.get("outcome") == "action_limit":
         return "The action limit for this task is reached, so the action was not run. Answer the user now."
     if status == "rejected":
-        reason = result.get("outcome")
-        text = f"The action was not run: {REASONS.get(reason, REASONS['invalid_request'])}"
-        return text + (" To create it, call write_file." if reason == "not_found" else "")
+        return f"The action was not run: {REASONS.get(result.get('outcome'), REASONS['invalid_request'])}"
     if status not in ("completed", "failed"):
         return f"The action was not run (status: {status})."
     lines = [f"Status: {result.get('outcome', status)}"]
@@ -618,6 +665,11 @@ def run(value, engine, approve, stop: Event, *, instructions: str = "",
                             text = f"{prose}\n\n{_problem_message(*problem)}".strip()
                             if reject is not None:
                                 reject("unknown", {"action": "unknown", "target": problem[1]}, problem[0])
+                        if calls and reject is not None:
+                            # A call that cannot run, beside ones that can, still gets its "Not run" card.
+                            for block in re.findall(_TAGGED, _strip_thinking(raw), flags=re.S):
+                                if problem := call_problem(f"<tool_call>{block}</tool_call>", True):
+                                    reject("unknown", {"action": "unknown", "target": problem[1]}, problem[0])
                         if not text and not calls:
                             text = "The model returned an empty reply."
                         send({"type": "generation", "text": text, "calls": calls})

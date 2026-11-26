@@ -132,6 +132,16 @@ allows that specific action for this run. **Deny** rejects it. An approval
 expires after 90 seconds. A new proposal, including a repeated request for the
 same action, needs a separate decision. The run can be cancelled while waiting.
 You can switch between chat and **Open full run** while a decision is pending.
+If one reply asks for several actions, each gets its own card and approval, one
+after another, in the order asked. An exact repeat in the same reply is asked
+once. Denying one still asks about the rest; cancel the run to stop it.
+
+**Seeing what happened.** A finished command or read card shows what ran and an
+**Output** box with what it produced, plus the exit code when a command failed.
+Compare the answer with it: a model can misreport what a command printed. The
+cards keep this in memory only, so it is gone after the app closes. Output can
+hold sensitive details such as serial numbers or file contents, so check
+screenshots before sharing them.
 
 **Writing files.** A tool can create a text file or replace one. The card says
 **Create file** or **Replace file**, shows the resolved path and the exact

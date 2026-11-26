@@ -309,6 +309,10 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
             decision["replaces"] = action["replaces"];
             if (action.contains("existing_bytes")) decision["existingBytes"] = action["existing_bytes"];
         }
+        if (item.contains("output")) {
+            decision["output"] = item["output"];
+            if (item.contains("exit_code")) decision["exitCode"] = item["exit_code"];
+        }
         if (pending) paused.insert(item["node_id"].toString());
         decisions.append(decision);
     }

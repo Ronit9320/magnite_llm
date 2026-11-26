@@ -244,6 +244,14 @@ Their receipt has `outcome`, `exit_code`, and combined `output` capped at
 16,000 bytes. Open reports dispatch to the operating system. Output stays in
 the run's step history and is never written to the approval audit.
 
+When one model reply holds several tool calls, each is proposed in turn, in
+order, with exact repeats dropped. The four-action limit counts each one.
+
+The approval list also returns `output`, and `exit_code` for a command, on
+finished `command` and `read` records. These come from backend memory, for the
+50 most recent runs that produced output. They are never written to the audit or
+sent as an event, and are absent after a restart.
+
 SSE emits `approval` events containing the proposal ID, status, and
 fingerprint. Fetch approval details to show the exact pending action. The
 approval expires after 90 seconds. Display the normalized target or each

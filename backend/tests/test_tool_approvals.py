@@ -74,6 +74,13 @@ class ToolApprovalTests(unittest.TestCase):
                 receipt = {"status": "rejected"}
         return receipt["status"]
 
+    def stored(self, run_id):
+        with connection(blueprint_runner().store.path) as conn:
+            rows = [row[0] for row in conn.execute("SELECT audit FROM tool_approvals WHERE run_id = ?", (run_id,))]
+            rows += [row[0] for row in conn.execute(
+                "SELECT payload FROM events WHERE run_id = ? AND kind = 'approval'", (run_id,))]
+        return json.dumps(rows)
+
     def command(self):
         script = "from pathlib import Path; p=Path(__import__('sys').argv[1]); " \
                  "p.write_text((p.read_text() if p.exists() else '') + 'ran')"
@@ -159,7 +166,7 @@ class ToolApprovalTests(unittest.TestCase):
         self.assertEqual(run["status"], "failed")
         audit = self.client.get(path + "/approvals").json()[0]
         self.assertEqual((audit["status"], audit["outcome"]), ("failed", "nonzero_exit"))
-        self.assertNotIn("output-marker", json.dumps(audit))
+        self.assertNotIn("output-marker", self.stored(audit["run_id"]))
 
         path = self.start("blueprints", {**proposal, "arguments": ["-c", "print('x' * 40000)"]})
         self.assertEqual(self.decide(path, self.pending(path)).status_code, 200)
@@ -167,6 +174,36 @@ class ToolApprovalTests(unittest.TestCase):
         self.assertEqual((receipt["exit_code"], receipt["outcome"]), (0, "completed"))
         self.assertIn("bytes omitted", receipt["output"])
         self.assertLess(len(receipt["output"]), 17_000)
+
+    def test_output_is_listed_for_the_user_but_never_stored(self):
+        for script, printed, code in (("print('output-marker'); raise SystemExit(3)", "output-marker", 3),
+                                      ("pass", "", 0)):
+            with self.subTest(code=code):
+                path = self.start("blueprints", {"action": "command", "executable": str(Path(sys.executable).resolve()),
+                                                 "arguments": ["-c", script]})
+                self.assertEqual(self.decide(path, self.pending(path)).status_code, 200)
+                self.terminal(path)
+                record = self.client.get(path + "/approvals").json()[0]
+                self.assertEqual((record["output"].strip(), record["exit_code"]), (printed, code))
+                self.assertNotIn("output-marker", self.stored(record["run_id"]))
+
+    def test_only_recent_runs_keep_output_and_writes_keep_none(self):
+        python = str(Path(sys.executable).resolve())
+        scratch = tempfile.TemporaryDirectory()  # Writes inside MAGNITE_HOME are refused.
+        self.addCleanup(scratch.cleanup)
+        target = str(Path(scratch.name).resolve() / "kept-none.txt")
+        paths = []
+        with patch("backend.tooling.approvals.MAX_OUTPUT_RUNS", 1):
+            for proposal in ({"action": "command", "executable": python, "arguments": ["-c", "print(1)"]},
+                             {"action": "command", "executable": python, "arguments": ["-c", "print(2)"]},
+                             {"action": "write", "target": target, "content": "x"}):
+                paths.append(self.start("blueprints", proposal))
+                self.assertEqual(self.decide(paths[-1], self.pending(paths[-1])).status_code, 200)
+                self.terminal(paths[-1])
+        first, second, written = (self.client.get(path + "/approvals").json()[0] for path in paths)
+        self.assertNotIn("output", first)
+        self.assertEqual(second["output"].strip(), "2")
+        self.assertNotIn("output", written)
 
     def test_read_returns_file_text_and_folder_listing_after_approval(self):
         (self.home / "notes.md").write_text("todo: ship")
@@ -178,7 +215,9 @@ class ToolApprovalTests(unittest.TestCase):
             self.assertEqual(self.decide(path, pending).status_code, 200)
             receipt = self.terminal(path)["results"]["result"]
             self.assertIn(expected, receipt["output"])
-            self.assertNotIn(expected, json.dumps(self.client.get(path + "/approvals").json()))
+            record = self.client.get(path + "/approvals").json()[0]
+            self.assertIn(expected, record["output"])
+            self.assertNotIn(expected, self.stored(record["run_id"]))
 
     def test_denial_expiry_cancellation_and_malformed_actions_never_dispatch(self):
         for surface in ("blueprints", "chat"):
@@ -337,16 +376,50 @@ class ReplyParsingTests(unittest.TestCase):
         # Seen from Qwen3 0.6B deep into a conversation; it was shown to the user as text.
         one = 'run_command\n{"command": "python3 --version"}'
         three = one + '\nrun_command\n{"command": "git --version"}\nrun_command\n{"command": "df -h"}'
-        call = {"name": "run_command", "arguments": {"command": "python3 --version"}}
-        for raw in (one, three):
+        call = lambda command: {"name": "run_command", "arguments": {"command": command}}
+        expected = {one: [call("python3 --version")],
+                    three: [call("python3 --version"), call("git --version"), call("df -h")]}
+        for raw, calls in expected.items():
             with self.subTest(raw=raw):
-                self.assertEqual(pi_bridge.parse_reply(raw, True), ("", [call]))
+                self.assertEqual(pi_bridge.parse_reply(raw, True), ("", calls))
                 self.assertEqual(pi_bridge.call_problem(raw, False), ("action_limit", "run_command"))
         for answer in ("To check, use:\n" + one, one + "\nThat is how the call looks.",
                        'delete_all\n{"path": "a"}'):
             with self.subTest(answer=answer):
                 self.assertEqual(pi_bridge.parse_reply(answer, True), (answer, []))
                 self.assertIsNone(pi_bridge.call_problem(answer, False))
+
+    def test_every_call_in_a_reply_is_returned_once(self):
+        tagged = lambda command: ('<tool_call>{"name":"run_command","arguments":{"command":"%s"}}</tool_call>'
+                                  % command)
+        text, calls = pi_bridge.parse_reply(tagged("a") + tagged("b") + tagged("a"), True)
+        self.assertEqual((text, [call["arguments"]["command"] for call in calls]), ("", ["a", "b"]))
+        self.assertEqual(pi_bridge.parse_reply("Use " + tagged("a"), False), ("Use", []))
+
+    def test_a_list_of_python_style_calls_runs_each_and_never_crashes(self):
+        call = lambda command: {"name": "run_command", "arguments": {"command": command}}
+        raw = "[run_command(command='a'), run_command(command='b'), run_command(command='a')]"
+        self.assertEqual(pi_bridge.parse_reply(raw, True), ("", [call("a"), call("b")]))
+        for answer in ("run_command(command='a'), print('b')", "[run_command(command='a'), delete_all()]",
+                       "run_command(command='a') then run_command(command='b')", "read_file(path={[]})"):
+            with self.subTest(answer=answer):
+                self.assertEqual(pi_bridge.parse_reply(answer, True), (answer, []))
+
+    def test_several_json_calls_on_their_own_lines_are_each_a_call(self):
+        # The form a model without a tool format sees for its own earlier calls.
+        line = lambda command: json.dumps({"name": "run_command", "arguments": {"command": command}})
+        call = lambda command: {"name": "run_command", "arguments": {"command": command}}
+        two = line("a") + "\n" + line("b")
+        for raw in (two, f"```json\n{two}\n```", two + "\n" + line("a")):
+            with self.subTest(raw=raw):
+                self.assertEqual(pi_bridge.parse_reply(raw, True), ("", [call("a"), call("b")]))
+        for answer in ("Use these:\n" + two, two + "\nThat is how they look.", '{"name":"Alice"}\n{"name":"Bob"}'):
+            with self.subTest(answer=answer):
+                self.assertEqual(pi_bridge.parse_reply(answer, True), (answer, []))
+                self.assertIsNone(pi_bridge.call_problem(answer, True))
+        mixed = line("a") + '\n{"name":"delete_all","arguments":{}}'
+        self.assertEqual(pi_bridge.parse_reply(mixed, True), (mixed, []))
+        self.assertEqual(pi_bridge.call_problem(mixed, True), ("unknown_tool", "delete_all"))
 
     def test_write_file_becomes_a_write_action(self):
         self.assertEqual(pi_bridge.proposal({"name": "write_file", "arguments": {"path": "a.md", "content": "hi"}}),
@@ -381,11 +454,12 @@ class ReplyParsingTests(unittest.TestCase):
         action = pi_bridge.proposal({"name": "run_command", "arguments": {"command": "touch ~/x.txt a~b"}})
         self.assertEqual(action["arguments"], [os.path.expanduser("~/x.txt"), "a~b"])
 
-    def test_a_missing_file_receipt_names_the_reason_and_the_way_forward(self):
+    def test_a_missing_file_receipt_names_only_the_reason(self):
+        # A hint meant for the model was repeated to the user.
         text = pi_bridge.receipt_text({"status": "rejected", "outcome": "not_found"})
         self.assertIn("not run", text)
         self.assertIn("does not exist", text)
-        self.assertIn("write_file", text)
+        self.assertNotIn("write_file", text)
 
     def test_unknown_and_incomplete_calls_are_named(self):
         cases = [
@@ -526,6 +600,48 @@ class PiBridgeTests(unittest.TestCase):
         self.assertIn("denied", result)
         self.assertEqual(calls, [{"action": "open", "target": "https://example.com"}] * 4)
         self.assertEqual(turns[-1], [])
+
+    def test_several_calls_in_one_reply_are_each_proposed_up_to_the_limit(self):
+        tagged = lambda n: '<tool_call>{"name":"run_command","arguments":{"command":"echo %d"}}</tool_call>' % n
+        replies = iter(["".join(map(tagged, range(5))), "Done."])
+        asked, refused = [], []
+
+        def approve(proposal):
+            asked.append(proposal["arguments"][0])
+            return {"status": "denied" if len(asked) == 1 else "completed", "outcome": "completed"}
+
+        with patch("backend.tooling.pi_bridge._generate", side_effect=lambda *args: next(replies)):
+            result = pi_bridge.run("Echo", object(), approve, Event(),
+                                   reject=lambda *args: refused.append(args[2]))
+        self.assertEqual((asked, refused, result), (["0", "1", "2", "3"], ["action_limit"], "Done."))
+
+    def test_a_call_that_cannot_run_beside_good_ones_is_still_shown(self):
+        raw = ('<tool_call>{"name":"run_command","arguments":{"command":"echo 1"}}</tool_call>'
+               '<tool_call>{"name":"delete_all","arguments":{}}</tool_call>'
+               '<tool_call>{"name":"run_command","arguments":{"comm')
+        replies = iter([raw, "Done."])
+        asked, refused = [], []
+
+        def approve(proposal):
+            asked.append(proposal["arguments"][0])
+            return {"status": "completed", "outcome": "completed"}
+
+        with patch("backend.tooling.pi_bridge._generate", side_effect=lambda *args: next(replies)):
+            pi_bridge.run("Echo", object(), approve, Event(),
+                          reject=lambda kind, action, reason: refused.append((action["target"], reason)))
+        self.assertEqual((asked, refused), (["1"], [("delete_all", "unknown_tool"), ("", "incomplete_call")]))
+
+    def test_several_results_reach_a_model_without_a_tool_format_as_one_turn(self):
+        # Templates such as Gemma and Mistral reject two user turns in a row.
+        result = lambda text: {"role": "tool", "name": "run_command", "content": text}
+        flat = pi_bridge._plain_messages(
+            [{"role": "user", "content": "Check"}, {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "run_command", "arguments": {"command": "a"}}},
+                {"function": {"name": "run_command", "arguments": {"command": "b"}}}]},
+             result("first-output"), result("second-output")], [])
+        self.assertEqual([message.role.value for message in flat], ["user", "assistant", "user"])
+        self.assertEqual(flat[-1].content, "Tool result for run_command:\nfirst-output\n\n"
+                                           "Tool result for run_command:\nsecond-output")
 
     def test_a_refusal_before_approval_is_reported_to_the_caller(self):
         replies = iter(['{"name":"run_command","arguments":{"command":"ls | wc"}}', "Done."])

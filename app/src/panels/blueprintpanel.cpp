@@ -204,6 +204,19 @@ QJsonArray decisionsFor(const QJsonObject &run) {
     return run["decision"].isObject() ? QJsonArray{run["decision"]} : QJsonArray{};
 }
 
+// Plain text that scrolls both ways, so nothing in it can be hidden or read as markup.
+QPlainTextEdit *codeBox(QWidget *parent, const QString &name, const QString &text) {
+    auto *box = new QPlainTextEdit(parent);
+    box->setObjectName("blueprintCode");
+    box->setAccessibleName(name);
+    box->setReadOnly(true);
+    box->setLineWrapMode(QPlainTextEdit::NoWrap);
+    box->setPlainText(text);
+    const auto lines = qMin(text.count('\n') + 1, qsizetype(10));
+    box->setFixedHeight(qBound(56, int(lines) * box->fontMetrics().lineSpacing() + 32, 200));
+    return box;
+}
+
 QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const QJsonObject &decision) {
     auto *pane = new QFrame;
     pane->setObjectName("runToolCall");
@@ -245,19 +258,19 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
         if (decision["replaces"].toBool())
             fieldLayout->addWidget(wrapped(QString("This replaces the current contents (%1).")
                 .arg(QLocale().formattedDataSize(decision["existingBytes"].toInteger())), "blueprintWarning"));
-        // Plain text that scrolls both ways, so nothing about to be written can be hidden.
-        const auto content = decision["content"].toString();
-        auto *box = new QPlainTextEdit(fields);
-        box->setObjectName("blueprintCode");
-        box->setAccessibleName("File content");
-        box->setReadOnly(true);
-        box->setLineWrapMode(QPlainTextEdit::NoWrap);
-        box->setPlainText(content);
-        const auto lines = qMin(content.count('\n') + 1, qsizetype(10));
-        box->setFixedHeight(qBound(56, int(lines) * box->fontMetrics().lineSpacing() + 32, 200));
-        fieldLayout->addWidget(box);
+        fieldLayout->addWidget(codeBox(fields, "File content", decision["content"].toString()));
     }
-    if (fieldLayout->count() && status != "waiting" && status != "rejected") {
+    // What a command or read produced is what the user checks the answer against, so it is never folded away.
+    const bool produced = decision.contains("output");
+    if (produced) {
+        const int code = decision["exitCode"].toInt();
+        fieldLayout->addWidget(label(code ? QString("Output · exit code %1").arg(code) : QString("Output"),
+                                     "headingLabel"));
+        const auto printed = decision["output"].toString();
+        fieldLayout->addWidget(codeBox(fields, "Action output",
+                                       printed.trimmed().isEmpty() ? QString("(no output)") : printed));
+    }
+    if (fieldLayout->count() && !produced && status != "waiting" && status != "rejected") {
         auto *toggle = action("Show action details", false, true);
         toggle->setCheckable(true);
         body->addWidget(toggle, 0, Qt::AlignLeft);
