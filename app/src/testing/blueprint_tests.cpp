@@ -5,6 +5,7 @@
 #include "backend_manager.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
+#include "panels/blueprintquickadd.h"
 #include "panels/chatpanel.h"
 #include "theme.h"
 #include "widgets/blueprintscene.h"
@@ -44,6 +45,25 @@
 using namespace BlueprintTest;
 
 namespace {
+
+// The quick-add menu if it is open.
+BlueprintQuickAdd *openQuickAdd(QWidget &panel) {
+    for (auto *menu : panel.findChildren<BlueprintQuickAdd *>())
+        if (menu->isVisible()) return menu;
+    return nullptr;
+}
+
+// Types a search into the open quick-add menu and adds the first match.
+bool quickAddFirst(QWidget &panel, const QString &query) {
+    auto *menu = openQuickAdd(panel);
+    auto *search = menu ? visibleNamed<QLineEdit>(*menu, "Search nodes to add") : nullptr;
+    if (!search) return false;
+    search->setText(query);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(search, &enter);
+    pump();
+    return true;
+}
 
 // The In this workflow list, shown or not: the compact rule may have closed the library it sits in.
 QListWidget *nodeTree(QWidget &panel) {
@@ -387,41 +407,33 @@ int runBlueprintChecks(const QString &captures) {
     auto *canvas = panel.findChild<BlueprintView *>();
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    auto *picker = visibleNamed<QDialog>(panel, "Add node picker");
-    check(picker, "Add node opens a separate themed dialog");
-    if (picker) {
-        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 6 && !picker->findChild<QScrollArea *>() &&
-              cards[0]->y() == cards[1]->y() && cards[0]->x() < cards[1]->x() && cards[3]->y() > cards[0]->y(),
-              "the node picker lays out built-in cards across columns without scrolling");
-        capture(*picker, "blueprints-palette-dark");
+    auto *menu = openQuickAdd(panel);
+    check(menu && visibleNamed<QLineEdit>(*menu, "Search nodes to add"), "Add node opens the quick-add menu");
+    if (menu) {
+        capture(*menu, "blueprints-quick-add-dark");
         Theme::setDark(false);
         pump();
-        capture(*picker, "blueprints-palette-light");
+        capture(*menu, "blueprints-quick-add-light");
         Theme::setDark(true);
         pump();
     }
     panel.resize(782, 628);
     pump();
-    check(panel.width() == 782 && visibleNamed<QPushButton>(panel, "Add Input")
-              && visibleNamed<QPushButton>(panel, "Add Dataset") && visibleNamed<QPushButton>(panel, "Add Transform"),
-          "the node picker lists general node kinds in the compact workspace");
-    if (auto *addInput = visibleNamed<QPushButton>(panel, "Add Input")) {
-        QTimer::singleShot(0, &panel, [&] {
-            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
-                if (auto *port = visibleNamed<QLineEdit>(*dialog, "Output port name")) port->setText("Payload");
-                if (auto *type = visibleNamed<QComboBox>(*dialog, "Output port type"))
-                    type->setCurrentIndex(type->findData("object"));
-                capture(*dialog, "blueprints-node-config-dark");
-                if (auto *submit = visibleButton(*dialog, "Create node")) submit->click();
-                else dialog->reject();
-            }
-        });
-        addInput->click();
+    check(panel.width() == 782 && quickAddFirst(panel, "Read run input"),
+          "quick-add finds the Input node in the compact workspace");
+    // Adding is instant; the port is named and typed in the inspector afterwards.
+    if (auto *port = visibleNamed<QLineEdit>(panel, "Output port name")) {
+        port->setText("Payload");
+        port->setModified(true);
+        emit port->editingFinished();
+        pump();
     }
-    pump();
+    if (auto *type = visibleNamed<QComboBox>(panel, "Output port type")) {
+        type->setCurrentIndex(type->findData("object"));
+        pump();
+    }
     check(canvas->isVisible() && preview.blueprint(blankId)["nodes"].toArray().size() == 1,
-          "choosing a palette item inserts and selects a node");
+          "choosing a quick-add entry inserts and selects a node");
     const auto initialNodes = preview.blueprint(blankId)["nodes"].toArray();
     QString firstNodeId;
     if (canvas->isVisible() && !initialNodes.isEmpty()) {
@@ -484,20 +496,7 @@ int runBlueprintChecks(const QString &captures) {
         preview.saveNodeTemplate(QString("Saved input %1").arg(i + 1), preview.makeNode("input", "input", 0, 0));
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    if (auto *savedPicker = visibleNamed<QDialog>(panel, "Add node picker")) {
-        if (auto *tabs = savedPicker->findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
-        pump();
-        auto *next = visibleButton(*savedPicker, "Next");
-        check(next && next->isEnabled() && visibleText(*savedPicker, "Page 1 of 2") &&
-              !visibleNamed<QPushButton>(*savedPicker, "Add saved node Object input") &&
-              !savedPicker->findChild<QScrollArea *>(), "the saved-node grid pages through larger libraries");
-        if (next) next->click();
-        pump();
-        check(visibleText(*savedPicker, "Page 2 of 2") && next && !next->isEnabled(),
-              "the next page shows the remaining cards and stops at the end");
-    }
-    if (auto *savedNode = visibleNamed<QPushButton>(panel, "Add saved node Object input")) savedNode->click();
-    pump();
+    check(quickAddFirst(panel, "Object input"), "saved nodes appear in quick-add search");
     const auto savedGraphs = preview.saved();
     const auto reusedGraph = savedGraphs.isEmpty() ? QJsonObject{} : savedGraphs.first().toObject();
     const auto reusedNodes = reusedGraph["nodes"].toArray();
@@ -876,28 +875,16 @@ int runLiveBlueprintChecks(const QString &captures) {
 
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
-        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
-              std::none_of(cards.begin(), cards.end(), [](const auto *card) {
-                  return card->accessibleName() == "Add Pi Agent";
-              }) &&
-              std::any_of(cards.begin(), cards.end(), [](const auto *card) {
-                  return card->accessibleName() == "Add Knowledge";
-              }) &&
-              picker->height() <= picker->screen()->availableGeometry().height() &&
-              std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
-                  const auto *title = card->template findChild<QLabel *>("headingLabel");
-                  const auto *caption = card->template findChild<QLabel *>("cardMeta");
-                  return card->isVisible() && picker->rect().contains(card->mapTo(picker, QPoint())) &&
-                         picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
-                         title && card->accessibleName() == "Add " + title->text() &&
-                         caption && caption->height() >= caption->heightForWidth(caption->width());
-              }), "all nine live cards fit without scrolling, with Knowledge and without Pi Agent");
-        capture(*picker, "live-add-node-cards");
-        picker->reject();
+    if (auto *menu = openQuickAdd(panel)) {
+        QStringList rows;
+        if (auto *list = menu->findChild<QListWidget *>()) for (int i = 0; i < list->count(); ++i) rows << list->item(i)->text();
+        check(rows.contains("Knowledge") && std::none_of(rows.cbegin(), rows.cend(), [](const QString &row) {
+                  return row.contains("Pi agent", Qt::CaseInsensitive);
+              }), "the live quick-add lists the Knowledge family and no Pi agent");
+        capture(*menu, "live-quick-add");
+        menu->dismiss();
         pump();
-    } else check(false, "the live node picker opens");
+    } else check(false, "the live quick-add opens");
     capture(panel, "live-canvas-dark");
     QSettings().setValue("appearance/studio3ReducedMotion", true);
     panel.resize(740, 620);

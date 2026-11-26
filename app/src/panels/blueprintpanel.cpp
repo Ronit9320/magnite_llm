@@ -5,6 +5,7 @@
 #include "panels/blueprintbindingfields.h"
 #include "panels/blueprintinspector.h"
 #include "panels/blueprintlibrarydock.h"
+#include "panels/blueprintquickadd.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
@@ -855,7 +856,10 @@ void BlueprintPanel::setupEditor() {
     emptyHint->setAlignment(Qt::AlignCenter);
     center->addWidget(emptyHint);
     m_emptyAdd = action("Add node");
-    connect(m_emptyAdd, &Button::clicked, this, [this] { openNodePicker(); });
+    connect(m_emptyAdd, &Button::clicked, this, [this] {
+        openQuickAdd(m_emptyCanvas, m_emptyAdd->geometry().bottomLeft() + m_emptyAdd->parentWidget()->mapTo(m_emptyCanvas, QPoint()) + QPoint(0, 6),
+                     m_canvas->centerInGraph());
+    });
     center->addWidget(m_emptyAdd, 0, Qt::AlignHCenter);
     center->addStretch();
     m_canvasPages->addWidget(empty);
@@ -926,7 +930,10 @@ void BlueprintPanel::setupEditor() {
     m_inspectorPanel->hide();
 
     // The dock's Add node opens the node picker until quick-add replaces it.
-    connect(m_canvas, &BlueprintView::addNodeClicked, this, [this] { openNodePicker(); });
+    connect(m_canvas, &BlueprintView::addNodeClicked, this, [this] {
+        const auto centre = m_canvas->freeArea().center();
+        openQuickAdd(m_canvas->viewport(), centre - QPoint(150, 120), m_canvas->mapToScene(centre));
+    });
     connect(m_canvas, &BlueprintView::nodeSelected, this, [this](const QString &id) {
         m_selected = id;
         refreshInspector();
@@ -962,11 +969,14 @@ void BlueprintPanel::setupEditor() {
     connect(m_canvas, &BlueprintView::wireMoved, this, &BlueprintPanel::moveConnection);
     // The quick-add popup replaces the node picker for these in a later task.
     connect(m_canvas, &BlueprintView::wireDropped, this,
-            [this](const QString &, const QString &, const QPoint &, const QPointF &graph) { openNodePicker(graph); });
-    connect(m_canvas, &BlueprintView::quickAddRequested, this,
-            [this](const QPoint &, const QPointF &graph) { openNodePicker(graph); });
-    connect(m_canvas, &BlueprintView::canvasMenuRequested, this,
-            [this](const QPoint &, const QPointF &graph) { openNodePicker(graph); });
+            [this](const QString &from, const QString &out, const QPoint &screen, const QPointF &graph) {
+        openQuickAdd(m_canvas->viewport(), m_canvas->viewport()->mapFromGlobal(screen), graph, from, out);
+    });
+    const auto quickAddAt = [this](const QPoint &screen, const QPointF &graph) {
+        openQuickAdd(m_canvas->viewport(), m_canvas->viewport()->mapFromGlobal(screen), graph);
+    };
+    connect(m_canvas, &BlueprintView::quickAddRequested, this, quickAddAt);
+    connect(m_canvas, &BlueprintView::canvasMenuRequested, this, quickAddAt);
 }
 
 void BlueprintPanel::checkValidation(int issue) {
@@ -1145,192 +1155,88 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
     }
 }
 
-void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
-    auto *dialog = new SettingsDetailDialog(m_canvas);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle("Add node");
-    dialog->setAccessibleName("Add node picker");
-    const auto screen = m_canvas->screen()->availableGeometry();
-    const int width = qMin(650, screen.width() - 16);
-    const bool compact = width < 500 || screen.height() < 420;
-    const int horizontalMargin = compact ? 12 : 16;
-    const int gridGap = compact ? 6 : 8;
-    auto *body = new QVBoxLayout(dialog);
-    body->setContentsMargins(horizontalMargin, compact ? 10 : 14, horizontalMargin, compact ? 10 : 14);
-    body->setSpacing(compact ? 8 : 10);
-    titleBar(body, dialog->windowTitle());
-    auto *footer = new QHBoxLayout;
-    constexpr int columns = 3;
-    constexpr int perPage = 9;
-    auto gridPage = [gridGap](QWidget *page) {
-        auto *grid = new QGridLayout(page);
-        grid->setContentsMargins(0, 4, 0, 0);
-        grid->setSpacing(gridGap);
-        for (int column = 0; column < columns; ++column)
-            grid->setColumnStretch(column, 1);
-        return grid;
-    };
-    const int cardWidth = (width - 2 * horizontalMargin - (columns - 1) * gridGap - 4) / columns;
-    auto addCard = [compact, cardWidth](QGridLayout *grid, int index, const QString &title, const QString &detail,
-                                       const QString &kind, const QString &actionName) {
-        auto *button = new Button;
-        button->setObjectName("blueprintNodeCard");
-        button->setAutoDefault(false);
-        button->setAccessibleName(actionName);
-        button->setAccessibleDescription(detail);
-        button->setToolTip("<qt>" + title.toHtmlEscaped() + "<br>" + detail.toHtmlEscaped() + "</qt>");
-        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        button->setFixedHeight(compact ? 78 : 82);
-        const int inset = compact ? 8 : 10;
-        const int iconSize = compact ? 14 : 16;
-        const int iconGap = compact ? 4 : 6;
-        auto *contents = new QVBoxLayout(button);
-        contents->setContentsMargins(inset, 9, inset, 9);
-        contents->setSpacing(5);
-        auto *header = new QHBoxLayout;
-        header->setSpacing(iconGap);
-        auto *icon = label({});
-        icon->setFixedSize(iconSize, iconSize);
-        icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(kind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(kind)),
-                                           iconSize).pixmap(iconSize, iconSize));
-        auto *name = label(title, "headingLabel");
-        name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        name->ensurePolished();
-        const int titleWidth = cardWidth - 2 * inset - iconSize - iconGap;
-        name->setText(name->fontMetrics().elidedText(title, Qt::ElideRight, titleWidth));
-        auto *caption = wrapped(detail);
-        for (auto *child : {icon, name, caption}) child->setAttribute(Qt::WA_TransparentForMouseEvents);
-        header->addWidget(icon, 0, Qt::AlignTop);
-        header->addWidget(name, 1);
-        contents->addLayout(header);
-        contents->addWidget(caption);
-        contents->addStretch();
-        grid->addWidget(button, index / columns, index % columns);
-        return button;
-    };
-
-    const auto saved = m_preview->nodeLibrary();
-    auto *builtInPage = new QWidget;
-    auto *builtInGrid = gridPage(builtInPage);
-    const auto types = m_preview->fixtures()["nodeTypes"].toArray();
-    for (int i = 0; i < types.size(); ++i) {
-        const auto type = types.at(i).toObject();
-        const auto kind = type["id"].toString();
-        const auto title = type["label"].toString();
-        auto *button = addCard(builtInGrid, i, title, type["detail"].toString(), kind, "Add " + title);
-        connect(button, &Button::clicked, dialog, [dialog, kind] {
-            dialog->setProperty("nodeKind", kind);
-            dialog->accept();
+void BlueprintPanel::openQuickAdd(QWidget *host, const QPoint &position, const QPointF &graph,
+                                  const QString &fromNode, const QString &outPort) {
+    if (!m_quickAdd) {
+        m_quickAdd = new BlueprintQuickAdd(*m_preview, host);
+        connect(m_quickAdd, &BlueprintQuickAdd::accepted, this, [this](const BlueprintLibraryDock::Entry &entry) {
+            const auto at = m_quickAdd->property("graph").toPointF();
+            const auto from = m_quickAdd->property("fromNode").toString();
+            if (from.isEmpty()) addEntry(entry, at);
+            else addConnectedEntry(entry, at, from, m_quickAdd->property("outPort").toString());
         });
     }
-    if (saved.isEmpty()) {
-        body->addWidget(builtInPage, 1);
-    } else {
-        auto *tabs = new TabWidget;
-        tabs->addTab(builtInPage, "Built-in nodes");
-        auto *savedPage = new QWidget;
-        auto *savedLayout = new QVBoxLayout(savedPage);
-        savedLayout->setContentsMargins(0, 0, 0, 0);
-        auto *pages = new QStackedWidget;
-        savedLayout->addWidget(pages, 1);
-        tabs->addTab(savedPage, "Saved nodes");
-        body->addWidget(tabs, 1);
+    if (m_quickAdd->parentWidget() != host) m_quickAdd->setParent(host);
+    m_quickAdd->setProperty("graph", graph);
+    m_quickAdd->setProperty("fromNode", fromNode);
+    m_quickAdd->setProperty("outPort", outPort);
+    BlueprintQuickAdd::Filter filter;
+    if (!fromNode.isEmpty())
+        filter = [this, fromNode, outPort](const BlueprintLibraryDock::Entry &entry) {
+            return !connectedInput(entry, fromNode, outPort).isEmpty();
+        };
+    m_quickAdd->open(position, filter);
+}
 
-        for (int start = 0; start < saved.size(); start += perPage) {
-            auto *page = new QWidget;
-            auto *grid = gridPage(page);
-            const auto end = qMin(qsizetype(start + perPage), saved.size());
-            for (int i = start; i < end; ++i) {
-                const auto entry = saved.at(i).toObject();
-                const auto design = entry["node"].toObject();
-                const auto spec = m_preview->operation(BlueprintPreview::operationId(design));
-                const auto title = entry["name"].toString();
-                auto *button = addCard(grid, i - start, title, spec["label"].toString(),
-                                       spec["kind"].toString(), "Add saved node " + title);
-                connect(button, &Button::clicked, dialog, [dialog, design] {
-                    dialog->setProperty("savedNode", QVariant::fromValue(design));
-                    dialog->accept();
-                });
-                button->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(button, &QWidget::customContextMenuRequested, dialog, [this, button, dialog, entry](const QPoint &point) {
-                    QMenu menu(dialog);
-                    menu.addAction("Remove from node library…", this, [this, dialog, entry] {
-                        if (!Ui::confirmRemoval(dialog, "Remove saved node",
-                                QString("Remove “%1” from the node library?").arg(entry["name"].toString()), "Remove")) return;
-                        if (m_preview->removeNodeTemplate(entry["id"].toString())) dialog->reject();
-                        else Ui::showNotice(dialog, "Saved nodes", "The saved node could not be removed.");
-                    });
-                    menu.exec(button->mapToGlobal(point));
-                });
-            }
-            grid->setRowStretch((end - start + columns - 1) / columns, 1);
-            pages->addWidget(page);
-        }
-        if (pages->count() > 1) {
-            auto *navigationBar = new QWidget;
-            auto *navigation = new QHBoxLayout(navigationBar);
-            navigation->setContentsMargins(0, 0, 0, 0);
-            auto *previous = action("Previous");
-            auto *next = action("Next");
-            auto *pageNumber = label({}, "cardMeta");
-            navigation->addWidget(previous);
-            navigation->addWidget(pageNumber, 1, Qt::AlignCenter);
-            navigation->addWidget(next);
-            footer->addWidget(navigationBar);
-            navigationBar->hide();
-            connect(tabs, &TabWidget::currentChanged, navigationBar, [navigationBar](int index) {
-                navigationBar->setVisible(index == 1);
-            });
-            auto updateNavigation = [pages, previous, next, pageNumber](int index) {
-                previous->setEnabled(index > 0);
-                next->setEnabled(index + 1 < pages->count());
-                pageNumber->setText(QString("Page %1 of %2").arg(index + 1).arg(pages->count()));
-            };
-            connect(pages, &QStackedWidget::currentChanged, dialog, updateNavigation);
-            connect(previous, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() - 1); });
-            connect(next, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() + 1); });
-            updateNavigation(0);
-        }
+// The node an entry adds, with a fresh id, its top-left corner at a graph point.
+QJsonObject BlueprintPanel::entryNode(const BlueprintLibraryDock::Entry &entry, const QPointF &at) const {
+    auto node = entry.operation.isEmpty() ? entry.savedNode : m_preview->makeNode(entry.operation, BlueprintPreview::id(), 0, 0);
+    if (node.isEmpty()) return {};
+    node["id"] = BlueprintPreview::id();
+    node["x"] = qRound(at.x());
+    node["y"] = qRound(at.y());
+    return node;
+}
+
+// The first input of the entry's node that accepts a wire from fromNode.outPort, or empty.
+QString BlueprintPanel::connectedInput(const BlueprintLibraryDock::Entry &entry, const QString &fromNode,
+                                       const QString &outPort) const {
+    const auto node = entryNode(entry, {});
+    if (node.isEmpty()) return {};
+    auto graph = m_graph;
+    auto nodes = graph["nodes"].toArray();
+    nodes.append(node);
+    graph["nodes"] = nodes;
+    for (const auto &value : node["in"].toArray()) {
+        const auto port = value.toObject()["id"].toString();
+        const QJsonObject edge{{"from", fromNode}, {"out", outPort}, {"to", node["id"]}, {"in", port}};
+        if (m_preview->dropError(graph, edge).isEmpty()) return port;
     }
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
-    footer->addStretch();
-    footer->addWidget(buttons);
-    body->addLayout(footer);
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, dialog, position] {
-        auto node = dialog->property("savedNode").toJsonObject();
-        if (node.isEmpty()) {
-            const auto kind = dialog->property("nodeKind").toString();
-            const auto configured = configureBlueprintNode(*m_preview, m_canvas, kind);
-            if (!configured) return;
-            node = *configured;
-        } else {
-            node["id"] = BlueprintPreview::id();
-        }
-        const auto size = BlueprintScene::nodeRect(node).size();
-        const auto point = (position.value_or(m_canvas->centerInGraph()) - QPointF(size.width(), size.height()) / 2).toPoint();
-        node["x"] = point.x();
-        node["y"] = point.y();
-        addNode(node);
-    });
-    dialog->setFixedWidth(width);
-    dialog->resize(width, dialog->sizeHint().height());
-    dialog->open();
+    return {};
+}
+
+void BlueprintPanel::addConnectedEntry(const BlueprintLibraryDock::Entry &entry, const QPointF &at,
+                                       const QString &fromNode, const QString &outPort) {
+    const auto node = entryNode(entry, at);
+    if (node.isEmpty()) return;
+    auto graph = m_graph;
+    auto nodes = graph["nodes"].toArray();
+    nodes.append(node);
+    graph["nodes"] = nodes;
+    for (const auto &value : node["in"].toArray()) {
+        const QJsonObject edge{{"from", fromNode}, {"out", outPort}, {"to", node["id"]}, {"in", value.toObject()["id"]}};
+        QString error;
+        const auto connected = m_preview->connectGraph(graph, edge, nullptr, &error);
+        if (connected.isEmpty()) continue;
+        // One save adds the node and its wire.
+        const auto previous = m_selected;
+        m_selected = node["id"].toString();
+        if (saveGraph(connected)) m_canvas->revealNode(m_selected);
+        else m_selected = previous;
+        return;
+    }
 }
 
 void BlueprintPanel::addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at) {
-    auto node = entry.operation.isEmpty() ? entry.savedNode : m_preview->makeNode(entry.operation, BlueprintPreview::id(), 0, 0);
+    auto node = entryNode(entry, at.value_or(QPointF()));
     if (node.isEmpty()) return;
-    node["id"] = BlueprintPreview::id();
-    QPointF point;
-    if (at) point = *at;
-    else {
+    if (!at) {
         // The middle of the canvas the floating panels leave free.
         const auto size = BlueprintScene::nodeRect(node).size();
-        point = m_canvas->mapToScene(m_canvas->freeArea().center()) - QPointF(size.width(), size.height()) / 2;
+        const auto point = m_canvas->mapToScene(m_canvas->freeArea().center()) - QPointF(size.width(), size.height()) / 2;
+        node["x"] = qRound(point.x());
+        node["y"] = qRound(point.y());
     }
-    node["x"] = qRound(point.x());
-    node["y"] = qRound(point.y());
     addNode(node);
 }
 

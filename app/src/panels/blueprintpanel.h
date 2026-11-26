@@ -11,6 +11,7 @@
 class BlueprintView;
 class FloatingPanel;
 class BlueprintInspector;
+class BlueprintQuickAdd;
 class BlueprintPreview;
 class Button;
 class ComboBox;
@@ -64,7 +65,12 @@ private:
     void applyCompactRule();
     void refreshInspector();
     void addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at = {});
-    void openNodePicker(std::optional<QPointF> position = {});
+    void openQuickAdd(QWidget *host, const QPoint &position, const QPointF &graph,
+                      const QString &fromNode = {}, const QString &outPort = {});
+    QJsonObject entryNode(const BlueprintLibraryDock::Entry &entry, const QPointF &at) const;
+    QString connectedInput(const BlueprintLibraryDock::Entry &entry, const QString &fromNode, const QString &outPort) const;
+    void addConnectedEntry(const BlueprintLibraryDock::Entry &entry, const QPointF &at,
+                           const QString &fromNode, const QString &outPort);
     void configureNode(const QString &id);
     void saveNodeTemplate(const QString &id);
     void addNode(const QJsonObject &node);
@@ -120,6 +126,7 @@ private:
     QStackedWidget *m_views;  // Build · Test cases · Run history, in BlueprintTopBar::View order
     bool m_canGoBack = false;  // the open run came from Conversation
     BlueprintLibraryDock *m_libraryDock;
+    BlueprintQuickAdd *m_quickAdd = nullptr;
     FloatingPanel *m_libraryPanel;
     QStackedWidget *m_canvasPages;
     BlueprintView *m_canvas;

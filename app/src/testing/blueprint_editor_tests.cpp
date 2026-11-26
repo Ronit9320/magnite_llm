@@ -5,6 +5,7 @@
 #include "panels/blueprintlibrarydock.h"
 #include "panels/blueprintnodefields.h"
 #include "panels/blueprintpanel.h"
+#include "panels/blueprintquickadd.h"
 #include "panels/blueprintpreview.h"
 #include "panels/blueprinttopbar.h"
 #include "testing/blueprint_test_support.h"
@@ -21,6 +22,7 @@
 #include <QListWidget>
 #include <QMimeData>
 #include <QShortcut>
+#include <QCursor>
 #include <QDir>
 #include <QMenu>
 #include <QRegularExpression>
@@ -1239,6 +1241,102 @@ void checkLibrary(BlueprintPreview &preview) {
     preview.deleteBlueprint("library-check");
 }
 
+void checkQuickAdd(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    preview.saveBlueprint(QJsonObject{{"id", "quick-check"}, {"name", "Quick add check"}, {"revision", 1},
+                                      {"nodes", QJsonArray{preview.makeNode("count", "cnt", 0, 0)}}, {"edges", QJsonArray{}}});
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Quick add check")) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    const bool opened = view && view->graphScene()->node("cnt");
+    check(opened, "the quick-add check graph opens");
+    if (!opened) return;
+    const auto stored = [&] { return preview.blueprint("quick-check"); };
+    const auto nodesOf = [&](const QString &op) {
+        QJsonArray found;
+        for (const auto &value : stored()["nodes"].toArray())
+            if (value.toObject()["operation"] == op) found.append(value);
+        return found;
+    };
+    const auto menu = [&] { return panel.findChild<BlueprintQuickAdd *>(); };
+    const auto search = [&] { return menu() ? menu()->findChild<QLineEdit *>() : nullptr; };
+    const auto press = [&](int keyCode, Qt::KeyboardModifiers modifiers = {}) {
+        if (auto *field = search()) {
+            QKeyEvent event(QEvent::KeyPress, keyCode, modifiers);
+            QCoreApplication::sendEvent(field, &event);
+        }
+        pump(50);
+    };
+    const auto rows = [&] {
+        QStringList texts;
+        if (auto *list = menu() ? menu()->findChild<QListWidget *>() : nullptr)
+            for (int i = 0; i < list->count(); ++i)
+                if (list->item(i)->flags() & Qt::ItemIsSelectable) texts << list->item(i)->text();
+        return texts;
+    };
+
+    // An empty spot below the node, away from the floating panels.
+    const auto node = view->graphScene()->node("cnt")->sceneBoundingRect();
+    const QPoint empty = view->mapFromScene(node.bottomLeft() + QPointF(0, 120));
+    QCursor::setPos(view->viewport()->mapToGlobal(empty));
+    pump();
+    key(view->viewport(), Qt::Key_Space, {}, " ");
+    pump(50);
+    const bool shown = menu() && menu()->isVisible();
+    check(shown && search() && panel.window()->focusWidget() == search() && menu()->geometry().adjusted(-24, -24, 24, 24).contains(empty),
+          "Space opens quick-add at the cursor with the search focused");
+    if (search()) search()->setText("count");
+    press(Qt::Key_Return);
+    const auto counts = nodesOf("count");
+    check(counts.size() == 2 && view->selection() == counts.last().toObject()["id"].toString() && !menu()->isVisible(),
+          "Enter adds the highlighted node and selects it");
+
+    key(view->viewport(), Qt::Key_Space, {}, " ");
+    pump(50);
+    const int before = stored()["nodes"].toArray().size();
+    press(Qt::Key_Escape);
+    check(menu() && !menu()->isVisible() && stored()["nodes"].toArray().size() == before,
+          "Esc closes quick-add without adding");
+
+    // A wire from the Count output (an integer) only offers nodes that can take it.
+    view->fit();
+    pump();
+    auto *cnt = view->graphScene()->node("cnt");
+    const auto from = viewPoint(*view, cnt->pin(true, "value")->anchor());
+    const auto spot = viewPoint(*view, cnt->sceneBoundingRect().topRight() + QPointF(160, -140));
+    drag(view->viewport(), from, spot);
+    pump(50);
+    const auto offered = rows();
+    check(menu() && menu()->isVisible() && !offered.isEmpty() && !offered.contains(preview.operation("count")["label"].toString())
+              && offered.contains(preview.operation("output")["label"].toString()),
+          "a dropped wire filters quick-add to compatible nodes");
+    if (search()) search()->setText(preview.operation("output")["label"].toString());
+    press(Qt::Key_Return);
+    const auto outputs = nodesOf("output");
+    const auto newOutput = outputs.isEmpty() ? QString() : outputs.first().toObject()["id"].toString();
+    check(!newOutput.isEmpty() && stored()["edges"].toArray().contains(edge("cnt", "value", newOutput, "value")),
+          "the node added from a dropped wire arrives connected");
+
+    if (auto *add = visibleButton(*view, "Add node")) add->click();
+    pump(50);
+    bool picker = false;
+    for (auto *dialog : QApplication::topLevelWidgets())
+        picker |= dialog->isVisible() && dialog->accessibleName() == "Add node picker";
+    check(!picker && menu() && menu()->isVisible(), "Add node opens quick-add; the modal node picker is gone");
+    press(Qt::Key_Escape);
+    preview.deleteBlueprint("quick-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1254,6 +1352,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkFieldWidgets(preview);
     checkInspector(preview);
     checkLibrary(preview);
+    checkQuickAdd(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

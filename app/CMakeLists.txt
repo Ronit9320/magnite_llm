@@ -73,6 +73,8 @@ set(MAGNITE_SOURCES
     src/panels/blueprintinspector.h
     src/panels/blueprintlibrarydock.cpp
     src/panels/blueprintlibrarydock.h
+    src/panels/blueprintquickadd.cpp
+    src/panels/blueprintquickadd.h
     src/panels/blueprintpanel.h
     src/panels/blueprinttopbar.cpp
     src/panels/blueprinttopbar.h
