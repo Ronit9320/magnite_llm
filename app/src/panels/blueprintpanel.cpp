@@ -388,9 +388,10 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
         emit chatRequested();
     });
     connect(m_bar, &BlueprintTopBar::runClicked, this, [this] {
-        // In Test cases, Run starts the case shown (as Start run does); elsewhere it opens Test cases.
-        if (m_bar->view() != BlueprintTopBar::View::TestCases) showTest();
-        else if (m_start->isEnabled()) startRun();
+        // In Test cases, Run starts the case shown (as Start run does); elsewhere it runs on the canvas.
+        if (m_bar->view() == BlueprintTopBar::View::TestCases) {
+            if (m_start->isEnabled()) startRun();
+        } else runFromCanvas();
     });
     connect(m_bar, &BlueprintTopBar::runMenuRequested, this, &BlueprintPanel::showRunMenu);
     connect(m_bar, &BlueprintTopBar::editDetailsClicked, this, [this, outOfFullscreen] { outOfFullscreen(); editDetails(); });
@@ -406,6 +407,7 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     connect(m_preview, &BlueprintPreview::savedChanged, this, &BlueprintPanel::refreshLibrary);
     connect(m_preview, &BlueprintPreview::runChanged, this, [this](const QString &id) {
         if (id == m_runId) refreshRun();
+        if (id == m_canvasRunId) showCanvasRun(m_preview->run(id));
         if (m_bar->view() == BlueprintTopBar::View::RunHistory) refreshHistory();
     });
     connect(m_preview, &BlueprintPreview::serviceChanged, this, [this] {
@@ -790,6 +792,11 @@ void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     m_graph = graph;
     if (m_graph.isEmpty()) return;
     m_selected.clear();  // nothing is selected on open, so the inspector stays out of the way
+    // Run marks belong to the blueprint they ran on.
+    m_canvasRunId.clear();
+    m_runOnCanvas = false;
+    m_canvas->clearRunStates();
+    if (m_toast) m_toast->hide();
     const auto recent = m_preview->runs(id);
     m_runId = recent.isEmpty() ? QString{} : recent.first().toObject()["id"].toString();
     m_comparison = false;
@@ -811,10 +818,12 @@ void BlueprintPanel::publish() {
     m_preview->publish(before, [self = QPointer(this), before](const auto &saved, const auto &error) {
         if (!self) return;
         self->m_workspace->setEnabled(true);
+        const bool runNext = std::exchange(self->m_runAfterPublish, false);
         if (!saved.isEmpty() && self->m_graph == before) {
             self->m_graph = saved;
             self->refreshEditor();
             self->refreshRunOptions();
+            if (runNext) self->runFromCanvas();
         }
         if (!error.isEmpty()) Ui::showNotice(self, "Save blueprint", error);
     });
@@ -1026,6 +1035,17 @@ void BlueprintPanel::checkValidation(int issue) {
 
 void BlueprintPanel::showRunMenu(const QPoint &globalPosition) {
     QMenu menu(m_bar);
+    // The test case or sample a canvas run uses, as chosen in Test cases.
+    for (auto *combo : {m_scenarioField->isHidden() ? nullptr : m_scenario, m_sampleField->isHidden() ? nullptr : m_sample}) {
+        if (!combo) continue;
+        for (int i = 0; i < combo->count(); ++i) {
+            auto *choice = menu.addAction(combo->itemText(i), this, [combo, i] { combo->setCurrentIndex(i); });
+            choice->setCheckable(true);
+            choice->setChecked(i == combo->currentIndex());
+            choice->setData(combo->itemData(i));
+        }
+        menu.addSeparator();
+    }
     menu.addAction("Open Test cases…", this, [this] {
         if (m_fullscreenDialog) m_fullscreenDialog->reject();
         showView(BlueprintTopBar::View::TestCases);
@@ -1911,6 +1931,10 @@ void BlueprintPanel::startRun() {
                 self->m_runError->setVisible(!error.isEmpty());
                 if (run.isEmpty()) return;
                 self->m_runId = run["id"].toString();
+                if (std::exchange(self->m_runOnCanvas, false)) {
+                    self->m_canvasRunId = self->m_runId;
+                    self->showCanvasRun(run);
+                }
                 self->m_canGoBack = false;
                 self->refreshBar();
                 self->refreshRun();
@@ -1923,11 +1947,103 @@ void BlueprintPanel::startRun() {
         target, scenario, "Blueprints", &error);
     m_runError->setText(error);
     m_runError->setVisible(!error.isEmpty());
-    if (id.isEmpty()) return;
+    if (id.isEmpty()) {
+        m_runOnCanvas = false;
+        return;
+    }
     m_runId = id;
     m_comparison = false;
     refreshRun();
     m_traceScroll->verticalScrollBar()->setValue(0);
+    if (std::exchange(m_runOnCanvas, false)) {
+        m_canvasRunId = id;
+        showCanvasRun(m_preview->run(id));
+    }
+}
+
+void BlueprintPanel::runFromCanvas() {
+    if (m_graph.isEmpty() || m_graph["nodes"].toArray().isEmpty()) return;
+    if (m_bar->view() != BlueprintTopBar::View::Build) showView(BlueprintTopBar::View::Build);
+    // A live full run needs a saved revision; a node test runs the draft.
+    const bool fullRun = m_target->currentData().toString().isEmpty();
+    if (m_preview->live() && fullRun && (m_graph["dirty"].toBool() || m_graph["revision"].toInteger() == 0)) {
+        if (!Ui::confirmAction(m_canvas, "Save a revision", "A full run needs a saved revision. Save one now?",
+                               "Save and run"))
+            return;
+        m_runAfterPublish = true;
+        publish();
+        return;
+    }
+    if (m_preview->live() && !m_start->isEnabled()) {
+        // The run setup explains what is missing.
+        showView(BlueprintTopBar::View::TestCases);
+        return;
+    }
+    if (m_toast) m_toast->hide();
+    m_runOnCanvas = true;
+    startRun();
+    if (!m_runError->text().isEmpty() && m_runError->isVisible()) {
+        m_runOnCanvas = false;
+        Ui::showNotice(m_canvas, "Run blueprint", m_runError->text());
+    }
+}
+
+void BlueprintPanel::showCanvasRun(const QJsonObject &run) {
+    if (run.isEmpty() || run["id"].toString() != m_canvasRunId) return;
+    QHash<QString, QString> states;
+    QString active;
+    const auto steps = run["steps"].toArray();
+    for (int i = 0; i < steps.size(); ++i) {
+        const auto step = steps.at(i).toObject();
+        const auto status = step["status"].toString();
+        if (status.isEmpty() || status == "pending") continue;
+        states.insert(step["id"].toString(), status);
+        if (active.isEmpty() && status == "running") active = step["id"].toString();
+    }
+    const int cursor = run["cursor"].toInt(-1);
+    if (cursor >= 0 && cursor < steps.size()) active = steps.at(cursor).toObject()["id"].toString();
+    m_canvas->setRunStates(states, active);
+    if (!running(run) && m_toastedRun != m_canvasRunId) {
+        m_toastedRun = m_canvasRunId;
+        showRunToast(run);
+    }
+}
+
+void BlueprintPanel::showRunToast(const QJsonObject &run) {
+    if (!m_toast) {
+        m_toast = new FloatingPanel;
+        m_toast->setObjectName("blueprintRunToast");
+        m_toast->setAccessibleName("Run result");
+        auto *row = new QHBoxLayout(m_toast);
+        m_toastText = label({}, "blueprintToastText");
+        row->addWidget(m_toastText);
+        auto *open = action("Open in Run history", false, true);
+        row->addWidget(open);
+        connect(open, &Button::clicked, this, [this] {
+            m_toast->hide();
+            if (m_fullscreenDialog) m_fullscreenDialog->reject();
+            const auto id = m_toast->property("run").toString();
+            showView(BlueprintTopBar::View::RunHistory);
+            m_runId = id;
+            refreshHistory();
+        });
+        auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), m_toast, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+        connect(escape, &QShortcut::activated, m_toast, &QWidget::hide);
+        m_toastTimer = new QTimer(m_toast);
+        m_toastTimer->setSingleShot(true);
+        m_toastTimer->setInterval(6000);
+        connect(m_toastTimer, &QTimer::timeout, m_toast, &QWidget::hide);
+        // Above the bottom dock.
+        m_canvas->addOverlay(m_toast, OverlayEdge::Bottom, 72);
+    }
+    m_toast->setProperty("run", run["id"].toString());
+    qint64 total = 0;
+    for (const auto &step : run["steps"].toArray()) total += qint64(step.toObject()["duration"].toDouble());
+    const auto duration = total > 0 ? " · " + BlueprintPreview::duration(total) : QString();
+    m_toastText->setText(BlueprintPreview::statusLabel(run["status"].toString()) + duration);
+    m_toast->show();
+    m_toast->raise();
+    m_toastTimer->start();
 }
 
 void BlueprintPanel::openRun(const QString &id) {

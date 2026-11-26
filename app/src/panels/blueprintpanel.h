@@ -12,6 +12,8 @@ class BlueprintView;
 class FloatingPanel;
 class BlueprintInspector;
 class BlueprintQuickAdd;
+class FloatingPanel;
+class QTimer;
 class BlueprintPreview;
 class Button;
 class ComboBox;
@@ -97,6 +99,9 @@ private:
     QWidget *setupRun();
     void showTest(const QString &node = {});
     void startRun();
+    void runFromCanvas();
+    void showCanvasRun(const QJsonObject &run);
+    void showRunToast(const QJsonObject &run);
     void refreshRunOptions();
     void refreshRun();
     void refreshHistory();
@@ -127,6 +132,13 @@ private:
     bool m_canGoBack = false;  // the open run came from Conversation
     BlueprintLibraryDock *m_libraryDock;
     BlueprintQuickAdd *m_quickAdd = nullptr;
+    QString m_canvasRunId;
+    QString m_toastedRun;
+    bool m_runOnCanvas = false;
+    bool m_runAfterPublish = false;
+    FloatingPanel *m_toast = nullptr;
+    QLabel *m_toastText = nullptr;
+    QTimer *m_toastTimer = nullptr;
     FloatingPanel *m_libraryPanel;
     QStackedWidget *m_canvasPages;
     BlueprintView *m_canvas;

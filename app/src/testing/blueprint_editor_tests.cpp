@@ -1337,6 +1337,97 @@ void checkQuickAdd(BlueprintPreview &preview) {
     preview.deleteBlueprint("quick-check");
 }
 
+void checkCanvasRun(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    const auto example = preview.example();
+    const auto graphId = example["id"].toString();
+    preview.saveBlueprint(example);
+    preview.saveBlueprint(QJsonObject{{"id", "other-run-check"}, {"name", "Other blueprint"}, {"revision", 1},
+                                      {"nodes", QJsonArray{preview.makeNode("input", "in", 0, 0)}}, {"edges", QJsonArray{}}});
+    const auto open = [&](const QString &name) {
+        if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+        pump();
+        for (auto *button : panel.findChildren<QPushButton *>())
+            if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), name)) {
+                button->click();
+                break;
+            }
+        pump(100);
+    };
+    open(example["name"].toString());
+    auto *view = panel.findChild<BlueprintView *>();
+    auto *bar = panel.findChild<BlueprintTopBar *>();
+    const bool opened = view && bar && view->isVisible();
+    check(opened, "the run check opens the example on the canvas");
+    if (!opened) return;
+    const auto statuses = [&] {
+        QHash<QString, QString> result;
+        for (auto *node : view->graphScene()->nodes()) result.insert(node->id(), node->runStatus());
+        return result;
+    };
+    const auto anyStatus = [&](const QString &status) {
+        const auto all = statuses();
+        return std::any_of(all.cbegin(), all.cend(), [&](const QString &value) { return value == status; });
+    };
+    const auto latest = [&] { return preview.runs(graphId).first().toObject()["id"].toString(); };
+
+    if (auto *run = visibleButton(*bar, "Run")) run->click();
+    check(waitFor([&] { return anyStatus("running"); }) && bar->view() == BlueprintTopBar::View::Build,
+          "Run starts from the Build view and shows the running node");
+    const auto runId = preview.runs(graphId).isEmpty() ? QString() : latest();
+    bool allPassed = waitForState(preview, runId, "passed");
+    pump(50);
+    for (const auto &step : preview.run(runId)["steps"].toArray())
+        allPassed &= statuses().value(step.toObject()["id"].toString()) == "passed";
+    check(!runId.isEmpty() && allPassed, "nodes step through to done");
+    FloatingPanel *toast = nullptr;
+    for (auto *panelWidget : view->findChildren<FloatingPanel *>())
+        if (panelWidget->isVisible() && panelWidget->accessibleName() == "Run result") toast = panelWidget;
+    auto *history = toast ? visibleButton(*toast, "Open in Run history") : nullptr;
+    check(toast && history && visibleText(*toast, "Completed"), "a toast reports the result");
+    if (history) history->click();
+    pump(50);
+    check(bar->view() == BlueprintTopBar::View::RunHistory && !toast->isVisible(), "the toast opens the run in Run history");
+    if (auto *build = visibleButton(panel, "Build")) build->click();
+    pump(50);
+
+    bool chosen = false;
+    QTimer::singleShot(0, &panel, [&] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (!menu) return;
+        for (auto *action : menu->actions())
+            if (action->data() == "failure") {
+                chosen = true;
+                menu->setActiveAction(action);
+                QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+                QCoreApplication::sendEvent(menu, &enter);
+                return;
+            }
+        menu->close();
+    });
+    if (auto *options = visibleNamed<QPushButton>(*bar, "Run options")) options->click();
+    pump(50);
+    check(chosen, "Run ▾ lists the test cases to run with");
+    if (auto *run = visibleButton(*bar, "Run")) run->click();
+    pump(50);
+    const auto failureId = latest();
+    QString failedNode;
+    const bool failed = failureId != runId && waitForState(preview, failureId, "failed");
+    pump(50);
+    for (const auto &step : preview.run(failureId)["steps"].toArray())
+        if (step.toObject()["status"] == "failed") failedNode = step.toObject()["id"].toString();
+    check(failed && !failedNode.isEmpty() && statuses().value(failedNode) == "failed", "a failed step is marked on the canvas");
+
+    open("Other blueprint");
+    check(view->graphScene()->node("in") && !anyStatus("passed") && !anyStatus("failed") && !anyStatus("running"),
+          "run marks clear when another blueprint opens");
+    preview.deleteBlueprint("other-run-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1353,6 +1444,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkInspector(preview);
     checkLibrary(preview);
     checkQuickAdd(preview);
+    checkCanvasRun(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

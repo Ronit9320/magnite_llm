@@ -688,6 +688,7 @@ QPushButton#blueprintStartCard {
 }
 QPushButton#blueprintStartCard:hover { background: @surfaceFillHover; }
 QPushButton#blueprintStartCard:focus { border: 1px solid @accentLabel; }
+QLabel#blueprintToastText { font-size: 13px; color: @textPrimary; }
 /* Node library dock: family chips, grouped rows, and the In this workflow list. */
 QPushButton#blueprintLibraryChip { font-size: 11px; padding: 2px 8px; min-height: 16px; border-radius: 9px; }
 QPushButton#blueprintLibraryChip:checked { background: @surfaceFillActive; color: @textPrimary; }

@@ -334,6 +334,33 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (!check(runInEditor("Start run") && latest()["revision"].toInt() == 3 &&
                latest()["result"] == editorRun["result"], "local generation uses the linked adapter")) return false;
 
+    // A full run of an edited draft from the canvas offers to save a revision first.
+    if (auto *build = visibleButton(panel, "Build")) build->click();
+    if (auto *list = nodeTree(panel)) list->setCurrentRow(0);
+    pump();
+    if (auto *name = visibleNamed<QLineEdit>(panel, "Name (optional)")) {
+        name->setText(name->text() + " (edited)");
+        name->setModified(true);
+        emit name->editingFinished();
+        pump();
+    }
+    bool offered = false;
+    QTimer::singleShot(0, &panel, [&] {
+        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
+            offered = visibleText(*dialog, "saved revision");
+            if (auto *save = visibleButton(*dialog, "Save and run")) save->click();
+            else dialog->reject();
+        }
+    });
+    const auto beforeCanvas = latest()["id"].toString();
+    if (auto *run = visibleButton(panel, "Run")) run->click();
+    if (!check(offered && waitFor([&] {
+                   const auto run = latest();
+                   return publishedRevision(id) == 4 && run["id"] != beforeCanvas && run["revision"].toInt() == 4
+                       && (run["status"] == "passed" || run["status"] == "failed");
+               }, 180000),
+               "Run on an edited draft offers to save a revision and runs it")) return false;
+
     if (reasoningModel.isEmpty()) return true;
     const QJsonObject integer{{"type", "integer"}};
     const QJsonObject resultSchema{{"type", "object"}, {"required", QJsonArray{"result"}},
@@ -610,7 +637,8 @@ int runBlueprintChecks(const QString &captures) {
     const QJsonObject badEdge{{"from", "input"}, {"out", "text"}, {"to", "lookup"}, {"in", "index"}};
     check(preview.connectionError(graph, badEdge).contains("Text cannot connect to Integer"),
           "editor rejects incompatible typed ports");
-    if (auto *runButton = visibleButton(panel, "Run")) runButton->click();
+    // Run now runs on the canvas; the full run setup lives in Test cases.
+    if (auto *testCases = visibleButton(panel, "Test cases")) testCases->click();
     pump();
     auto *start = visibleButton(panel, "Start run");
     auto *scenario = visibleNamed<QComboBox>(panel, "Fixture scenario");
