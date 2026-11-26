@@ -670,6 +670,14 @@ int runBlueprintChecks(const QString &captures) {
         Theme::setDark(false);
         pump();
         capture(panel, "blueprints-run-light");
+        Theme::setDark(true);
+        pump();
+        if (auto *history = visibleButton(panel, "Run history")) history->click();
+        pump();
+        check(visibleText(panel, "Full blueprint"), "Run history lists the runs just made");
+        capture(panel, "blueprints-history-dark");
+        if (auto *cases = visibleButton(panel, "Test cases")) cases->click();
+        pump();
     }
 
     ConversationRunPanel chat(&preview, ConversationRunPanel::Mode::Tool);

@@ -649,14 +649,15 @@ QLabel#blueprintError, QLabel#blueprintStepError { color: @statusError; }
 QLabel#blueprintSuccess { color: @statusSuccess; }
 QLabel#blueprintWarning { color: @textPrimary; background: @warningSurface; border: none; border-left: 3px solid @statusWarning; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
 QLabel#blueprintRunning { color: @comparisonSeries; }
-QLabel#blueprintStepError { font-size: 11px; padding-left: 31px; padding-bottom: 3px; }
+QLabel#blueprintStepError { font-size: 12px; padding-left: 42px; padding-bottom: 8px; }
 QPushButton#blueprintStep {
-    background: transparent; text-align: left; border: 1px solid transparent; border-radius: 0;
-    min-height: 29px; padding: 4px 8px; font-weight: 500;
+    background: transparent; text-align: left; border: 1px solid transparent; border-radius: 10px;
+    min-height: 34px; padding: 4px 12px; font-weight: 500;
 }
-QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background: @surfaceFillHover; }
+QPushButton#blueprintStep:hover { background: @fieldFillHover; }
+QPushButton#blueprintStep:checked { background: transparent; }
 QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
-QWidget#blueprintStepDetail { background: @surfaceFill; }
+QWidget#blueprintStepDetail { background: transparent; }
 QGraphicsView#blueprintView { background: @canvasBackground; border: none; }
 /* Floating panels paint their own fill (@blueprintPanelFill) and shadow; no border. */
 QFrame#blueprintFloating { background: transparent; border: none; }
@@ -754,3 +755,24 @@ QLabel#blueprintDetailsPortName { font-size: 13px; font-weight: 500; color: @tex
 QLabel#blueprintDetailsNote { font-size: 12px; color: @textMuted; }
 QLabel#blueprintDetailsStat { font-family: @headingFont; font-size: 14px; font-weight: 500; color: @textPrimary; }
 QLabel#blueprintDetailsEmpty { font-size: 12px; color: @textMuted; background: @fieldFill; border-radius: 9px; padding: 18px 12px; }
+/* Test cases and Run history: status pills, step cards, code blocks and run rows. */
+QLabel#blueprintStatusPill { font-size: 12px; font-weight: 500; color: @textSecondary; background: @fieldFillHover; border-radius: 9px; padding: 2px 9px; }
+QLabel#blueprintStatusPill[tone="ok"] { color: @statusSuccess; background: @successSurface; }
+QLabel#blueprintStatusPill[tone="err"] { color: @statusError; background: @errorSurface; }
+QLabel#blueprintStatusPill[tone="warn"] { color: @statusWarning; background: @warningSurface; }
+QLabel#blueprintStatusPill[tone="run"] { color: @comparisonSeries; background: @runningSurface; }
+QLabel#blueprintStatusMark { background: @fieldFillHover; border-radius: 14px; }
+QLabel#blueprintStatusMark[tone="ok"] { background: @successSurface; }
+QLabel#blueprintStatusMark[tone="err"] { background: @errorSurface; }
+QLabel#blueprintStatusMark[tone="warn"] { background: @warningSurface; }
+QFrame#blueprintStepCard { background: @fieldFill; border: none; border-radius: 10px; }
+QFrame#blueprintCodeBlock { background: @insetBackground; border: none; border-radius: 8px; }
+QLabel#blueprintCodeCaption { font-size: 11px; font-weight: 500; color: @textMuted; }
+QLabel#blueprintMetaChip { font-size: 12px; color: @textSecondary; background: @fieldFill; border-radius: 9px; padding: 2px 9px; }
+QLabel#blueprintRunId { font-family: @monoFont; font-size: 11px; color: @textMuted; }
+QFrame#blueprintRunSetup { background: @blueprintPanelFill; border: none; border-radius: 12px; }
+QFrame#blueprintRunSetup QLabel#headingLabel { font-family: @headingFont; font-size: 16px; font-weight: 600; }
+QFrame#blueprintHistoryRow { background: @fieldFill; border: none; border-radius: 10px; }
+QFrame#blueprintHistoryRow:hover { background: @fieldFillHover; }
+QLabel#blueprintHistoryTitle { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QLabel#blueprintColumnHeader { font-size: 11px; font-weight: 500; color: @textMuted; }

@@ -180,13 +180,17 @@ QString statusIcon(const QString &status) {
     return "window-minimize";
 }
 
+// A run or step status as a small tinted pill.
 QLabel *statusLabel(const QString &status) {
-    const char *style = "cardMeta";
-    if (status == "passed" || status == "approved") style = "blueprintSuccess";
-    else if (status == "failed" || status == "denied") style = "blueprintError";
-    else if (status == "waiting" || status == "expired") style = "blueprintWarning";
-    else if (status == "running") style = "blueprintRunning";
-    return label(BlueprintPreview::statusLabel(status), style);
+    QString tone = "idle";
+    if (status == "passed" || status == "approved") tone = "ok";
+    else if (status == "failed" || status == "denied") tone = "err";
+    else if (status == "waiting" || status == "expired") tone = "warn";
+    else if (status == "running" || status == "queued") tone = "run";
+    auto *pill = label(BlueprintPreview::statusLabel(status), "blueprintStatusPill");
+    pill->setProperty("tone", tone);
+    pill->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    return pill;
 }
 
 bool running(const QJsonObject &run) {
@@ -317,12 +321,19 @@ QJsonObject collectInput(const QJsonObject &contracts, const QString &text, QStr
     return input;
 }
 
+// A caption over a dark inset block of monospaced JSON.
 void fillCode(QVBoxLayout *layout, const QString &title, const QJsonValue &value) {
-    layout->addWidget(label(title, "headingLabel"));
+    auto *block = new QFrame;
+    block->setObjectName("blueprintCodeBlock");
+    auto *inner = new QVBoxLayout(block);
+    inner->setContentsMargins(10, 8, 10, 10);
+    inner->setSpacing(4);
+    inner->addWidget(label(title, "blueprintCodeCaption"));
     auto *code = wrapped(BlueprintPreview::jsonText(value), "blueprintCode");
     code->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-    layout->addWidget(code);
-    layout->addStretch();
+    inner->addWidget(code);
+    inner->addStretch();
+    layout->addWidget(block, 1);
 }
 }
 
@@ -1854,10 +1865,12 @@ QWidget *BlueprintPanel::setupRun() {
     layout->addWidget(m_traceScroll, 1);
     QVBoxLayout *setup;
     m_runSetup = scroller(&setup);
-    m_runSetup->setFixedWidth(278);
+    m_runSetup->setFixedWidth(306);
     layout->addWidget(m_runSetup);
     auto *card = Surface::card(m_runSetup, "Run setup");
-    card->parentWidget()->setObjectName("blueprintSurface");
+    card->parentWidget()->setObjectName("blueprintRunSetup");
+    card->setContentsMargins(16, 14, 16, 16);
+    card->setSpacing(6);
     setup->addWidget(card->parentWidget());
     setup->addStretch();
     m_target = new ComboBox;
@@ -1902,7 +1915,8 @@ QWidget *BlueprintPanel::setupRun() {
     card->addWidget(m_runError);
     m_start = action("Start run", true);
     m_start->setObjectName("blueprintStartRun");
-    card->addWidget(m_start, 0, Qt::AlignLeft);
+    card->addSpacing(4);
+    card->addWidget(m_start);
     connect(m_target, &ComboBox::currentIndexChanged, this, &BlueprintPanel::refreshRunOptions);
     connect(m_sample, &ComboBox::activated, this, [this] {
         if (m_sample->currentIndex() > 0) m_input->setPlainText(m_sample->currentData().toString());
@@ -2176,7 +2190,7 @@ void BlueprintPanel::refreshRun() {
     auto *head = new QHBoxLayout;
     head->setContentsMargins(0, 3, 3, 3);
     head->setSpacing(8);
-    head->addWidget(label(run["target"].toString().isEmpty() ? "Run details" : "Node test", "blueprintSection"));
+    head->addWidget(label(run["target"].toString().isEmpty() ? "Run details" : "Node test", "blueprintInspectorTitle"));
     head->addStretch();
     if (!run.isEmpty()) {
         head->addWidget(statusLabel(run["status"].toString()));
@@ -2188,7 +2202,7 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(head);
-    m_trace->addWidget(rule());
+    m_trace->addSpacing(4);
     if (run.isEmpty()) {
         m_trace->addSpacing(14);
         m_trace->addWidget(wrapped("Run a blueprint or test a node to see its steps here."));
@@ -2235,8 +2249,14 @@ void BlueprintPanel::refreshRun() {
     if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
     const auto revision = run["revision"].toInt() > 0 ? QString(" · Rev %1").arg(run["revision"].toInt()) : QString{};
     auto *summary = new QHBoxLayout;
-    summary->setContentsMargins(0, 4, 0, 4);
-    summary->addWidget(wrapped(QString("%1  ·  %2 / %3 steps  ·  %4%5").arg(elapsed).arg(completed).arg(steps.size()).arg(source, revision)), 1);
+    summary->setContentsMargins(0, 2, 0, 2);
+    summary->setSpacing(6);
+    for (const auto &fact : {elapsed, QString("%1 / %2 steps").arg(completed).arg(steps.size()), source + revision}) {
+        auto *chip = label(fact, "blueprintMetaChip");
+        chip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        summary->addWidget(chip);
+    }
+    summary->addStretch(1);
     const auto fixtures = m_preview->fixtures();
     const auto sample = findById(fixtures["samples"].toArray(), run["sampleId"].toString());
     const auto baseline = fixtures["baseline"].toObject();
@@ -2287,12 +2307,12 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(summary);
-    auto *runId = wrapped("Run ID  " + m_runId, "cardMeta");
+    auto *runId = wrapped("Run ID  " + m_runId, "blueprintRunId");
     runId->setAccessibleName("Run ID: " + m_runId);
     runId->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     m_trace->addWidget(runId);
     if (!m_baseline.isEmpty()) {
-        m_trace->addWidget(rule());
+        m_trace->addSpacing(10);
         m_trace->addWidget(label("Run comparison", "blueprintSection"));
         m_trace->addWidget(wrapped(run["supplied"] == m_baseline["supplied"] ? "Same input values" : "Different input values"));
         auto *comparison = new QHBoxLayout;
@@ -2310,8 +2330,7 @@ void BlueprintPanel::refreshRun() {
         m_trace->addLayout(result);
     }
     if (compare && m_comparison) {
-        m_trace->addWidget(rule());
-        m_trace->addSpacing(7);
+        m_trace->addSpacing(14);
         m_trace->addWidget(label("Baseline comparison", "blueprintSection"));
         m_trace->addWidget(wrapped("Same sample input · fixture results"));
         auto *comparison = new QHBoxLayout;
@@ -2327,14 +2346,20 @@ void BlueprintPanel::refreshRun() {
         m_trace->addLayout(comparison);
     }
 
-    m_trace->addWidget(rule());
+    m_trace->addSpacing(10);
     for (const auto &value : steps) {
         const auto step = value.toObject();
         const auto id = step["id"].toString();
         const auto status = step["status"].toString();
         const auto name = step["name"].toString();
+        // Each step is a rounded card: its header row, any error, and the input and output when open.
+        auto *card = new QFrame;
+        card->setObjectName("blueprintStepCard");
+        auto *cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(0, 0, 0, 0);
+        cardLayout->setSpacing(0);
         auto *row = new QHBoxLayout;
-        row->setContentsMargins(0, 0, 5, 0);
+        row->setContentsMargins(0, 0, 12, 0);
         row->setSpacing(8);
         auto *button = new QPushButton(literalButtonText(name));
         button->setObjectName("blueprintStep");
@@ -2347,15 +2372,15 @@ void BlueprintPanel::refreshRun() {
         row->addWidget(label(BlueprintPreview::duration(step["duration"].toInteger(-1)), "blueprintCode"));
         auto *arrow = label(button->isChecked() ? "⌄" : "›", "cardMeta");
         row->addWidget(arrow);
-        m_trace->addLayout(row);
+        cardLayout->addLayout(row);
         if (step.contains("error")) {
             auto *error = wrapped(step["error"].toString(), "blueprintStepError");
-            m_trace->addWidget(error);
+            cardLayout->addWidget(error);
         }
         auto *info = new QWidget;
         info->setObjectName("blueprintStepDetail");
         auto *details = new QVBoxLayout(info);
-        details->setContentsMargins(31, 8, 9, 12);
+        details->setContentsMargins(12, 4, 12, 12);
         for (const auto &value : decisions) {
             const auto item = value.toObject();
             if (item["stepId"] == step["id"]) details->addWidget(approvalView(m_preview, run, item));
@@ -2371,19 +2396,27 @@ void BlueprintPanel::refreshRun() {
         const bool empty = produced.isUndefined() || produced.isNull()
             || (produced.isObject() && produced.toObject().isEmpty());
         if (empty && status != "passed") {
-            output->addWidget(label(outputTitle, "headingLabel"));
-            output->addWidget(wrapped(status == "skipped" || status == "pending" ? "Not run"
-                                      : "No output because the step did not finish.", "cardMeta"));
-            output->addStretch();
+            auto *block = new QFrame;
+            block->setObjectName("blueprintCodeBlock");
+            auto *inner = new QVBoxLayout(block);
+            inner->setContentsMargins(10, 8, 10, 10);
+            inner->setSpacing(4);
+            inner->addWidget(label(outputTitle, "blueprintCodeCaption"));
+            inner->addWidget(wrapped(status == "skipped" || status == "pending" ? "Not run"
+                                     : "No output because the step did not finish.", "cardMeta"));
+            inner->addStretch();
+            output->addWidget(block, 1);
         } else {
             fillCode(output, outputTitle, produced);
         }
+        io->setSpacing(8);
         io->addLayout(input, 1);
         io->addLayout(output, 1);
         details->addLayout(io);
-        m_trace->addWidget(info);
+        cardLayout->addWidget(info);
         info->setVisible(button->isChecked());
-        m_trace->addWidget(rule());
+        m_trace->addWidget(card);
+        m_trace->addSpacing(6);
         connect(button, &QPushButton::toggled, info, [this, info, arrow, id](bool expanded) {
             m_expanded.insert(id, expanded);
             info->setVisible(expanded);
@@ -2399,41 +2432,96 @@ void BlueprintPanel::refreshRun() {
 
 void BlueprintPanel::refreshHistory() {
     clear(m_history);
-    titleBar(m_history, m_preview->live() ? "Recent run history" : "Run history");
     const auto runs = m_preview->runs(m_graph["id"].toString());
-    if (runs.isEmpty()) m_history->addWidget(wrapped("Start a run to see it in this history."));
+    auto *head = new QHBoxLayout;
+    head->setContentsMargins(0, 3, 0, 0);
+    head->addWidget(label(m_preview->live() ? "Recent run history" : "Run history", "blueprintInspectorTitle"));
+    head->addStretch();
+    if (!runs.isEmpty()) head->addWidget(label(QString(runs.size() == 1 ? "1 run" : "%1 runs").arg(runs.size()), "cardMeta"));
+    m_history->addLayout(head);
+    m_history->addSpacing(10);
+    if (runs.isEmpty()) {
+        auto *empty = wrapped("Start a run to see it in this history.", "blueprintDetailsEmpty");
+        empty->setAlignment(Qt::AlignCenter);
+        m_history->addWidget(empty);
+        m_history->addStretch();
+        return;
+    }
+    // Fixed columns keep status, source, duration and time aligned down the list.
+    const QList<QPair<QString, int>> columns{{"Status", 112}, {"Source", 92}, {"Time", 60}, {"Started", 112}};
+    auto *header = new QHBoxLayout;
+    header->setContentsMargins(52, 0, 12, 4);
+    header->setSpacing(16);
+    header->addWidget(label("Run", "blueprintColumnHeader"), 1);
+    for (const auto &[name, width] : columns) {
+        auto *cell = label(name, "blueprintColumnHeader");
+        cell->setFixedWidth(width);
+        if (name == "Time") cell->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        header->addWidget(cell);
+    }
+    {
+        // Room for each row's Inspect button, so the headings line up with their columns.
+        Button probe(literalButtonText("Inspect"));
+        probe.setFlat(true);
+        probe.ensurePolished();
+        header->addSpacing(probe.sizeHint().width());
+    }
+    m_history->addLayout(header);
     for (const auto &value : runs) {
         const auto run = value.toObject();
         const auto id = run["id"].toString();
-        auto *row = new QHBoxLayout;
-        row->setContentsMargins(0, 5, 0, 5);
+        const auto status = run["status"].toString();
+        auto *card = new QFrame;
+        card->setObjectName("blueprintHistoryRow");
+        auto *row = new QHBoxLayout(card);
+        row->setContentsMargins(12, 9, 10, 9);
+        row->setSpacing(16);
+        auto *mark = label({}, "blueprintStatusMark");
+        mark->setProperty("tone", status == "passed" ? "ok" : status == "failed" || status == "denied" ? "err"
+                                  : status == "waiting" || status == "expired" ? "warn" : "idle");
+        mark->setFixedSize(28, 28);
+        mark->setAlignment(Qt::AlignCenter);
+        mark->setPixmap(Theme::coloredIcon(statusIcon(status), statusTone(status), 15).pixmap(15, 15));
+        row->addWidget(mark);
+        row->setSpacing(12);
         auto *title = new QVBoxLayout;
-        title->addWidget(label(run["target"].toString().isEmpty() ? "Full blueprint" : "Node test", "headingLabel"));
+        title->setSpacing(1);
+        title->addWidget(label(run["target"].toString().isEmpty() ? "Full blueprint" : "Node test", "blueprintHistoryTitle"));
         const auto rev = run["revision"].toInt();
-        auto *meta = wrapped((rev ? QString("Revision %1").arg(rev) : QString("Draft node")) + " · " + id.left(8), "cardMeta");
+        auto *meta = label((rev ? QString("Revision %1").arg(rev) : QString("Draft node")) + " · " + id.left(8), "blueprintRunId");
         meta->setToolTip("Run ID " + id);
         title->addWidget(meta);
         row->addLayout(title, 1);
-        row->setSpacing(16);
-        // Fixed columns keep status, source, duration and time aligned down the list.
-        const auto column = [row](QLabel *cell, int width) {
-            cell->setFixedWidth(width);
-            row->addWidget(cell);
+        row->addSpacing(4);
+        const auto column = [row](QWidget *cell, int width) {
+            auto *box = new QWidget;
+            box->setFixedWidth(width);
+            auto *inner = new QHBoxLayout(box);
+            inner->setContentsMargins(0, 0, 0, 0);
+            inner->addWidget(cell);
+            inner->addStretch();
+            row->addWidget(box);
         };
-        column(statusLabel(run["status"].toString()), 118);
+        column(statusLabel(status), columns[0].second);
         auto source = run["source"].toString();
         if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
-        column(label(source, "cardMeta"), 92);
+        auto *sourceLabel = label(source, "cardMeta");
+        sourceLabel->setFixedWidth(columns[1].second);
+        row->addWidget(sourceLabel);
         auto *elapsed = label(run.contains("ended")
-            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "cardMeta");
+            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "blueprintCode");
         elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        column(elapsed, 56);
-        column(label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta"), 112);
+        elapsed->setFixedWidth(columns[2].second);
+        row->addWidget(elapsed);
+        auto *when = label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta");
+        when->setFixedWidth(columns[3].second);
+        row->addWidget(when);
         auto *open = action("Inspect", false, true);
+        open->setMinimumWidth(open->sizeHint().width());
         row->addWidget(open);
         connect(open, &Button::clicked, this, [this, id] { openRun(id); });
-        m_history->addLayout(row);
-        m_history->addWidget(rule());
+        m_history->addWidget(card);
+        m_history->addSpacing(6);
     }
     m_history->addStretch();
 }

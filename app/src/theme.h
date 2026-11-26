@@ -90,6 +90,14 @@ inline QString accentSurface() {
                            base.blueF() * 0.92 + accent.blueF() * 0.08).name();
 }
 
+// Status tints for run pills and step marks: the status colour washed over the surface.
+inline QString statusSurface(const QString &status) {
+    const QColor base(surfaceFill()), tone(status);
+    return QColor::fromRgbF(base.redF() * 0.84 + tone.redF() * 0.16,
+                           base.greenF() * 0.84 + tone.greenF() * 0.16,
+                           base.blueF() * 0.84 + tone.blueF() * 0.16).name();
+}
+
 // Tinted surface for inline warning banners (service reconnecting, etc.).
 inline QString warningSurface() {
     const QColor base(surfaceFill()), warning(statusWarning());
