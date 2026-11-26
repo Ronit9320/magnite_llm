@@ -10,6 +10,7 @@
 class BlueprintView;
 class FloatingPanel;
 class QTreeWidget;
+class BlueprintInspector;
 class BlueprintPreview;
 class Button;
 class ComboBox;
@@ -127,6 +128,7 @@ private:
     QDialog *m_fullscreenDialog = nullptr;
     FloatingPanel *m_inspectorPanel;
     QVBoxLayout *m_inspector;
+    BlueprintInspector *m_nodeInspector;
 
     QScrollArea *m_runSetup;
     ComboBox *m_target;

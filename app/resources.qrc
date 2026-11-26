@@ -66,6 +66,7 @@
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>
         <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+        <file alias="icons/info.svg">resources/icons/info.svg</file>
         <file alias="icons/ellipsis.svg">resources/icons/ellipsis.svg</file>
         <file alias="icons/expand.svg">resources/icons/expand.svg</file>
         <file alias="icons/shrink.svg">resources/icons/shrink.svg</file>

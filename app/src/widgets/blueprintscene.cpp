@@ -49,23 +49,25 @@ void BlueprintScene::setGraph(const QJsonObject &graph) {
 
 QJsonObject BlueprintScene::graph() const { return m_graph; }
 
+QStringList BlueprintScene::warningLines(const BlueprintPreview &preview, const QJsonObject &graph,
+                                         const QJsonObject &node, const QStringList &issues) {
+    const auto edges = graph["edges"].toArray();
+    QStringList lines;
+    for (const auto &value : node["in"].toArray()) {
+        const auto port = value.toObject();
+        const bool connected = std::any_of(edges.cbegin(), edges.cend(), [&](const auto &edge) {
+            return edge.toObject()["to"] == node["id"] && edge.toObject()["in"] == port["id"];
+        });
+        if (!connected) lines << preview.portLabel(port) + " is not connected";
+    }
+    const auto name = node["name"].toString();
+    if (!name.isEmpty())
+        for (const auto &issue : issues)
+            if (issue.startsWith(name + " ")) lines << issue;
+    return lines;
+}
+
 void BlueprintScene::refreshWarnings() {
     const auto issues = m_preview.issues(m_graph);
-    const auto edges = m_graph["edges"].toArray();
-    for (auto *item : m_order) {
-        const auto data = item->node();
-        QStringList lines;
-        for (const auto &value : data["in"].toArray()) {
-            const auto port = value.toObject();
-            const bool connected = std::any_of(edges.cbegin(), edges.cend(), [&](const auto &edge) {
-                return edge.toObject()["to"] == data["id"] && edge.toObject()["in"] == port["id"];
-            });
-            if (!connected) lines << m_preview.portLabel(port) + " is not connected";
-        }
-        const auto name = data["name"].toString();
-        if (!name.isEmpty())
-            for (const auto &issue : issues)
-                if (issue.startsWith(name + " ")) lines << issue;
-        item->setWarning(lines.join('\n'));
-    }
+    for (auto *item : m_order) item->setWarning(warningLines(m_preview, m_graph, item->node(), issues).join('\n'));
 }

@@ -152,8 +152,8 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     });
     dialogTime.start();
     driver.start();
-    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
-    else fprintf(stderr, "[blueprints-model] Configure button unavailable after selecting the model\n");
+    if (!triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…"))
+        fprintf(stderr, "[blueprints-model] Configure node… unavailable after selecting the model\n");
     driver.stop();
     QObject::disconnect(bindingDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(1).toObject()["model"] == modelId(model),
@@ -292,7 +292,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     });
     dialogTime.restart();
     driver.start();
-    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…");
     driver.stop();
     QObject::disconnect(adapterDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(3).toObject()["adapter"] == adapter,
@@ -1153,15 +1153,15 @@ int runLiveBlueprintChecks(const QString &captures) {
             tree->setCurrentItem(tree->topLevelItem(i));
             pump();
             captured += captureDialog("dialog-configure-" + operations[i], [&] {
-                if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+                triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…");
             });
             if (operations[i] == "generate" || operations[i] == "reason")
                 captured += captureDialog("dialog-binding-" + operations[i], [&] {
-                    if (auto *binding = visibleButton(panel, "Change binding")) binding->click();
+                    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Change binding…");
                 });
             if (operations[i] == "dataset-rows") {
                 captured += captureDialog("dialog-dataset", [&] {
-                    if (auto *source = visibleButton(panel, "Choose dataset")) source->click();
+                    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Choose dataset…");
                 });
                 captured += captureDialog("dialog-schema", [&] {
                     for (auto *button : panel.findChildren<QPushButton *>("blueprintPortContract"))

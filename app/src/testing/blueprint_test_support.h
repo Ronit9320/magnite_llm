@@ -9,7 +9,9 @@
 #include <QEventLoop>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QContextMenuEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QTimer>
@@ -107,6 +109,31 @@ inline void key(QWidget *w, int key, Qt::KeyboardModifiers modifiers = {}, const
 
 inline QPointF viewPoint(BlueprintView &view, QPointF scenePoint) {
     return QPointF(view.mapFromScene(scenePoint));
+}
+
+
+// Opens the right-click menu of a node on the canvas and chooses one of its actions.
+inline bool triggerNodeMenu(BlueprintView *view, const QString &nodeId, const QString &text) {
+    auto *item = view ? view->graphScene()->node(nodeId) : nullptr;
+    if (!item) return false;
+    const QPoint at = view->mapFromScene(item->sceneBoundingRect().center());
+    bool found = false;
+    QTimer::singleShot(0, view, [&] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (!menu) return;
+        for (auto *action : menu->actions()) {
+            if (action->text() != text || !action->isEnabled()) continue;
+            found = true;
+            menu->setActiveAction(action);
+            QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+            QCoreApplication::sendEvent(menu, &enter);
+            return;
+        }
+        menu->close();
+    });
+    QContextMenuEvent event(QContextMenuEvent::Mouse, at, view->viewport()->mapToGlobal(at));
+    QCoreApplication::sendEvent(view->viewport(), &event);
+    return found;
 }
 
 }  // namespace BlueprintTest

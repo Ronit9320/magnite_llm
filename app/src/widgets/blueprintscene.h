@@ -20,6 +20,9 @@ public:
     QList<NodeItem *> nodes() const;
     QList<WireItem *> wires() const;
     static QRectF nodeRect(const QJsonObject &node);
+    // The warning lines a node shows: unconnected inputs, then the graph's issues that name it.
+    static QStringList warningLines(const BlueprintPreview &preview, const QJsonObject &graph,
+                                    const QJsonObject &node, const QStringList &issues);
 
 private:
     void refreshWarnings();

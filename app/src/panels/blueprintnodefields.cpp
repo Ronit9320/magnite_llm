@@ -149,7 +149,7 @@ void BlueprintNodeFields::loadOptions() {
     const bool sameOperation = code == BlueprintPreview::operationId(m_original);
     m_detail->setText(spec["detail"].toString());
 
-    if (m_preview.live() && (code == "generate" || code == "reason" || code == "lora")) {
+    if (m_bindingShown && m_preview.live() && (code == "generate" || code == "reason" || code == "lora")) {
         m_binding = new ComboBox;
         m_binding->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         m_binding->setMinimumContentsLength(20);
@@ -433,6 +433,12 @@ QJsonObject BlueprintNodeFields::build(QString *error, QWidget **focus) const {
 }
 
 QWidget *BlueprintNodeFields::firstField() const { return m_operation; }
+
+void BlueprintNodeFields::setBindingShown(bool shown) {
+    if (m_bindingShown == shown) return;
+    m_bindingShown = shown;
+    loadOptions();
+}
 
 QJsonObject BlueprintNodeFields::node() const { return build(nullptr, nullptr); }
 

@@ -1,6 +1,7 @@
 #include "testing/blueprint_editor_tests.h"
 
 #include "panels/blueprintbindingfields.h"
+#include "panels/blueprintinspector.h"
 #include "panels/blueprintnodefields.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
@@ -1018,6 +1019,117 @@ void checkFieldWidgets(BlueprintPreview &preview) {
     check(!rows.error().isEmpty(), "dataset fields explain invalid rows");
 }
 
+void checkInspector(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    const auto in = preview.makeNode("input", "in", 0, 0), out = preview.makeNode("output", "out", 320, 0),
+               p = preview.makeNode("parse-json", "p", 0, 240), f = preview.makeNode("field", "f", 320, 240);
+    const QJsonObject graph{{"id", "inspect-check"}, {"name", "Inspector check"}, {"revision", 1},
+        {"nodes", QJsonArray{in, out, p, f}},
+        {"edges", QJsonArray{edge("in", "text", "out", "value"), edge("p", "value", "f", "value")}}};
+    preview.saveBlueprint(graph);
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Inspector check")) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    auto *inspector = panel.findChild<BlueprintInspector *>();
+    const bool opened = view && inspector && view->graphScene()->node("f");
+    check(opened, "the inspector check graph opens");
+    if (!opened) return;
+    view->fit();
+    pump();
+    const auto stored = [&] { return preview.blueprint("inspect-check"); };
+    const auto storedNode = [&](const QString &id) {
+        for (const auto &value : stored()["nodes"].toArray())
+            if (value.toObject()["id"] == id) return value.toObject();
+        return QJsonObject{};
+    };
+    const auto select = [&](const QString &id) {
+        click(view->viewport(), viewPoint(*view, view->graphScene()->node(id)->sceneBoundingRect().center()));
+        pump(50);
+    };
+    const auto answer = [&](bool accept) {
+        QTimer::singleShot(0, &panel, [accept] {
+            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
+                if (auto *save = accept ? visibleButton(*dialog, "Save changes") : nullptr) save->click();
+                else dialog->reject();
+            }
+        });
+    };
+    const auto field = [&](const char *name) { return visibleNamed<QLineEdit>(*inspector, name); };
+
+    select("in");
+    check(inspector->nodeId() == "in" && inspector->isVisible(), "selecting a node shows it in the inspector");
+    if (auto *name = field("Output port name")) {
+        name->setText("Payload");
+        name->setModified(true);
+        emit name->editingFinished();
+        pump(50);
+    }
+    check(storedNode("in")["out"].toArray().first().toObject()["name"] == "Payload",
+          "editing a field in the inspector saves through changeNode");
+    const auto buttons = panel.findChildren<QPushButton *>();
+    check(std::none_of(buttons.cbegin(), buttons.cend(), [](auto *b) { return b->isVisible() && b->text() == "Configure…"; }),
+          "the inspector edits in place with no Configure button");
+
+    select("p");
+    const auto changeType = [&](bool accept) {
+        auto *type = visibleNamed<QComboBox>(*inspector, "Output port type");
+        if (!type) return false;
+        answer(accept);
+        type->setCurrentIndex(type->findData("text"));
+        pump(50);
+        return true;
+    };
+    const auto before = stored();
+    check(changeType(false) && stored() == before, "a port change that breaks wires asks first and Cancel keeps everything");
+    auto *reverted = visibleNamed<QComboBox>(*inspector, "Output port type");
+    check(reverted && reverted->currentData() == "object", "declining the change puts the inspector back");
+    const auto hasEdge = [&](const QJsonObject &e) { return stored()["edges"].toArray().contains(e); };
+    check(changeType(true) && !hasEdge(edge("p", "value", "f", "value"))
+              && storedNode("p")["out"].toArray().first().toObject()["type"] == "text",
+          "accepting drops the broken wire");
+
+    select("out");
+    QPushButton *disconnect = nullptr;
+    for (auto *button : inspector->findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Disconnect") disconnect = button;
+    if (disconnect) disconnect->click();
+    pump(50);
+    check(disconnect && !hasEdge(edge("in", "text", "out", "value")), "Disconnect removes a wire from the inspector");
+
+    // Typing that was never committed belongs to the node it was typed for.
+    select("in");
+    const auto outBefore = storedNode("out");
+    if (auto *name = field("Output port name")) {
+        name->setText("Draft");
+        name->setModified(true);
+    }
+    select("out");
+    pump(50);
+    check(storedNode("in")["out"].toArray().first().toObject()["name"] == "Draft" && storedNode("out") == outBefore
+              && inspector->nodeId() == "out",
+          "an edit commits to the node it was typed for when selection moves");
+    select("in");
+    if (auto *name = field("Output port name")) {
+        name->setText("Gone");
+        name->setModified(true);
+    }
+    confirmDelete(&panel);
+    key(view->viewport(), Qt::Key_Delete);
+    pump(80);
+    check(storedNode("in").isEmpty() && storedNode("out") == outBefore, "an edit on a deleted node is dropped");
+    preview.deleteBlueprint("inspect-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1031,6 +1143,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkOverlays(preview);
     checkShell(preview, captures);
     checkFieldWidgets(preview);
+    checkInspector(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

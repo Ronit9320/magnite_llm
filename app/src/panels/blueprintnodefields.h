@@ -30,6 +30,8 @@ public:
     bool portsChanged() const;
     QJsonObject original() const { return m_original; }
     QWidget *firstField() const;
+    // Leaves the live checkpoint or adapter picker out (a host that shows its own binding).
+    void setBindingShown(bool shown);
 
 signals:
     void edited();
@@ -73,4 +75,5 @@ private:
     QString m_resourceSide;
     QPlainTextEdit *m_text = nullptr;
     QList<PortEditor> m_ports;
+    bool m_bindingShown = true;
 };

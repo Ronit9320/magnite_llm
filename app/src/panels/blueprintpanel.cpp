@@ -3,6 +3,7 @@
 
 #include "panels/blueprintpreview.h"
 #include "panels/blueprintbindingfields.h"
+#include "panels/blueprintinspector.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
@@ -146,11 +147,6 @@ QString sampleText(const QJsonObject &sample) {
     QStringList lines;
     for (const auto &line : sample["lines"].toArray()) lines.append(line.toString());
     return lines.join(' ');
-}
-
-QString named(const QJsonObject &fixtures, const QString &collection, const QJsonValue &id) {
-    const auto object = findById(fixtures[collection].toArray(), id.toString());
-    return object["name"].toString("Unbound");
 }
 
 void titleBar(QVBoxLayout *body, const QString &title) {
@@ -899,7 +895,29 @@ void BlueprintPanel::setupEditor() {
     inspectorLayout->setContentsMargins(4, 4, 0, 0);
     auto *inspectorScroll = scroller(&m_inspector);
     m_inspector->setSpacing(6);
+    m_nodeInspector = new BlueprintInspector(*m_preview);
+    m_inspector->addWidget(m_nodeInspector);
     inspectorLayout->addWidget(inspectorScroll);
+    // Inspector edits apply to the node they were made for, and only while it still exists.
+    connect(m_nodeInspector, &BlueprintInspector::nodeChanged, this, [this](const QJsonObject &node, bool ports) {
+        if (findById(m_graph["nodes"].toArray(), node["id"].toString()).isEmpty()) return;
+        const auto before = m_graph;
+        changeNode(node, ports);
+        if (m_graph == before) m_nodeInspector->reload();
+    });
+    connect(m_nodeInspector, &BlueprintInspector::disconnectRequested, this, &BlueprintPanel::removeConnection);
+    connect(m_nodeInspector, &BlueprintInspector::schemaRequested, this, &BlueprintPanel::editSchema);
+    connect(m_nodeInspector, &BlueprintInspector::trainRequested, this, [this] {
+        if (m_preview->live()) liveTraining();
+        else saveTrainingRecipe();
+    });
+    connect(m_nodeInspector, &BlueprintInspector::testRequested, this, [this](const QString &id) { showTest(id); });
+    connect(m_nodeInspector, &BlueprintInspector::saveToLibraryRequested, this, &BlueprintPanel::saveNodeTemplate);
+    connect(m_nodeInspector, &BlueprintInspector::deleteRequested, this, &BlueprintPanel::removeNode);
+    connect(m_nodeInspector, &BlueprintInspector::closeRequested, this, [this] {
+        m_selected.clear();
+        refreshInspector();
+    });
     m_canvas->addOverlay(m_inspectorPanel, OverlayEdge::Right);
     m_inspectorPanel->hide();
 
@@ -1077,7 +1095,6 @@ void BlueprintPanel::applyCompactRule() {
 
 void BlueprintPanel::refreshInspector() {
     m_canvas->setSelection(m_selected);
-    clear(m_inspector);
     const auto nodes = m_graph["nodes"].toArray();
     const auto *current = m_nodeTree->currentItem();
     if (!current || current->data(0, Qt::UserRole).toString() != m_selected) {
@@ -1094,157 +1111,8 @@ void BlueprintPanel::refreshInspector() {
     const auto node = findById(nodes, m_selected);
     // The inspector floats in while a node is selected and leaves when nothing is.
     m_inspectorPanel->setVisible(!node.isEmpty());
-    if (node.isEmpty()) return;
-    auto *header = new QHBoxLayout;
-    header->addWidget(label("Node inspector", "headingLabel"), 1);
-    auto *close = iconAction("window-close", "Clear node selection");
-    close->setFixedSize(24, 24);
-    header->addWidget(close);
-    connect(close, &Button::clicked, this, [this] { m_selected.clear(); refreshInspector(); });
-    m_inspector->addLayout(header);
-    m_inspector->addWidget(rule());
-    const auto fixtures = m_preview->fixtures();
-    const auto code = BlueprintPreview::operationId(node);
-    const auto spec = m_preview->operation(code);
-    const auto kind = spec["kind"].toString(node["kind"].toString());
-    const auto iconKind = code == "selector" || code == "extractor" ? code : kind;
-    auto *identity = new QHBoxLayout;
-    identity->setSpacing(9);
-    auto *icon = label({});
-    icon->setFixedSize(34, 34);
-    icon->setAlignment(Qt::AlignCenter);
-    icon->setObjectName("blueprintNodeIcon");
-    icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(iconKind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(iconKind)), 19).pixmap(19, 19));
-    identity->addWidget(icon);
-    auto *names = new QVBoxLayout;
-    names->setSpacing(3);
-    names->addWidget(wrapped(node["name"].toString(), "blueprintSection"));
-    names->addWidget(wrapped(m_preview->nodeKindLabel(kind) + " · " + spec["label"].toString()));
-    identity->addLayout(names, 1);
-    m_inspector->addLayout(identity);
-    m_inspector->addWidget(wrapped(spec["detail"].toString()));
-    const auto id = node["id"].toString();
-    auto *nodeActions = new QHBoxLayout;
-    auto *configure = action("Configure…");
-    auto *save = iconAction("folder", "Save to node library");
-    nodeActions->addWidget(configure, 1);
-    nodeActions->addWidget(save);
-    m_inspector->addLayout(nodeActions);
-    connect(configure, &Button::clicked, this, [this, id] { configureNode(id); });
-    connect(save, &Button::clicked, this, [this, id] { saveNodeTemplate(id); });
-    if (m_preview->live() && (kind == "model" || kind == "reasoning")) {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Checkpoint & adapter", "headingLabel"));
-        const auto checkpoint = node["model"].toString();
-        const auto adapter = node["adapter"].toString();
-        const auto linked = BlueprintPreview::adapterSource(m_graph, node);
-        m_inspector->addWidget(wrapped(checkpoint.isEmpty() ? "Choose a checkpoint from the local model library."
-            : findById(fixtures["models"].toArray(), checkpoint)["name"].toString(checkpoint)));
-        m_inspector->addWidget(wrapped(!linked.isEmpty() ? "Adapter node · " + linked["name"].toString()
-            : adapter.isEmpty() ? "No adapter" : "Adapter · " +
-              findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
-        m_inspector->addWidget(wrapped(QString("Output budget · %1 tokens")
-            .arg(node["maxTokens"].toInt(kind == "reasoning" ? 1024 : 256))));
-        auto *binding = action("Change binding");
-        auto *train = action("Training jobs…", false, true);
-        m_inspector->addWidget(binding);
-        m_inspector->addWidget(train);
-        train->setEnabled(m_graph["revision"].toInteger() > 0 && !m_graph["dirty"].toBool());
-        if (!train->isEnabled()) train->setToolTip("Save a complete revision before training or binding a job.");
-        connect(binding, &Button::clicked, this, &BlueprintPanel::editBinding);
-        connect(train, &Button::clicked, this, &BlueprintPanel::liveTraining);
-    } else if (kind == "adapter") {
-        const auto adapter = node["adapter"].toString();
-        m_inspector->addWidget(wrapped(adapter.isEmpty() ? "Choose a trained LoRA adapter in Configure."
-            : findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
-    } else if (m_preview->live() && kind == "dataset") {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Dataset", "headingLabel"));
-        const auto dataset = node["dataset"].toString();
-        m_inspector->addWidget(wrapped(dataset.isEmpty() ? "Inline rows"
-            : findById(m_preview->datasets(), dataset)["name"].toString(dataset)));
-        auto *source = action("Choose dataset");
-        m_inspector->addWidget(source);
-        connect(source, &Button::clicked, this, &BlueprintPanel::editDataset);
-    } else if (kind == "model") {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Model & adapter", "headingLabel"));
-        auto *base = Surface::card(m_inspector->parentWidget());
-        base->parentWidget()->setObjectName("blueprintBinding");
-        base->setContentsMargins(9, 6, 9, 6);
-        base->setSpacing(3);
-        base->addWidget(label("Base model", "cardMeta"));
-        base->addWidget(wrapped(named(fixtures, "models", node["model"]), "blueprintBindingValue"));
-        m_inspector->addWidget(base->parentWidget());
-
-        auto *adapter = new ComboBox;
-        adapter->setAccessibleName("Node adapter");
-        adapter->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        adapter->addItem("Select compatible adapter");
-        for (const auto &value : m_preview->compatibleAdapters(node["model"].toString(), code)) {
-            const auto choice = value.toObject();
-            adapter->addItem(choice["name"].toString(), choice["id"].toString());
-        }
-        adapter->setCurrentIndex(qMax(0, adapter->findData(node["adapter"].toString())));
-        adapter->setEnabled(adapter->count() > 1);
-        Surface::field(m_inspector, "Node adapter", adapter);
-        connect(adapter, &ComboBox::activated, this, [this, adapter, node] {
-            const auto chosen = adapter->currentData().toString();
-            if (chosen == node["adapter"].toString()) return;
-            auto updated = node;
-            updated["adapter"] = chosen;
-            changeNode(updated);
-            for (auto *current : m_inspector->parentWidget()->findChildren<QComboBox *>()) {
-                if (current->isVisible() && current->accessibleName() == "Node adapter") current->setFocus();
-            }
-        });
-        const auto model = findById(fixtures["models"].toArray(), node["model"].toString());
-        m_inspector->addWidget(label(model["engine"].toString(), "blueprintCode"));
-        auto *binding = new QHBoxLayout;
-        auto *pickerButton = action("Change binding");
-        auto *train = action("Train adapter", false, true);
-        binding->addWidget(pickerButton);
-        binding->addWidget(train);
-        m_inspector->addLayout(binding);
-        connect(pickerButton, &Button::clicked, this, &BlueprintPanel::editBinding);
-        connect(train, &Button::clicked, this, &BlueprintPanel::saveTrainingRecipe);
-        const auto recipe = node["training"].toObject();
-        if (!recipe.isEmpty()) m_inspector->addWidget(wrapped("Training recipe saved\n" + recipe["name"].toString()));
-    }
-    m_inspector->addWidget(rule());
-    m_inspector->addWidget(label("Port contracts", "headingLabel"));
-    const auto contracts = fixtures["contracts"].toObject();
-    for (const auto &side : {QString("in"), QString("out")}) {
-        for (const auto &value : node[side].toArray()) {
-            const auto port = value.toObject();
-            const auto name = m_preview->portLabel(port);
-            const auto type = contracts.value(port["type"].toString()).toObject()["label"].toString();
-            const bool input = side == "in";
-            if (port["type"] == "adapter-ref") {
-                m_inspector->addWidget(wrapped(input ? "In    LoRA adapter · Optional" : "Out   LoRA adapter"));
-                continue;
-            }
-            const auto text = name == type ? name : QString("%1 · %2").arg(name, type);
-            auto *edit = new QPushButton(literalButtonText((input ? "In    " : "Out   ") + text + "  ›"));
-            edit->setObjectName("blueprintPortContract");
-            edit->setAccessibleName(QString("Edit %1 schema for %2").arg(input ? "input" : "output", name));
-            edit->setCursor(Qt::PointingHandCursor);
-            m_inspector->addWidget(edit);
-            connect(edit, &QPushButton::clicked, this, [this, side, port] { editSchema(side, port["id"].toString()); });
-        }
-    }
-    m_inspector->addWidget(rule());
-    auto *actions = new QHBoxLayout;
-    auto *test = action("Test this node");
-    auto *remove = iconAction("trash", "Delete node");
-    actions->addWidget(test);
-    actions->addStretch();
-    actions->addWidget(remove);
-    m_inspector->addLayout(actions);
-    connect(test, &Button::clicked, this, [this] { showTest(m_selected); });
-    connect(remove, &Button::clicked, this, [this, node] { removeNode(node["id"].toString()); });
-    m_inspector->addStretch();
-    applyCompactRule();
+    m_nodeInspector->setNode(m_graph, node.isEmpty() ? QString{} : m_selected);
+    if (!node.isEmpty()) applyCompactRule();
 }
 
 void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {

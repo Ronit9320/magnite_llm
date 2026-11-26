@@ -55,7 +55,7 @@ BlueprintBindingFields::BlueprintBindingFields(BlueprintPreview &preview, const 
         }
         m_models->setCurrentIndex(qMax(0, m_models->findData(node["model"].toString())));
         Surface::field(body, "Base checkpoint", m_models);
-        Surface::field(body, "Reuse a LoRA adapter", m_adapters);
+        Surface::field(body, "Node adapter", m_adapters);
         body->addWidget(m_note);
         refreshFixture();
         connect(m_models, &ComboBox::currentIndexChanged, this, [this] {
