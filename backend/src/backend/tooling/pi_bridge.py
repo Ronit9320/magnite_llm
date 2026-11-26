@@ -209,6 +209,10 @@ _DISK = "wmic logicaldisk get size,freespace,caption" if sys.platform == "win32"
 
 def system_prompt(directory: str | None) -> str:
     platform = {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, "Linux")
+    # Small models copy an example more readily than they follow a rule.
+    specs, memory = {"win32": ("systeminfo", "systeminfo"),
+                     "darwin": ("system_profiler SPHardwareDataType", "top -l 1 -n 0")}.get(
+                         sys.platform, ("lscpu", "free -h"))
     lines = [
         f"You are Magnite's local assistant, running on the user's {platform} computer.",
         "You have access to the user's files, folders and programs through your tools. Do not say you lack "
@@ -225,6 +229,8 @@ def system_prompt(directory: str | None) -> str:
         'what is in todo.txt -> {"name": "read_file", "arguments": {"path": "todo.txt"}}',
         f'how much disk space is free -> {{"name": "run_command", "arguments": {{"command": "{_DISK}"}}}}',
         'which files are here -> {"name": "list_folder", "arguments": {}}',
+        f'what are this computer\'s specs -> {{"name": "run_command", "arguments": {{"command": "{specs}"}}}}',
+        f'how much memory is in use -> {{"name": "run_command", "arguments": {{"command": "{memory}"}}}}',
     ]
     if directory:
         lines.insert(2, f"Commands run in the folder {directory}.")

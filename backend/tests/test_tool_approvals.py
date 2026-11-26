@@ -421,6 +421,16 @@ class ReplyParsingTests(unittest.TestCase):
         self.assertEqual(pi_bridge.parse_reply(mixed, True), (mixed, []))
         self.assertEqual(pi_bridge.call_problem(mixed, True), ("unknown_tool", "delete_all"))
 
+    def test_the_examples_name_each_platform_s_own_commands(self):
+        example = lambda ask, command: ('%s -> {"name": "run_command", "arguments": {"command": "%s"}}'
+                                        % (ask, command))
+        for platform, specs, memory in (("darwin", "system_profiler SPHardwareDataType", "top -l 1 -n 0"),
+                                        ("linux", "lscpu", "free -h"), ("win32", "systeminfo", "systeminfo")):
+            with self.subTest(platform=platform), patch("backend.tooling.pi_bridge.sys.platform", platform):
+                self.assertEqual(pi_bridge.system_prompt("/work").splitlines()[-2:],
+                                 [example("what are this computer's specs", specs),
+                                  example("how much memory is in use", memory)])
+
     def test_write_file_becomes_a_write_action(self):
         self.assertEqual(pi_bridge.proposal({"name": "write_file", "arguments": {"path": "a.md", "content": "hi"}}),
                          {"action": "write", "target": "a.md", "content": "hi"})
