@@ -299,7 +299,7 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     painter->restore();
 
     const QColor family = BlueprintStyle::familyColor(m_family);
-    QColor outline = QColor(Theme::surfaceBorder());
+    QColor outline = Qt::transparent;  // unselected nodes have no outline, only their shadow
     qreal outlineWidth = 1;
     if (isSelected()) {
         outline = QColor(Theme::accentPrimary());

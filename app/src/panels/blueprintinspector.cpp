@@ -30,13 +30,6 @@ QLabel *text(const QString &value, const char *style = "cardMeta", bool wrap = t
     return label;
 }
 
-QFrame *rule() {
-    auto *line = new QFrame;
-    line->setObjectName("blueprintRule");
-    line->setFixedHeight(1);
-    return line;
-}
-
 Button *iconButton(const QString &icon, const QString &name) {
     auto *button = new Button({});
     button->setFlat(true);
@@ -110,7 +103,7 @@ BlueprintInspector::BlueprintInspector(BlueprintPreview &preview, QWidget *paren
     : QWidget(parent), m_preview(preview) {
     setObjectName("blueprintNodeInspector");
     m_root = new QVBoxLayout(this);
-    m_root->setContentsMargins(0, 0, 0, 0);
+    m_root->setContentsMargins(10, 8, 10, 10);
     m_root->setSpacing(0);
 }
 
@@ -174,51 +167,50 @@ void BlueprintInspector::rebuild() {
     const auto spec = m_preview.operation(code);
     const auto kind = spec["kind"].toString(m_node["kind"].toString());
 
+    const auto iconKind = code == "selector" || code == "extractor" ? code : kind;
+    const QColor family = BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(iconKind));
     auto *header = new QHBoxLayout;
-    header->addWidget(text("Node inspector", "headingLabel", false), 1);
+    header->setSpacing(10);
+    auto *icon = text({}, "blueprintInspectorGlyph", false);
+    icon->setFixedSize(36, 36);
+    icon->setAlignment(Qt::AlignCenter);
+    QColor tint = family;
+    tint.setAlphaF(0.16);
+    icon->setStyleSheet(QString("background: rgba(%1, %2, %3, %4); border-radius: 10px;")
+        .arg(tint.red()).arg(tint.green()).arg(tint.blue()).arg(tint.alphaF(), 0, 'f', 2));
+    icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(iconKind), family, 18).pixmap(18, 18));
+    header->addWidget(icon);
+    auto *names = new QVBoxLayout;
+    names->setSpacing(1);
+    names->addWidget(text(m_node["name"].toString(), "blueprintInspectorTitle"));
+    names->addWidget(text(spec["label"].toString(m_preview.nodeKindLabel(kind)), "blueprintInspectorSubtitle"));
+    header->addLayout(names, 1);
     auto *details = iconButton("info", "Node details");
     auto *close = iconButton("window-close", "Clear node selection");
-    close->setFixedSize(24, 24);
-    header->addWidget(details);
-    header->addWidget(close);
+    header->addWidget(details, 0, Qt::AlignTop);
+    header->addWidget(close, 0, Qt::AlignTop);
     connect(details, &Button::clicked, this, [this, id] { emit detailsRequested(id); });
     connect(close, &Button::clicked, this, &BlueprintInspector::closeRequested);
     body->addLayout(header);
-    body->addWidget(rule());
+    body->addSpacing(6);
 
-    const auto iconKind = code == "selector" || code == "extractor" ? code : kind;
-    auto *identity = new QHBoxLayout;
-    identity->setSpacing(9);
-    auto *icon = text({}, "blueprintNodeIcon", false);
-    icon->setFixedSize(34, 34);
-    icon->setAlignment(Qt::AlignCenter);
-    icon->setPixmap(Theme::coloredIcon(BlueprintStyle::nodeIcon(iconKind),
-        BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(iconKind)), 19).pixmap(19, 19));
-    identity->addWidget(icon);
-    auto *names = new QVBoxLayout;
-    names->setSpacing(3);
-    names->addWidget(text(m_node["name"].toString(), "blueprintSection"));
-    names->addWidget(text(m_preview.nodeKindLabel(kind) + " · " + spec["label"].toString()));
-    identity->addLayout(names, 1);
-    body->addLayout(identity);
-    if (!spec["detail"].toString().isEmpty()) body->addWidget(text(spec["detail"].toString()));
     const auto warnings = BlueprintScene::warningLines(m_preview, m_graph, m_node, m_preview.issues(m_graph));
     if (!warnings.isEmpty()) {
-        auto *warning = text(warnings.join('\n'), "blueprintError");
+        auto *warning = text(warnings.join('\n'), "blueprintWarning");
         warning->setAccessibleName("Node warnings");
         body->addWidget(warning);
     }
 
-    body->addWidget(rule());
     const bool liveModel = m_preview.live() && (kind == "model" || kind == "reasoning");
     m_fields = new BlueprintNodeFields(m_preview, kind, m_node);
+    m_fields->setHelpShown(false);
     if (liveModel) m_fields->setBindingShown(false);
     body->addWidget(m_fields);
     connect(m_fields, &BlueprintNodeFields::edited, this, &BlueprintInspector::commitNodeFields);
 
     if (liveModel || (!m_preview.live() && kind == "model")) {
-        body->addWidget(rule());
-        body->addWidget(text(kind == "reasoning" ? "Reasoning checkpoint" : "Model & adapter", "headingLabel", false));
+        body->addSpacing(6);
+        body->addWidget(text(kind == "reasoning" ? "Reasoning checkpoint" : "Model & adapter", "blueprintInspectorSection", false));
         m_binding = new BlueprintBindingFields(m_preview, m_graph, m_node);
         body->addWidget(m_binding);
         m_bindingError = text({}, "blueprintError");
@@ -246,8 +238,8 @@ void BlueprintInspector::rebuild() {
             if (!recipe.isEmpty()) body->addWidget(text("Training recipe saved\n" + recipe["name"].toString()));
         }
     } else if (m_preview.live() && kind == "dataset") {
-        body->addWidget(rule());
-        body->addWidget(text("Dataset", "headingLabel", false));
+        body->addSpacing(6);
+        body->addWidget(text("Dataset", "blueprintInspectorSection", false));
         m_dataset = new BlueprintDatasetFields(m_preview, m_node);
         body->addWidget(m_dataset);
         m_bindingError = text({}, "blueprintError");
@@ -256,15 +248,18 @@ void BlueprintInspector::rebuild() {
         connect(m_dataset, &BlueprintDatasetFields::edited, this, &BlueprintInspector::commitDataset);
     }
 
-    body->addWidget(rule());
+    body->addSpacing(6);
     addPorts(body);
-    body->addWidget(rule());
+    body->addSpacing(8);
     auto *actions = new QHBoxLayout;
+    actions->setSpacing(8);
     auto *test = new Button("Test this node");
     auto *save = iconButton("folder", "Save to node library");
-    auto *remove = iconButton("trash", "Delete node");
-    actions->addWidget(test);
-    actions->addStretch();
+    auto *remove = new Button("Delete");
+    remove->setObjectName("destructiveBtn");
+    remove->setAccessibleName("Delete node");
+    remove->setToolTip("Delete node");
+    actions->addWidget(test, 1);
     actions->addWidget(save);
     actions->addWidget(remove);
     body->addLayout(actions);
@@ -272,51 +267,92 @@ void BlueprintInspector::rebuild() {
     connect(save, &Button::clicked, this, [this, id] { emit saveToLibraryRequested(id); });
     connect(remove, &Button::clicked, this, [this, id] { emit deleteRequested(id); });
     body->addStretch();
+    // Long checkpoint or operation names stay in the popup; the closed box fits the panel.
+    for (auto *combo : m_content->findChildren<QComboBox *>()) {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(qMin(combo->minimumContentsLength() > 0 ? combo->minimumContentsLength() : 10, 10));
+    }
     restoreFocus(m_content, spot);
 }
 
 void BlueprintInspector::addPorts(QVBoxLayout *body) {
-    body->addWidget(text("Inputs & outputs", "headingLabel", false));
     const auto contracts = m_preview.fixtures()["contracts"].toObject();
     const auto nodes = m_graph["nodes"].toArray();
     const auto edges = m_graph["edges"].toArray();
     for (const auto &side : {QString("in"), QString("out")}) {
         const bool input = side == "in";
-        for (const auto &value : m_node[side].toArray()) {
+        const auto ports = m_node[side].toArray();
+        if (ports.isEmpty()) continue;
+        body->addWidget(text(input ? "Inputs" : "Outputs", "blueprintInspectorSection", false));
+        for (const auto &value : ports) {
             const auto port = value.toObject();
             const auto name = m_preview.portLabel(port);
-            if (port["type"] == "adapter-ref") {
-                body->addWidget(text(input ? "In    LoRA adapter · Optional" : "Out   LoRA adapter"));
-                continue;
+            const bool adapter = port["type"] == "adapter-ref";
+            // One rounded row per pin: type dot, name and type; below it, each wire with its own unlink.
+            auto *row = new QFrame;
+            row->setObjectName("blueprintPortRow");
+            auto *rowLayout = new QVBoxLayout(row);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
+            rowLayout->setSpacing(0);
+            auto *head = new QPushButton;
+            head->setObjectName("blueprintPortContract");
+            auto *headLayout = new QHBoxLayout(head);
+            headLayout->setContentsMargins(10, 0, 10, 0);
+            headLayout->setSpacing(8);
+            auto *dot = text({}, "blueprintPortDot", false);
+            dot->setFixedSize(8, 8);
+            dot->setStyleSheet(QString("background: %1; border-radius: 4px;")
+                .arg(BlueprintStyle::typeColor(port["type"].toString()).name()));
+            headLayout->addWidget(dot);
+            auto *nameLabel = text(adapter ? QString("LoRA adapter") : name, "blueprintPortName", false);
+            nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            headLayout->addWidget(nameLabel, 1);
+            const auto type = adapter ? QString(input ? "adapter · optional" : "adapter")
+                                      : contracts.value(port["type"].toString()).toObject()["label"].toString().toLower();
+            headLayout->addWidget(text(type, "blueprintPortType", false));
+            for (auto *label : head->findChildren<QLabel *>()) label->setAttribute(Qt::WA_TransparentForMouseEvents);
+            if (adapter) {
+                head->setEnabled(false);
+                head->setFocusPolicy(Qt::NoFocus);
+            } else {
+                head->setAccessibleName(QString("Edit %1 schema for %2").arg(input ? "input" : "output", name));
+                head->setToolTip(QString("Edit the %1 schema").arg(input ? "input" : "output"));
+                head->setCursor(Qt::PointingHandCursor);
+                const auto portId = port["id"].toString();
+                connect(head, &QPushButton::clicked, this, [this, side, portId] { emit schemaRequested(side, portId); });
             }
-            const auto type = contracts.value(port["type"].toString()).toObject()["label"].toString();
-            const auto label = name == type ? name : QString("%1 · %2").arg(name, type);
-            auto *edit = new QPushButton(QString((input ? "In    " : "Out   ") + label + "  ›").replace('&', "&&"));
-            edit->setObjectName("blueprintPortContract");
-            edit->setAccessibleName(QString("Edit %1 schema for %2").arg(input ? "input" : "output", name));
-            edit->setCursor(Qt::PointingHandCursor);
-            body->addWidget(edit);
-            const auto portId = port["id"].toString();
-            connect(edit, &QPushButton::clicked, this, [this, side, portId] { emit schemaRequested(side, portId); });
+            rowLayout->addWidget(head);
+            int wires = 0;
             for (const auto &edgeValue : edges) {
                 const auto edge = edgeValue.toObject();
                 if (input ? (edge["to"] != m_node["id"] || edge["in"] != port["id"])
                           : (edge["from"] != m_node["id"] || edge["out"] != port["id"]))
                     continue;
+                ++wires;
                 const auto other = findById(nodes, (input ? edge["from"] : edge["to"]).toString());
                 const auto otherPort = findById(other[input ? "out" : "in"].toArray(),
                                                 (input ? edge["out"] : edge["in"]).toString());
-                auto *row = new QHBoxLayout;
-                row->setContentsMargins(12, 0, 0, 0);
-                row->addWidget(text(QString(input ? "← %1 · %2" : "→ %1 · %2")
-                    .arg(other["name"].toString(), m_preview.portLabel(otherPort))), 1);
-                auto *disconnect = new Button("Disconnect");
-                disconnect->setFlat(true);
-                disconnect->setAccessibleName(QString("Disconnect %1 from %2").arg(other["name"].toString(), name));
-                row->addWidget(disconnect);
-                body->addLayout(row);
+                auto *wire = new QHBoxLayout;
+                wire->setContentsMargins(26, 0, 4, 4);
+                wire->setSpacing(4);
+                auto *label = text(QString(input ? "← %1 · %2" : "→ %1 · %2")
+                    .arg(other["name"].toString(), m_preview.portLabel(otherPort)), "blueprintPortWire", false);
+                label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+                label->setToolTip(label->text());
+                wire->addWidget(label, 1);
+                auto *disconnect = iconButton("window-close", QString("Disconnect %1 from %2").arg(other["name"].toString(), name));
+                disconnect->setFixedSize(22, 22);
+                disconnect->setIcon(Theme::coloredIcon("window-close", QColor(Theme::textMuted()), 12));
+                wire->addWidget(disconnect);
+                rowLayout->addLayout(wire);
                 connect(disconnect, &Button::clicked, this, [this, edge] { emit disconnectRequested(edge); });
             }
+            if (input && !adapter && !wires) {
+                auto *missing = text("Not connected", "blueprintPortMissing", false);
+                missing->setContentsMargins(26, 0, 0, 6);
+                rowLayout->addWidget(missing);
+            }
+            body->addWidget(row);
         }
     }
 }

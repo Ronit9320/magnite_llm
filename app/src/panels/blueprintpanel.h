@@ -141,6 +141,7 @@ private:
     bool m_runAfterPublish = false;
     FloatingPanel *m_toast = nullptr;
     BlueprintDetails *m_details = nullptr;
+    BlueprintLibraryDock::Entry m_detailsEntry;  // the library entry the details window shows
     QLabel *m_toastText = nullptr;
     QTimer *m_toastTimer = nullptr;
     FloatingPanel *m_libraryPanel;

@@ -1,3 +1,4 @@
+#include "widgets/wheelguard.h"
 #include "theme.h"
 #include "systemappearance.h"
 
@@ -94,6 +95,8 @@ std::vector<Token> tokens() {
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
         {"@controlBorder",        Theme::controlBorder()},
+        {"@fieldFillHover",       Theme::fieldFillHover()},
+        {"@fieldFill",            Theme::fieldFill()},
         {"@warningSurface",       Theme::warningSurface()},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
@@ -176,6 +179,7 @@ void Theme::loadFonts() {
 
 void Theme::setupApplicationTheme() {
     loadFonts();
+    WheelGuard::install();
     // Start the refined dark-first design in dark mode once, then remember the switch.
     QSettings appearance;
     if (!appearance.value("appearance/darkRefinementApplied", false).toBool()) {
@@ -413,6 +417,8 @@ int Theme::selfCheck() {
                             !loadText(":/fonts/JetBrainsMono-Regular.ttf").isEmpty());
     Theme::loadFonts();   // --theme-check runs before setupApplicationTheme()
     check("monoFont is bundled JetBrains Mono", Theme::monoFont() == "JetBrains Mono");
+    check("light fields stand apart by fill", isDark() || (fieldFill() != surfaceFill() && fieldFill() != canvasBackground() && fieldFillHover() != fieldFill()));
+    check("light focus ring reaches 3:1 on fields", isDark() || contrastRatio(accentLabel(), fieldFill()) >= 3.0);
     check("light control border reaches 3:1", isDark() || (contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0));
     {
         // Type scale: every QSS font-size sits on the shared scale, never below 11px.
@@ -534,6 +540,8 @@ int Theme::selfCheck() {
     check("refined dark surface", surfaceFill() == "#111113");
     check("refined dark border", surfaceBorder() == "#36363C");
     check("dark control border reaches 3:1", contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0);
+    check("dark fields stand apart by fill", fieldFill() != surfaceFill() && fieldFill() != canvasBackground() && fieldFillHover() != fieldFill());
+    check("dark focus ring reaches 3:1 on fields", contrastRatio(accentLabel(), fieldFill()) >= 3.0);
     check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() <= 12);
     check("dark surfaces retain elevation", QColor(insetBackground()).lightness()<QColor(canvasBackground()).lightness() && QColor(canvasBackground()).lightness()<QColor(surfaceFill()).lightness() && QColor(surfaceFill()).lightness()<QColor(surfaceFillHover()).lightness());
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);

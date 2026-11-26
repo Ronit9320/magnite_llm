@@ -82,10 +82,9 @@ void ToggleSwitch::paintEvent(QPaintEvent *) {
                                off.greenF()+(on.greenF()-off.greenF())*m_position,
                                off.blueF()+(on.blueF()-off.blueF())*m_position);
     };
-    QColor fill=blend(QColor(Theme::surfaceBorder()),QColor(hover?Theme::accentHover():Theme::accentPrimary()));
-    QColor edge=blend(QColor(Theme::textMuted()),QColor(Theme::accentPrimary()));
-    if (!isEnabled()) { fill=QColor(Theme::insetBackground()); edge=QColor(Theme::surfaceBorder()); }
-    painter.setPen(QPen(edge,1)); painter.setBrush(fill);
+    QColor fill=blend(QColor(Theme::controlBorder()),QColor(hover?Theme::accentHover():Theme::accentPrimary()));
+    if (!isEnabled()) fill=QColor(Theme::insetBackground());
+    painter.setPen(Qt::NoPen); painter.setBrush(fill);
     painter.drawRoundedRect(track,trackHeight/2,trackHeight/2);
     const qreal inset=(trackHeight-thumbDiameter)/2;
     const qreal progress=rtl?1-m_position:m_position;

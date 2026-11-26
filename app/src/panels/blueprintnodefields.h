@@ -32,6 +32,8 @@ public:
     QWidget *firstField() const;
     // Leaves the live checkpoint or adapter picker out (a host that shows its own binding).
     void setBindingShown(bool shown);
+    // Leaves out the descriptions and port notes (a host whose info panel explains the node).
+    void setHelpShown(bool shown);
 
 signals:
     void edited();
@@ -66,6 +68,7 @@ private:
     ComboBox *m_operation;
     QLineEdit *m_name;
     QLabel *m_detail;
+    bool m_helpShown = true;
     QLabel *m_error;
     QVBoxLayout *m_options;
     QWidget *m_fields = nullptr;
