@@ -7,7 +7,9 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
+import tempfile
 from threading import Event, Thread
 from time import monotonic
 from typing import Annotated, Literal
@@ -15,18 +17,45 @@ from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
 
+from backend.paths import app_home
 from backend.textcheck import ensure_utf8
+
+
+CONTENT_LIMIT = 16_000
+# Characters that reorder text on screen, so a preview could read differently from the file.
+_DIRECTION_OVERRIDES = {chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))}
+
+
+class Rejected(ValueError):
+    """An action that cannot be offered for approval, with a short reason code."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 def _argument(value: str) -> str:
     ensure_utf8(value, "Tool argument")
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
         raise ValueError("Tool arguments must be single-line text")
+    if any(ch in _DIRECTION_OVERRIDES for ch in value):
+        raise ValueError("Tool arguments may not contain text direction characters")
+    return value
+
+
+def _content(value: str) -> str:
+    ensure_utf8(value, "File content")
+    if len(value.encode("utf-8")) > CONTENT_LIMIT:
+        raise ValueError(f"File content is limited to {CONTENT_LIMIT} bytes")
+    if any(ch in _DIRECTION_OVERRIDES or (ord(ch) < 32 and ch not in "\n\r\t") or 127 <= ord(ch) <= 159
+           for ch in value):
+        raise ValueError("File content may not contain control or text direction characters")
     return value
 
 
 Argument = Annotated[str, Field(max_length=4096), AfterValidator(_argument)]
 Target = Annotated[Argument, Field(min_length=1)]
+Content = Annotated[str, AfterValidator(_content)]
 
 
 class OpenAction(BaseModel):
@@ -41,6 +70,13 @@ class ReadAction(BaseModel):
     target: Target
 
 
+class WriteAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    action: Literal["write"]
+    target: Target
+    content: Content
+
+
 class CommandAction(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     action: Literal["command"]
@@ -48,7 +84,38 @@ class CommandAction(BaseModel):
     arguments: list[Argument] = Field(max_length=32)
 
 
-PROPOSAL = TypeAdapter(Annotated[OpenAction | ReadAction | CommandAction, Field(discriminator="action")])
+PROPOSAL = TypeAdapter(Annotated[OpenAction | ReadAction | WriteAction | CommandAction,
+                                 Field(discriminator="action")])
+
+
+_MODEL_KINDS = {"run_command": "command", "read_file": "read", "list_folder": "read",
+                "open_target": "open", "write_file": "write"}
+
+
+def describe(request) -> tuple[str, dict]:
+    """Summarize a refused request for its card: a broker action or a model tool call.
+
+    File content is never included.
+    """
+    def text(value) -> str:
+        return str("" if value is None else value)[:4096].encode("utf-8", "replace").decode("utf-8")
+
+    request = request if isinstance(request, dict) else {}
+    if "action" in request:
+        kind = request["action"] if request["action"] in ("read", "open", "command", "write") else "unknown"
+        if kind == "command":
+            arguments = request.get("arguments")
+            return kind, {"action": kind, "executable": text(request.get("executable")),
+                          "arguments": [text(item) for item in arguments[:32]]
+                          if isinstance(arguments, list) else []}
+        return kind, {"action": kind, "target": text(request.get("target"))}
+    name = request.get("name")
+    arguments = request.get("arguments")
+    arguments = arguments if isinstance(arguments, dict) else {}
+    kind = _MODEL_KINDS.get(name, "unknown") if isinstance(name, str) else "unknown"
+    target = {"command": arguments.get("command"), "read": arguments.get("path") or ".",
+              "open": arguments.get("target"), "write": arguments.get("path"), "unknown": name}[kind]
+    return kind, {"action": kind, "target": text(target)}
 
 
 @dataclass(frozen=True)
@@ -71,13 +138,21 @@ class PathIdentity:
 
 @dataclass(frozen=True)
 class PreparedAction:
-    action: Literal["open", "read", "command"]
+    action: Literal["open", "read", "command", "write"]
     target: str
     arguments: tuple[str, ...]
     directory: Path
     paths: tuple[PathIdentity, ...]
+    content: str = ""
+    existing_bytes: int | None = None  # Set when a write replaces a file.
 
     def display(self) -> dict:
+        if self.action == "write":
+            shown = {"action": "write", "target": self.target, "content": self.content,
+                     "replaces": self.existing_bytes is not None}
+            if self.existing_bytes is not None:
+                shown["existing_bytes"] = self.existing_bytes
+            return shown
         if self.action in ("open", "read"):
             return {"action": self.action, "target": self.target}
         return {"action": "command", "executable": self.target, "arguments": list(self.arguments),
@@ -98,12 +173,62 @@ def _resolve_path(value: str, directory: Path) -> Path:
     return (directory / Path(value).expanduser()).resolve(strict=True)
 
 
+def _existing_target(value: str, directory: Path) -> Path:
+    try:
+        return _resolve_path(value, directory)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise Rejected("not_found") from exc
+
+
+def _same(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _protected(path: Path) -> bool:
+    """Magnite's own data, apart from the tool workspace. Compared by identity, not spelling."""
+    home = Path(app_home()).expanduser()
+    for parent in path.parents:
+        if _same(parent, home / "tool-workspace"):
+            return False
+        if _same(parent, home):
+            return True
+    return False
+
+
+def _prepare_write(action: WriteAction, directory: Path) -> PreparedAction:
+    path = (directory / Path(action.target).expanduser()).resolve()
+    if not path.parent.is_dir():
+        raise Rejected("folder_not_found")
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise Rejected("not_a_file")
+    if _protected(path):
+        raise Rejected("protected_location")
+    if path.exists():
+        return PreparedAction("write", str(path), (), directory, (PathIdentity.read(path),),
+                              action.content, path.stat().st_size)
+    return PreparedAction("write", str(path), (), directory, (PathIdentity.read(path.parent),), action.content)
+
+
 def prepare(proposal, directory: Path) -> PreparedAction:
-    action = PROPOSAL.validate_python(proposal)
+    """Validate a proposal and pin the paths it names. Every refusal is a ``Rejected``."""
+    try:
+        return _prepare(PROPOSAL.validate_python(proposal), directory)
+    except Rejected:
+        raise
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise Rejected("invalid_request") from exc
+
+
+def _prepare(action, directory: Path) -> PreparedAction:
+    if isinstance(action, WriteAction):
+        return _prepare_write(action, directory)
     if isinstance(action, ReadAction):
-        path = _resolve_path(action.target, directory)
+        path = _existing_target(action.target, directory)
         if not (path.is_file() or path.is_dir()):
-            raise ValueError("Read requires a regular file or folder")
+            raise Rejected("not_a_file")
         return PreparedAction("read", str(path), (), directory, (PathIdentity.read(path),))
     if isinstance(action, OpenAction):
         value = action.target
@@ -117,9 +242,9 @@ def prepare(proposal, directory: Path) -> PreparedAction:
             # Accessing port checks its syntax and range.
             parsed.port
             return PreparedAction("open", value, (), directory, ())
-        path = _resolve_path(value, directory)
+        path = _existing_target(value, directory)
         if not (path.is_file() or path.is_dir()):
-            raise ValueError("Open requires a regular file or folder")
+            raise Rejected("not_a_file")
         return PreparedAction("open", str(path), (), directory, (PathIdentity.read(path),))
 
     raw = Path(action.executable)
@@ -213,12 +338,40 @@ def _read(path: Path) -> str:
     return text + (f"\n[... truncated at {OUTPUT_LIMIT} bytes ...]" if len(data) > OUTPUT_LIMIT else "")
 
 
+def _write(action: PreparedAction) -> ActionResult:
+    path = Path(action.target)
+    data = action.content.encode("utf-8")
+    if action.existing_bytes is None:
+        # Exclusive: a file that appeared after approval is never overwritten.
+        with path.open("xb") as handle:
+            try:
+                handle.write(data)
+                handle.flush()
+            except OSError:
+                path.unlink(missing_ok=True)
+                raise
+    else:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        descriptor, temporary = tempfile.mkstemp(prefix=".magnite-", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(data)
+            os.chmod(temporary, mode)
+            action.paths[0].verify()
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+    return ActionResult("completed", output=f"Wrote {len(data)} bytes to {path}.")
+
+
 def execute(action: PreparedAction, stop: Event) -> ActionResult:
     """Dispatch an approved action. Command output goes only to the caller, not to audit records."""
     for identity in action.paths:
         identity.verify()
     if stop.is_set():
         return ActionResult("cancelled")
+    if action.action == "write":
+        return _write(action)
     if action.action == "read":
         return ActionResult("completed", output=_read(Path(action.target)))
     if action.action == "open":

@@ -55,7 +55,10 @@ Blueprint run history also keeps typed inputs and outputs, dataset snapshots,
 and local model and adapter paths. Removing a saved blueprint does not delete
 its recorded runs. The approval audit keeps decisions and outcomes. Exact
 pending tool details are available for review while a decision is pending, and
-the original task or step values can still contain sensitive data.
+the original task or step values can still contain sensitive data. The content of
+a file a tool asks to write is shown while approval is pending and kept in the
+app's memory until it closes. The approval audit stores neither that content nor
+its path. Attempts refused before approval are kept in memory only.
 [Workflow and permission guide](BLUEPRINTS.md)
 
 Settings → Updates checks GitHub for preview releases and downloads signed update

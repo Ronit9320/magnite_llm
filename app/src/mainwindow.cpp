@@ -1754,7 +1754,8 @@ void MainWindow::toolModeSelfTest(std::shared_ptr<int> failCount, std::function<
                                   std::function<void(const QString &)> check, std::function<void()> next) {
         auto *panel = visibleRunPanel(m_chatPanel);
         if (!report(panel != nullptr, "Tool mode panel is showing")) { next(); return; }
-        auto *input = panel->findChild<QPlainTextEdit *>();
+        // By name: a cleared card's file content box can still exist and would be found first.
+        auto *input = panel->findChild<QPlainTextEdit *>("toolTaskInput");
         if (!report(input != nullptr, "composer found")) { next(); return; }
         input->setPlainText(task);
         pollUntil(this, 60000, [panel] {
@@ -1778,6 +1779,45 @@ void MainWindow::toolModeSelfTest(std::shared_ptr<int> failCount, std::function<
                     next();
                 });
             });
+        });
+    };
+
+    // Starts a fresh task, then runs `then`; ends the test when that is not possible.
+    auto newTask = [this, report, finish](std::function<void()> then) {
+        auto *panel = visibleRunPanel(m_chatPanel);
+        auto *fresh = panel ? visibleButton(panel, "New task") : nullptr;
+        if (!report(fresh && fresh->isEnabled(), "New task available")) { finish(); return; }
+        fresh->click();
+        then();
+    };
+
+    const QString written = QDir::temp().filePath("magnite-selftest-write.txt");
+    QFile::remove(written);
+    const QString writeTask = QString("Create a file at %1 containing: purple walrus").arg(written);
+
+    auto unload = [this, report, finish] {
+        m_backendClient->post("/inference/unload", QJsonObject(), [=](int unloaded, const QJsonDocument &) {
+            report(unloaded == 200, "unload");
+            finish();
+        });
+    };
+
+    // A write that is denied leaves no file; an approved one creates it.
+    auto writeTasks = [=] {
+        newTask([=] {
+            runTask(writeTask, "Deny",
+                [=](const QString &) { report(!QFile::exists(written), "a denied write creates no file"); },
+                [=] {
+                    newTask([=] {
+                        runTask(writeTask, "Approve once",
+                            [=](const QString &) {
+                                QFile file(written);
+                                report(file.open(QIODevice::ReadOnly) && file.readAll().contains("purple walrus"),
+                                       "an approved write created the file with its content");
+                            },
+                            unload);
+                    });
+                });
         });
     };
 
@@ -1817,13 +1857,7 @@ void MainWindow::toolModeSelfTest(std::shared_ptr<int> failCount, std::function<
                                 [=](const QString &text) {
                                     report(text.contains("Python 3."), "an approved command ran and its output reached the model");
                                 },
-                                [=] {
-                                    m_backendClient->post("/inference/unload", QJsonObject(),
-                                        [=](int unloaded, const QJsonDocument &) {
-                                            report(unloaded == 200, "unload");
-                                            finish();
-                                        });
-                                });
+                                writeTasks);
                         });
                 });
         });

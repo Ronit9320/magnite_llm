@@ -286,16 +286,28 @@ QJsonObject displayRun(const QJsonObject &raw, const QJsonArray &approvals) {
         const auto action = item["action"].toObject();
         const bool pending = item["status"] == "pending" && !action.isEmpty() && active(record);
         const auto status = item["status"].toString();
+        const auto kind = item["kind"].toString();
+        const QString type = kind == "command" ? "Run command"
+            : kind == "read" ? "Read file or folder"
+            : kind == "open" ? "Open target"
+            : kind != "write" ? "Tool request"
+            : !action.contains("replaces") ? "Write file"
+            : action["replaces"].toBool() ? "Replace file" : "Create file";
         QJsonObject decision{{"id", item["id"]}, {"fingerprint", item["fingerprint"]}, {"stepId", item["node_id"]},
-            {"type", item["kind"] == "command" ? "Run command" : item["kind"] == "read" ? "Read file or folder" : "Open target"},
+            {"type", type},
             {"status", pending ? QString("waiting") : status == "pending" ? QString("unavailable") : status},
             {"expires", timestamp(item["expires_at"])}, {"outcome", item["outcome"]}};
         if (action.contains("executable")) {
             decision["executable"] = action["executable"];
             decision["args"] = action["arguments"];
-            decision["cwd"] = action["working_directory"];
+            if (action.contains("working_directory")) decision["cwd"] = action["working_directory"];
         } else if (action.contains("target")) {
             decision["target"] = action["target"];
+        }
+        if (action.contains("content")) {
+            decision["content"] = action["content"];
+            decision["replaces"] = action["replaces"];
+            if (action.contains("existing_bytes")) decision["existingBytes"] = action["existing_bytes"];
         }
         if (pending) paused.insert(item["node_id"].toString());
         decisions.append(decision);
@@ -590,8 +602,10 @@ void BlueprintPreview::loadRun(const QString &id, Result done) {
                 auto decision = decisions.at(index).toObject();
                 if (decision["status"] == "waiting" || decision["status"] == "unavailable") continue;
                 const auto old = findById(previous, decision["id"].toString());
-                for (const auto *field : {"executable", "args", "cwd", "target"})
+                for (const auto *field : {"executable", "args", "cwd", "target", "content", "replaces", "existingBytes"})
                     if (old.contains(field)) decision[field] = old[field];
+                // A settled write no longer says whether it created or replaced the file.
+                if (old.contains("content")) decision["type"] = old["type"];
                 decisions.replace(index, decision);
             }
             if (!decisions.isEmpty()) record["decisions"] = decisions;

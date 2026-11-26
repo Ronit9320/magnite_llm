@@ -25,7 +25,7 @@ class LlamaCppEngine(BaseEngine):
 
     name = "llamacpp"
 
-    def __init__(self, model_ref: str, n_ctx: int = 2048, n_threads: int = 0,
+    def __init__(self, model_ref: str, n_ctx: int = 8192, n_threads: int = 0,
                  n_gpu_layers: int = 0):
         super().__init__(model_ref)
         self.n_ctx = n_ctx
@@ -76,6 +76,14 @@ class LlamaCppEngine(BaseEngine):
         path = self._resolve_gguf_path()
         # Building/binding the model is CPU-bound and can block the event loop.
         with _GUARD:
+            # Never reserve more context than the model was trained for. Reading only the
+            # vocabulary gets the metadata without loading any weights.
+            probe = Llama(model_path=path, vocab_only=True, verbose=False)
+            metadata = probe.metadata
+            probe.close()
+            trained = str(metadata.get(f"{metadata.get('general.architecture')}.context_length", ""))
+            if trained.isdigit() and int(trained) > 0:
+                self.n_ctx = min(self.n_ctx, int(trained))
             self._llm = Llama(
                 model_path=path,
                 n_ctx=self.n_ctx,

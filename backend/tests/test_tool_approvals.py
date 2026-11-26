@@ -21,7 +21,7 @@ from backend.local_access import LocalAccessMiddleware
 from backend.routes.blueprints import blueprint_runner
 from backend.server import app
 from backend.tooling import pi_bridge
-from backend.tooling.actions import prepare
+from backend.tooling.actions import Rejected, prepare
 from backend.tooling.approvals import ApprovalConflict, Decision
 
 TOKEN = "approval-test-token"
@@ -199,12 +199,25 @@ class ToolApprovalTests(unittest.TestCase):
                         terminal = self.terminal(path)
                     audit = self.client.get(path + "/approvals").json()
                     if expected == "malformed":
-                        self.assertEqual(audit, [])
+                        self.assertEqual([record["status"] for record in audit], ["rejected"])
                     else:
                         self.assertEqual(audit[0]["status"], expected)
                     self.assertFalse(self.marker.exists())
                     if surface == "blueprints":
                         self.assertEqual(terminal["status"], "cancelled" if expected == "cancelled" else "failed")
+
+    def test_a_rejected_action_is_listed_but_never_persisted(self):
+        path = self.start("chat", {"action": "read", "target": "missing.md"})
+        self.terminal(path)
+        record = self.client.get(path + "/approvals").json()[0]
+        self.assertEqual((record["status"], record["kind"], record["outcome"]), ("rejected", "read", "not_found"))
+        self.assertEqual(record["action"], {"action": "read", "target": "missing.md"})
+        self.assertNotIn("missing.md", self.client.get(path + "/events").text)
+        self.assertEqual(self.client.post(f"{path}/approvals/{record['id']}/decision",
+                                          json={"decision": "approve_once", "fingerprint": "0" * 64}).status_code, 404)
+        with connection(blueprint_runner().store.path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM tool_approvals WHERE run_id = ?",
+                                          (record["run_id"],)).fetchone()[0], 0)
 
     def test_repeated_chat_proposal_needs_a_new_approval(self):
         path = self.start("chat", self.command(), repeated=True)
@@ -302,8 +315,6 @@ class ReplyParsingTests(unittest.TestCase):
         cases = [
             ({"name": "run_command", "arguments": {"command": "python3 -c 'print(1)'"}},
              {"action": "command", "executable": "python3", "arguments": ["-c", "print(1)"]}),
-            ({"name": "run_command", "arguments": {"command": "ls | wc"}},
-             {"action": "command", "executable": "ls", "arguments": ["|", "wc"]}),
             ({"name": "read_file", "arguments": {"path": "notes.md"}}, {"action": "read", "target": "notes.md"}),
             ({"name": "list_folder", "arguments": {}}, {"action": "read", "target": "."}),
             ({"name": "open_target", "arguments": {"target": "https://example.com"}},
@@ -317,6 +328,80 @@ class ReplyParsingTests(unittest.TestCase):
                      {"name": "delete", "arguments": {}}):
             with self.subTest(call=call), self.assertRaises(ValueError):
                 pi_bridge.proposal(call)
+
+    def test_a_tool_name_followed_by_its_arguments_is_a_call(self):
+        # Seen from Qwen3 0.6B deep into a conversation; it was shown to the user as text.
+        one = 'run_command\n{"command": "python3 --version"}'
+        three = one + '\nrun_command\n{"command": "git --version"}\nrun_command\n{"command": "df -h"}'
+        call = {"name": "run_command", "arguments": {"command": "python3 --version"}}
+        for raw in (one, three):
+            with self.subTest(raw=raw):
+                self.assertEqual(pi_bridge.parse_reply(raw, True), ("", [call]))
+                self.assertEqual(pi_bridge.call_problem(raw, False), ("action_limit", "run_command"))
+        for answer in ("To check, use:\n" + one, one + "\nThat is how the call looks.",
+                       'delete_all\n{"path": "a"}'):
+            with self.subTest(answer=answer):
+                self.assertEqual(pi_bridge.parse_reply(answer, True), (answer, []))
+                self.assertIsNone(pi_bridge.call_problem(answer, False))
+
+    def test_write_file_becomes_a_write_action(self):
+        self.assertEqual(pi_bridge.proposal({"name": "write_file", "arguments": {"path": "a.md", "content": "hi"}}),
+                         {"action": "write", "target": "a.md", "content": "hi"})
+
+    def test_unquoted_shell_syntax_is_refused_and_quoted_text_is_not(self):
+        call = lambda command: {"name": "run_command", "arguments": {"command": command}}
+        for command in ("ls | wc", "echo hi > ~/test.md", "a && b", "a;b", "sleep 1 &", "cat < x"):
+            with self.subTest(command=command), self.assertRaises(Rejected) as caught:
+                pi_bridge.proposal(call(command))
+            self.assertEqual(caught.exception.reason, "shell_syntax")
+        allowed = ["grep 'a|b' notes.txt", 'python3 -c "print(1>0)"']
+        if os.name != "nt":
+            allowed.append(r"find . -exec cat {} \;")
+        for command in allowed:
+            with self.subTest(command=command):
+                self.assertEqual(pi_bridge.proposal(call(command))["action"], "command")
+
+    def test_a_command_given_as_a_list_cannot_slip_shell_syntax_past_the_check(self):
+        split = lambda *parts: ('<tool_call>{"name":"run_command","arguments":{"executable":"%s","arguments":%s}}'
+                                "</tool_call>" % (parts[0], json.dumps(list(parts[1:]))))
+        for parts in (("echo", "hi", ">", "f.txt"), ("ls", "|", "wc"), ("a", "&&", "b"), ("x", "2>&1"),
+                      ("echo", "a", ";", "b")):
+            with self.subTest(parts=parts), self.assertRaises(Rejected):
+                pi_bridge.proposal(pi_bridge.parse_reply(split(*parts), True)[1][0])
+        for parts in (("grep", "a|b", "notes.txt"), ("find", ".", "-exec", "cat", "{}", ";")):
+            with self.subTest(parts=parts):
+                action = pi_bridge.proposal(pi_bridge.parse_reply(split(*parts), True)[1][0])
+                self.assertEqual(action["arguments"], list(parts[1:]))
+
+    def test_a_leading_tilde_is_expanded_and_shown(self):
+        action = pi_bridge.proposal({"name": "run_command", "arguments": {"command": "touch ~/x.txt a~b"}})
+        self.assertEqual(action["arguments"], [os.path.expanduser("~/x.txt"), "a~b"])
+
+    def test_a_missing_file_receipt_names_the_reason_and_the_way_forward(self):
+        text = pi_bridge.receipt_text({"status": "rejected", "outcome": "not_found"})
+        self.assertIn("not run", text)
+        self.assertIn("does not exist", text)
+        self.assertIn("write_file", text)
+
+    def test_unknown_and_incomplete_calls_are_named(self):
+        cases = [
+            ('<tool_call>{"name":"delete_all","arguments":{}}</tool_call>', True, ("unknown_tool", "delete_all")),
+            ('{"name":"delete_all","arguments":{}}', True, ("unknown_tool", "delete_all")),
+            ('{"name":"list_folder","arguments":{}', True, ("incomplete_call", "")),
+            ('<tool_call>\n{"name": "read_', True, ("incomplete_call", "")),
+            ('{"name":"read_file","arguments":{"path":"a"}}', False, ("action_limit", "read_file")),
+            ('{"name":"Alice","age":3}', True, None),
+            ('{"name": "Alice", "age": 30}\n\nThat is the JSON object you asked for.', True, None),
+            ('{"name":"Alice"}\n{"name":"Bob"}', True, None),
+            ('{"name":"Alice","age":30,}', True, None),
+            ('{"name": "magnite", "version": "1.0.0"}\nSave this as package.json.', True, None),
+            ('{"answer":"hi"}', True, None),
+            ('A call looks like {"name":"x","arguments":{}} in this format.', True, None),
+            ("Paris is the capital.", True, None),
+        ]
+        for raw, offered, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(pi_bridge.call_problem(raw, offered), expected)
 
     def test_receipts_describe_output_and_refusals(self):
         text = pi_bridge.receipt_text({"status": "completed", "outcome": "completed", "exit_code": 0,
@@ -429,11 +514,48 @@ class PiBridgeTests(unittest.TestCase):
             calls.append(proposal)
             return {"status": "denied"}
 
+        refused = []
         with patch("backend.tooling.pi_bridge._generate", side_effect=generate):
-            result = pi_bridge.run("Ask to open a website", object(), deny, Event())
+            result = pi_bridge.run("Ask to open a website", object(), deny, Event(),
+                                   reject=lambda *args: refused.append(args))
+        self.assertEqual([(kind, reason) for kind, _, reason in refused], [("open", "action_limit")])
         self.assertIn("denied", result)
         self.assertEqual(calls, [{"action": "open", "target": "https://example.com"}] * 4)
         self.assertEqual(turns[-1], [])
+
+    def test_a_refusal_before_approval_is_reported_to_the_caller(self):
+        replies = iter(['{"name":"run_command","arguments":{"command":"ls | wc"}}', "Done."])
+        refused = []
+        with patch("backend.tooling.pi_bridge._generate", side_effect=lambda *args: next(replies)):
+            pi_bridge.run("List", object(), lambda proposal: self.fail("never proposed"), Event(),
+                          reject=lambda *args: refused.append(args))
+        self.assertEqual([(kind, reason) for kind, _, reason in refused], [("command", "shell_syntax")])
+
+    def test_an_unknown_tool_gets_a_plain_message_and_a_record(self):
+        refused = []
+        with patch("backend.tooling.pi_bridge._generate",
+                   return_value='<tool_call>{"name":"delete_all","arguments":{}}</tool_call>'):
+            result = pi_bridge.run("Clean up", object(), lambda p: self.fail("never"), Event(),
+                                   reject=lambda *args: refused.append(args))
+        self.assertEqual(result, "Nothing ran: the model asked for a tool Magnite does not have (delete_all).")
+        self.assertEqual([(kind, reason) for kind, _, reason in refused], [("unknown", "unknown_tool")])
+
+    def test_reminders_reach_the_model_only(self):
+        for status, reminded in (("completed", True), ("denied", False), ("failed", False)):
+            turns = []
+            replies = iter(['{"name":"read_file","arguments":{"path":"a"}}',
+                            "Done. " + pi_bridge.STEP_REMINDER])
+
+            def generate(messages, tools, engine, stop, native):
+                turns.append([dict(message) for message in messages])
+                return next(replies)
+
+            with self.subTest(status=status), patch("backend.tooling.pi_bridge._generate", side_effect=generate):
+                result = pi_bridge.run("Read my notes", object(),
+                                       lambda p: {"status": status, "outcome": status}, Event())
+                self.assertEqual(turns[0][-1]["content"], "Read my notes\n\n" + pi_bridge.REQUEST_REMINDER)
+                self.assertEqual(turns[1][-1]["content"].endswith(pi_bridge.STEP_REMINDER), reminded)
+                self.assertEqual(result, "Done.")
 
     def test_text_agent_passes_instructions_and_keeps_action_shaped_text_as_data(self):
         proposed = '{"action":"open","target":"https://example.com"}'

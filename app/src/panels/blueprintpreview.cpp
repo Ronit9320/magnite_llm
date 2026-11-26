@@ -943,7 +943,7 @@ QString BlueprintPreview::statusLabel(const QString &status) {
         {"passed", "Completed"}, {"failed", "Failed"}, {"cancelled", "Cancelled"}, {"denied", "Denied"},
         {"expired", "Expired"}, {"queued", "Queued"}, {"skipped", "Skipped"}, {"approved", "Approved once"},
         {"pending", "Pending"}, {"unavailable", "Unavailable"}, {"executing", "Executing"},
-        {"completed", "Completed"}, {"interrupted", "Interrupted"}};
+        {"completed", "Completed"}, {"interrupted", "Interrupted"}, {"rejected", "Not run"}};
     return labels.value(status, status);
 }
 

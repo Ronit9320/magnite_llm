@@ -346,8 +346,10 @@ class BlueprintRunner:
 
         if node.operation == "agent":
             try:
-                return {"receipt": {"text": pi_bridge.run(value, job.tool_engine, approve, job.stop,
-                                                          working_directory=str(directory))}}
+                return {"receipt": {"text": pi_bridge.run(
+                    value, job.tool_engine, approve, job.stop, working_directory=str(directory),
+                    reject=lambda kind, action, reason: self.broker.reject(
+                        job.run.id, node.id, kind, action, reason))}}
             except (ValueError, OSError, RuntimeError) as exc:
                 raise Problems([Issue(code="pi_failed", node_id=node.id, message=str(exc))]) from exc
         try:

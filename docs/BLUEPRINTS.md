@@ -129,6 +129,20 @@ expires after 90 seconds. A new proposal, including a repeated request for the
 same action, needs a separate decision. The run can be cancelled while waiting.
 You can switch between chat and **Open full run** while a decision is pending.
 
+**Writing files.** A tool can create a text file or replace one. The card says
+**Create file** or **Replace file**, shows the resolved path and the exact
+content, and warns before replacing. The folder must already exist, content is
+limited to 16,000 bytes, and Magnite's own data folder is protected apart from
+`tool-workspace/`. One model reply is capped, so in practice a model can only
+write short files, roughly 2–3 KB. There is no partial edit.
+
+**Attempts that did not run** appear as **Not run** cards with the reason, such
+as a missing file or a command that needs a shell (`|`, `>`, `<`, `&`, `;`).
+They are kept only until the app closes. An answer from a task where nothing ran
+is marked **No actions ran**: small models sometimes describe results they never
+produced, so check that line and the cards. Very small models often miss steps;
+Qwen3 1.7B or larger is recommended.
+
 Opening a target uses the operating system's file, folder, or HTTP(S) handler.
 Reading returns a file's text or a folder listing to the run. Approved commands
 run with your desktop account's permissions, with a direct argument list and a

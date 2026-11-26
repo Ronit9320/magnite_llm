@@ -31,6 +31,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QLocale>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
@@ -157,7 +158,7 @@ QDialogButtonBox *dialogButtons(QDialog *dialog, QVBoxLayout *body, const QStrin
 QColor statusTone(const QString &status) {
     if (status == "passed" || status == "approved") return QColor(Theme::statusSuccess());
     if (status == "failed" || status == "denied") return QColor(Theme::statusError());
-    if (status == "waiting" || status == "expired") return QColor(Theme::statusWarning());
+    if (status == "waiting" || status == "expired" || status == "rejected") return QColor(Theme::statusWarning());
     if (status == "running") return QColor(Theme::comparisonSeries());
     return QColor(Theme::textMuted());
 }
@@ -174,7 +175,7 @@ QLabel *statusLabel(const QString &status) {
     const char *style = "cardMeta";
     if (status == "passed" || status == "approved") style = "blueprintSuccess";
     else if (status == "failed" || status == "denied") style = "blueprintError";
-    else if (status == "waiting" || status == "expired") style = "blueprintWarning";
+    else if (status == "waiting" || status == "expired" || status == "rejected") style = "blueprintWarning";
     else if (status == "running") style = "blueprintRunning";
     return label(BlueprintPreview::statusLabel(status), style);
 }
@@ -200,8 +201,9 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
     auto *header = new QHBoxLayout;
     auto *icon = label({});
     const auto kind = decision["type"].toString();
-    icon->setPixmap(Theme::coloredIcon(kind == "Read file or folder" ? "file-text"
-        : decision.contains("target") || kind == "Open target" ? "folder" : "play",
+    const bool file = kind == "Read file or folder" || kind.endsWith(" file");
+    icon->setPixmap(Theme::coloredIcon(file ? "file-text"
+        : kind != "Run command" && (decision.contains("target") || kind == "Open target") ? "folder" : "play",
         statusTone(status), 16).pixmap(16, 16));
     header->addWidget(icon);
     header->addWidget(label(decision["type"].toString(), "headingLabel"));
@@ -217,14 +219,31 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
         line->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
         fieldLayout->addWidget(line);
     };
+    const bool writes = decision.contains("content");
     if (decision.contains("executable")) {
         detail("Executable", decision["executable"]);
         detail("Arguments", decision["args"]);
-        detail("Working directory", decision["cwd"]);
+        if (decision.contains("cwd")) detail("Working directory", decision["cwd"]);
     } else if (decision.contains("target")) {
-        detail("Target", decision["target"]);
+        detail(writes || kind.endsWith(" file") ? "Path" : "Target", decision["target"]);
     }
-    if (fieldLayout->count() && status != "waiting") {
+    if (writes) {
+        if (decision["replaces"].toBool())
+            fieldLayout->addWidget(wrapped(QString("This replaces the current contents (%1).")
+                .arg(QLocale().formattedDataSize(decision["existingBytes"].toInteger())), "blueprintWarning"));
+        // Plain text that scrolls both ways, so nothing about to be written can be hidden.
+        const auto content = decision["content"].toString();
+        auto *box = new QPlainTextEdit(fields);
+        box->setObjectName("blueprintCode");
+        box->setAccessibleName("File content");
+        box->setReadOnly(true);
+        box->setLineWrapMode(QPlainTextEdit::NoWrap);
+        box->setPlainText(content);
+        const auto lines = qMin(content.count('\n') + 1, qsizetype(10));
+        box->setFixedHeight(qBound(56, int(lines) * box->fontMetrics().lineSpacing() + 32, 200));
+        fieldLayout->addWidget(box);
+    }
+    if (fieldLayout->count() && status != "waiting" && status != "rejected") {
         auto *toggle = action("Show action details", false, true);
         toggle->setCheckable(true);
         body->addWidget(toggle, 0, Qt::AlignLeft);
@@ -263,6 +282,19 @@ QWidget *approvalView(BlueprintPreview *preview, const QJsonObject &run, const Q
         actions->addWidget(deny);
         actions->addWidget(approve);
         body->addLayout(actions);
+    } else if (status == "rejected") {
+        static const QHash<QString, QString> reasons{
+            {"not_found", "The file does not exist."},
+            {"folder_not_found", "The folder does not exist."},
+            {"not_a_file", "That is not a regular file."},
+            {"shell_syntax", "Shell syntax such as | and > is not supported."},
+            {"protected_location", "Magnite's own data folder cannot be written to."},
+            {"invalid_request", "The request was not valid."},
+            {"action_limit", "The action limit for this task was reached."},
+            {"unknown_tool", "Magnite does not have that tool."},
+            {"incomplete_call", "The model's tool call was incomplete."}
+        };
+        body->addWidget(wrapped(reasons.value(outcome, reasons.value("invalid_request")), "blueprintWarning"));
     } else if (preview->live()) {
         static const QHash<QString, QString> outcomes{
             {"dispatched", "Passed to the desktop handler."},
@@ -3117,7 +3149,8 @@ void ConversationRunPanel::rebuildTranscript() {
     if (runs.isEmpty()) {
         if (tool)
             addWelcome(m_messages, "TOOL MODE", "What would you like to do?",
-                       "Choose a local model and describe the task. You can review each action before it runs.");
+                       "Choose a local model and describe the task. You can review each action before it runs. "
+                       "Very small models often miss steps. Qwen3 1.7B or larger is recommended.");
         else
             addWelcome(m_messages, "BLUEPRINT", "Run a saved workflow",
                        "Choose a blueprint above to see its inputs. Results and tool approvals appear here.");
@@ -3184,7 +3217,15 @@ void ConversationRunPanel::rebuildTranscript() {
         if (status == "passed") {
             if (tool && run["result"].isString()) {
                 const auto model = run["model"].toString();
-                body->addWidget(wrapped(model.isEmpty() ? "Local model" : model, "cardMeta"));
+                auto caption = model.isEmpty() ? QString("Local model") : model;
+                // A command that ran and failed still ran.
+                const bool ran = std::any_of(decisions.begin(), decisions.end(), [](const auto &value) {
+                    const auto item = value.toObject();
+                    return item["status"] == "completed" || item["outcome"] == "nonzero_exit" ||
+                           item["outcome"] == "timed_out";
+                });
+                if (m_preview->live() && run["details"].toBool() && !ran) caption += " · No actions ran";
+                body->addWidget(wrapped(caption, "cardMeta"));
                 addChatBubble(body, ChatBubble::Assistant, run["result"].toString());
             } else if (!run["result"].isUndefined()) {
                 body->addWidget(label("Result", "headingLabel"));

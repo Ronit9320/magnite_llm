@@ -227,10 +227,16 @@ or cancel using the Blueprint run routes above. Read the completed answer at
 serve ordinary chat.
 
 A local Blueprint can pass `{"action":"open","target":"..."}`,
-`{"action":"read","target":"..."}`, or
+`{"action":"read","target":"..."}`,
+`{"action":"write","target":"...","content":"..."}`, or
 `{"action":"command","executable":"...","arguments":["..."]}` to its
 `approval` node. The run request may specify an absolute `working_directory`
 for either surface. Its default is `tool-workspace/` under `MAGNITE_HOME`.
+Write creates or replaces one regular file in an existing folder: UTF-8, at
+most 16,000 bytes, no control characters except newline, carriage return and tab,
+and no text direction overrides. Magnite's data folder is refused apart from
+`tool-workspace/`. A pending write's `action` also has `replaces` and, when
+replacing, `existing_bytes`.
 Open accepts a regular file, folder, or HTTP(S) URL. Read accepts a file or
 folder and returns its text or listing in the receipt's `output`. Commands run
 directly with the displayed executable, argument array, and working directory.
@@ -246,6 +252,14 @@ duplicate decision returns `409`. Another run's approval ID returns `404`.
 Pending approvals close with the run on cancellation or interruption.
 The event and audit history retain identifiers, kind, timing, and outcome.
 Exact pending action details are available while the approval awaits a decision.
+
+An attempt refused before approval is listed with status `rejected` and an
+`outcome` reason: `not_found`, `folder_not_found`, `not_a_file`,
+`shell_syntax`, `protected_location`, `invalid_request`, `action_limit`,
+`unknown_tool`, or `incomplete_call`. Its `kind` is `open`, `read`, `command`,
+`write`, or `unknown`, and its `action` names what was asked, never file content.
+These records are held in memory only: they emit no event, cannot be decided,
+and are gone after a restart.
 
 ## Other route groups
 

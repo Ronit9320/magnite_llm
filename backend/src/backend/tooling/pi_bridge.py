@@ -24,11 +24,14 @@ import sys
 import subprocess
 from threading import Event, Thread
 from time import monotonic
+from typing import Callable
 
 from pydantic import TypeAdapter
 
 from backend.inference.schemas import ChatMessage
 from backend.inference.supervisor import get_supervisor
+from backend.tooling import actions
+from backend.tooling.actions import Rejected
 
 
 _BRIDGE = Path(__file__).with_name("pi") / "worker.mjs"
@@ -37,6 +40,22 @@ _MESSAGES = TypeAdapter(list[ChatMessage])
 MAX_TURNS = 6
 MAX_PROPOSALS = 4
 TURN_TOKENS = 768
+# Added to what the model reads, never shown or stored. Small models skip tools without them.
+REQUEST_REMINDER = "(Call a tool for this if it needs my computer.)"
+STEP_REMINDER = "(If my request has more steps, call the next tool now.)"
+
+# Why an attempt was refused before approval, as told to the model.
+REASONS = {
+    "not_found": "the file does not exist.",
+    "folder_not_found": "the folder does not exist.",
+    "not_a_file": "that is not a regular file.",
+    "shell_syntax": "shell syntax such as | and > is not supported.",
+    "protected_location": "Magnite's own data folder cannot be written to.",
+    "invalid_request": "the request was not valid.",
+    "action_limit": "the action limit for this task was reached.",
+    "unknown_tool": "Magnite does not have that tool.",
+    "incomplete_call": "the tool call was incomplete.",
+}
 
 # OpenAI-style declarations the model sees. ``proposal`` maps each call to a broker action.
 TOOLS = [
@@ -52,6 +71,14 @@ TOOLS = [
         "description": "Read a text file and get its contents.",
         "parameters": {"type": "object", "required": ["path"], "properties": {
             "path": {"type": "string", "description": "File path, relative to the working folder or absolute"},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": "Create a text file, or replace its contents.",
+        "parameters": {"type": "object", "required": ["path", "content"], "properties": {
+            "path": {"type": "string", "description": "File path, relative to the working folder or absolute"},
+            "content": {"type": "string", "description": "The full text to put in the file"},
         }},
     }},
     {"type": "function", "function": {
@@ -73,6 +100,30 @@ _TOOL_NAMES = {tool["function"]["name"] for tool in TOOLS}
 _LEGACY = {"command": "run_command", "open": "open_target", "read": "read_file"}
 
 
+def _has_shell_operator(command: str) -> bool:
+    """Whether the line uses | < > & or ; outside quotes, which needs a shell to mean anything."""
+    quote = ""
+    escaped = False
+    for ch in command:
+        if escaped:
+            escaped = False
+        elif ch == "\\" and quote != "'" and os.name != "nt":
+            escaped = True
+        elif quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "|<>&;":
+            return True
+    return False
+
+
+def _expand_home(argument: str) -> str:
+    prefixes = ("~/", "~\\") if os.name == "nt" else ("~/",)
+    return os.path.expanduser(argument) if argument == "~" or argument.startswith(prefixes) else argument
+
+
 def proposal(call: dict) -> dict:
     """Turn a model tool call into an exact broker action."""
     name, arguments = call.get("name"), call.get("arguments") or {}
@@ -82,10 +133,15 @@ def proposal(call: dict) -> dict:
         command = arguments.get("command")
         if not isinstance(command, str):
             raise ValueError("run_command needs a command")
+        if _has_shell_operator(command):
+            raise Rejected("shell_syntax")
         argv = shlex.split(command, posix=os.name != "nt")
         if not argv:
             raise ValueError("run_command needs a command")
-        return {"action": "command", "executable": argv[0], "arguments": argv[1:]}
+        return {"action": "command", "executable": argv[0],
+                "arguments": [_expand_home(item) for item in argv[1:]]}
+    if name == "write_file":
+        return {"action": "write", "target": arguments.get("path"), "content": arguments.get("content")}
     if name in ("read_file", "list_folder"):
         return {"action": "read", "target": arguments.get("path") or "."}
     if name == "open_target":
@@ -158,6 +214,7 @@ def system_prompt(directory: str | None) -> str:
         "You have access to the user's files, folders and programs through your tools. Do not say you lack "
         "access: call a tool instead. The user approves each tool call before it runs.",
         "- To answer questions about the user's files or folders, call read_file or list_folder.",
+        "- To create or change a file, call write_file.",
         "- Use run_command to run programs or check the system. Never guess or invent a result.",
         "- Use open_target to open a file, folder, or http(s) URL for the user.",
         "- Commands run without a shell, so pipes, redirects, wildcards, and shell built-ins are unavailable.",
@@ -179,6 +236,7 @@ _JSON_PROTOCOL = "\n".join([
     '{"answer":"your final answer to the user"}',
     '{"name":"run_command","arguments":{"command":"program --flag"}}',
     '{"name":"read_file","arguments":{"path":"notes.txt"}}',
+    '{"name":"write_file","arguments":{"path":"notes.txt","content":"text"}}',
     '{"name":"list_folder","arguments":{"path":"."}}',
     '{"name":"open_target","arguments":{"target":"path or URL"}}',
 ])
@@ -218,6 +276,19 @@ def _json_values(text: str):
                 yield value
 
 
+def _join_command(parts: list[str]) -> str:
+    """Quote a command given as a list, leaving items that are shell operators unquoted to be refused.
+
+    A lone ";" is the literal terminator of ``find -exec``.
+    """
+    find_exec = "-exec" in parts or "-execdir" in parts
+
+    def operator(part: str) -> bool:
+        return bool(re.fullmatch(r"\d?[|<>&;]+\d?", part)) and not (part == ";" and find_exec)
+
+    return " ".join(part if operator(part) else shlex.quote(part) for part in parts)
+
+
 def _call(value) -> dict | None:
     if not isinstance(value, dict):
         return None
@@ -232,9 +303,11 @@ def _call(value) -> dict | None:
         return None
     executable, rest = arguments.get("executable"), arguments.get("arguments", [])
     if name == "run_command" and isinstance(executable, str) and isinstance(rest, list):
-        arguments = {"command": shlex.join([executable, *map(str, rest)])}
+        arguments = {"command": _join_command([executable, *map(str, rest)])}
     if name == "read_file" and "target" in arguments:
         arguments = {"path": arguments["target"]}
+    if name == "write_file" and "target" in arguments:
+        arguments = {"path": arguments["target"], "content": arguments.get("content")}
     return {"name": name, "arguments": arguments}
 
 
@@ -253,6 +326,27 @@ def _python_call(text: str) -> dict | None:
     return {"name": match.group(1), "arguments": arguments}
 
 
+def _named_call(text: str) -> dict | None:
+    """Parse a tool name on one line followed by its JSON arguments; return the first such call.
+
+    The whole reply must be made of these blocks, so an answer that shows one as an example stays text.
+    """
+    rest, first = text.strip(), None
+    while rest:
+        match = re.match(r"(\w+)[ \t]*\r?\n\s*(?=\{)", rest)
+        if not match or match.group(1) not in _TOOL_NAMES:
+            return None
+        try:
+            arguments, end = json.JSONDecoder().raw_decode(rest, match.end())
+        except ValueError:
+            return None
+        call = _call({"name": match.group(1), "arguments": arguments})
+        if call is None:
+            return None
+        first, rest = first or call, rest[end:].strip()
+    return first
+
+
 def parse_reply(raw: str, tools: bool) -> tuple[str, list[dict]]:
     """Split a model turn into answer text and tool calls."""
     text = _strip_thinking(raw)
@@ -265,7 +359,7 @@ def parse_reply(raw: str, tools: bool) -> tuple[str, list[dict]]:
         if calls:
             return answer, calls
         return text, []
-    if tools and (call := _python_call(text)):
+    if tools and (call := _python_call(text) or _named_call(text)):
         return "", [call]
     for value in _json_values(text):
         if tools and (call := _call(value)):
@@ -276,6 +370,50 @@ def parse_reply(raw: str, tools: bool) -> tuple[str, list[dict]]:
     # Small models often preface a direct answer with this sentence.
     trimmed = re.sub(r"^(None of the tools|No tools?) (are|is) (needed|required)[^.]*\.\s*", "", text, flags=re.I)
     return trimmed or text, []
+
+
+_TAGGED = r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)"
+
+
+def call_problem(raw: str, offered: bool) -> tuple[str, str] | None:
+    """Why a reply that tried to call a tool cannot run, as (reason, tool name). None for an answer.
+
+    Only a tagged call, or a reply that is nothing but JSON, counts as an attempt.
+    """
+    text = _strip_thinking(raw)
+    tagged = re.findall(_TAGGED, text, flags=re.S)
+    if not tagged and not offered and (call := _named_call(text)):
+        return "action_limit", call["name"]
+    body = tagged[0] if tagged else re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
+    if not tagged and not body.startswith("{"):
+        return None
+    value = next(_json_values(body), None) if tagged else None
+    if not tagged:
+        # Read the leading object, so words after an answer do not make it look broken.
+        with suppress(ValueError):
+            value, _ = json.JSONDecoder().raw_decode(body)
+    if not isinstance(value, dict):
+        cut_off = tagged or re.match(r'\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"(?:arguments|parameters)"', body)
+        return ("incomplete_call", "") if cut_off else None
+    name = value.get("name")
+    if not tagged and not (isinstance(name, str) and ("arguments" in value or "parameters" in value)):
+        return None
+    if not isinstance(name, str):
+        return "incomplete_call", ""
+    name = name[:64].encode("utf-8", "replace").decode("utf-8")
+    if name not in _TOOL_NAMES:
+        return "unknown_tool", name
+    if not offered:
+        return "action_limit", name
+    return None if _call(value) else ("incomplete_call", name)
+
+
+def _problem_message(reason: str, name: str) -> str:
+    if reason == "unknown_tool":
+        return f"Nothing ran: the model asked for a tool Magnite does not have ({name})."
+    if reason == "action_limit":
+        return "Nothing ran: the action limit for this task was reached."
+    return "Nothing ran: the model's tool call was incomplete."
 
 
 async def _stream_text(stream, stop: Event) -> str:
@@ -301,6 +439,27 @@ async def _stream_text(stream, stop: Event) -> str:
                 await task
 
 
+_TRIM_MARK = "\n[... truncated to fit the model's context ...]"
+_TOO_LONG = "The tool conversation is longer than the loaded model's context"
+
+
+def _fit_tool_output(messages: list[dict], size: Callable[[list[dict]], int], limit: int) -> list[dict]:
+    """Return a copy of ``messages`` within ``limit``, shortening the longest tool results first."""
+    fitted = [dict(message) for message in messages]
+    suffix = f"\n\n{STEP_REMINDER}"
+    bodies = {index: (message["content"] or "").removesuffix(suffix)
+              for index, message in enumerate(fitted) if message["role"] == "tool"}
+    suffixes = {index: suffix if (fitted[index]["content"] or "").endswith(suffix) else "" for index in bodies}
+    while size(fitted) > limit:
+        longest = max((index for index in bodies if len(bodies[index]) > 400),
+                      key=lambda index: len(bodies[index]), default=None)
+        if longest is None:
+            raise ValueError(_TOO_LONG)
+        bodies[longest] = bodies[longest][:len(bodies[longest]) // 2]
+        fitted[longest]["content"] = bodies[longest] + _TRIM_MARK + suffixes[longest]
+    return fitted
+
+
 def _generate(messages: list[dict], tools: list[dict], engine, stop: Event, native: bool) -> str:
     """Run one model turn on the loaded chat engine and return its raw text."""
     supervisor = get_supervisor()
@@ -314,23 +473,25 @@ def _generate(messages: list[dict], tools: list[dict], engine, stop: Event, nati
             verify(active)
             # Keep the same declarations once the action budget is spent so earlier
             # tool turns still render; parse_reply then ignores further calls.
-            prompt = active.render_tool_prompt(messages, TOOLS)
-            if prompt is None:
-                raise ValueError("The model's chat template stopped rendering tools")
-            if active.count_tokens(prompt) + TURN_TOKENS > active.context_size():
-                raise ValueError("The tool conversation is longer than the loaded model's context")
-            return prompt
+            def prompt_for(items):
+                prompt = active.render_tool_prompt(items, TOOLS)
+                if prompt is None:
+                    raise ValueError("The model's chat template stopped rendering tools")
+                return prompt
+
+            fitted = _fit_tool_output(messages, lambda items: active.count_tokens(prompt_for(items)),
+                                      active.context_size() - TURN_TOKENS)
+            return prompt_for(fitted)
 
         stream = supervisor.complete_stream(None, prepare=render, max_tokens=TURN_TOKENS,
                                             temperature=0, templated=True)
     else:
-        plain = _plain_messages(messages, tools)
-
         def check(active):
             verify(active)
-            if active.count_messages(plain) + TURN_TOKENS > active.context_size():
-                raise ValueError("The tool conversation is longer than the loaded model's context")
-            return plain
+            fitted = _fit_tool_output(messages,
+                                      lambda items: active.count_messages(_plain_messages(items, tools)),
+                                      active.context_size() - TURN_TOKENS)
+            return _plain_messages(fitted, tools)
 
         stream = supervisor.chat_stream(None, prepare=check, max_tokens=TURN_TOKENS,
                                         temperature=0, tool_mode=True)
@@ -362,7 +523,9 @@ def receipt_text(result: dict) -> str:
     if result.get("outcome") == "action_limit":
         return "The action limit for this task is reached, so the action was not run. Answer the user now."
     if status == "rejected":
-        return f"The action was invalid and was not run ({result.get('outcome', 'invalid_action')})."
+        reason = result.get("outcome")
+        text = f"The action was not run: {REASONS.get(reason, REASONS['invalid_request'])}"
+        return text + (" To create it, call write_file." if reason == "not_found" else "")
     if status not in ("completed", "failed"):
         return f"The action was not run (status: {status})."
     lines = [f"Status: {result.get('outcome', status)}"]
@@ -374,14 +537,20 @@ def receipt_text(result: dict) -> str:
 
 
 def run(value, engine, approve, stop: Event, *, instructions: str = "",
-        working_directory: str | None = None) -> str:
-    """Run one agent task. ``approve`` is None for a text-only agent without tools."""
+        working_directory: str | None = None,
+        reject: Callable[[str, dict, str], None] | None = None) -> str:
+    """Run one agent task. ``approve`` is None for a text-only agent without tools.
+
+    ``reject`` records an attempt refused here; ``approve`` records the ones it refuses itself.
+    """
     messages = chat_messages(value)
     executable = node_path()
     native = approve is not None and native_tools(engine)
     system = system_prompt(working_directory) if approve is not None else instructions
     history = [{"role": "system", "content": system}] if system else []
     history += [message.model_dump(mode="json") for message in messages if message.role.value != "system"]
+    if approve is not None:
+        history[-1]["content"] += f"\n\n{REQUEST_REMINDER}"
     # The bridge uses pipes and only needs the host's runtime environment.
     # Omit Node injection settings and provider credentials.
     with subprocess.Popen([executable, str(_BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -442,6 +611,13 @@ def run(value, engine, approve, stop: Event, *, instructions: str = "",
                                 raise RuntimeError(f"The model's reply was cut off at {TURN_TOKENS} tokens "
                                                    "before its tool call finished")
                             text = f"{text}\n\n[The reply was cut off at {TURN_TOKENS} tokens.]".strip()
+                        if approve is not None and not calls and (problem := call_problem(raw, bool(tools))):
+                            # Replace the markup, keeping any words the model wrote around it.
+                            prose = (re.sub(_TAGGED, "", _strip_thinking(raw), flags=re.S).strip()
+                                     if "<tool_call>" in raw else "")
+                            text = f"{prose}\n\n{_problem_message(*problem)}".strip()
+                            if reject is not None:
+                                reject("unknown", {"action": "unknown", "target": problem[1]}, problem[0])
                         if not text and not calls:
                             text = "The model returned an empty reply."
                         send({"type": "generation", "text": text, "calls": calls})
@@ -449,19 +625,38 @@ def run(value, engine, approve, stop: Event, *, instructions: str = "",
                         if approve is None:
                             raise ValueError("This Pi agent does not have action tools")
                         proposals += 1
-                        if proposals > MAX_PROPOSALS:
-                            result = {"status": "rejected", "outcome": "action_limit"}
+                        call, request, reason = frame["proposal"], None, "action_limit"
+                        if proposals <= MAX_PROPOSALS:
+                            try:
+                                request = proposal(call)
+                            except Rejected as exc:
+                                reason = exc.reason
+                            except (ValueError, OSError, TypeError):
+                                reason = "invalid_request"
+                        if request is None:
+                            if reject is not None:
+                                reject(*actions.describe(call), reason)
+                            result = {"status": "rejected", "outcome": reason}
                         else:
                             try:
-                                result = approve(proposal(frame["proposal"]))
+                                result = approve(request)
+                            except Rejected as exc:
+                                result = {"status": "rejected", "outcome": exc.reason}
                             except (ValueError, OSError, TypeError):
-                                result = {"status": "rejected", "outcome": "invalid_action"}
-                        send({"type": "receipt", "text": receipt_text(result),
-                              "error": result.get("status") != "completed"})
+                                result = {"status": "rejected", "outcome": "invalid_request"}
+                        receipt = receipt_text(result)
+                        completed = result.get("status") == "completed"
+                        # Never after a refusal or failure, which would push the model to try again.
+                        if completed and proposals < MAX_PROPOSALS:
+                            receipt += f"\n\n{STEP_REMINDER}"
+                        send({"type": "receipt", "text": receipt, "error": not completed})
                     case "result":
                         if not isinstance(frame["text"], str) or not frame["text"].strip():
                             raise ValueError("Pi returned an empty answer")
-                        return frame["text"]
+                        answer = frame["text"]
+                        if approve is not None and (REQUEST_REMINDER in answer or STEP_REMINDER in answer):
+                            answer = answer.replace(REQUEST_REMINDER, "").replace(STEP_REMINDER, "").strip()
+                        return answer or "The model returned an empty reply."
                     case "error":
                         raise RuntimeError(frame["message"])
                     case _:

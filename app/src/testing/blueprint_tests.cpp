@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QInputDialog>
@@ -1063,6 +1064,62 @@ int runLiveBlueprintChecks(const QString &captures) {
         }
     }
 
+    {
+        // File writes and refusals through the same approval node. Nothing leaves the scratch folder.
+        QTemporaryDir scratch;
+        const auto submit = [&](const QJsonObject &request) {
+            if (auto *target = visibleNamed<QComboBox>(panel, "Run target")) target->setCurrentIndex(0);
+            if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
+                message->setPlainText(BlueprintPreview::jsonText(QJsonObject{{"request", request}}));
+            if (auto *start = visibleButton(panel, "Start run")) start->click();
+        };
+        const auto contents = [](const QString &path) {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray("<missing>");
+        };
+        const auto showsContent = [&](const QString &expected) {
+            for (const auto *box : panel.findChildren<QPlainTextEdit *>("blueprintCode"))
+                if (box->isVisible() && box->isReadOnly() && box->toPlainText() == expected) return true;
+            return false;
+        };
+        const auto newestRun = [&] { return session.runs(graphId).first().toObject()["id"].toString(); };
+        const auto file = scratch.filePath("approved.txt");
+
+        submit({{"action", "write"}, {"target", file}, {"content", "from magnite space"}});
+        const bool creating = until([&] { return visibleButton(panel, "Approve once") && visibleText(panel, "Create file"); });
+        check(creating && showsContent("from magnite space") && !QFile::exists(file),
+              "a write shows its content and waits for approval");
+        if (creating) {
+            const auto id = newestRun();
+            capture(panel, "live-write-approval-dark");
+            visibleButton(panel, "Approve once")->click();
+            check(waitForState(session, id, "passed") && contents(file) == "from magnite space",
+                  "an approved write creates the file with exactly that content");
+        }
+
+        submit({{"action", "write"}, {"target", file}, {"content", "second"}});
+        const bool replacing = until([&] { return visibleButton(panel, "Deny") && visibleText(panel, "Replace file"); });
+        check(replacing && visibleText(panel, "This replaces the current contents"),
+              "replacing a file is declared before approval");
+        if (replacing) {
+            const auto id = newestRun();
+            Theme::setDark(false);
+            pump();
+            capture(panel, "live-replace-approval-light");
+            visibleButton(panel, "Deny")->click();
+            check(waitForState(session, id, "failed") && contents(file) == "from magnite space",
+                  "a denied replacement leaves the file unchanged");
+            Theme::setDark(true);
+            pump();
+        }
+
+        submit({{"action", "read"}, {"target", scratch.filePath("missing.txt")}});
+        check(until([&] { return visibleText(panel, "Not run") && visibleText(panel, "The file does not exist."); }),
+              "a refused action is shown with its reason");
+        pump(600);
+        capture(panel, "live-not-run-dark");
+    }
+
     const auto testModel = qEnvironmentVariable("MAGNITE_BLUEPRINTS_LIVE_MODEL");
     const auto adapterModel = qEnvironmentVariable("MAGNITE_BLUEPRINTS_ACCEPTANCE_MODEL");
     if (!adapterModel.isEmpty())
@@ -1092,6 +1149,8 @@ int runLiveBlueprintChecks(const QString &captures) {
                 const auto last = runs.last().toObject();
                 return last["toolChat"].toBool() && last["status"] == "passed" && last["result"].isString();
             }, 30000), "native Tool mode sends an ad hoc task through Pi and displays its answer");
+            check(until([&] { return visibleText(chat, "No actions ran"); }),
+                  "an answer without a completed action says so");
             capture(chat, "live-conversation-tool-reply");
             if (auto *message = visibleNamed<QPlainTextEdit>(chat, "Task message"))
                 message->setPlainText("Say ready again.");

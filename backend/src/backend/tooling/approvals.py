@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -28,8 +29,9 @@ CREATE INDEX IF NOT EXISTS tool_approvals_by_run ON tool_approvals (run_id);
 """
 
 _ACTIVE = ("pending", "approved", "executing")
+MAX_REJECTED_RUNS = 50
 ApprovalStatus = Literal["pending", "approved", "executing", "completed", "failed",
-                         "denied", "expired", "cancelled", "interrupted"]
+                         "denied", "expired", "cancelled", "interrupted", "rejected"]
 ApprovalDecision = Literal["approve_once", "deny"]
 
 
@@ -43,7 +45,7 @@ class Approval(BaseModel):
     id: str
     run_id: str
     node_id: str
-    kind: Literal["open", "read", "command"]
+    kind: Literal["open", "read", "command", "write", "unknown"]
     fingerprint: str
     status: ApprovalStatus = "pending"
     created_at: datetime
@@ -99,6 +101,20 @@ class ToolBroker:
         self.ttl = ttl
         self._condition = Condition()
         self._pending: dict[str, _Pending] = {}
+        # Refused attempts are shown to the user but never stored: no database row, no event.
+        self._rejected: OrderedDict[str, list[Approval]] = OrderedDict()
+
+    def reject(self, run_id: str, node_id: str, kind: str, action: dict, reason: str) -> None:
+        """Remember an attempt that was refused before it could be offered for approval."""
+        created = _now()
+        item = Approval(id=uuid4().hex, run_id=run_id, node_id=node_id, kind=kind, fingerprint="",
+                        status="rejected", created_at=created, expires_at=created, outcome=reason,
+                        action=action)
+        with self._condition:
+            self._rejected.setdefault(run_id, []).append(item)
+            self._rejected.move_to_end(run_id)
+            while len(self._rejected) > MAX_REJECTED_RUNS:
+                self._rejected.popitem(last=False)
 
     def list(self, run_id: str) -> list[Approval]:
         with self._condition, connection(self.db) as conn:
@@ -107,7 +123,7 @@ class ToolBroker:
                 pending = self._pending.get(item.id)
                 if item.status == "pending" and pending is not None:
                     item.action = pending.action.display()
-            return result
+            return sorted([*result, *self._rejected.get(run_id, [])], key=lambda item: item.created_at)
 
     @staticmethod
     def _read(conn, run_id, approval_id) -> Approval | None:
@@ -135,7 +151,11 @@ class ToolBroker:
 
     def perform(self, run_id: str, node_id: str, proposal, directory: Path, stop: Event) -> dict:
         """Only a worker that owns a resolved proposal may claim and execute it."""
-        action = actions.prepare(proposal, directory)
+        try:
+            action = actions.prepare(proposal, directory)
+        except actions.Rejected as exc:
+            self.reject(run_id, node_id, *actions.describe(proposal), exc.reason)
+            raise
         identifier = uuid4().hex
         data = json.dumps([run_id, node_id, identifier, action.display(),
                            [path.identity for path in action.paths]], ensure_ascii=True, sort_keys=True)
