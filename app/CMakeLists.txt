@@ -62,6 +62,7 @@ set(MAGNITE_SOURCES
     src/testing/blueprint_tests.cpp
     src/testing/blueprint_tests.h
     src/testing/blueprint_test_support.h
+    src/testing/frameaudit.h
     src/testing/blueprint_editor_tests.cpp
     src/testing/blueprint_editor_tests.h
     src/panels/blueprintpanel.cpp
