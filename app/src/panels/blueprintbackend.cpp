@@ -57,7 +57,8 @@ QString issuesText(const QJsonArray &issues, const QHash<QString, QString> &name
 }
 
 QString errorText(int status, const QJsonDocument &doc) {
-    const auto detail = doc.object()["detail"];
+    // value(), not []: [] on a temporary returns a reference into an object that is already gone.
+    const auto detail = doc.object().value("detail");
     auto message = detail.isArray() ? issuesText(detail.toArray()) : detail.toString();
     if (message.isEmpty()) message = doc.object()["error"].toString();
     if (!message.isEmpty()) return message;

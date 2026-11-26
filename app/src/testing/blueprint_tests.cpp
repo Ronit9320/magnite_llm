@@ -405,6 +405,13 @@ int runBlueprintChecks(const QString &captures) {
     const bool original = Theme::isDark();
     Theme::setDark(true);
     BlueprintPreview preview(nullptr, false);
+    {
+        // A reply without a "detail" field, as from a lost connection, once crashed the app here.
+        QString reason;
+        preview.runToolTask(QJsonArray{}, [&reason](const QJsonObject &, const QString &error) { reason = error; });
+        check(reason == "The local service is disconnected. Refresh status before retrying.",
+              "a task sent while disconnected reports why");
+    }
     BlueprintPanel panel(&preview);
     panel.resize(1120, 720);
     panel.show();
