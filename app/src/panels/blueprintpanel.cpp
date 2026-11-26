@@ -1015,6 +1015,7 @@ void BlueprintPanel::refreshEditor(bool fit) {
     refreshBar();
     const auto nodes = m_graph["nodes"].toArray();
     if (!m_fullscreenDialog) m_canvasPages->setCurrentWidget(nodes.isEmpty() ? m_emptyCanvas : m_canvas);
+    m_bar->setFullscreenAvailable(m_fullscreenDialog || !nodes.isEmpty());
     placeBar();
     m_canvas->setGraph(m_graph);
     if (fit) m_canvas->fit();
@@ -2151,6 +2152,7 @@ void BlueprintPanel::leaveFullscreen() {
     m_canvasPages->setCurrentWidget(m_graph["nodes"].toArray().isEmpty() ? m_emptyCanvas : m_canvas);
     m_canvas->show();
     m_bar->setFullscreen(false);
+    m_bar->setFullscreenAvailable(!m_graph["nodes"].toArray().isEmpty());
     placeBar();
     dialog->deleteLater();
     m_canvas->setFocus();

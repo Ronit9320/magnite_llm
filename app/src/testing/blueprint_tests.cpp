@@ -377,6 +377,8 @@ int runBlueprintChecks(const QString &captures) {
     check(preview.saved().size() == 1 && preview.saved().first().toObject()["nodes"].toArray().isEmpty()
               && visibleText(panel, "Start with a node"),
           "naming a blueprint opens an empty canvas and saves it");
+    check(!visibleNamed<QPushButton>(panel, "Fullscreen canvas"),
+          "an empty canvas offers no fullscreen button that would do nothing");
 
     const auto blankId = preview.saved().isEmpty() ? QString{} : preview.saved().first().toObject()["id"].toString();
     auto *canvas = panel.findChild<BlueprintView *>();

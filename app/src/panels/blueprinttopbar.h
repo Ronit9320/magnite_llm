@@ -31,6 +31,8 @@ public:
     // False while showing a run whose blueprint is not open: only Test cases, no blueprint actions.
     void setEditable(bool editable);
     void setFullscreen(bool fullscreen);
+    // False while the canvas has nothing to show (the empty-graph page), which cannot go fullscreen.
+    void setFullscreenAvailable(bool available);
 
     // The bar never asks its parent layout for more than the room it is given; it folds instead.
     QSize minimumSizeHint() const override;
@@ -61,6 +63,7 @@ private:
     // Folds the least important controls (validation text, Reload, Open in Conversation, the Run label)
     // until the bar fits its width.
     void fit();
+    void updateFullscreenButton();
 
     View m_view = View::Build;
     QHBoxLayout *m_row;
@@ -88,8 +91,7 @@ private:
     bool m_canOpen = false;
     bool m_canGoBack = false;
     bool m_editable = true;
-    bool m_isFullscreen = false;
+    bool m_fullscreenAvailable = true;
     bool m_runEnabled = true;
     bool m_fitting = false;
-    int m_folded = 0;  // how many fold steps fit() applied
 };

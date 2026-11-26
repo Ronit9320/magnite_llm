@@ -181,7 +181,7 @@ QSize BlueprintTopBar::minimumSizeHint() const { return {0, sizeHint().height()}
 void BlueprintTopBar::setView(View view) {
     m_view = view;
     if (auto *button = m_segments->button(int(view))) button->setChecked(true);
-    m_fullscreen->setVisible(view == View::Build && m_editable);
+    updateFullscreenButton();
 }
 
 void BlueprintTopBar::setBlueprint(const QString &name, const QString &revisionText, bool draft, bool fixture) {
@@ -228,12 +228,23 @@ void BlueprintTopBar::setEditable(bool editable) {
     m_build->setEnabled(editable);
     m_history->setEnabled(editable);
     m_validation->setVisible(editable);
-    m_fullscreen->setVisible(editable && m_view == View::Build);
+    updateFullscreenButton();
     setRunEnabled(m_runEnabled);
 }
 
+void BlueprintTopBar::setFullscreenAvailable(bool available) {
+    m_fullscreenAvailable = available;
+    updateFullscreenButton();
+}
+
+void BlueprintTopBar::updateFullscreenButton() {
+    const bool shown = m_view == View::Build && m_editable && m_fullscreenAvailable;
+    if (m_fullscreen->isHidden() != shown) return;
+    m_fullscreen->setVisible(shown);
+    fit();
+}
+
 void BlueprintTopBar::setFullscreen(bool fullscreen) {
-    m_isFullscreen = fullscreen;
     const QString name = fullscreen ? "Exit fullscreen" : "Fullscreen canvas";
     m_fullscreen->setAccessibleName(name);
     m_fullscreen->setToolTip(name);
@@ -273,7 +284,6 @@ void BlueprintTopBar::fit() {
     if (m_fitting) return;
     m_fitting = true;
     const auto fold = [this](int steps) {
-        m_folded = steps;
         m_validation->setText(steps >= 1 ? QString() : m_validationText);
         m_reload->setVisible(m_canReload && steps < 2);
         m_open->setVisible(m_canOpen && steps < 3);
