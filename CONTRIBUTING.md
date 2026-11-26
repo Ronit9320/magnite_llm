@@ -15,14 +15,33 @@ and [AGENTS.md](AGENTS.md).
 ## Branch workflow
 
 Create a new branch from `dev` for every change, including fixes and cleanup.
-Release packaging and pipeline work uses `release/` branches; the current preview
-continues on `release/v0.1-testing`. See [preview delivery](docs/development/RELEASE_PIPELINE.md).
 Merge completed work into `dev` for integration testing. Promote tested changes
 from `dev` to `master`. Do not develop directly on `dev` or `master`, or merge
-feature branches directly into `master`.
+feature branches directly into `master`. Pushes and PRs to `dev` and `master`
+build and test all three platforms; they never publish anything.
 
 Delete completed feature branches after their commits are merged into `dev`.
 Check for unmerged commits before deleting a branch; preserve ongoing work.
+
+## Releases
+
+Each public release is cut from `dev` onto its own `release/` branch, for example
+`release/magnite-spacev0.2` for v0.2-preview. Pushes and PRs to `release/**`
+build and test all three platforms. Only the manual **Publish preview release**
+workflow (`.github/workflows/release.yml`) publishes, and only from a release
+branch. See the [release pipeline](docs/development/RELEASE_PIPELINE.md).
+
+- The release commit sets `RELEASE_VERSION`, `RELEASE_NAME` and a higher
+  `UPDATE_SEQUENCE` in `backend/src/backend/_version.py`, writes
+  `docs/release/RELEASE_NOTES.md`, and switches off unfinished features in
+  `backend/src/backend/_features.py`.
+- Bring fixes from `dev` onto the release branch with `git cherry-pick`. Don't
+  merge a release branch back into `dev` or `master`: its version and feature
+  switches belong only to that release. Changes to the release machinery itself
+  (workflows, updater, packaging) land on `dev` first or are cherry-picked there.
+- New features still in development can be switched off for a release instead of
+  being removed. Gate the UI, routes and packaging on the profile, keep their
+  tests running with it on, and add a check for the switched-off state.
 
 Keep ML work in Python and heavyweight imports lazy. New C++ files must be added
 to MAGNITE_SOURCES in app/CMakeLists.txt. Preserve explicit error reporting,
@@ -37,7 +56,12 @@ hardcode hex colors in widgets/stylesheets. Icons use `stroke="currentColor"`
 and Theme::coloredIcon. Preserve keyboard focus, both themes, and reduced motion.
 The implementation in `app/src/theme.h`, `app/resources/theme/console.qss`, and
 `app/resources/brand/` defines the current design. Keep new feature styling
-consistent with it. Boolean settings use the shared `ToggleSwitch` in
+consistent with it. The app runs on Fusion everywhere, and the top of `console.qss`
+is a base layer that makes every frame and scroll area borderless, so new widgets
+need no `setFrameShape(QFrame::NoFrame)`. Fields, buttons and cards have no outline;
+lines between regions use the `@divider` token (`Theme::divider()`), never
+`@surfaceBorder`. `--ui-check` fails on any frame still drawn by the platform style.
+Boolean settings use the shared `ToggleSwitch` in
 `app/src/widgets/toggleswitch.h`; it preserves native checked-state and keyboard
 behavior while drawing the themed track and thumb. Use shared `Button`,
 `ComboBox`, `TabWidget`, `SpinBox`/`DoubleSpinBox` and `ProgressBar` components for

@@ -18,6 +18,19 @@ from backend.routes import rag
 from backend.server import app
 
 OLD, NEW = "old-model", "new-model"
+_real_remove = os.remove
+
+
+def remove_like_windows(path):
+    """Windows refuses to delete a file this process still has memory-mapped; Linux allows it.
+    Checking /proc/self/maps reproduces the Windows behavior on Linux."""
+    try:
+        with open("/proc/self/maps", encoding="utf-8", errors="replace") as maps:
+            if any(line.rstrip().endswith(os.path.abspath(path)) for line in maps):
+                raise PermissionError(f"[like Windows] {path} is still mapped")
+    except FileNotFoundError:
+        pass
+    return _real_remove(path)
 
 
 def make_embed(dim):
@@ -92,6 +105,9 @@ class StoreTestCase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        windows_like = patch("backend.rag.store.os.remove", remove_like_windows)
+        windows_like.start()
+        self.addCleanup(windows_like.stop)
         self.store = RagStore(self.dir)
         self.store.update_config({"model": OLD})
         self.texts = [[f"doc{d} chunk {i} unique words {d * 100 + i}" for i in range(5)] for d in range(3)]

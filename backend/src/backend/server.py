@@ -1,3 +1,4 @@
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend._version import RELEASE_VERSION
 import math
 
@@ -75,7 +76,8 @@ async def startup():
     _training_setup()
     store = _adapter_setup()
     _rag_setup()
-    blueprint_setup()
+    if BLUEPRINTS_AND_TOOLS:   # switched-off releases never create blueprints.db
+        blueprint_setup()
     from backend.inference.supervisor import get_supervisor
 
     get_supervisor().set_adapter_store(store)
@@ -89,5 +91,6 @@ app.include_router(training_router)
 app.include_router(datasets_router)
 app.include_router(adapters_router)
 app.include_router(rag_router)
-app.include_router(blueprints_router)
-app.include_router(tooling_router)
+if BLUEPRINTS_AND_TOOLS:
+    app.include_router(blueprints_router)
+    app.include_router(tooling_router)

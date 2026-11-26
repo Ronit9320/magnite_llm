@@ -1,5 +1,9 @@
 # Blueprints and Tool mode
 
+> **Not in v0.2-preview.** Blueprints and Tool mode are still in development and are
+> switched off in the magnite-spacev0.2 packages. This guide describes builds with
+> them switched on, such as the `dev` branch.
+
 **Conversation** has three modes. **Chat** lets you test a local model and
 its active adapter with ordinary messages. Activate trained weights in
 **Library → Adapters** and check the active adapter under **Model settings**.

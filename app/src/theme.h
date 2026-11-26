@@ -41,8 +41,15 @@ inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113
 inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#36363C") : QStringLiteral("#C4C8B9"); }
-// Form-control edges must reach 3:1 against their fill (WCAG 1.4.11); card borders stay subtle.
+// Fields and buttons have no outline: their fill sets them apart, and focus draws an accent ring.
+inline QString fieldFill()           { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E8E6DB"); }
+inline QString fieldFillHover()      { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#DEDCD0"); }
+// Scroll handles and other drawn strokes that must reach 3:1 against their fill (WCAG 1.4.11).
 inline QString controlBorder()       { return isDark() ? QStringLiteral("#63636B") : QStringLiteral("#878C7C"); }
+
+// Hairline dividers between regions (sidebar edge, toolbars, table rows, menu separators).
+// The one place that decides how strong, or whether visible, every divider in the app is.
+inline QString divider()             { return surfaceBorder(); }
 
 // Unfilled part of the context meter ring and bar.
 inline QString meterTrack()          { return surfaceBorder(); }
@@ -56,6 +63,25 @@ inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : Q
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
 inline QString comparisonSeries() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
 
+// ---- Blueprints editor: wire (port type) colours, node family colours, floating panels ----
+inline QString blueprintTypeText() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+inline QString blueprintTypeNumber() { return isDark() ? QStringLiteral("#7FD8E0") : QStringLiteral("#0B6B75"); }
+inline QString blueprintTypeBoolean() { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
+inline QString blueprintTypeObject() { return isDark() ? QStringLiteral("#C3A6FF") : QStringLiteral("#6B47B8"); }
+inline QString blueprintTypeArray() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
+inline QString blueprintTypeReceipt() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#5B6370"); }
+inline QString blueprintTypeAdapter() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
+inline QString blueprintFamilySources() { return isDark() ? QStringLiteral("#6FCF97") : QStringLiteral("#2E7D4F"); }
+inline QString blueprintFamilyTransform() { return isDark() ? QStringLiteral("#9AA3B2") : QStringLiteral("#5B6370"); }
+inline QString blueprintFamilyKnowledge() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+inline QString blueprintFamilyModels() { return isDark() ? QStringLiteral("#FF784E") : QStringLiteral("#B8420F"); }
+inline QString blueprintFamilyTools() { return isDark() ? QStringLiteral("#C3A6FF") : QStringLiteral("#6B47B8"); }
+inline QString blueprintFamilyOutput() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
+inline QString blueprintPanelFill() { return isDark() ? QStringLiteral("#111113") : QStringLiteral("#FFFEF8"); }
+// Soft drop shadow colour for floating panels, #AARRGGBB.
+inline QString blueprintPanelShadow() { return isDark() ? QStringLiteral("#73000000") : QStringLiteral("#33281E14"); }
+inline QString blueprintCanvasDot() { return isDark() ? QStringLiteral("#1A1A1C") : QStringLiteral("#D3CFC0"); }
+
 // Graph readouts stay dark and compact in both appearances.
 inline QString chartHoverFill() { return brandInk(); }
 inline QString chartHoverText() { return isDark() ? textPrimary() : canvasBackground(); }
@@ -66,6 +92,14 @@ inline QString accentSurface() {
     return QColor::fromRgbF(base.redF() * 0.92 + accent.redF() * 0.08,
                            base.greenF() * 0.92 + accent.greenF() * 0.08,
                            base.blueF() * 0.92 + accent.blueF() * 0.08).name();
+}
+
+// Status tints for run pills and step marks: the status colour washed over the surface.
+inline QString statusSurface(const QString &status) {
+    const QColor base(surfaceFill()), tone(status);
+    return QColor::fromRgbF(base.redF() * 0.84 + tone.redF() * 0.16,
+                           base.greenF() * 0.84 + tone.greenF() * 0.16,
+                           base.blueF() * 0.84 + tone.blueF() * 0.16).name();
 }
 
 // Tinted surface for inline warning banners (service reconnecting, etc.).

@@ -1,3 +1,4 @@
+#include "build_features.h"
 #include "testing/settings_tests.h"
 #include "testing/textfit.h"
 #include "backend_client.h"
@@ -195,6 +196,12 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                 for (int category = 0; category < pages->count(); ++category) {
                     panel.selectCategory(category);
                     pump(80);
+                    // Profile fills in from an asynchronous request; measure once it has answered
+                    // and Qt has run the layout pass for the new text (slow CI runners lag behind).
+                    for (int waited = 0; panel.profileLoading() && waited < 3000; waited += 20)
+                        pump(20);
+                    QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+                    pump(20);
                     const auto found = TextFit::clippedText(&panel);
                     check(found.isEmpty(), qPrintable(TextFit::describe(QString("%1 %2").arg(TextFit::sizeName(size), dark ? "dark" : "light"),
                                                                        QString("settings category %1").arg(category), found)));
@@ -202,6 +209,20 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
                         check(panel.grab().save(captures + QString("/large-settings-%1-%2.png").arg(dark ? "dark" : "light").arg(category)), "capture settings category at Large");
                 }
             }
+        {
+            // A short window at Large: the sidebar scrolls instead of squeezing its labels
+            // (fonts with taller line spacing, e.g. on Ubuntu 22.04, need more room).
+            guardSettings.setValue("appearance/interfaceSize", 2);
+            Theme::applyPreferences();
+            workspace.resize(1280, 600);
+            pump(80);
+            panel.selectCategory(0);
+            pump(80);
+            const auto found = TextFit::clippedText(&panel);
+            check(found.isEmpty(), qPrintable(TextFit::describe("Large short window", "settings sidebar", found)));
+            workspace.resize(1280, 820);
+            pump(80);
+        }
         if (storedSize.isValid()) guardSettings.setValue("appearance/interfaceSize", storedSize);
         else guardSettings.remove("appearance/interfaceSize");
         Theme::applyPreferences();
@@ -267,7 +288,11 @@ int runSettingsChecks(BackendClient* client, const QString& captures) {
         int tiles = 0;
         for (auto* tile : panel.findChildren<QFrame*>("settingsMetric"))
             if (tile->property("profileStat").isValid() && tile->isVisible()) ++tiles;
-        check(tiles == 8, "Profile shows eight work statistics");
+        check(tiles == (Features::blueprintsAndTools ? 8 : 6), "Profile shows every work statistic this build has");
+        bool valuesKeepLineHeight = true;
+        for (auto* value : panel.findChildren<QLabel*>("settingsProfileValue"))
+            valuesKeepLineHeight &= value->minimumHeight() >= value->fontMetrics().height();
+        check(valuesKeepLineHeight, "Profile numbers keep their full line height as a minimum");
         panel.selectCategory(0);
     }
     for (bool dark : {false, true}) {

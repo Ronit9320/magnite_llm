@@ -25,4 +25,5 @@ protected:
 private:
     MotionValue *m_hover;
     bool m_truncated=false;
+    bool m_keyboardFocus=false;  // the focus ring shows only when focus came from the keyboard
 };

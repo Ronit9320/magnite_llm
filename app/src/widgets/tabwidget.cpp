@@ -30,14 +30,14 @@ void SegmentedTabBar::tabLayoutChange() { QTabBar::tabLayoutChange(); if (m_moti
 void SegmentedTabBar::hideEvent(QHideEvent *event) { m_motion->snap(1); QTabBar::hideEvent(event); }
 void SegmentedTabBar::paintEvent(QPaintEvent *) {
     QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
-    painter.setBrush(QColor(Theme::insetBackground())); painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
+    painter.setBrush(QColor(Theme::insetBackground())); painter.setPen(Qt::NoPen);
     const bool underline=property("underline").toBool();
     if (underline) {
-        painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
+        painter.setPen(QPen(QColor(Theme::divider()),1));
         painter.drawLine(0,height()-1,width(),height()-1);
     } else painter.drawRoundedRect(QRectF(rect()).adjusted(0.5,0.5,-0.5,-0.5),10,10);
     if (m_indicator.isValid()) {
-        painter.setBrush(QColor(Theme::surfaceFill())); painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
+        painter.setBrush(QColor(Theme::fieldFillHover())); painter.setPen(Qt::NoPen);
         if (underline) {
             painter.setPen(QPen(QColor(Theme::accentPrimary()),2));
             painter.drawLine(QPointF(m_indicator.left(),height()-1),QPointF(m_indicator.right(),height()-1));

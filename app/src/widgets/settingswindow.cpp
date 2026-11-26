@@ -18,7 +18,7 @@ void paintSurface(QWidget* widget) {
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(QColor(Theme::surfaceFill()));
-    painter.setPen(QPen(QColor(Theme::surfaceBorder()), 1));
+    painter.setPen(Qt::NoPen);
     painter.drawRoundedRect(QRectF(widget->rect()).adjusted(.5, .5, -.5, -.5), 14, 14);
 }
 class Scrim : public QWidget {

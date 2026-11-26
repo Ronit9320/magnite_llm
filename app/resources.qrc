@@ -1,8 +1,12 @@
 <RCC>
     <qresource prefix="/">
         <file alias="blueprints/node-catalog.json">resources/blueprints/node-catalog.json</file>
+        <file alias="blueprints/node-docs.json">resources/blueprints/node-docs.json</file>
         <file alias="blueprints/order-preview.json">resources/blueprints/order-preview.json</file>
         <file alias="docs/catalog.json">resources/docs/catalog.json</file>
+        <!-- Installed-app update steps that run after the client exits (see update_manager.cpp). -->
+        <file alias="updates/install-macos.sh">../packaging/macos/update_install.sh</file>
+        <file alias="updates/install-windows.ps1">../packaging/windows/update_install.ps1</file>
         <file alias="docs/reference/WORKFLOWS.md">resources/docs/reference/WORKFLOWS.md</file>
         <file alias="docs/reference/BLUEPRINTS.md">resources/docs/reference/BLUEPRINTS.md</file>
         <file alias="docs/reference/LOCAL_API.md">resources/docs/reference/LOCAL_API.md</file>
@@ -46,6 +50,7 @@
         <file alias="icons/message-circle.svg">resources/icons/message-circle.svg</file>
         <file alias="icons/play.svg">resources/icons/play.svg</file>
         <file alias="icons/plus.svg">resources/icons/plus.svg</file>
+        <file alias="icons/minus.svg">resources/icons/minus.svg</file>
         <file alias="icons/refresh-cw.svg">resources/icons/refresh-cw.svg</file>
         <file alias="icons/search.svg">resources/icons/search.svg</file>
         <file alias="icons/chevron-up.svg">resources/icons/chevron-up.svg</file>
@@ -62,6 +67,8 @@
         <file alias="icons/settings.svg">resources/icons/settings.svg</file>
         <file alias="icons/square.svg">resources/icons/square.svg</file>
         <file alias="icons/trash.svg">resources/icons/trash.svg</file>
+        <file alias="icons/info.svg">resources/icons/info.svg</file>
+        <file alias="icons/ellipsis.svg">resources/icons/ellipsis.svg</file>
         <file alias="icons/expand.svg">resources/icons/expand.svg</file>
         <file alias="icons/shrink.svg">resources/icons/shrink.svg</file>
         <file alias="icons/window-close.svg">resources/icons/window-close.svg</file>

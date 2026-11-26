@@ -7,6 +7,7 @@
 #include <QListView>
 #include <QPainter>
 #include <QStyleOptionComboBox>
+#include <QStylePainter>
 #include <QStyledItemDelegate>
 
 namespace {
@@ -61,10 +62,22 @@ ComboBox::ComboBox(QWidget *parent) : QComboBox(parent) {
     setMaxVisibleItems(8);
 }
 
-void ComboBox::paintEvent(QPaintEvent *event) {
-    QComboBox::paintEvent(event);
+void ComboBox::paintEvent(QPaintEvent *) {
     QStyleOptionComboBox option;
     initStyleOption(&option);
+    {
+        // As QComboBox paints itself, but a label too long for the box ends in "…" instead of being cut.
+        QStylePainter box(this);
+        box.drawComplexControl(QStyle::CC_ComboBox, option);
+        if (!isEditable()) {
+            QStyleOptionComboBox label = option;
+            int room = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxEditField, this).width();
+            if (!label.currentIcon.isNull()) room -= label.iconSize.width() + 4;
+            label.currentText = fontMetrics().elidedText(label.currentText, Qt::ElideRight, qMax(0, room));
+            box.drawControl(QStyle::CE_ComboBoxLabel, label);
+        }
+    }
+    if (!isEnabled()) return;  // a fixed value reads as plain text, with no chevron to suggest a choice
     const QRect arrow = style()->subControlRect(QStyle::CC_ComboBox, &option,
                                                 QStyle::SC_ComboBoxArrow, this);
     const QColor ink(isEnabled() ? Theme::textSecondary() : Theme::textMuted());

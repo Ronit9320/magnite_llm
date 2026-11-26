@@ -19,6 +19,7 @@ from backend.blueprints.store import BlueprintStore
 from backend.database import connection
 from backend.local_access import LocalAccessMiddleware
 from backend.routes.blueprints import blueprint_runner
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend.server import app
 from backend.tooling import pi_bridge
 from backend.tooling.actions import Rejected, prepare
@@ -28,6 +29,7 @@ TOKEN = "approval-test-token"
 ROOT = "/blueprints/runs"
 
 
+@unittest.skipUnless(BLUEPRINTS_AND_TOOLS, "Blueprints and Tool mode are switched off in this build")
 class ToolApprovalTests(unittest.TestCase):
     def setUp(self):
         resources = ExitStack()
@@ -313,8 +315,10 @@ class ReplyParsingTests(unittest.TestCase):
 
     def test_tool_calls_become_exact_broker_actions(self):
         cases = [
+            # Windows commands are split without POSIX quote rules (see pi_bridge.proposal).
             ({"name": "run_command", "arguments": {"command": "python3 -c 'print(1)'"}},
-             {"action": "command", "executable": "python3", "arguments": ["-c", "print(1)"]}),
+             {"action": "command", "executable": "python3",
+              "arguments": ["-c", "print(1)" if os.name != "nt" else "'print(1)'"]}),
             ({"name": "read_file", "arguments": {"path": "notes.md"}}, {"action": "read", "target": "notes.md"}),
             ({"name": "list_folder", "arguments": {}}, {"action": "read", "target": "."}),
             ({"name": "open_target", "arguments": {"target": "https://example.com"}},

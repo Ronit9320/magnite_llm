@@ -37,23 +37,67 @@ if(NOT MAGNITE_RELEASE_REPOSITORY MATCHES "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     message(FATAL_ERROR "Invalid GitHub release repository")
 endif()
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/keys/update-public.pem" MAGNITE_UPDATE_PUBLIC_KEY)
+# Build-time feature profile shared with the backend and packaging.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_features.py" MAGNITE_TOOLS_LINE
+     REGEX "^BLUEPRINTS_AND_TOOLS = (True|False)$")
+if(NOT MAGNITE_TOOLS_LINE)
+    message(FATAL_ERROR "backend/src/backend/_features.py must set BLUEPRINTS_AND_TOOLS = True or False")
+endif()
+if(MAGNITE_TOOLS_LINE MATCHES "True$")
+    set(MAGNITE_BLUEPRINTS_AND_TOOLS 1)
+else()
+    set(MAGNITE_BLUEPRINTS_AND_TOOLS 0)
+endif()
+message(STATUS "Blueprints and Tool mode: ${MAGNITE_BLUEPRINTS_AND_TOOLS}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_version.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../backend/src/backend/_features.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/keys/update-public.pem")
 configure_file(src/update_config.h.in generated/update_config.h @ONLY)
+configure_file(src/build_features.h.in generated/build_features.h @ONLY)
 
 set(MAGNITE_SOURCES
+    src/widgets/wheelguard.cpp
+    src/widgets/wheelguard.h
     src/testing/blueprint_tests.cpp
     src/testing/blueprint_tests.h
+    src/testing/blueprint_test_support.h
+    src/testing/frameaudit.h
+    src/testing/blueprint_editor_tests.cpp
+    src/testing/blueprint_editor_tests.h
     src/panels/blueprintpanel.cpp
     src/panels/blueprintnodedialog.cpp
     src/panels/blueprintnodedialog.h
+    src/panels/blueprintnodefields.cpp
+    src/panels/blueprintnodefields.h
+    src/panels/blueprintbindingfields.cpp
+    src/panels/blueprintbindingfields.h
+    src/panels/blueprintinspector.cpp
+    src/panels/blueprintinspector.h
+    src/panels/blueprintlibrarydock.cpp
+    src/panels/blueprintlibrarydock.h
+    src/panels/blueprintquickadd.cpp
+    src/panels/blueprintquickadd.h
+    src/panels/blueprintdetails.cpp
+    src/panels/blueprintdetails.h
     src/panels/blueprintpanel.h
+    src/panels/blueprinttopbar.cpp
+    src/panels/blueprinttopbar.h
     src/panels/blueprintpreview.cpp
     src/panels/blueprintbackend.cpp
     src/panels/blueprintpreview.h
-    src/widgets/blueprintcanvas.cpp
-    src/widgets/blueprintcanvas.h
+    src/widgets/blueprintitems.cpp
+    src/widgets/blueprintminimap.cpp
+    src/widgets/blueprintminimap.h
+    src/widgets/floatingpanel.cpp
+    src/widgets/floatingpanel.h
+    src/widgets/blueprintitems.h
+    src/widgets/blueprintscene.cpp
+    src/widgets/blueprintscene.h
+    src/widgets/blueprintstyle.cpp
+    src/widgets/blueprintstyle.h
+    src/widgets/blueprintview.cpp
+    src/widgets/blueprintview.h
     src/panels/modelhubpanel.cpp
     src/panels/modelhubpanel.h
     src/testing/modelhub_tests.cpp

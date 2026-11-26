@@ -133,11 +133,13 @@ class EdgeCaseTests(unittest.TestCase):
 
 
 class MatchesTheOldExtractorOnWellFormedHtml(unittest.TestCase):
+    # No <textarea> with markup inside: from Python 3.12.12 html.parser keeps textarea content as
+    # literal text, so the oracle would depend on the patch release. the explicit cases above cover it.
     FRAGMENTS = ["<p>", "</p>", "<div class='x y'>", "</div>", "<b>", "</b>", "<a href=\"u?a=1&b=2\">", "</a>", "<br/>", "<br>",
                  "<img alt='a>b' src=x>", "<!-- note -->", "<!DOCTYPE html>", "<?xml version='1.0'?>",
                  "<script>var s = '<b>x</b>'; if (a < b) {}</script>", "<style>p > a { }</style>", "<SCRIPT>x</SCRIPT>",
                  "plain words here", "Second sentence.", "&amp;", "&lt;tag&gt;", "&#169;", "&nbsp;", "&#x1F600;", "café", "日本語",
-                 "<li>", "<td colspan=2>", "<h1>", "</h1>", "<title>T</title>", "<textarea>t<b>x</b></textarea>"]
+                 "<li>", "<td colspan=2>", "<h1>", "</h1>", "<title>T</title>"]
 
     def test_random_documents(self):
         rng = random.Random(2026)

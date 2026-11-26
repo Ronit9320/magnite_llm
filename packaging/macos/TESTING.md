@@ -1,6 +1,7 @@
-# Magnite v0.1 testing build — macOS
+# Magnite Space v0.2-preview — macOS
 
-This is an unfinished application packaged for testing, not a stable release. It is **not notarized**.
+This is magnite-spacev0.2, an unfinished preview packaged for testing, not a stable release. It is **not notarized**.
+Blueprints and Tool mode are not included in this release.
 
 The app contains Qt, Python 3.12 and the backend, with llama.cpp (Metal), PyTorch (MPS), LoRA/PEFT and document-retrieval dependencies.
 It does not contain model weights; the first model or embedding download needs internet access. vLLM and Ollama are not bundled.
@@ -13,9 +14,9 @@ GPU behavior or the Gatekeeper flow on other chips/OS versions. See
 
 ## Install
 
-1. Open `Magnite-v0.1-preview-arm64.dmg` and drag **Magnite** into **Applications**. Eject the image.
-2. Compare the download with the published checksum if you were given one:
-   `shasum -a 256 Magnite-v0.1-preview-arm64.dmg`
+1. Compare the download with the release's `SHA256SUMS`:
+   `shasum -a 256 Magnite-v0.2-preview-arm64.dmg`
+2. Open the disk image and drag **Magnite** into **Applications**. Eject the image.
 3. The first launch of a downloaded copy is blocked by Gatekeeper because the app is not notarized. Follow the
    [first-launch guide](../../docs/MACOS_FIRST_LAUNCH.md) (System Settings → Privacy & Security → Open Anyway). You only do this once.
 
@@ -28,6 +29,13 @@ Please write down, or screenshot, exactly what each dialog says. The wording has
 - Chat with GGUF models runs on the GPU (Metal). LoRA training runs on the GPU (MPS) and is much faster than on the CPU.
 - **4-bit and 8-bit QLoRA are not available on macOS.** The option is disabled in Training.
 - Tested with models up to about 1.5B parameters. Larger models have not been tried.
+
+## Updates
+
+Settings → Updates checks for newer previews and installs them when you choose **Restart to install**: the app closes, swaps in
+the verified new bundle and starts it, and puts the previous one back if the new version doesn't start. Open the app from
+Applications, not from the disk image, or it can't update itself. macOS may ask to allow App Management once. The previous
+bundle stays in a hidden `.magnite-update-…` folder beside the app until the next update.
 
 ## Keep test data separate
 

@@ -5,16 +5,22 @@ Magnite Space is a native C++20/Qt 6 desktop app backed by a local Python servic
 The release scope is local training, inference, and RAG; hosted inference and
 cloud training are excluded.
 
-**[v0.1-preview](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.1-preview):**
-Linux x86-64 AppImage available, with signed in-app preview updates.
-See the [pipeline architecture and setup](docs/development/RELEASE_PIPELINE.md)
-and [release checklist](RELEASE_CHECKLIST.md) for verification and deferred work.
-Hosted native integration checks now build and test Linux x86-64 AppImage,
-Mac ARM DMG and Windows x86-64 installer candidates from one source commit.
-See [native package builds and evidence](docs/development/NATIVE_PACKAGES.md).
-These are Actions testing artifacts; the public release above remains Linux-only.
-Mac builds are ad-hoc signed and not notarized; Windows installers are unsigned.
-Physical GPU and additional desktop OS coverage remain separate acceptance work.
+**[magnite-spacev0.2 (v0.2-preview)](https://github.com/Ronit9320/magnite_llm/releases/tag/v0.2-preview):**
+a development preview for Linux x86-64 (AppImage), macOS on Apple silicon (DMG)
+and Windows x86-64 (installer), with signed in-app updates on all three. The
+Linux and Windows packages run models on the CPU; the macOS package uses the
+Apple GPU (Metal/MPS). Blueprints and Tool mode are still in
+development and are not part of this release.
+
+The macOS build is not notarized and the Windows installer is not code-signed,
+so both systems warn on first launch: see
+[macOS first launch](docs/MACOS_FIRST_LAUNCH.md) and
+[Windows first launch](docs/WINDOWS_FIRST_LAUNCH.md). The
+[installation guide](docs/INSTALL.md) covers all three packages,
+[release notes](docs/release/RELEASE_NOTES.md) list what changed, and
+[current limitations](docs/LIMITATIONS.md) list what is not done yet.
+How releases are built and published: [release pipeline](docs/development/RELEASE_PIPELINE.md)
+and [native package evidence](docs/development/NATIVE_PACKAGES.md).
 
 Capture the current interface using the [screenshot instructions](docs/release/SCREENSHOTS.md).
 
@@ -23,7 +29,7 @@ Capture the current interface using the [screenshot instructions](docs/release/S
 - Download and manage Hugging Face models; connect to an existing Ollama service.
 - Fine-tune transformer models with LoRA or QLoRA and track training jobs.
 - Export, import, and activate trained adapters through the PEFT/torch engine.
-- Build and test typed local workflows in Blueprints, run saved revisions from chat, and review tool requests before they run. [Blueprints guide](docs/BLUEPRINTS.md)
+- In development, not in v0.2-preview: typed local workflows in Blueprints and Tool mode, with tool requests you review before they run. [Blueprints guide](docs/BLUEPRINTS.md)
 - Run local streaming inference with llama.cpp, torch, or an optional vLLM installation.
 - Ingest PDF, text, Markdown, and HTML documents, test retrieval, and use RAG in chat.
 - Explore the offline Docs reference: ML concepts, dataset quality, training results, examples and primary sources. Save useful articles and return to your reading position.
@@ -76,7 +82,7 @@ Start with the [workflow guide](docs/WORKFLOWS.md) and the small
 ## Architecture and data
 
 ```text
-Qt desktop: Library | Training | Blueprints | Knowledge | Adapters | Playground | Docs | Settings (window)
+Qt desktop: Model hub | Library | Training | Conversation (+ Knowledge) | Docs | Settings (window)
                          |
                  BackendClient HTTP/SSE
                          |
@@ -107,7 +113,7 @@ macOS results for earlier builds are recorded separately.
 - [Current native package evidence](docs/development/NATIVE_PACKAGES.md)
 - [Documentation consistency review](docs/development/DOCUMENTATION_REVIEW.md)
 - [Historical source verification](docs/release/VERIFICATION.md)
-- [Release checklist](RELEASE_CHECKLIST.md) and [draft release notes](docs/release/RELEASE_NOTES.md)
+- [Release checklist](RELEASE_CHECKLIST.md) and [release notes](docs/release/RELEASE_NOTES.md)
 - [Current theme rules and branch workflow](CONTRIBUTING.md)
 - [Security reporting](SECURITY.md)
 
@@ -124,4 +130,5 @@ are separate from the app's license.
 
 ## Windows build
 
-See [BUILD_WINDOWS.md](BUILD_WINDOWS.md) for Windows build instructions. The codebase has been prepared for Windows compatibility while maintaining Linux support.
+Most Windows users should use the installer from the releases page. To build from
+source on Windows, see [BUILD_WINDOWS.md](BUILD_WINDOWS.md).

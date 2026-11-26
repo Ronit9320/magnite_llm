@@ -2,15 +2,23 @@
 #include "textformat.h"
 
 #include "panels/blueprintpreview.h"
+#include "panels/blueprintbindingfields.h"
+#include "panels/blueprintinspector.h"
+#include "panels/blueprintlibrarydock.h"
+#include "panels/blueprintquickadd.h"
+#include "panels/blueprintdetails.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
-#include "widgets/blueprintcanvas.h"
+#include "widgets/blueprintscene.h"
+#include "widgets/blueprintstyle.h"
+#include "widgets/blueprintview.h"
 #include "widgets/brandmark.h"
 #include "widgets/button.h"
 #include "widgets/combobox.h"
 #include "widgets/confirmation.h"
 #include "widgets/edgescrollbar.h"
+#include "widgets/floatingpanel.h"
 #include "widgets/settingswindow.h"
 #include "widgets/spinbox.h"
 #include "widgets/surface.h"
@@ -43,7 +51,6 @@
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QTimer>
-#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <utility>
@@ -93,6 +100,24 @@ void clear(QLayout *layout) {
     }
 }
 
+// The graph without the first edge matching all four fields of edge; found reports whether one matched.
+QJsonObject withoutEdge(QJsonObject graph, const QJsonObject &edge, bool *found = nullptr) {
+    QJsonArray edges;
+    bool matched = false;
+    for (const auto &value : graph["edges"].toArray()) {
+        const auto existing = value.toObject();
+        if (!matched && existing["from"] == edge["from"] && existing["out"] == edge["out"]
+                && existing["to"] == edge["to"] && existing["in"] == edge["in"]) {
+            matched = true;
+            continue;
+        }
+        edges.append(existing);
+    }
+    graph["edges"] = edges;
+    if (found) *found = matched;
+    return graph;
+}
+
 QFrame *rule() {
     auto *line = new QFrame;
     line->setObjectName("blueprintRule");
@@ -121,25 +146,10 @@ QJsonObject findById(const QJsonArray &array, const QString &id) {
     return {};
 }
 
-QJsonObject adapterSource(const QJsonObject &graph, const QJsonObject &node) {
-    if (findById(node["in"].toArray(), "adapter")["type"] != "adapter-ref") return {};
-    for (const auto &value : graph["edges"].toArray()) {
-        const auto edge = value.toObject();
-        if (edge["to"] == node["id"] && edge["in"] == "adapter")
-            return findById(graph["nodes"].toArray(), edge["from"].toString());
-    }
-    return {};
-}
-
 QString sampleText(const QJsonObject &sample) {
     QStringList lines;
     for (const auto &line : sample["lines"].toArray()) lines.append(line.toString());
     return lines.join(' ');
-}
-
-QString named(const QJsonObject &fixtures, const QString &collection, const QJsonValue &id) {
-    const auto object = findById(fixtures[collection].toArray(), id.toString());
-    return object["name"].toString("Unbound");
 }
 
 void titleBar(QVBoxLayout *body, const QString &title) {
@@ -171,13 +181,17 @@ QString statusIcon(const QString &status) {
     return "window-minimize";
 }
 
+// A run or step status as a small tinted pill.
 QLabel *statusLabel(const QString &status) {
-    const char *style = "cardMeta";
-    if (status == "passed" || status == "approved") style = "blueprintSuccess";
-    else if (status == "failed" || status == "denied") style = "blueprintError";
-    else if (status == "waiting" || status == "expired" || status == "rejected") style = "blueprintWarning";
-    else if (status == "running") style = "blueprintRunning";
-    return label(BlueprintPreview::statusLabel(status), style);
+    QString tone = "idle";
+    if (status == "passed" || status == "approved") tone = "ok";
+    else if (status == "failed" || status == "denied") tone = "err";
+    else if (status == "waiting" || status == "expired" || status == "rejected") tone = "warn";
+    else if (status == "running" || status == "queued") tone = "run";
+    auto *pill = label(BlueprintPreview::statusLabel(status), "blueprintStatusPill");
+    pill->setProperty("tone", tone);
+    pill->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    return pill;
 }
 
 bool running(const QJsonObject &run) {
@@ -339,12 +353,19 @@ QJsonObject collectInput(const QJsonObject &contracts, const QString &text, QStr
     return input;
 }
 
+// A caption over a dark inset block of monospaced JSON.
 void fillCode(QVBoxLayout *layout, const QString &title, const QJsonValue &value) {
-    layout->addWidget(label(title, "headingLabel"));
+    auto *block = new QFrame;
+    block->setObjectName("blueprintCodeBlock");
+    auto *inner = new QVBoxLayout(block);
+    inner->setContentsMargins(10, 8, 10, 10);
+    inner->setSpacing(4);
+    inner->addWidget(label(title, "blueprintCodeCaption"));
     auto *code = wrapped(BlueprintPreview::jsonText(value), "blueprintCode");
     code->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-    layout->addWidget(code);
-    layout->addStretch();
+    inner->addWidget(code);
+    inner->addStretch();
+    layout->addWidget(block, 1);
 }
 }
 
@@ -368,104 +389,84 @@ BlueprintPanel::BlueprintPanel(BlueprintPreview *preview, QWidget *parent)
     library->addWidget(m_service);
     library->addWidget(scroller(&m_libraryBody), 1);
 
+    // The editor is full-bleed; the library and create pages keep the panel gutter.
+    connect(m_pages, &QStackedWidget::currentChanged, this, [this, root] {
+        if (m_pages->currentWidget() == m_workspace) root->setContentsMargins(0, 0, 0, 0);
+        else root->setContentsMargins(20, 17, 20, 14);
+    });
     auto *workspace = new QVBoxLayout(m_workspace);
     workspace->setContentsMargins(0, 0, 0, 0);
-    auto *crumb = new QHBoxLayout;
-    auto *back = action("‹ Blueprints", false, true);
-    back->setAccessibleName("Blueprint library");
-    crumb->addWidget(back);
-    crumb->addStretch();
-    m_backToChat = action("Back to Conversation", false, true);
-    m_backToChat->hide();
-    crumb->addWidget(m_backToChat);
-    connect(m_backToChat, &Button::clicked, this, &BlueprintPanel::chatRequested);
-    if (!m_preview->live()) crumb->addWidget(label("Fixture data", "cardMeta"));
-    // Revision actions sit beside Run in the heading; the crumb is only for navigation.
-    m_publish = action("Save revision");
-    m_publish->setToolTip("Publish this draft as a new revision that Conversation and runs can use.");
-    m_reload = action("Discard draft edits", false, true);
-    m_reload->setToolTip("Reload the last saved revision.");
-    m_openInConversation = iconAction("message-circle", "Open in Conversation");
-    m_openInConversation->setAccessibleName("Open in Conversation");
-    m_openInConversation->hide();
-    connect(m_openInConversation, &Button::clicked, this, [this] {
+    workspace->setSpacing(0);
+    // Outside Build the bar sits above the page; the slot puts its body on the pages' 20px gutter.
+    const int shadow = FloatingPanel::shadowMargin();
+    m_barSlot = new QVBoxLayout;
+    m_barSlot->setContentsMargins(20 - shadow, 0, 20 - shadow, 0);
+    workspace->addLayout(m_barSlot);
+    m_bar = new BlueprintTopBar;
+    m_barSlot->addWidget(m_bar);
+    m_views = new QStackedWidget;
+    workspace->addWidget(m_views, 1);
+    const auto page = [](QWidget *content) {
+        auto *inset = new QWidget;
+        auto *layout = new QVBoxLayout(inset);
+        layout->setContentsMargins(20, 0, 20, 14);
+        layout->addWidget(content);
+        return inset;
+    };
+    setupEditor();
+    m_views->addWidget(page(setupRun()));
+    m_views->addWidget(page(scroller(&m_history)));
+
+    const auto outOfFullscreen = [this] { if (m_fullscreenDialog) m_fullscreenDialog->reject(); };
+    connect(m_bar, &BlueprintTopBar::backClicked, this, [this, outOfFullscreen] { outOfFullscreen(); showLibrary(); });
+    connect(m_bar, &BlueprintTopBar::viewChanged, this, &BlueprintPanel::showView);
+    connect(m_bar, &BlueprintTopBar::issueClicked, this, &BlueprintPanel::checkValidation);
+    connect(m_bar, &BlueprintTopBar::publishClicked, this, &BlueprintPanel::publish);
+    connect(m_bar, &BlueprintTopBar::reloadClicked, this, [this, outOfFullscreen] { outOfFullscreen(); reloadRevision(); });
+    connect(m_bar, &BlueprintTopBar::openInConversationClicked, this, [this, outOfFullscreen] {
+        outOfFullscreen();
         emit conversationRequested(m_graph["id"].toString());
     });
-    m_publish->hide();
-    m_reload->hide();
-    connect(m_publish, &Button::clicked, this, &BlueprintPanel::publish);
-    connect(m_reload, &Button::clicked, this, &BlueprintPanel::reloadRevision);
-    workspace->addLayout(crumb);
-    connect(back, &Button::clicked, this, &BlueprintPanel::showLibrary);
-
-    auto *head = new QHBoxLayout;
-    auto *heading = new QVBoxLayout;
-    auto *name = new QHBoxLayout;
-    m_title = wrapped({}, "blueprintTitle");
-    m_title->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    m_revision = label({}, "blueprintRevision");
-    name->addWidget(m_title);
-    name->addWidget(m_revision, 0, Qt::AlignVCenter);
-    name->addStretch();
-    heading->addLayout(name);
-    m_description = wrapped({});
-    heading->addWidget(m_description);
-    head->addLayout(heading, 1);
-    auto *edit = iconAction("pencil", "Edit blueprint details");
-    edit->setObjectName("blueprintEdit");
-    edit->setAccessibleName("Edit blueprint details");
-    auto *copy = iconAction("copy", "Duplicate blueprint");
-    copy->setObjectName("blueprintDuplicate");
-    copy->setAccessibleName("Duplicate blueprint");
-    auto *remove = iconAction("trash", "Delete blueprint");
-    remove->setObjectName("blueprintDelete");
-    auto *run = action("Run blueprint", true);
-    head->addWidget(edit);
-    head->addWidget(copy);
-    head->addWidget(remove);
-    head->addSpacing(6);
-    head->addWidget(m_openInConversation);
-    head->addWidget(m_reload);
-    head->addWidget(m_publish);
-    head->addWidget(run);
-    workspace->addLayout(head);
-    connect(edit, &Button::clicked, this, &BlueprintPanel::editDetails);
-    connect(remove, &Button::clicked, this, [this] { deleteBlueprint(m_graph["id"].toString()); });
-    connect(copy, &Button::clicked, this, [this] { if (!m_graph.isEmpty()) duplicate(m_graph); });
-    connect(run, &Button::clicked, this, [this] { showTest(); });
-
-    m_tabs = new TabWidget;
-    m_tabs->tabBar()->setProperty("underline", true);
-    workspace->addWidget(m_tabs, 1);
-    setupEditor();
-    setupRun();
-    m_tabs->addTab(scroller(&m_history), "Run history");
-    connect(m_tabs, &TabWidget::currentChanged, this, [this, run](int index) {
-        run->setVisible(index != 1 && !m_graph.isEmpty());
-        if (index == 2) {
-            refreshHistory();
-            m_preview->refreshHistory(m_graph["id"].toString());
-        }
+    connect(m_bar, &BlueprintTopBar::backToConversationClicked, this, [this, outOfFullscreen] {
+        outOfFullscreen();
+        emit chatRequested();
     });
+    connect(m_bar, &BlueprintTopBar::runClicked, this, [this] {
+        // In Test cases, Run starts the case shown (as Start run does); elsewhere it runs on the canvas.
+        if (m_bar->view() == BlueprintTopBar::View::TestCases) {
+            if (m_start->isEnabled()) startRun();
+        } else runFromCanvas();
+    });
+    connect(m_bar, &BlueprintTopBar::runMenuRequested, this, &BlueprintPanel::showRunMenu);
+    connect(m_bar, &BlueprintTopBar::editDetailsClicked, this, [this, outOfFullscreen] { outOfFullscreen(); editDetails(); });
+    connect(m_bar, &BlueprintTopBar::duplicateClicked, this, [this, outOfFullscreen] {
+        outOfFullscreen();
+        if (!m_graph.isEmpty()) duplicate(m_graph);
+    });
+    connect(m_bar, &BlueprintTopBar::deleteClicked, this, [this, outOfFullscreen] {
+        outOfFullscreen();
+        deleteBlueprint(m_graph["id"].toString());
+    });
+    connect(m_bar, &BlueprintTopBar::fullscreenClicked, this, &BlueprintPanel::toggleFullscreen);
     connect(m_preview, &BlueprintPreview::savedChanged, this, &BlueprintPanel::refreshLibrary);
     connect(m_preview, &BlueprintPreview::runChanged, this, [this](const QString &id) {
         if (id == m_runId) refreshRun();
-        if (m_tabs->currentIndex() == 2) refreshHistory();
+        if (id == m_canvasRunId) showCanvasRun(m_preview->run(id));
+        if (m_bar->view() == BlueprintTopBar::View::RunHistory) refreshHistory();
     });
     connect(m_preview, &BlueprintPreview::serviceChanged, this, [this] {
         const auto error = m_preview->serviceError();
         m_service->setText(error);
         m_service->setVisible(!error.isEmpty());
         if (m_preview->live()) {
-            m_publish->setEnabled(m_preview->connected());
-            m_reload->setEnabled(m_preview->connected());
+            m_bar->setConnected(m_preview->connected());
             if (!m_graph.isEmpty()) refreshRunOptions();
             refreshRun();
         }
     });
     connect(m_preview, &BlueprintPreview::optionsChanged, this, [this] {
         if (!m_graph.isEmpty()) {
-            m_canvas->setGraph(m_graph, m_preview->fixtures());
+            m_canvas->setGraph(m_graph);
             refreshRunOptions();
         }
     });
@@ -831,27 +832,24 @@ void BlueprintPanel::openBlueprint(const QString &id) {
 
 void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     const auto id = graph["id"].toString();
-    m_backToChat->hide();
+    m_canGoBack = false;
     m_graph = graph;
     if (m_graph.isEmpty()) return;
-    const auto nodes = m_graph["nodes"].toArray();
-    m_selected = nodes.isEmpty() ? QString{} : nodes.first().toObject()["id"].toString();
-    m_outputNode.clear();
-    m_outputPort.clear();
+    m_selected.clear();  // nothing is selected on open, so the inspector stays out of the way
+    // Run marks belong to the blueprint they ran on.
+    m_canvasRunId.clear();
+    m_runOnCanvas = false;
+    m_canvas->clearRunStates();
+    if (m_toast) m_toast->hide();
+    m_details->hide();
     const auto recent = m_preview->runs(id);
     m_runId = recent.isEmpty() ? QString{} : recent.first().toObject()["id"].toString();
     m_comparison = false;
-    m_tabs->setCurrentIndex(0);
-    m_tabs->setTabEnabled(0, true);
-    m_tabs->setTabEnabled(2, true);
     m_runSetup->show();
-    findChild<Button *>("blueprintEdit")->show();
-    findChild<Button *>("blueprintDuplicate")->show();
-    findChild<Button *>("blueprintDelete")->show();
     m_pages->setCurrentWidget(m_workspace);
     refreshEditor(true);
     showTest();
-    m_tabs->setCurrentIndex(0);
+    showView(BlueprintTopBar::View::Build);
     if (m_preview->live()) {
         m_preview->refreshHistory(id);
         if (!m_runId.isEmpty()) m_preview->loadRun(m_runId);
@@ -865,10 +863,12 @@ void BlueprintPanel::publish() {
     m_preview->publish(before, [self = QPointer(this), before](const auto &saved, const auto &error) {
         if (!self) return;
         self->m_workspace->setEnabled(true);
+        const bool runNext = std::exchange(self->m_runAfterPublish, false);
         if (!saved.isEmpty() && self->m_graph == before) {
             self->m_graph = saved;
             self->refreshEditor();
             self->refreshRunOptions();
+            if (runNext) self->runFromCanvas();
         }
         if (!error.isEmpty()) Ui::showNotice(self, "Save blueprint", error);
     });
@@ -887,45 +887,16 @@ void BlueprintPanel::reloadRevision() {
 }
 
 void BlueprintPanel::setupEditor() {
-    auto *page = new QWidget;
-    auto *editor = new QHBoxLayout(page);
-    editor->setContentsMargins(0, 9, 0, 0);
-    editor->setSpacing(12);
-    m_tabs->addTab(page, "Canvas");
-    m_canvasHome = new QVBoxLayout;
-    editor->addLayout(m_canvasHome, 1);
-    auto *panel = new QFrame;
-    panel->setObjectName("blueprintCanvasPanel");
-    panel->setFrameShape(QFrame::NoFrame);
-    m_canvasPanel = panel;
-    m_canvasPanel->installEventFilter(this);
-    auto *body = new QVBoxLayout(panel);
-    body->setContentsMargins(0, 0, 0, 0);
-    body->setSpacing(0);
-    m_canvasHome->addWidget(panel);
-    auto *toolbar = new QHBoxLayout;
-    toolbar->setContentsMargins(10, 6, 7, 6);
-    toolbar->addWidget(label("Workflow canvas", "headingLabel"));
-    toolbar->addStretch();
-    m_connect = action("Connect", false, true);
-    m_addNode = action("Add node");
-    m_fullscreen = action({}, false, true);
-    m_fullscreen->setObjectName("blueprintFullscreen");
-    m_fullscreen->setFixedSize(32, 32);
-    m_fullscreen->setIconSize(QSize(17, 17));
-    toolbar->addWidget(m_connect);
-    toolbar->addWidget(m_addNode);
-    toolbar->addWidget(m_fullscreen);
-    body->addLayout(toolbar);
-    connect(m_connect, &Button::clicked, this, [this] { connectPorts(); });
-    connect(m_addNode, &Button::clicked, this, [this] { openNodePicker(); });
-    connect(m_fullscreen, &Button::clicked, this, &BlueprintPanel::toggleFullscreen);
-
     m_canvasPages = new QStackedWidget;
-    body->addWidget(m_canvasPages, 1);
-    m_canvas = new BlueprintCanvas;
+    m_views->addWidget(m_canvasPages);
+    m_canvas = new BlueprintView(*m_preview);
+    m_canvas->installEventFilter(this);
+    m_canvas->setDropValidator([this](const QJsonObject &e) {
+        return m_preview->dropError(withoutEdge(m_graph, m_canvas->movingEdge()), e);
+    });
     m_canvasPages->addWidget(m_canvas);
     auto *empty = new QWidget;
+    m_emptyCanvas = empty;
     empty->setObjectName("blueprintEmptyCanvas");
     auto *center = new QVBoxLayout(empty);
     center->addStretch();
@@ -939,97 +910,117 @@ void BlueprintPanel::setupEditor() {
     emptyHint->setAlignment(Qt::AlignCenter);
     center->addWidget(emptyHint);
     m_emptyAdd = action("Add node");
-    connect(m_emptyAdd, &Button::clicked, this, [this] { openNodePicker(); });
+    connect(m_emptyAdd, &Button::clicked, this, [this] {
+        openQuickAdd(m_emptyCanvas, m_emptyAdd->geometry().bottomLeft() + m_emptyAdd->parentWidget()->mapTo(m_emptyCanvas, QPoint()) + QPoint(0, 6),
+                     m_canvas->centerInGraph());
+    });
     center->addWidget(m_emptyAdd, 0, Qt::AlignHCenter);
     center->addStretch();
     m_canvasPages->addWidget(empty);
 
-    auto *footer = new QHBoxLayout;
-    footer->setContentsMargins(7, 4, 7, 4);
-    m_validation = action({}, false, true);
-    m_canvasCount = label({}, "cardMeta");
-    footer->addWidget(m_validation);
-    footer->addWidget(m_canvasCount);
-    m_gestureHint = label("Drag to pan · Scroll to zoom", "cardMeta");
-    m_gestureHint->setAlignment(Qt::AlignCenter);
-    m_gestureHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    footer->addWidget(m_gestureHint, 1);
-    m_zoomControls = new QWidget;
-    auto *zoomRow = new QHBoxLayout(m_zoomControls);
-    zoomRow->setContentsMargins(0, 0, 0, 0);
-    zoomRow->setSpacing(2);
-    auto *minus = action("−", false, true);
-    auto *plus = action("+", false, true);
-    auto *fit = action("Fit", false, true);
-    minus->setAccessibleName("Zoom out");
-    plus->setAccessibleName("Zoom in");
-    fit->setAccessibleName("Fit canvas");
-    m_zoom = label("100%", "blueprintCode");
-    zoomRow->addWidget(minus);
-    zoomRow->addWidget(m_zoom);
-    zoomRow->addWidget(plus);
-    zoomRow->addWidget(fit);
-    footer->addWidget(m_zoomControls);
-    body->addLayout(footer);
-
-    auto *inspector = new QFrame;
-    inspector->setObjectName("blueprintSurface");
-    inspector->setFixedWidth(243);
-    auto *inspectorLayout = new QVBoxLayout(inspector);
-    inspectorLayout->setContentsMargins(10, 10, 6, 6);
-    inspectorLayout->addWidget(label("Workflow nodes", "headingLabel"));
-    m_nodeTree = new QTreeWidget;
-    m_nodeTree->setObjectName("blueprintNodeTree");
-    m_nodeTree->setAccessibleName("Workflow nodes and connections");
-    m_nodeTree->setHeaderHidden(true);
-    m_nodeTree->setUniformRowHeights(true);
-    m_nodeTree->setMaximumHeight(142);
-    m_nodeTree->setMinimumHeight(60);
-    inspectorLayout->addWidget(m_nodeTree, 1);
-    auto *inspectorScroll = scroller(&m_inspector);
-    m_inspector->setSpacing(6);
-    inspectorLayout->addWidget(inspectorScroll, 3);
-    editor->addWidget(inspector);
-    connect(m_nodeTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
-        if (!item) return;
-        m_selected = item->data(0, Qt::UserRole).toString();
-        m_canvas->revealNode(m_selected);
+    // The node library: operations to add, and the nodes already in this workflow.
+    const int shadow = FloatingPanel::shadowMargin();
+    m_libraryPanel = new FloatingPanel;
+    m_libraryPanel->setObjectName("blueprintLibraryDock");
+    m_libraryPanel->setAccessibleName("Node library");
+    m_libraryPanel->setFixedWidth(248 + 2 * shadow);
+    auto *libraryLayout = new QVBoxLayout(m_libraryPanel);
+    libraryLayout->setContentsMargins(4, 4, 0, 0);
+    m_libraryDock = new BlueprintLibraryDock(*m_preview);
+    libraryLayout->addWidget(m_libraryDock, 1);
+    m_canvas->addOverlay(m_libraryPanel, OverlayEdge::Left);
+    connect(m_canvas, &BlueprintView::libraryToggled, m_libraryPanel, &QWidget::setVisible);
+    m_canvas->setLibraryShown(true);
+    connect(m_libraryDock, &BlueprintLibraryDock::addRequested, this,
+            [this](const BlueprintLibraryDock::Entry &entry) { addEntry(entry); });
+    connect(m_canvas, &BlueprintView::entryDropped, this, [this](const QByteArray &json, const QPointF &graph) {
+        addEntry(BlueprintLibraryDock::Entry::fromJson(json), graph);
+    });
+    connect(m_libraryDock, &BlueprintLibraryDock::nodeActivated, this, [this](const QString &id) {
+        m_selected = id;
+        m_canvas->revealNode(id);
         refreshInspector();
     });
+    // "/" jumps to the library search; text fields keep it as a character.
+    auto *search = new QShortcut(QKeySequence(Qt::Key_Slash), m_canvas, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+    connect(search, &QShortcut::activated, this, [this] {
+        m_canvas->setLibraryShown(true);
+        m_libraryDock->focusSearch();
+    });
 
-    connect(m_canvas, &BlueprintCanvas::zoomChanged, this, [this](int percent) { m_zoom->setText(QString("%1%").arg(percent)); });
-    connect(minus, &Button::clicked, this, [this] { m_canvas->zoomBy(1 / 1.2); });
-    connect(plus, &Button::clicked, this, [this] { m_canvas->zoomBy(1.2); });
-    connect(fit, &Button::clicked, m_canvas, &BlueprintCanvas::fit);
-    connect(m_validation, &Button::clicked, this, [this] {
-        if (m_preview->live()) {
-            m_preview->validateLive(m_graph, [self = QPointer(this)](const auto &caps, const auto &error) {
-                if (!self) return;
-                QString detail = error;
-                if (detail.isEmpty()) {
-                    detail = "The workflow has compatible bindings and connected inputs.";
-                    if (caps["device"].isString()) detail += "\nLocal device: " + caps["device"].toString();
-                    for (const auto &key : caps["nodes"].toObject().keys()) {
-                        const auto node = caps["nodes"].toObject()[key].toObject();
-                        detail += QString("\n%1: %2 context tokens%3").arg(key).arg(node["context_tokens"].toInt())
-                            .arg(node["reasoning"].toBool() ? " · supports thinking" : "");
-                    }
-                }
-                Ui::showNotice(self, "Workflow validation", detail);
-            });
+    // Today's inspector content, floating at the right while a node is selected.
+    m_inspectorPanel = new FloatingPanel;
+    m_inspectorPanel->setObjectName("blueprintInspector");
+    m_inspectorPanel->setAccessibleName("Node inspector");
+    m_inspectorPanel->setFixedWidth(BlueprintInspector::panelWidth + 2 * shadow);
+    m_inspectorPanel->setProperty("slideIn", true);
+    auto *inspectorLayout = new QVBoxLayout(m_inspectorPanel);
+    inspectorLayout->setContentsMargins(4, 4, 0, 0);
+    auto *inspectorScroll = scroller(&m_inspector);
+    inspectorScroll->setObjectName("blueprintInspectorScroll");
+    m_inspector->setSpacing(6);
+    m_nodeInspector = new BlueprintInspector(*m_preview);
+    m_inspector->addWidget(m_nodeInspector);
+    inspectorLayout->addWidget(inspectorScroll);
+    // Inspector edits apply to the node they were made for, and only while it still exists.
+    connect(m_nodeInspector, &BlueprintInspector::nodeChanged, this, [this](const QJsonObject &node, bool ports) {
+        if (findById(m_graph["nodes"].toArray(), node["id"].toString()).isEmpty()) return;
+        const auto before = m_graph;
+        changeNode(node, ports);
+        if (m_graph == before) m_nodeInspector->reload();
+    });
+    connect(m_nodeInspector, &BlueprintInspector::disconnectRequested, this, &BlueprintPanel::removeConnection);
+    connect(m_nodeInspector, &BlueprintInspector::schemaRequested, this, &BlueprintPanel::editSchema);
+    connect(m_nodeInspector, &BlueprintInspector::trainRequested, this, [this] {
+        if (m_preview->live()) liveTraining();
+        else saveTrainingRecipe();
+    });
+    connect(m_nodeInspector, &BlueprintInspector::testRequested, this, [this](const QString &id) { showTest(id); });
+    connect(m_nodeInspector, &BlueprintInspector::saveToLibraryRequested, this, &BlueprintPanel::saveNodeTemplate);
+    connect(m_nodeInspector, &BlueprintInspector::deleteRequested, this, &BlueprintPanel::removeNode);
+    connect(m_nodeInspector, &BlueprintInspector::closeRequested, this, [this] {
+        m_selected.clear();
+        refreshInspector();
+    });
+    m_details = new BlueprintDetails(*m_preview, m_canvas->viewport());
+    connect(m_details, &BlueprintDetails::editRequested, this, [this](const QString &id) {
+        m_selected = id;
+        m_canvas->revealNode(id);
+        refreshInspector();
+    });
+    connect(m_details, &BlueprintDetails::testRequested, this, [this](const QString &id) { showTest(id); });
+    connect(m_details, &BlueprintDetails::addRequested, this, [this] {
+        if (m_quickAdd && m_quickAdd->isVisible()) {
+            // Opened from quick-add: add it where the menu was opened, as Enter would.
+            m_quickAdd->dismiss();
+            const auto at = m_quickAdd->property("graph").toPointF();
+            const auto from = m_quickAdd->property("fromNode").toString();
+            if (from.isEmpty()) addEntry(m_detailsEntry, at);
+            else addConnectedEntry(m_detailsEntry, at, from, m_quickAdd->property("outPort").toString());
             return;
         }
-        const auto issues = m_preview->issues(m_graph);
-        Ui::showNotice(this, "Workflow validation", issues.isEmpty()
-            ? QString("The workflow has compatible bindings and connected inputs.") : issues.join('\n'));
+        addEntry(m_detailsEntry);
     });
-    connect(m_canvas, &BlueprintCanvas::nodeSelected, this, [this](const QString &id) {
+    connect(m_nodeInspector, &BlueprintInspector::detailsRequested, this, &BlueprintPanel::showNodeDetails);
+    connect(m_canvas, &BlueprintView::detailsRequested, this, &BlueprintPanel::showNodeDetails);
+    connect(m_libraryDock, &BlueprintLibraryDock::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
+        showEntryDetails(entry, m_libraryPanel->geometry());
+    });
+    m_canvas->addOverlay(m_inspectorPanel, OverlayEdge::Right);
+    m_inspectorPanel->hide();
+
+    // The dock's Add node opens the node picker until quick-add replaces it.
+    connect(m_canvas, &BlueprintView::addNodeClicked, this, [this] {
+        const auto centre = m_canvas->freeArea().center();
+        openQuickAdd(m_canvas->viewport(), centre - QPoint(150, 120), m_canvas->mapToScene(centre));
+    });
+    connect(m_canvas, &BlueprintView::nodeSelected, this, [this](const QString &id) {
         m_selected = id;
         refreshInspector();
     });
-    connect(m_canvas, &BlueprintCanvas::nodeMenuRequested, this, &BlueprintPanel::showNodeMenu);
-    connect(m_canvas, &BlueprintCanvas::deleteRequested, this, &BlueprintPanel::removeNode);
-    connect(m_canvas, &BlueprintCanvas::nodeMoved, this, [this](const QString &id, const QPoint &position) {
+    connect(m_canvas, &BlueprintView::nodeMenuRequested, this, &BlueprintPanel::showNodeMenu);
+    connect(m_canvas, &BlueprintView::deleteRequested, this, &BlueprintPanel::removeNode);
+    connect(m_canvas, &BlueprintView::nodeMoved, this, [this](const QString &id, const QPoint &position) {
         if (m_preview->live()) {
             auto graph = m_graph;
             auto nodes = graph["nodes"].toArray();
@@ -1053,62 +1044,95 @@ void BlueprintPanel::setupEditor() {
         node["y"] = position.y();
         changeNode(node);
     });
-    connect(m_canvas, &BlueprintCanvas::portSelected, this, [this](const QString &node, bool output, const QString &port) {
-        if (output) {
-            if (m_outputNode == node && m_outputPort == port) {
-                m_outputNode.clear();
-                m_outputPort.clear();
-            } else {
-                m_outputNode = node;
-                m_outputPort = port;
-            }
-            refreshInspector();
-        } else if (m_outputNode.isEmpty()) connectPorts(node, port);
-        else addConnection({{"from", m_outputNode}, {"out", m_outputPort}, {"to", node}, {"in", port}}, m_canvasPanel);
+    connect(m_canvas, &BlueprintView::connectRequested, this, &BlueprintPanel::dropConnection);
+    connect(m_canvas, &BlueprintView::disconnectRequested, this, &BlueprintPanel::removeConnection);
+    connect(m_canvas, &BlueprintView::wireMoved, this, &BlueprintPanel::moveConnection);
+    // The quick-add popup replaces the node picker for these in a later task.
+    connect(m_canvas, &BlueprintView::wireDropped, this,
+            [this](const QString &from, const QString &out, const QPoint &screen, const QPointF &graph) {
+        openQuickAdd(m_canvas->viewport(), m_canvas->viewport()->mapFromGlobal(screen), graph, from, out);
     });
-    refreshCanvasActions();
+    const auto quickAddAt = [this](const QPoint &screen, const QPointF &graph) {
+        openQuickAdd(m_canvas->viewport(), m_canvas->viewport()->mapFromGlobal(screen), graph);
+    };
+    connect(m_canvas, &BlueprintView::quickAddRequested, this, quickAddAt);
+    connect(m_canvas, &BlueprintView::canvasMenuRequested, this, quickAddAt);
 }
 
-void BlueprintPanel::refreshCanvasActions() {
-    const bool full = m_fullscreenDialog;
-    const QString title = full ? "Exit fullscreen" : "Fullscreen canvas";
-    m_fullscreen->setIcon(Theme::coloredIcon(full ? "shrink" : "expand", QColor(Theme::textSecondary()), 16));
-    m_fullscreen->setAccessibleName(title);
-    m_fullscreen->setToolTip(title);
+void BlueprintPanel::checkValidation(int issue) {
+    const auto issues = m_preview->issues(m_graph);
+    if (issue >= 0 && issue < issues.size()) {
+        // Issues start with the node's name; the longest matching name is the offending node.
+        QString found;
+        qsizetype matched = 0;
+        for (const auto &value : m_graph["nodes"].toArray()) {
+            const auto node = value.toObject();
+            const auto name = node["name"].toString();
+            if (!name.isEmpty() && name.size() > matched && issues.at(issue).startsWith(name)) {
+                found = node["id"].toString();
+                matched = name.size();
+            }
+        }
+        if (found.isEmpty()) {
+            Ui::showNotice(this, "Workflow validation", issues.join('\n'));
+            return;
+        }
+        showView(BlueprintTopBar::View::Build);
+        m_selected = found;
+        m_canvas->revealNode(found);
+        refreshInspector();
+        return;
+    }
+    // No issues: the live service checks bindings and the device; fixtures are ready as they are.
+    if (!m_preview->live()) {
+        Ui::showNotice(this, "Workflow validation", "The workflow has compatible bindings and connected inputs.");
+        return;
+    }
+    m_preview->validateLive(m_graph, [self = QPointer(this)](const auto &caps, const auto &error) {
+        if (!self) return;
+        QString detail = error;
+        if (detail.isEmpty()) {
+            detail = "The workflow has compatible bindings and connected inputs.";
+            if (caps["device"].isString()) detail += "\nLocal device: " + caps["device"].toString();
+            for (const auto &key : caps["nodes"].toObject().keys()) {
+                const auto node = caps["nodes"].toObject()[key].toObject();
+                detail += QString("\n%1: %2 context tokens%3").arg(key).arg(node["context_tokens"].toInt())
+                    .arg(node["reasoning"].toBool() ? " · supports thinking" : "");
+            }
+        }
+        Ui::showNotice(self, "Workflow validation", detail);
+    });
+}
+
+void BlueprintPanel::showRunMenu(const QPoint &globalPosition) {
+    QMenu menu(m_bar);
+    // The test case or sample a canvas run uses, as chosen in Test cases.
+    for (auto *combo : {m_scenarioField->isHidden() ? nullptr : m_scenario, m_sampleField->isHidden() ? nullptr : m_sample}) {
+        if (!combo) continue;
+        for (int i = 0; i < combo->count(); ++i) {
+            auto *choice = menu.addAction(combo->itemText(i), this, [combo, i] { combo->setCurrentIndex(i); });
+            choice->setCheckable(true);
+            choice->setChecked(i == combo->currentIndex());
+            choice->setData(combo->itemData(i));
+        }
+        menu.addSeparator();
+    }
+    menu.addAction("Open Test cases…", this, [this] {
+        if (m_fullscreenDialog) m_fullscreenDialog->reject();
+        showView(BlueprintTopBar::View::TestCases);
+    });
+    menu.exec(globalPosition - QPoint(menu.sizeHint().width(), 0));
 }
 
 void BlueprintPanel::refreshEditor(bool fit) {
     if (m_graph.isEmpty()) return;
-    m_title->setText(m_graph["name"].toString());
-    const auto revision = m_graph["revision"].toInt();
-    const bool dirty = m_graph["dirty"].toBool();
-    m_revision->setText(revision ? QString("Revision %1%2").arg(revision).arg(dirty ? " · Draft edits" : "") : "Draft");
-    m_publish->setVisible(m_preview->live() && dirty);
-    m_publish->setEnabled(m_preview->connected());
-    m_reload->setVisible(m_preview->live() && dirty && revision);
-    m_openInConversation->setVisible(m_preview->live() && revision > 0);
-    m_openInConversation->setToolTip("Open in Conversation · run the latest saved revision there");
-    m_reload->setEnabled(m_preview->connected());
-    m_description->setText(m_graph["description"].toString().trimmed());
-    m_description->setVisible(!m_description->text().isEmpty());
-    const auto fixtures = m_preview->fixtures();
+    refreshBar();
     const auto nodes = m_graph["nodes"].toArray();
-    m_canvasPages->setCurrentIndex(nodes.isEmpty() ? 1 : 0);
-    m_canvas->setGraph(m_graph, fixtures);
+    if (!m_fullscreenDialog) m_canvasPages->setCurrentWidget(nodes.isEmpty() ? m_emptyCanvas : m_canvas);
+    m_bar->setFullscreenAvailable(m_fullscreenDialog || !nodes.isEmpty());
+    placeBar();
+    m_canvas->setGraph(m_graph);
     if (fit) m_canvas->fit();
-    m_connect->setVisible(!nodes.isEmpty());
-    m_connect->setEnabled(nodes.size() > 1);
-    m_addNode->setVisible(!nodes.isEmpty());
-    m_zoomControls->setVisible(!nodes.isEmpty());
-    updateCanvasFooter();
-    const auto issues = m_preview->issues(m_graph);
-    m_validation->setText(issues.isEmpty() ? (m_preview->live() ? "Check readiness" : "Ready to run")
-        : QString("%1 validation issue%2").arg(issues.size()).arg(issues.size() == 1 ? "" : "s"));
-    m_validation->setIcon(Theme::coloredIcon(issues.isEmpty() ? "check" : "file-text",
-        QColor(issues.isEmpty() ? Theme::statusSuccess() : Theme::statusWarning()), 15));
-    const auto connections = m_graph["edges"].toArray().size();
-    m_canvasCount->setText(QString("%1 %2 · %3 %4").arg(nodes.size()).arg(nodes.size() == 1 ? "node" : "nodes")
-        .arg(connections).arg(connections == 1 ? "link" : "links"));
     // Rebuild the test target menu after structural edits, keeping the selected target.
     const auto target = m_target->currentData().toString();
     const QSignalBlocker blocked(m_target);
@@ -1119,185 +1143,77 @@ void BlueprintPanel::refreshEditor(bool fit) {
         m_target->addItem("Node only · " + node["name"].toString(), node["id"].toString());
     }
     m_target->setCurrentIndex(qMax(0, m_target->findData(target)));
-    refreshNodeTree();
+    QHash<QString, QString> warnings;
+    const auto issues = m_preview->issues(m_graph);
+    for (const auto &value : nodes) {
+        const auto node = value.toObject();
+        warnings.insert(node["id"].toString(),
+                        BlueprintScene::warningLines(*m_preview, m_graph, node, issues).join('\n'));
+    }
+    m_libraryDock->setGraph(m_graph, warnings);
     refreshInspector();
     if (m_preview->live()) refreshRunOptions();
 }
 
-void BlueprintPanel::refreshInspector() {
-    m_canvas->setSelection(m_selected, m_outputNode, m_outputPort);
-    clear(m_inspector);
-    auto *header = new QHBoxLayout;
-    header->addWidget(label("Node inspector", "headingLabel"), 1);
-    if (!m_selected.isEmpty()) {
-        auto *close = iconAction("window-close", "Clear node selection");
-        close->setFixedSize(24, 24);
-        header->addWidget(close);
-        connect(close, &Button::clicked, this, [this] { m_selected.clear(); refreshInspector(); });
-    }
-    m_inspector->addLayout(header);
-    m_inspector->addWidget(rule());
-    const auto nodes = m_graph["nodes"].toArray();
-    const auto *current = m_nodeTree->currentItem();
-    if (!current || current->data(0, Qt::UserRole).toString() != m_selected) {
-        const QSignalBlocker blocked(m_nodeTree);
-        m_nodeTree->setCurrentItem(nullptr);
-        for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
-            auto *item = m_nodeTree->topLevelItem(i);
-            if (item->data(0, Qt::UserRole).toString() == m_selected) {
-                m_nodeTree->setCurrentItem(item);
-                break;
-            }
-        }
-    }
-    if (!m_outputNode.isEmpty()) m_inspector->addWidget(wrapped("Select a matching input port."));
-    const auto node = findById(nodes, m_selected);
-    if (node.isEmpty()) {
-        m_inspector->addWidget(wrapped("Select a node to see its settings and contracts."));
-        m_inspector->addStretch();
+void BlueprintPanel::refreshBar() {
+    if (m_graph.isEmpty()) {  // a run whose blueprint is not open
+        m_bar->setActions(false, false, false, m_canGoBack);
         return;
     }
-    const auto fixtures = m_preview->fixtures();
-    const auto code = BlueprintPreview::operationId(node);
-    const auto spec = m_preview->operation(code);
-    const auto kind = spec["kind"].toString(node["kind"].toString());
-    const auto iconKind = code == "selector" || code == "extractor" ? code : kind;
-    auto *identity = new QHBoxLayout;
-    identity->setSpacing(9);
-    auto *icon = label({});
-    icon->setFixedSize(34, 34);
-    icon->setAlignment(Qt::AlignCenter);
-    icon->setObjectName("blueprintNodeIcon");
-    icon->setPixmap(Theme::coloredIcon(BlueprintCanvas::nodeIcon(iconKind), BlueprintCanvas::nodeAccent(iconKind), 19).pixmap(19, 19));
-    identity->addWidget(icon);
-    auto *names = new QVBoxLayout;
-    names->setSpacing(3);
-    names->addWidget(wrapped(node["name"].toString(), "blueprintSection"));
-    names->addWidget(wrapped(m_preview->nodeKindLabel(kind) + " · " + spec["label"].toString()));
-    identity->addLayout(names, 1);
-    m_inspector->addLayout(identity);
-    m_inspector->addWidget(wrapped(spec["detail"].toString()));
-    const auto id = node["id"].toString();
-    auto *nodeActions = new QHBoxLayout;
-    auto *configure = action("Configure…");
-    auto *save = iconAction("folder", "Save to node library");
-    nodeActions->addWidget(configure, 1);
-    nodeActions->addWidget(save);
-    m_inspector->addLayout(nodeActions);
-    connect(configure, &Button::clicked, this, [this, id] { configureNode(id); });
-    connect(save, &Button::clicked, this, [this, id] { saveNodeTemplate(id); });
-    if (m_preview->live() && (kind == "model" || kind == "reasoning")) {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Checkpoint & adapter", "headingLabel"));
-        const auto checkpoint = node["model"].toString();
-        const auto adapter = node["adapter"].toString();
-        const auto linked = adapterSource(m_graph, node);
-        m_inspector->addWidget(wrapped(checkpoint.isEmpty() ? "Choose a checkpoint from the local model library."
-            : findById(fixtures["models"].toArray(), checkpoint)["name"].toString(checkpoint)));
-        m_inspector->addWidget(wrapped(!linked.isEmpty() ? "Adapter node · " + linked["name"].toString()
-            : adapter.isEmpty() ? "No adapter" : "Adapter · " +
-              findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
-        m_inspector->addWidget(wrapped(QString("Output budget · %1 tokens")
-            .arg(node["maxTokens"].toInt(kind == "reasoning" ? 1024 : 256))));
-        auto *binding = action("Change binding");
-        auto *train = action("Training jobs…", false, true);
-        m_inspector->addWidget(binding);
-        m_inspector->addWidget(train);
-        train->setEnabled(m_graph["revision"].toInteger() > 0 && !m_graph["dirty"].toBool());
-        if (!train->isEnabled()) train->setToolTip("Save a complete revision before training or binding a job.");
-        connect(binding, &Button::clicked, this, &BlueprintPanel::editBinding);
-        connect(train, &Button::clicked, this, &BlueprintPanel::liveTraining);
-    } else if (kind == "adapter") {
-        const auto adapter = node["adapter"].toString();
-        m_inspector->addWidget(wrapped(adapter.isEmpty() ? "Choose a trained LoRA adapter in Configure."
-            : findById(fixtures["adapters"].toArray(), adapter)["name"].toString(adapter)));
-    } else if (m_preview->live() && kind == "dataset") {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Dataset", "headingLabel"));
-        const auto dataset = node["dataset"].toString();
-        m_inspector->addWidget(wrapped(dataset.isEmpty() ? "Inline rows"
-            : findById(m_preview->datasets(), dataset)["name"].toString(dataset)));
-        auto *source = action("Choose dataset");
-        m_inspector->addWidget(source);
-        connect(source, &Button::clicked, this, &BlueprintPanel::editDataset);
-    } else if (kind == "model") {
-        m_inspector->addWidget(rule());
-        m_inspector->addWidget(label("Model & adapter", "headingLabel"));
-        auto *base = Surface::card(m_inspector->parentWidget());
-        base->parentWidget()->setObjectName("blueprintBinding");
-        base->setContentsMargins(9, 6, 9, 6);
-        base->setSpacing(3);
-        base->addWidget(label("Base model", "cardMeta"));
-        base->addWidget(wrapped(named(fixtures, "models", node["model"]), "blueprintBindingValue"));
-        m_inspector->addWidget(base->parentWidget());
+    const auto revision = m_graph["revision"].toInt();
+    const bool dirty = m_graph["dirty"].toBool();
+    const bool live = m_preview->live();
+    m_bar->setBlueprint(m_graph["name"].toString(),
+                        revision ? QString("Revision %1%2").arg(revision).arg(dirty ? " · unpublished edits" : "")
+                                 : QString("No published revision"),
+                        dirty || !revision, !live);
+    // One way back to Conversation is enough.
+    m_bar->setActions(live && dirty, live && dirty && revision, live && revision > 0 && !m_canGoBack, m_canGoBack);
+    m_bar->setConnected(!live || m_preview->connected());
+    m_bar->setValidation(m_preview->issues(m_graph));
+    m_bar->setEditable(true);
+    m_bar->setRunEnabled(true);
+}
 
-        auto *adapter = new ComboBox;
-        adapter->setAccessibleName("Node adapter");
-        adapter->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        adapter->addItem("Select compatible adapter");
-        for (const auto &value : m_preview->compatibleAdapters(node["model"].toString(), code)) {
-            const auto choice = value.toObject();
-            adapter->addItem(choice["name"].toString(), choice["id"].toString());
-        }
-        adapter->setCurrentIndex(qMax(0, adapter->findData(node["adapter"].toString())));
-        adapter->setEnabled(adapter->count() > 1);
-        Surface::field(m_inspector, "Node adapter", adapter);
-        connect(adapter, &ComboBox::activated, this, [this, adapter, node] {
-            const auto chosen = adapter->currentData().toString();
-            if (chosen == node["adapter"].toString()) return;
-            auto updated = node;
-            updated["adapter"] = chosen;
-            changeNode(updated);
-            for (auto *current : m_inspector->parentWidget()->findChildren<QComboBox *>()) {
-                if (current->isVisible() && current->accessibleName() == "Node adapter") current->setFocus();
-            }
-        });
-        const auto model = findById(fixtures["models"].toArray(), node["model"].toString());
-        m_inspector->addWidget(label(model["engine"].toString(), "blueprintCode"));
-        auto *binding = new QHBoxLayout;
-        auto *pickerButton = action("Change binding");
-        auto *train = action("Train adapter", false, true);
-        binding->addWidget(pickerButton);
-        binding->addWidget(train);
-        m_inspector->addLayout(binding);
-        connect(pickerButton, &Button::clicked, this, &BlueprintPanel::editBinding);
-        connect(train, &Button::clicked, this, &BlueprintPanel::saveTrainingRecipe);
-        const auto recipe = node["training"].toObject();
-        if (!recipe.isEmpty()) m_inspector->addWidget(wrapped("Training recipe saved\n" + recipe["name"].toString()));
+void BlueprintPanel::showView(BlueprintTopBar::View view) {
+    if (view != BlueprintTopBar::View::Build && m_fullscreenDialog) m_fullscreenDialog->reject();
+    m_bar->setView(view);
+    m_views->setCurrentIndex(int(view));
+    placeBar();
+    if (view == BlueprintTopBar::View::RunHistory) {
+        refreshHistory();
+        m_preview->refreshHistory(m_graph["id"].toString());
     }
-    m_inspector->addWidget(rule());
-    m_inspector->addWidget(label("Port contracts", "headingLabel"));
-    const auto contracts = fixtures["contracts"].toObject();
-    for (const auto &side : {QString("in"), QString("out")}) {
-        for (const auto &value : node[side].toArray()) {
-            const auto port = value.toObject();
-            const auto name = m_preview->portLabel(port);
-            const auto type = contracts.value(port["type"].toString()).toObject()["label"].toString();
-            const bool input = side == "in";
-            if (port["type"] == "adapter-ref") {
-                m_inspector->addWidget(wrapped(input ? "In    LoRA adapter · Optional" : "Out   LoRA adapter"));
-                continue;
-            }
-            const auto text = name == type ? name : QString("%1 · %2").arg(name, type);
-            auto *edit = new QPushButton(literalButtonText((input ? "In    " : "Out   ") + text + "  ›"));
-            edit->setObjectName("blueprintPortContract");
-            edit->setAccessibleName(QString("Edit %1 schema for %2").arg(input ? "input" : "output", name));
-            edit->setCursor(Qt::PointingHandCursor);
-            m_inspector->addWidget(edit);
-            connect(edit, &QPushButton::clicked, this, [this, side, port] { editSchema(side, port["id"].toString()); });
-        }
+}
+
+void BlueprintPanel::placeBar() {
+    const bool overCanvas = m_fullscreenDialog
+        || (m_views->currentIndex() == int(BlueprintTopBar::View::Build) && m_canvasPages->currentWidget() == m_canvas);
+    if (overCanvas == (m_bar->parentWidget() == m_canvas)) return;
+    if (overCanvas) {
+        m_barSlot->removeWidget(m_bar);
+        m_canvas->addOverlay(m_bar, OverlayEdge::Top);
+    } else {
+        m_canvas->removeOverlay(m_bar);
+        m_barSlot->addWidget(m_bar);
+        m_bar->show();
     }
-    m_inspector->addWidget(rule());
-    auto *actions = new QHBoxLayout;
-    auto *test = action("Test this node");
-    auto *remove = iconAction("trash", "Delete node");
-    actions->addWidget(test);
-    actions->addStretch();
-    actions->addWidget(remove);
-    m_inspector->addLayout(actions);
-    connect(test, &Button::clicked, this, [this] { showTest(m_selected); });
-    connect(remove, &Button::clicked, this, [this, node] { removeNode(node["id"].toString()); });
-    m_inspector->addStretch();
+}
+
+void BlueprintPanel::applyCompactRule() {
+    if (m_selected.isEmpty() || m_inspectorPanel->isHidden() || !m_canvas->libraryShown()) return;
+    if (m_canvas->freeArea().width() < 240) m_canvas->setLibraryShown(false);
+}
+
+void BlueprintPanel::refreshInspector() {
+    m_canvas->setSelection(m_selected);
+    const auto nodes = m_graph["nodes"].toArray();
+    m_libraryDock->setCurrentNode(m_selected);
+    const auto node = findById(nodes, m_selected);
+    // The inspector floats in while a node is selected and leaves when nothing is.
+    m_inspectorPanel->setVisible(!node.isEmpty());
+    m_nodeInspector->setNode(m_graph, node.isEmpty() ? QString{} : m_selected);
+    if (!node.isEmpty()) applyCompactRule();
 }
 
 void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
@@ -1321,238 +1237,145 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
                 retained.append(edge);
             }
             const auto removed = edges.size() - retained.size();
-            if (removed && !Ui::confirmAction(m_canvasPanel, "Update node",
+            if (removed && !Ui::confirmAction(m_canvas, "Update node",
                     QString("This change will remove %1.").arg(countOf(removed, "incompatible connection")), "Save changes")) return;
             graph["edges"] = retained;
-            m_outputNode.clear();
-            m_outputPort.clear();
         }
         if (!saveGraph(graph)) refreshEditor();
         return;
     }
 }
 
-void BlueprintPanel::refreshNodeTree() {
-    const QSignalBlocker blocked(m_nodeTree);
-    QSet<QString> expanded;
-    for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
-        const auto *item = m_nodeTree->topLevelItem(i);
-        if (item->isExpanded()) expanded.insert(item->data(0, Qt::UserRole).toString());
-    }
-    m_nodeTree->clear();
-    QHash<QString, QJsonObject> nodes;
-    QHash<QString, QTreeWidgetItem *> items;
-    for (const auto &value : m_graph["nodes"].toArray()) {
-        const auto node = value.toObject();
-        const auto id = node["id"].toString();
-        const auto kind = node["kind"].toString();
-        auto *item = new QTreeWidgetItem(m_nodeTree, {node["name"].toString()});
-        item->setData(0, Qt::UserRole, id);
-        item->setIcon(0, Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind), 15));
-        nodes.insert(id, node);
-        items.insert(id, item);
-    }
-    for (const auto &value : m_graph["edges"].toArray()) {
-        const auto edge = value.toObject();
-        const auto from = edge["from"].toString();
-        const auto to = edge["to"].toString();
-        if (!items.contains(from) || !items.contains(to)) continue;
-        const auto source = nodes.value(from);
-        const auto target = nodes.value(to);
-        const auto out = m_preview->portLabel(findById(source["out"].toArray(), edge["out"].toString()));
-        const auto in = m_preview->portLabel(findById(target["in"].toArray(), edge["in"].toString()));
-        const auto downstream = QString("%1 → %2 · %3").arg(out, target["name"].toString(), in);
-        const auto upstream = QString("%1 ← %2 · %3").arg(in, source["name"].toString(), out);
-        auto *outgoing = new QTreeWidgetItem(items.value(from), {downstream});
-        outgoing->setData(0, Qt::UserRole, to);
-        outgoing->setToolTip(0, downstream);
-        auto *incoming = new QTreeWidgetItem(items.value(to), {upstream});
-        incoming->setData(0, Qt::UserRole, from);
-        incoming->setToolTip(0, upstream);
-    }
-    for (const auto &id : expanded)
-        if (auto *item = items.value(id)) item->setExpanded(true);
-    if (auto *selected = items.value(m_selected)) m_nodeTree->setCurrentItem(selected);
-}
-
-void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
-    auto *dialog = new SettingsDetailDialog(m_canvasPanel);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle("Add node");
-    dialog->setAccessibleName("Add node picker");
-    const auto screen = m_canvasPanel->screen()->availableGeometry();
-    const int width = qMin(650, screen.width() - 16);
-    const bool compact = width < 500 || screen.height() < 420;
-    const int horizontalMargin = compact ? 12 : 16;
-    const int gridGap = compact ? 6 : 8;
-    auto *body = new QVBoxLayout(dialog);
-    body->setContentsMargins(horizontalMargin, compact ? 10 : 14, horizontalMargin, compact ? 10 : 14);
-    body->setSpacing(compact ? 8 : 10);
-    titleBar(body, dialog->windowTitle());
-    auto *footer = new QHBoxLayout;
-    constexpr int columns = 3;
-    constexpr int perPage = 9;
-    auto gridPage = [gridGap](QWidget *page) {
-        auto *grid = new QGridLayout(page);
-        grid->setContentsMargins(0, 4, 0, 0);
-        grid->setSpacing(gridGap);
-        for (int column = 0; column < columns; ++column)
-            grid->setColumnStretch(column, 1);
-        return grid;
-    };
-    const int cardWidth = (width - 2 * horizontalMargin - (columns - 1) * gridGap - 4) / columns;
-    auto addCard = [compact, cardWidth](QGridLayout *grid, int index, const QString &title, const QString &detail,
-                                       const QString &kind, const QString &actionName) {
-        auto *button = new Button;
-        button->setObjectName("blueprintNodeCard");
-        button->setAutoDefault(false);
-        button->setAccessibleName(actionName);
-        button->setAccessibleDescription(detail);
-        button->setToolTip("<qt>" + title.toHtmlEscaped() + "<br>" + detail.toHtmlEscaped() + "</qt>");
-        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        button->setFixedHeight(compact ? 78 : 82);
-        const int inset = compact ? 8 : 10;
-        const int iconSize = compact ? 14 : 16;
-        const int iconGap = compact ? 4 : 6;
-        auto *contents = new QVBoxLayout(button);
-        contents->setContentsMargins(inset, 9, inset, 9);
-        contents->setSpacing(5);
-        auto *header = new QHBoxLayout;
-        header->setSpacing(iconGap);
-        auto *icon = label({});
-        icon->setFixedSize(iconSize, iconSize);
-        icon->setPixmap(Theme::coloredIcon(BlueprintCanvas::nodeIcon(kind), BlueprintCanvas::nodeAccent(kind),
-                                           iconSize).pixmap(iconSize, iconSize));
-        auto *name = label(title, "headingLabel");
-        name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        name->ensurePolished();
-        const int titleWidth = cardWidth - 2 * inset - iconSize - iconGap;
-        name->setText(name->fontMetrics().elidedText(title, Qt::ElideRight, titleWidth));
-        auto *caption = wrapped(detail);
-        for (auto *child : {icon, name, caption}) child->setAttribute(Qt::WA_TransparentForMouseEvents);
-        header->addWidget(icon, 0, Qt::AlignTop);
-        header->addWidget(name, 1);
-        contents->addLayout(header);
-        contents->addWidget(caption);
-        contents->addStretch();
-        grid->addWidget(button, index / columns, index % columns);
-        return button;
-    };
-
-    const auto saved = m_preview->nodeLibrary();
-    auto *builtInPage = new QWidget;
-    auto *builtInGrid = gridPage(builtInPage);
-    const auto types = m_preview->fixtures()["nodeTypes"].toArray();
-    for (int i = 0; i < types.size(); ++i) {
-        const auto type = types.at(i).toObject();
-        const auto kind = type["id"].toString();
-        const auto title = type["label"].toString();
-        auto *button = addCard(builtInGrid, i, title, type["detail"].toString(), kind, "Add " + title);
-        connect(button, &Button::clicked, dialog, [dialog, kind] {
-            dialog->setProperty("nodeKind", kind);
-            dialog->accept();
+void BlueprintPanel::openQuickAdd(QWidget *host, const QPoint &position, const QPointF &graph,
+                                  const QString &fromNode, const QString &outPort) {
+    if (!m_quickAdd) {
+        m_quickAdd = new BlueprintQuickAdd(*m_preview, host);
+        connect(m_quickAdd, &BlueprintQuickAdd::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
+            if (m_quickAdd->parentWidget() == m_canvas) showEntryDetails(entry, m_quickAdd->geometry());
+        });
+        connect(m_quickAdd, &BlueprintQuickAdd::accepted, this, [this](const BlueprintLibraryDock::Entry &entry) {
+            const auto at = m_quickAdd->property("graph").toPointF();
+            const auto from = m_quickAdd->property("fromNode").toString();
+            if (from.isEmpty()) addEntry(entry, at);
+            else addConnectedEntry(entry, at, from, m_quickAdd->property("outPort").toString());
         });
     }
-    if (saved.isEmpty()) {
-        body->addWidget(builtInPage, 1);
-    } else {
-        auto *tabs = new TabWidget;
-        tabs->addTab(builtInPage, "Built-in nodes");
-        auto *savedPage = new QWidget;
-        auto *savedLayout = new QVBoxLayout(savedPage);
-        savedLayout->setContentsMargins(0, 0, 0, 0);
-        auto *pages = new QStackedWidget;
-        savedLayout->addWidget(pages, 1);
-        tabs->addTab(savedPage, "Saved nodes");
-        body->addWidget(tabs, 1);
-
-        for (int start = 0; start < saved.size(); start += perPage) {
-            auto *page = new QWidget;
-            auto *grid = gridPage(page);
-            const auto end = qMin(qsizetype(start + perPage), saved.size());
-            for (int i = start; i < end; ++i) {
-                const auto entry = saved.at(i).toObject();
-                const auto design = entry["node"].toObject();
-                const auto spec = m_preview->operation(BlueprintPreview::operationId(design));
-                const auto title = entry["name"].toString();
-                auto *button = addCard(grid, i - start, title, spec["label"].toString(),
-                                       spec["kind"].toString(), "Add saved node " + title);
-                connect(button, &Button::clicked, dialog, [dialog, design] {
-                    dialog->setProperty("savedNode", QVariant::fromValue(design));
-                    dialog->accept();
-                });
-                button->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(button, &QWidget::customContextMenuRequested, dialog, [this, button, dialog, entry](const QPoint &point) {
-                    QMenu menu(dialog);
-                    menu.addAction("Remove from node library…", this, [this, dialog, entry] {
-                        if (!Ui::confirmRemoval(dialog, "Remove saved node",
-                                QString("Remove “%1” from the node library?").arg(entry["name"].toString()), "Remove")) return;
-                        if (m_preview->removeNodeTemplate(entry["id"].toString())) dialog->reject();
-                        else Ui::showNotice(dialog, "Saved nodes", "The saved node could not be removed.");
-                    });
-                    menu.exec(button->mapToGlobal(point));
-                });
-            }
-            grid->setRowStretch((end - start + columns - 1) / columns, 1);
-            pages->addWidget(page);
-        }
-        if (pages->count() > 1) {
-            auto *navigationBar = new QWidget;
-            auto *navigation = new QHBoxLayout(navigationBar);
-            navigation->setContentsMargins(0, 0, 0, 0);
-            auto *previous = action("Previous");
-            auto *next = action("Next");
-            auto *pageNumber = label({}, "cardMeta");
-            navigation->addWidget(previous);
-            navigation->addWidget(pageNumber, 1, Qt::AlignCenter);
-            navigation->addWidget(next);
-            footer->addWidget(navigationBar);
-            navigationBar->hide();
-            connect(tabs, &TabWidget::currentChanged, navigationBar, [navigationBar](int index) {
-                navigationBar->setVisible(index == 1);
-            });
-            auto updateNavigation = [pages, previous, next, pageNumber](int index) {
-                previous->setEnabled(index > 0);
-                next->setEnabled(index + 1 < pages->count());
-                pageNumber->setText(QString("Page %1 of %2").arg(index + 1).arg(pages->count()));
-            };
-            connect(pages, &QStackedWidget::currentChanged, dialog, updateNavigation);
-            connect(previous, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() - 1); });
-            connect(next, &Button::clicked, pages, [pages] { pages->setCurrentIndex(pages->currentIndex() + 1); });
-            updateNavigation(0);
-        }
+    // Over the canvas the menu floats above the side panels, between the top bar and the dock.
+    QPoint at = position;
+    QRect bounds;
+    if (host == m_canvas->viewport()) {
+        at += m_canvas->viewport()->pos();
+        host = m_canvas;
+        bounds = m_canvas->openArea();
     }
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
-    footer->addStretch();
-    footer->addWidget(buttons);
-    body->addLayout(footer);
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, dialog, position] {
-        auto node = dialog->property("savedNode").toJsonObject();
-        if (node.isEmpty()) {
-            const auto kind = dialog->property("nodeKind").toString();
-            const auto configured = configureBlueprintNode(*m_preview, m_canvasPanel, kind);
-            if (!configured) return;
-            node = *configured;
-        } else {
-            node["id"] = BlueprintPreview::id();
-        }
-        const auto size = BlueprintCanvas::nodeRect(node).size();
-        const auto point = (position.value_or(m_canvas->centerInGraph()) - QPointF(size.width(), size.height()) / 2).toPoint();
-        node["x"] = point.x();
-        node["y"] = point.y();
-        addNode(node);
-    });
-    dialog->setFixedWidth(width);
-    dialog->resize(width, dialog->sizeHint().height());
-    dialog->open();
+    if (m_quickAdd->parentWidget() != host) m_quickAdd->setParent(host);
+    m_quickAdd->setBounds(bounds);
+    m_quickAdd->setProperty("graph", graph);
+    m_quickAdd->setProperty("fromNode", fromNode);
+    m_quickAdd->setProperty("outPort", outPort);
+    if (fromNode.isEmpty()) {
+        m_quickAdd->open(at);
+        return;
+    }
+    QString type;
+    for (const auto &value : m_graph["nodes"].toArray())
+        if (value.toObject()["id"].toString() == fromNode)
+            for (const auto &port : value.toObject()["out"].toArray())
+                if (port.toObject()["id"].toString() == outPort) type = port.toObject()["type"].toString();
+    m_quickAdd->openForWire(at, BlueprintStyle::typeFamily(type), BlueprintStyle::typeColor(type),
+        [this, fromNode, outPort](const BlueprintLibraryDock::Entry &entry) {
+            const auto port = connectedInput(entry, fromNode, outPort);
+            if (port.isEmpty()) return QString();
+            for (const auto &value : entryNode(entry, {})["in"].toArray())
+                if (value.toObject()["id"].toString() == port) return value.toObject()["label"].toString(port);
+            return port;
+        });
+}
+
+// The node an entry adds, with a fresh id, its top-left corner at a graph point.
+QJsonObject BlueprintPanel::entryNode(const BlueprintLibraryDock::Entry &entry, const QPointF &at) const {
+    auto node = entry.operation.isEmpty() ? entry.savedNode : m_preview->makeNode(entry.operation, BlueprintPreview::id(), 0, 0);
+    if (node.isEmpty()) return {};
+    node["id"] = BlueprintPreview::id();
+    node["x"] = qRound(at.x());
+    node["y"] = qRound(at.y());
+    return node;
+}
+
+// The first input of the entry's node that accepts a wire from fromNode.outPort, or empty.
+QString BlueprintPanel::connectedInput(const BlueprintLibraryDock::Entry &entry, const QString &fromNode,
+                                       const QString &outPort) const {
+    const auto node = entryNode(entry, {});
+    if (node.isEmpty()) return {};
+    auto graph = m_graph;
+    auto nodes = graph["nodes"].toArray();
+    nodes.append(node);
+    graph["nodes"] = nodes;
+    for (const auto &value : node["in"].toArray()) {
+        const auto port = value.toObject()["id"].toString();
+        const QJsonObject edge{{"from", fromNode}, {"out", outPort}, {"to", node["id"]}, {"in", port}};
+        if (m_preview->dropError(graph, edge).isEmpty()) return port;
+    }
+    return {};
+}
+
+void BlueprintPanel::addConnectedEntry(const BlueprintLibraryDock::Entry &entry, const QPointF &at,
+                                       const QString &fromNode, const QString &outPort) {
+    const auto node = entryNode(entry, at);
+    if (node.isEmpty()) return;
+    auto graph = m_graph;
+    auto nodes = graph["nodes"].toArray();
+    nodes.append(node);
+    graph["nodes"] = nodes;
+    for (const auto &value : node["in"].toArray()) {
+        const QJsonObject edge{{"from", fromNode}, {"out", outPort}, {"to", node["id"]}, {"in", value.toObject()["id"]}};
+        QString error;
+        const auto connected = m_preview->connectGraph(graph, edge, nullptr, &error);
+        if (connected.isEmpty()) continue;
+        // One save adds the node and its wire.
+        const auto previous = m_selected;
+        m_selected = node["id"].toString();
+        if (saveGraph(connected)) m_canvas->revealNode(m_selected);
+        else m_selected = previous;
+        return;
+    }
+}
+
+void BlueprintPanel::addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at) {
+    auto node = entryNode(entry, at.value_or(QPointF()));
+    if (node.isEmpty()) return;
+    if (!at) {
+        // The middle of the canvas the floating panels leave free.
+        const auto size = BlueprintScene::nodeRect(node).size();
+        const auto point = m_canvas->mapToScene(m_canvas->freeArea().center()) - QPointF(size.width(), size.height()) / 2;
+        node["x"] = qRound(point.x());
+        node["y"] = qRound(point.y());
+    }
+    addNode(node);
+}
+
+void BlueprintPanel::showNodeDetails(const QString &id) {
+    const auto node = findById(m_graph["nodes"].toArray(), id);
+    auto *item = m_canvas->graphScene()->node(id);
+    if (node.isEmpty() || !item) return;
+    QJsonObject lastStep;
+    const auto runs = m_preview->runs(m_graph["id"].toString());
+    if (!runs.isEmpty()) lastStep = findById(runs.first().toObject()["steps"].toArray(), id);
+    const auto anchor = m_canvas->mapFromScene(item->sceneBoundingRect()).boundingRect();
+    m_details->showFor(BlueprintPreview::operationId(node), node, m_graph, lastStep, anchor);
+}
+
+void BlueprintPanel::showEntryDetails(const BlueprintLibraryDock::Entry &entry, const QRect &anchor) {
+    const auto operation = entry.operation.isEmpty() ? BlueprintPreview::operationId(entry.savedNode) : entry.operation;
+    m_detailsEntry = entry;
+    m_details->showFor(operation, entry.savedNode, {}, {}, anchor);
 }
 
 void BlueprintPanel::configureNode(const QString &id) {
     const auto node = findById(m_graph["nodes"].toArray(), id);
     if (node.isEmpty()) return;
     const auto spec = m_preview->operation(BlueprintPreview::operationId(node));
-    const auto configured = configureBlueprintNode(*m_preview, m_canvasPanel, spec["kind"].toString(), node);
+    const auto configured = configureBlueprintNode(*m_preview, m_canvas, spec["kind"].toString(), node);
     if (configured && *configured != node) changeNode(*configured, true);
 }
 
@@ -1560,11 +1383,11 @@ void BlueprintPanel::saveNodeTemplate(const QString &id) {
     const auto node = findById(m_graph["nodes"].toArray(), id);
     if (node.isEmpty()) return;
     bool accepted = false;
-    const auto name = QInputDialog::getText(m_canvasPanel, "Save to node library", "Name", QLineEdit::Normal,
+    const auto name = QInputDialog::getText(m_canvas, "Save to node library", "Name", QLineEdit::Normal,
         node["name"].toString(), &accepted).trimmed().left(60);
     if (!accepted || name.isEmpty()) return;
     if (!m_preview->saveNodeTemplate(name, node)) {
-        Ui::showNotice(m_canvasPanel, "Saved nodes", "The node could not be saved.");
+        Ui::showNotice(m_canvas, "Saved nodes", "The node could not be saved.");
         return;
     }
 }
@@ -1573,12 +1396,12 @@ void BlueprintPanel::addNode(const QJsonObject &source) {
     auto graph = m_graph;
     auto nodes = graph["nodes"].toArray();
     auto node = source;
-    auto bounds = BlueprintCanvas::nodeRect(node);
+    auto bounds = BlueprintScene::nodeRect(node);
     const auto start = bounds.topLeft();
     qreal rowHeight = bounds.height();
     QList<QRectF> occupied;
     for (const auto &value : nodes) {
-        const auto box = BlueprintCanvas::nodeRect(value.toObject());
+        const auto box = BlueprintScene::nodeRect(value.toObject());
         rowHeight = qMax(rowHeight, box.height());
         occupied.append(box.adjusted(-18, -18, 18, 18));
     }
@@ -1600,7 +1423,7 @@ void BlueprintPanel::addNode(const QJsonObject &source) {
 void BlueprintPanel::removeNode(const QString &id) {
     const auto node = findById(m_graph["nodes"].toArray(), id);
     if (node.isEmpty()) return;
-    if (!Ui::confirmRemoval(m_canvasPanel, "Delete node",
+    if (!Ui::confirmRemoval(m_canvas, "Delete node",
             QString("Delete “%1” and its connections?").arg(node["name"].toString()), "Delete")) return;
     auto graph = m_graph;
     QJsonArray remaining;
@@ -1615,10 +1438,6 @@ void BlueprintPanel::removeNode(const QString &id) {
     graph["edges"] = edges;
     if (!saveGraph(graph)) return;
     if (m_selected == id) m_selected.clear();
-    if (m_outputNode == id) {
-        m_outputNode.clear();
-        m_outputPort.clear();
-    }
     refreshInspector();
 }
 
@@ -1626,26 +1445,24 @@ void BlueprintPanel::renameNode(const QString &id) {
     auto node = findById(m_graph["nodes"].toArray(), id);
     if (node.isEmpty()) return;
     bool accepted = false;
-    const auto name = QInputDialog::getText(m_canvasPanel, "Rename node", "Name", QLineEdit::Normal,
+    const auto name = QInputDialog::getText(m_canvas, "Rename node", "Name", QLineEdit::Normal,
         node["name"].toString(), &accepted).trimmed().left(60);
     if (!accepted || name.isEmpty() || name == node["name"].toString()) return;
     node["name"] = name;
     changeNode(node);
 }
 
-void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPosition, const QPointF &graphPosition) {
+void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPosition, const QPointF &) {
     const auto node = findById(m_graph["nodes"].toArray(), id);
-    QMenu menu(m_canvasPanel);
-    if (node.isEmpty()) {
-        menu.addAction("Add node…", this, [this, graphPosition] { openNodePicker(graphPosition); });
-        menu.addAction("Fit canvas", m_canvas, &BlueprintCanvas::fit);
-        menu.exec(screenPosition);
-        return;
-    }
+    if (node.isEmpty()) return;
+    QMenu menu(m_canvas);
     m_selected = id;
     refreshInspector();
     menu.addAction("Configure node…", this, [this, id] { configureNode(id); });
     menu.addAction("Rename…", this, [this, id] { renameNode(id); });
+    // Wiring by dialog stays reachable from the keyboard here; drag-to-connect covers the mouse.
+    menu.addAction("Connect ports…", this, [this, id] { connectPorts(id); })
+        ->setEnabled(m_graph["nodes"].toArray().size() > 1);
     menu.addAction("Duplicate node", this, [this, node] {
         auto copy = node;
         copy["id"] = BlueprintPreview::id();
@@ -1677,7 +1494,7 @@ void BlueprintPanel::showNodeMenu(const QString &id, const QPoint &screenPositio
 }
 
 void BlueprintPanel::connectPorts(const QString &inputNode, const QString &inputPort) {
-    SettingsDetailDialog dialog(m_canvasPanel);
+    SettingsDetailDialog dialog(m_canvas);
     dialog.setWindowTitle("Connect ports");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, "Connect ports");
@@ -1700,7 +1517,7 @@ void BlueprintPanel::connectPorts(const QString &inputNode, const QString &input
             }
         }
     };
-    addPorts(out, "out", m_outputNode, m_outputPort);
+    addPorts(out, "out", {}, {});
     addPorts(in, "in", inputNode, inputPort);
     Surface::field(body, "Output port", out);
     Surface::field(body, "Input port", in);
@@ -1730,12 +1547,10 @@ void BlueprintPanel::connectPorts(const QString &inputNode, const QString &input
     body->addWidget(remove, 0, Qt::AlignLeft);
     connect(existing, &QListWidget::currentRowChanged, &dialog, [remove](int row) { remove->setEnabled(row >= 0); });
     connect(remove, &Button::clicked, &dialog, [&] {
-        if (existing->currentRow() < 0) return;
-        auto graph = m_graph;
-        auto edges = graph["edges"].toArray();
-        edges.removeAt(existing->currentRow());
-        graph["edges"] = edges;
-        if (saveGraph(graph)) refresh();
+        const int row = existing->currentRow();
+        const auto edges = m_graph["edges"].toArray();
+        if (row < 0 || row >= edges.size()) return;
+        if (removeConnection(edges.at(row).toObject())) refresh();
     });
     auto *buttons = dialogButtons(&dialog, body, "Connect");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
@@ -1760,217 +1575,113 @@ bool BlueprintPanel::addConnection(const QJsonObject &edge, QWidget *parent) {
     auto edges = graph["edges"].toArray();
     edges.append(edge);
     graph["edges"] = edges;
-    m_outputNode.clear();
-    m_outputPort.clear();
     return saveGraph(graph);
+}
+
+bool BlueprintPanel::dropConnection(const QJsonObject &edge) {
+    return saveConnected(m_graph, edge);
+}
+
+bool BlueprintPanel::moveConnection(const QJsonObject &oldEdge, const QJsonObject &newEdge) {
+    return saveConnected(withoutEdge(m_graph, oldEdge), newEdge);
+}
+
+// Connects edge into base and saves the result once. On an error, a declined prompt or a failed save
+// nothing is stored and the canvas returns to the stored graph.
+bool BlueprintPanel::saveConnected(const QJsonObject &base, const QJsonObject &edge) {
+    int dropped = 0;
+    QString error;
+    const auto graph = m_preview->connectGraph(base, edge, &dropped, &error);
+    if (graph.isEmpty()) {
+        Ui::showNotice(m_canvas, "Connect ports", error);
+        refreshEditor();
+        return false;
+    }
+    if (dropped > 0 && !Ui::confirmAction(m_canvas, "Update node",
+            QString("This change will remove %1.").arg(countOf(dropped, "incompatible connection")), "Save changes")) {
+        refreshEditor();
+        return false;
+    }
+    if (saveGraph(graph)) return true;
+    refreshEditor();
+    return false;
+}
+
+bool BlueprintPanel::removeConnection(const QJsonObject &edge) {
+    bool found = false;
+    const auto graph = withoutEdge(m_graph, edge, &found);
+    if (!found) return false;
+    if (saveGraph(graph)) return true;
+    refreshEditor();
+    return false;
 }
 
 void BlueprintPanel::editBinding() {
     if (m_preview->live()) { editLiveBinding(); return; }
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
-    SettingsDetailDialog dialog(m_canvasPanel);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    SettingsDetailDialog dialog(m_canvas);
     dialog.setWindowTitle("Model & adapter");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
     body->addWidget(wrapped("Choose a local binding for " + node["name"].toString() + "."));
-    const auto fixtures = m_preview->fixtures();
-    auto *models = new ComboBox;
-    auto *adapters = new ComboBox;
-    for (const auto &value : fixtures["models"].toArray()) {
-        const auto model = value.toObject();
-        models->addItem(model["name"].toString() + " · " + model["engine"].toString(), model["id"].toString());
-    }
-    models->setCurrentIndex(qMax(0, models->findData(node["model"].toString())));
-    Surface::field(body, "Base checkpoint", models);
-    Surface::field(body, "Reuse a LoRA adapter", adapters);
-    auto *note = wrapped({});
+    auto *fields = new BlueprintBindingFields(*m_preview, m_graph, node);
+    body->addWidget(fields);
+    auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
-    auto refresh = [&] {
-        const auto model = findById(fixtures["models"].toArray(), models->currentData().toString());
-        adapters->clear();
-        adapters->addItem("Select compatible adapter");
-        const bool supported = model["supported"].toBool();
-        for (const auto &value : m_preview->compatibleAdapters(model["id"].toString(), BlueprintPreview::operationId(node))) {
-            const auto adapter = value.toObject();
-            adapters->addItem(adapter["name"].toString(), adapter["id"].toString());
-        }
-        adapters->setCurrentIndex(qMax(0, adapters->findData(node["adapter"].toString())));
-        adapters->setEnabled(supported);
-        note->setText(!supported ? "This engine cannot switch PEFT adapters between blueprint nodes."
-            : adapters->count() == 1 ? "No adapters match this checkpoint and node type."
-            : "Adapters must match the selected checkpoint and node type.");
-    };
-    refresh();
-    connect(models, &ComboBox::currentIndexChanged, &dialog, refresh);
     auto *buttons = dialogButtons(&dialog, body, "Save binding");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        if (!adapters->isEnabled() || adapters->currentIndex() < 1) {
-            note->setText("Choose a Torch / PEFT checkpoint and a compatible adapter.");
-            return;
-        }
-        dialog.accept();
+        const auto error = fields->error();
+        note->setText(error);
+        if (error.isEmpty()) dialog.accept();
     });
     dialog.resize(450, dialog.sizeHint().height());
-    if (dialog.exec() != QDialog::Accepted) return;
-    node["model"] = models->currentData().toString();
-    node["adapter"] = adapters->currentData().toString();
-    changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::editLiveBinding() {
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
     if (node.isEmpty()) return;
-    const bool reasoning = node["kind"] == "reasoning";
-    const auto linked = adapterSource(m_graph, node);
     SettingsDetailDialog dialog(this);
-    dialog.setWindowTitle(reasoning ? "Reasoning checkpoint" : "Model & adapter");
+    dialog.setWindowTitle(node["kind"] == "reasoning" ? "Reasoning checkpoint" : "Model & adapter");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
-    auto *models = new ComboBox;
-    auto *adapters = new ComboBox;
-    for (auto *combo : {models, adapters}) {
-        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        combo->setMinimumContentsLength(22);
-    }
-    Surface::field(body, "Base checkpoint", models);
-    Surface::field(body, "Direct LoRA adapter", adapters);
-    auto *note = wrapped({});
+    auto *fields = new BlueprintBindingFields(*m_preview, m_graph, node);
+    body->addWidget(fields);
+    auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
-    auto *budget = new SpinBox;
-    budget->setRange(1, 32768);
-    budget->setValue(node["maxTokens"].toInt(reasoning ? 1024 : 256));
-    Surface::field(body, "Maximum output tokens", budget);
-    auto *response = new ComboBox;
-    response->addItem("Typed JSON", "json");
-    response->addItem("Plain text", "text");
-    response->setCurrentIndex(node["response"] == "text" ? 1 : 0);
-    Surface::field(body, "Response format", response);
-    auto *prompt = new QPlainTextEdit(node["prompt"].toString("Return only the requested JSON value."));
-    prompt->setTabChangesFocus(true);
-    prompt->setFixedHeight(100);
-    Surface::field(body, "System prompt", prompt);
     auto *buttons = dialogButtons(&dialog, body, "Save binding");
     auto *save = buttons->buttons().last();
     for (auto *button : buttons->buttons())
         if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) save = button;
-    auto refresh = [&] {
-        const auto model = models->currentData().toString();
-        adapters->clear();
-        adapters->addItem("No adapter", "");
-        adapters->setEnabled(false);
-        save->setEnabled(false);
-        if (model.isEmpty()) {
-            note->setText("Download a Transformers checkpoint in the model library, then select it here.");
-            return;
-        }
-        note->setText("Checking this checkpoint…");
-        m_preview->checkpoint(model, [guard = QPointer(&dialog), models, adapters, note, budget, save, reasoning, node, model, linked]
-            (const auto &info, const auto &error) {
-            if (!guard || models->currentData().toString() != model) return;
-            if (!error.isEmpty()) { note->setText(error); return; }
-            const bool supported = info["reasoning"].toBool();
-            if (reasoning && !supported) { note->setText("This checkpoint does not support explicit thinking."); return; }
-            const int context = info["context_tokens"].toInt();
-            note->setText(QString("%1 context tokens%2").arg(context).arg(supported ? " · Explicit thinking available" : ""));
-            budget->setMaximum(qBound(1, context - 1, 32768));
-            adapters->clear();
-            adapters->addItem("No adapter", "");
-            for (const auto &value : info["adapters"].toArray()) {
-                const auto adapter = value.toObject();
-                adapters->addItem(adapter["name"].toString(), adapter["id"].toString());
-            }
-            adapters->setCurrentIndex(qMax(0, adapters->findData(node["adapter"].toString())));
-            adapters->setEnabled(linked.isEmpty());
-            save->setEnabled(true);
-        });
-    };
-    const auto options = [&] {
-        const auto selected = models->currentData().toString();
-        QSignalBlocker blocker(models);
-        models->clear();
-        models->addItem("Choose a checkpoint", "");
-        const auto entries = m_preview->fixtures()["models"].toArray();
-        for (const auto &value : entries) {
-            const auto entry = value.toObject();
-            const bool unsupported = reasoning && entry["thinking"] == false;
-            models->addItem(entry["name"].toString() + (unsupported ? " · no thinking" : ""), entry["id"].toString());
-            if (unsupported) BlueprintPreview::disableItem(models, models->count() - 1);
-        }
-        models->setCurrentIndex(qMax(0, models->findData(selected.isEmpty() ? node["model"].toString() : selected)));
-        refresh();
-    };
-    options();
-    m_preview->refreshOptions();
-    connect(m_preview, &BlueprintPreview::optionsChanged, &dialog, options);
-    connect(models, &ComboBox::currentIndexChanged, &dialog, refresh);
+    save->setEnabled(fields->ready());
+    connect(fields, &BlueprintBindingFields::readyChanged, save, &QWidget::setEnabled);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        if (prompt->toPlainText().size() > 16000) { note->setText("Use at most 16,000 characters for the system prompt."); return; }
-        if (response->currentData() == "text") {
-            const auto ports = node["out"].toArray();
-            if (ports.size() != 1 || ports.first().toObject()["schema"].toObject()["type"] != "string") {
-                note->setText("Plain text requires one string output port.");
-                return;
-            }
-        }
-        dialog.accept();
+        const auto error = fields->error();
+        note->setText(error);
+        if (error.isEmpty()) dialog.accept();
     });
     dialog.resize(460, dialog.sizeHint().height());
-    if (dialog.exec() != QDialog::Accepted) return;
-    node["model"] = models->currentData().toString();
-    node["adapter"] = adapters->currentData().toString();
-    node["maxTokens"] = budget->value();
-    node["response"] = response->currentData().toString();
-    node["prompt"] = prompt->toPlainText();
-    changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::editDataset() {
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
     SettingsDetailDialog dialog(this);
     dialog.setWindowTitle("Dataset source");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
-    auto *datasets = new ComboBox;
-    datasets->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    datasets->setMinimumContentsLength(22);
-    auto populate = [&] {
-        const auto current = datasets->count() ? datasets->currentData().toString() : node["dataset"].toString();
-        datasets->clear();
-        datasets->addItem("Inline rows", "");
-        for (const auto &value : m_preview->datasets()) {
-            const auto item = value.toObject();
-            datasets->addItem(QString("%1 · %2 rows").arg(item["name"].toString()).arg(item["rows"].toInt()), item["id"].toString());
-        }
-        if (!current.isEmpty() && datasets->findData(current) < 0) datasets->addItem("Missing dataset · " + current, current);
-        datasets->setCurrentIndex(qMax(0, datasets->findData(current)));
-    };
-    populate();
-    connect(m_preview, &BlueprintPreview::optionsChanged, &dialog, populate);
-    m_preview->refreshOptions();
-    Surface::field(body, "Source", datasets);
-    auto *rows = new QPlainTextEdit(node["setting"].toString("[]"));
-    rows->setTabChangesFocus(true);
-    auto *field = new QWidget;
-    auto *rowsBody = new QVBoxLayout(field);
-    rowsBody->setContentsMargins(0, 0, 0, 0);
-    Surface::field(rowsBody, "Inline rows (JSON array)", rows);
-    body->addWidget(field);
-    const auto enabled = [datasets, field] { field->setVisible(datasets->currentData().toString().isEmpty()); };
-    connect(datasets, &ComboBox::currentIndexChanged, &dialog, enabled);
-    enabled();
-    body->addWidget(wrapped("Add local datasets in Training. Set the row type under the Rows port’s JSON Schema."));
+    auto *fields = new BlueprintDatasetFields(*m_preview, node);
+    body->addWidget(fields);
     auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
     auto *buttons = dialogButtons(&dialog, body, "Save dataset");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        node["dataset"] = datasets->currentData().toString();
-        node["setting"] = rows->toPlainText();
-        const auto error = m_preview->settingError(node);
+        const auto error = fields->error();
+        note->setText(error);
         if (error.isEmpty()) dialog.accept();
-        else note->setText(error);
     });
     dialog.resize(470, 340);
-    if (dialog.exec() == QDialog::Accepted) changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::liveTraining() {
@@ -1997,7 +1708,7 @@ void BlueprintPanel::liveTraining() {
     examples->setPlaceholderText("[{\"inputs\": {\"port\": \"value\"}, \"outputs\": {\"port\": \"answer\"}}]");
     Surface::field(body, "Typed examples (JSON array)", examples);
     auto *note = wrapped("Provide examples matching the named input and output ports. Follow queued jobs in Training.");
-    const bool usesAdapterNode = !adapterSource(graph, findById(graph["nodes"].toArray(), node)).isEmpty();
+    const bool usesAdapterNode = !BlueprintPreview::adapterSource(graph, findById(graph["nodes"].toArray(), node)).isEmpty();
     if (usesAdapterNode)
         note->setText("Select completed adapter weights on the connected Adapter node.");
     body->addWidget(note);
@@ -2076,7 +1787,7 @@ void BlueprintPanel::liveTraining() {
 void BlueprintPanel::saveTrainingRecipe() {
     auto node = findById(m_graph["nodes"].toArray(), m_selected);
     const auto existing = node["training"].toObject();
-    SettingsDetailDialog dialog(m_canvasPanel);
+    SettingsDetailDialog dialog(m_canvas);
     dialog.setWindowTitle("Train an adapter");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
@@ -2144,32 +1855,39 @@ void BlueprintPanel::toggleFullscreen() {
         m_fullscreenDialog->reject();
         return;
     }
+    if (m_canvasPages->currentWidget() != m_canvas) return;
+    // The view takes its overlays (library, inspector, dock, minimap and the top bar) with it.
     auto *dialog = new QDialog(this, Qt::Dialog | Qt::FramelessWindowHint);
     m_fullscreenDialog = dialog;
     dialog->setWindowTitle("Workflow canvas");
     dialog->setWindowModality(Qt::WindowModal);
     auto *layout = new QVBoxLayout(dialog);
     layout->setContentsMargins(0, 0, 0, 0);
-    m_canvasHome->removeWidget(m_canvasPanel);
-    layout->addWidget(m_canvasPanel);
+    m_canvasPages->removeWidget(m_canvas);
+    layout->addWidget(m_canvas);
+    m_canvas->show();
+    m_bar->setFullscreen(true);
+    placeBar();
     connect(dialog, &QDialog::finished, this, &BlueprintPanel::leaveFullscreen);
-    refreshCanvasActions();
     dialog->showFullScreen();
-    m_fullscreen->setFocus();
+    m_canvas->setFocus();
 }
 
 void BlueprintPanel::leaveFullscreen() {
     auto *dialog = std::exchange(m_fullscreenDialog, nullptr);
     if (!dialog) return;
-    dialog->layout()->removeWidget(m_canvasPanel);
-    m_canvasHome->addWidget(m_canvasPanel);
-    m_canvasPanel->show();
+    dialog->layout()->removeWidget(m_canvas);
+    m_canvasPages->insertWidget(0, m_canvas);
+    m_canvasPages->setCurrentWidget(m_graph["nodes"].toArray().isEmpty() ? m_emptyCanvas : m_canvas);
+    m_canvas->show();
+    m_bar->setFullscreen(false);
+    m_bar->setFullscreenAvailable(!m_graph["nodes"].toArray().isEmpty());
+    placeBar();
     dialog->deleteLater();
-    refreshCanvasActions();
-    m_fullscreen->setFocus();
+    m_canvas->setFocus();
 }
 
-void BlueprintPanel::setupRun() {
+QWidget *BlueprintPanel::setupRun() {
     auto *page = new QWidget;
     auto *layout = new QHBoxLayout(page);
     layout->setContentsMargins(0, 9, 0, 0);
@@ -2179,10 +1897,12 @@ void BlueprintPanel::setupRun() {
     layout->addWidget(m_traceScroll, 1);
     QVBoxLayout *setup;
     m_runSetup = scroller(&setup);
-    m_runSetup->setFixedWidth(278);
+    m_runSetup->setFixedWidth(306);
     layout->addWidget(m_runSetup);
     auto *card = Surface::card(m_runSetup, "Run setup");
-    card->parentWidget()->setObjectName("blueprintSurface");
+    card->parentWidget()->setObjectName("blueprintRunSetup");
+    card->setContentsMargins(16, 14, 16, 16);
+    card->setSpacing(6);
     setup->addWidget(card->parentWidget());
     setup->addStretch();
     m_target = new ComboBox;
@@ -2227,7 +1947,8 @@ void BlueprintPanel::setupRun() {
     card->addWidget(m_runError);
     m_start = action("Start run", true);
     m_start->setObjectName("blueprintStartRun");
-    card->addWidget(m_start, 0, Qt::AlignLeft);
+    card->addSpacing(4);
+    card->addWidget(m_start);
     connect(m_target, &ComboBox::currentIndexChanged, this, &BlueprintPanel::refreshRunOptions);
     connect(m_sample, &ComboBox::activated, this, [this] {
         if (m_sample->currentIndex() > 0) m_input->setPlainText(m_sample->currentData().toString());
@@ -2239,7 +1960,7 @@ void BlueprintPanel::setupRun() {
         refreshRunOptions();
     });
     connect(m_start, &Button::clicked, this, &BlueprintPanel::startRun);
-    m_tabs->addTab(page, "Test && run");
+    return page;
 }
 
 void BlueprintPanel::refreshRunOptions() {
@@ -2292,7 +2013,7 @@ void BlueprintPanel::refreshRunOptions() {
 
 void BlueprintPanel::showTest(const QString &node) {
     if (m_graph.isEmpty()) return;
-    m_tabs->setCurrentIndex(1);
+    showView(BlueprintTopBar::View::TestCases);
     m_runError->hide();
     m_target->setCurrentIndex(qMax(0, m_target->findData(node)));
     m_scenario->setCurrentIndex(0);
@@ -2319,12 +2040,22 @@ void BlueprintPanel::startRun() {
                 if (!self) return;
                 self->m_starting = false;
                 self->refreshRunOptions();
+                // A canvas run is one start; whatever happens, the next run starts fresh.
+                const bool onCanvas = std::exchange(self->m_runOnCanvas, false);
                 if (nav != self->m_navigation) return;
                 self->m_runError->setText(error);
                 self->m_runError->setVisible(!error.isEmpty());
-                if (run.isEmpty()) return;
+                if (run.isEmpty()) {
+                    if (onCanvas && !error.isEmpty()) Ui::showNotice(self->m_canvas, "Run blueprint", error);
+                    return;
+                }
                 self->m_runId = run["id"].toString();
-                self->m_backToChat->hide();
+                if (onCanvas) {
+                    self->m_canvasRunId = self->m_runId;
+                    self->showCanvasRun(run);
+                }
+                self->m_canGoBack = false;
+                self->refreshBar();
                 self->refreshRun();
                 self->m_traceScroll->verticalScrollBar()->setValue(0);
             });
@@ -2335,11 +2066,104 @@ void BlueprintPanel::startRun() {
         target, scenario, "Blueprints", &error);
     m_runError->setText(error);
     m_runError->setVisible(!error.isEmpty());
-    if (id.isEmpty()) return;
+    if (id.isEmpty()) {
+        m_runOnCanvas = false;
+        return;
+    }
     m_runId = id;
     m_comparison = false;
     refreshRun();
     m_traceScroll->verticalScrollBar()->setValue(0);
+    if (std::exchange(m_runOnCanvas, false)) {
+        m_canvasRunId = id;
+        showCanvasRun(m_preview->run(id));
+    }
+}
+
+void BlueprintPanel::runFromCanvas() {
+    if (m_graph.isEmpty() || m_graph["nodes"].toArray().isEmpty()) return;
+    if (m_bar->view() != BlueprintTopBar::View::Build) showView(BlueprintTopBar::View::Build);
+    // A live full run needs a saved revision; a node test runs the draft.
+    const bool fullRun = m_target->currentData().toString().isEmpty();
+    if (m_preview->live() && fullRun && (m_graph["dirty"].toBool() || m_graph["revision"].toInteger() == 0)) {
+        if (!Ui::confirmAction(m_canvas, "Save a revision", "A full run needs a saved revision. Save one now?",
+                               "Save and run"))
+            return;
+        m_runAfterPublish = true;
+        publish();
+        return;
+    }
+    if (m_preview->live() && !m_start->isEnabled()) {
+        // The run setup explains what is missing.
+        showView(BlueprintTopBar::View::TestCases);
+        return;
+    }
+    if (m_toast) m_toast->hide();
+    m_runOnCanvas = true;
+    startRun();
+    if (!m_runError->text().isEmpty() && m_runError->isVisible()) {
+        m_runOnCanvas = false;
+        Ui::showNotice(m_canvas, "Run blueprint", m_runError->text());
+    }
+}
+
+void BlueprintPanel::showCanvasRun(const QJsonObject &run) {
+    if (run.isEmpty() || run["id"].toString() != m_canvasRunId) return;
+    QHash<QString, QString> states;
+    QString active;
+    const auto steps = run["steps"].toArray();
+    for (int i = 0; i < steps.size(); ++i) {
+        const auto step = steps.at(i).toObject();
+        const auto status = step["status"].toString();
+        if (status.isEmpty() || status == "pending") continue;
+        states.insert(step["id"].toString(), status);
+        if (active.isEmpty() && status == "running") active = step["id"].toString();
+    }
+    const int cursor = run["cursor"].toInt(-1);
+    if (cursor >= 0 && cursor < steps.size()) active = steps.at(cursor).toObject()["id"].toString();
+    m_canvas->setRunStates(states, active);
+    if (!running(run) && m_toastedRun != m_canvasRunId) {
+        m_toastedRun = m_canvasRunId;
+        showRunToast(run);
+    }
+}
+
+void BlueprintPanel::showRunToast(const QJsonObject &run) {
+    if (!m_toast) {
+        m_toast = new FloatingPanel;
+        m_toast->setObjectName("blueprintRunToast");
+        m_toast->setAccessibleName("Run result");
+        auto *row = new QHBoxLayout(m_toast);
+        m_toastText = label({}, "blueprintToastText");
+        row->addWidget(m_toastText);
+        auto *open = action("Open in Run history", false, true);
+        row->addWidget(open);
+        connect(open, &Button::clicked, this, [this] {
+            m_toast->hide();
+            if (m_fullscreenDialog) m_fullscreenDialog->reject();
+            const auto id = m_toast->property("run").toString();
+            showView(BlueprintTopBar::View::RunHistory);
+            m_runId = id;
+            refreshHistory();
+        });
+        auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), m_toast, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+        connect(escape, &QShortcut::activated, m_toast, &QWidget::hide);
+        m_toastTimer = new QTimer(m_toast);
+        m_toastTimer->setSingleShot(true);
+        m_toastTimer->setInterval(6000);
+        connect(m_toastTimer, &QTimer::timeout, m_toast, &QWidget::hide);
+        // Above the bottom dock.
+        m_toast->setProperty("ignoredByFit", true);
+        m_canvas->addOverlay(m_toast, OverlayEdge::Bottom, 72);
+    }
+    m_toast->setProperty("run", run["id"].toString());
+    qint64 total = 0;
+    for (const auto &step : run["steps"].toArray()) total += qint64(step.toObject()["duration"].toDouble());
+    const auto duration = total > 0 ? " · " + BlueprintPreview::duration(total) : QString();
+    m_toastText->setText(BlueprintPreview::statusLabel(run["status"].toString()) + duration);
+    m_toast->show();
+    m_toast->raise();
+    m_toastTimer->start();
 }
 
 void BlueprintPanel::openRun(const QString &id) {
@@ -2371,27 +2195,19 @@ void BlueprintPanel::showRun(const QString &id, const QJsonObject &run) {
         m_scenario->setCurrentIndex(qMax(0, m_scenario->findData(run["scenario"].toString())));
         m_input->setPlainText(run["input"].toString());
     } else {
+        if (m_fullscreenDialog) m_fullscreenDialog->reject();
         m_graph = {};
-        m_title->setText(run["name"].toString());
-        m_revision->clear();
-        m_description->setText(m_preview->live() || graphId.isEmpty() ? "Inspect the run and its recorded steps."
-            : "This run was recorded before its blueprint was deleted.");
-        m_publish->hide();
-        m_reload->hide();
-        m_openInConversation->hide();
-        m_tabs->setTabEnabled(0, false);
-        m_tabs->setTabEnabled(2, false);
+        m_bar->setBlueprint(run["name"].toString(), m_preview->live() || graphId.isEmpty()
+            ? "Inspect the run and its recorded steps." : "This run was recorded before its blueprint was deleted.",
+            false, !m_preview->live());
+        m_bar->setEditable(false);
         m_runSetup->hide();
-        findChild<Button *>("blueprintEdit")->hide();
-        findChild<Button *>("blueprintDuplicate")->hide();
-        findChild<Button *>("blueprintDelete")->hide();
         m_pages->setCurrentWidget(m_workspace);
     }
-    m_tabs->setCurrentIndex(1);
+    showView(BlueprintTopBar::View::TestCases);
     m_runId = id;
-    m_backToChat->setVisible(run["source"].toString() == "Local chat");
-    // One way back to Conversation is enough.
-    if (m_backToChat->isVisible()) m_openInConversation->hide();
+    m_canGoBack = run["source"].toString() == "Local chat";
+    refreshBar();
     m_comparison = false;
     refreshRun();
     m_traceScroll->verticalScrollBar()->setValue(0);
@@ -2406,7 +2222,7 @@ void BlueprintPanel::refreshRun() {
     auto *head = new QHBoxLayout;
     head->setContentsMargins(0, 3, 3, 3);
     head->setSpacing(8);
-    head->addWidget(label(run["target"].toString().isEmpty() ? "Run details" : "Node test", "blueprintSection"));
+    head->addWidget(label(run["target"].toString().isEmpty() ? "Run details" : "Node test", "blueprintInspectorTitle"));
     head->addStretch();
     if (!run.isEmpty()) {
         head->addWidget(statusLabel(run["status"].toString()));
@@ -2418,7 +2234,7 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(head);
-    m_trace->addWidget(rule());
+    m_trace->addSpacing(4);
     if (run.isEmpty()) {
         m_trace->addSpacing(14);
         m_trace->addWidget(wrapped("Run a blueprint or test a node to see its steps here."));
@@ -2465,8 +2281,14 @@ void BlueprintPanel::refreshRun() {
     if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
     const auto revision = run["revision"].toInt() > 0 ? QString(" · Rev %1").arg(run["revision"].toInt()) : QString{};
     auto *summary = new QHBoxLayout;
-    summary->setContentsMargins(0, 4, 0, 4);
-    summary->addWidget(wrapped(QString("%1  ·  %2 / %3 steps  ·  %4%5").arg(elapsed).arg(completed).arg(steps.size()).arg(source, revision)), 1);
+    summary->setContentsMargins(0, 2, 0, 2);
+    summary->setSpacing(6);
+    for (const auto &fact : {elapsed, QString("%1 / %2 steps").arg(completed).arg(steps.size()), source + revision}) {
+        auto *chip = label(fact, "blueprintMetaChip");
+        chip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        summary->addWidget(chip);
+    }
+    summary->addStretch(1);
     const auto fixtures = m_preview->fixtures();
     const auto sample = findById(fixtures["samples"].toArray(), run["sampleId"].toString());
     const auto baseline = fixtures["baseline"].toObject();
@@ -2517,12 +2339,12 @@ void BlueprintPanel::refreshRun() {
         }
     }
     m_trace->addLayout(summary);
-    auto *runId = wrapped("Run ID  " + m_runId, "cardMeta");
+    auto *runId = wrapped("Run ID  " + m_runId, "blueprintRunId");
     runId->setAccessibleName("Run ID: " + m_runId);
     runId->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     m_trace->addWidget(runId);
     if (!m_baseline.isEmpty()) {
-        m_trace->addWidget(rule());
+        m_trace->addSpacing(10);
         m_trace->addWidget(label("Run comparison", "blueprintSection"));
         m_trace->addWidget(wrapped(run["supplied"] == m_baseline["supplied"] ? "Same input values" : "Different input values"));
         auto *comparison = new QHBoxLayout;
@@ -2540,8 +2362,7 @@ void BlueprintPanel::refreshRun() {
         m_trace->addLayout(result);
     }
     if (compare && m_comparison) {
-        m_trace->addWidget(rule());
-        m_trace->addSpacing(7);
+        m_trace->addSpacing(14);
         m_trace->addWidget(label("Baseline comparison", "blueprintSection"));
         m_trace->addWidget(wrapped("Same sample input · fixture results"));
         auto *comparison = new QHBoxLayout;
@@ -2557,14 +2378,20 @@ void BlueprintPanel::refreshRun() {
         m_trace->addLayout(comparison);
     }
 
-    m_trace->addWidget(rule());
+    m_trace->addSpacing(10);
     for (const auto &value : steps) {
         const auto step = value.toObject();
         const auto id = step["id"].toString();
         const auto status = step["status"].toString();
         const auto name = step["name"].toString();
+        // Each step is a rounded card: its header row, any error, and the input and output when open.
+        auto *card = new QFrame;
+        card->setObjectName("blueprintStepCard");
+        auto *cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(0, 0, 0, 0);
+        cardLayout->setSpacing(0);
         auto *row = new QHBoxLayout;
-        row->setContentsMargins(0, 0, 5, 0);
+        row->setContentsMargins(0, 0, 12, 0);
         row->setSpacing(8);
         auto *button = new QPushButton(literalButtonText(name));
         button->setObjectName("blueprintStep");
@@ -2577,15 +2404,15 @@ void BlueprintPanel::refreshRun() {
         row->addWidget(label(BlueprintPreview::duration(step["duration"].toInteger(-1)), "blueprintCode"));
         auto *arrow = label(button->isChecked() ? "⌄" : "›", "cardMeta");
         row->addWidget(arrow);
-        m_trace->addLayout(row);
+        cardLayout->addLayout(row);
         if (step.contains("error")) {
             auto *error = wrapped(step["error"].toString(), "blueprintStepError");
-            m_trace->addWidget(error);
+            cardLayout->addWidget(error);
         }
         auto *info = new QWidget;
         info->setObjectName("blueprintStepDetail");
         auto *details = new QVBoxLayout(info);
-        details->setContentsMargins(31, 8, 9, 12);
+        details->setContentsMargins(12, 4, 12, 12);
         for (const auto &value : decisions) {
             const auto item = value.toObject();
             if (item["stepId"] == step["id"]) details->addWidget(approvalView(m_preview, run, item));
@@ -2601,19 +2428,27 @@ void BlueprintPanel::refreshRun() {
         const bool empty = produced.isUndefined() || produced.isNull()
             || (produced.isObject() && produced.toObject().isEmpty());
         if (empty && status != "passed") {
-            output->addWidget(label(outputTitle, "headingLabel"));
-            output->addWidget(wrapped(status == "skipped" || status == "pending" ? "Not run"
-                                      : "No output because the step did not finish.", "cardMeta"));
-            output->addStretch();
+            auto *block = new QFrame;
+            block->setObjectName("blueprintCodeBlock");
+            auto *inner = new QVBoxLayout(block);
+            inner->setContentsMargins(10, 8, 10, 10);
+            inner->setSpacing(4);
+            inner->addWidget(label(outputTitle, "blueprintCodeCaption"));
+            inner->addWidget(wrapped(status == "skipped" || status == "pending" ? "Not run"
+                                     : "No output because the step did not finish.", "cardMeta"));
+            inner->addStretch();
+            output->addWidget(block, 1);
         } else {
             fillCode(output, outputTitle, produced);
         }
+        io->setSpacing(8);
         io->addLayout(input, 1);
         io->addLayout(output, 1);
         details->addLayout(io);
-        m_trace->addWidget(info);
+        cardLayout->addWidget(info);
         info->setVisible(button->isChecked());
-        m_trace->addWidget(rule());
+        m_trace->addWidget(card);
+        m_trace->addSpacing(6);
         connect(button, &QPushButton::toggled, info, [this, info, arrow, id](bool expanded) {
             m_expanded.insert(id, expanded);
             info->setVisible(expanded);
@@ -2629,53 +2464,102 @@ void BlueprintPanel::refreshRun() {
 
 void BlueprintPanel::refreshHistory() {
     clear(m_history);
-    titleBar(m_history, m_preview->live() ? "Recent run history" : "Run history");
     const auto runs = m_preview->runs(m_graph["id"].toString());
-    if (runs.isEmpty()) m_history->addWidget(wrapped("Start a run to see it in this history."));
+    auto *head = new QHBoxLayout;
+    head->setContentsMargins(0, 3, 0, 0);
+    head->addWidget(label(m_preview->live() ? "Recent run history" : "Run history", "blueprintInspectorTitle"));
+    head->addStretch();
+    if (!runs.isEmpty()) head->addWidget(label(QString(runs.size() == 1 ? "1 run" : "%1 runs").arg(runs.size()), "cardMeta"));
+    m_history->addLayout(head);
+    m_history->addSpacing(10);
+    if (runs.isEmpty()) {
+        auto *empty = wrapped("Start a run to see it in this history.", "blueprintDetailsEmpty");
+        empty->setAlignment(Qt::AlignCenter);
+        m_history->addWidget(empty);
+        m_history->addStretch();
+        return;
+    }
+    // Fixed columns keep status, source, duration and time aligned down the list.
+    const QList<QPair<QString, int>> columns{{"Status", 112}, {"Source", 92}, {"Time", 60}, {"Started", 112}};
+    auto *header = new QHBoxLayout;
+    header->setContentsMargins(52, 0, 12, 4);
+    header->setSpacing(16);
+    header->addWidget(label("Run", "blueprintColumnHeader"), 1);
+    for (const auto &[name, width] : columns) {
+        auto *cell = label(name, "blueprintColumnHeader");
+        cell->setFixedWidth(width);
+        if (name == "Time") cell->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        header->addWidget(cell);
+    }
+    {
+        // Room for each row's Inspect button, so the headings line up with their columns.
+        Button probe(literalButtonText("Inspect"));
+        probe.setFlat(true);
+        probe.ensurePolished();
+        header->addSpacing(probe.sizeHint().width());
+    }
+    m_history->addLayout(header);
     for (const auto &value : runs) {
         const auto run = value.toObject();
         const auto id = run["id"].toString();
-        auto *row = new QHBoxLayout;
-        row->setContentsMargins(0, 5, 0, 5);
+        const auto status = run["status"].toString();
+        auto *card = new QFrame;
+        card->setObjectName("blueprintHistoryRow");
+        auto *row = new QHBoxLayout(card);
+        row->setContentsMargins(12, 9, 10, 9);
+        row->setSpacing(16);
+        auto *mark = label({}, "blueprintStatusMark");
+        mark->setProperty("tone", status == "passed" ? "ok" : status == "failed" || status == "denied" ? "err"
+                                  : status == "waiting" || status == "expired" ? "warn" : "idle");
+        mark->setFixedSize(28, 28);
+        mark->setAlignment(Qt::AlignCenter);
+        mark->setPixmap(Theme::coloredIcon(statusIcon(status), statusTone(status), 15).pixmap(15, 15));
+        row->addWidget(mark);
+        row->setSpacing(12);
         auto *title = new QVBoxLayout;
-        title->addWidget(label(run["target"].toString().isEmpty() ? "Full blueprint" : "Node test", "headingLabel"));
+        title->setSpacing(1);
+        title->addWidget(label(run["target"].toString().isEmpty() ? "Full blueprint" : "Node test", "blueprintHistoryTitle"));
         const auto rev = run["revision"].toInt();
-        auto *meta = wrapped((rev ? QString("Revision %1").arg(rev) : QString("Draft node")) + " · " + id.left(8), "cardMeta");
+        auto *meta = label((rev ? QString("Revision %1").arg(rev) : QString("Draft node")) + " · " + id.left(8), "blueprintRunId");
         meta->setToolTip("Run ID " + id);
         title->addWidget(meta);
         row->addLayout(title, 1);
-        row->setSpacing(16);
-        // Fixed columns keep status, source, duration and time aligned down the list.
-        const auto column = [row](QLabel *cell, int width) {
-            cell->setFixedWidth(width);
-            row->addWidget(cell);
+        row->addSpacing(4);
+        const auto column = [row](QWidget *cell, int width) {
+            auto *box = new QWidget;
+            box->setFixedWidth(width);
+            auto *inner = new QHBoxLayout(box);
+            inner->setContentsMargins(0, 0, 0, 0);
+            inner->addWidget(cell);
+            inner->addStretch();
+            row->addWidget(box);
         };
-        column(statusLabel(run["status"].toString()), 118);
+        column(statusLabel(status), columns[0].second);
         auto source = run["source"].toString();
         if (source == "Local chat") source = run["toolChat"].toBool() ? "Tool mode" : "Conversation";
-        column(label(source, "cardMeta"), 92);
+        auto *sourceLabel = label(source, "cardMeta");
+        sourceLabel->setFixedWidth(columns[1].second);
+        row->addWidget(sourceLabel);
         auto *elapsed = label(run.contains("ended")
-            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "cardMeta");
+            ? BlueprintPreview::duration(run["ended"].toInteger() - run["created"].toInteger()) : "—", "blueprintCode");
         elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        column(elapsed, 56);
-        column(label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta"), 112);
+        elapsed->setFixedWidth(columns[2].second);
+        row->addWidget(elapsed);
+        auto *when = label(QDateTime::fromMSecsSinceEpoch(run["created"].toInteger()).toString("d MMM, h:mm AP"), "cardMeta");
+        when->setFixedWidth(columns[3].second);
+        row->addWidget(when);
         auto *open = action("Inspect", false, true);
+        open->setMinimumWidth(open->sizeHint().width());
         row->addWidget(open);
         connect(open, &Button::clicked, this, [this, id] { openRun(id); });
-        m_history->addLayout(row);
-        m_history->addWidget(rule());
+        m_history->addWidget(card);
+        m_history->addSpacing(6);
     }
     m_history->addStretch();
 }
 
-void BlueprintPanel::updateCanvasFooter() {
-    // The hint is the first thing to go in a narrow canvas so the counts and zoom stay on one line.
-    const bool hasNodes = !m_graph["nodes"].toArray().isEmpty();
-    m_gestureHint->setVisible(hasNodes && m_canvasPanel->width() >= 600);
-}
-
 bool BlueprintPanel::eventFilter(QObject *watched, QEvent *event) {
-    if (watched == m_canvasPanel && event->type() == QEvent::Resize) updateCanvasFooter();
+    if (watched == m_canvas && event->type() == QEvent::Resize) applyCompactRule();
     return QWidget::eventFilter(watched, event);
 }
 
@@ -2684,10 +2568,9 @@ void BlueprintPanel::changeEvent(QEvent *event) {
     if (m_dark == Theme::isDark()) return;
     m_dark = Theme::isDark();
     QTimer::singleShot(0, this, [this] {
-        refreshCanvasActions();
         refreshEditor();
         refreshRun();
-        if (m_tabs->currentIndex() == 2) refreshHistory();
+        if (m_bar->view() == BlueprintTopBar::View::RunHistory) refreshHistory();
     });
 }
 

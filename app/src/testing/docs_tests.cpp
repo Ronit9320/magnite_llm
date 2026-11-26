@@ -1,3 +1,4 @@
+#include "build_features.h"
 #include "testing/docs_tests.h"
 #include "panels/docspanel.h"
 #include "theme.h"
@@ -59,16 +60,34 @@ int runDocsChecks(const QString &captures) {
         docs.resize(1240, 900);
         docs.show();
         pump(220);
-        check(docs.library().error().isEmpty() && docs.library().articles().size() == 26 &&
+        // Builds without Blueprints and Tool mode omit their three articles.
+        const int expectedArticles = Features::blueprintsAndTools ? 26 : 23;
+        check(docs.library().error().isEmpty() && docs.library().articles().size() == expectedArticles &&
                   docs.library().groups().size() == 7,
-              "twenty-six complete offline articles in seven subjects");
+              "every complete offline article for this build in seven subjects");
         check(docs.library().groups().value(0) == "Getting started" &&
                   docs.library().groups().value(1) == "Using Magnite Space" &&
                   docs.library().groups().last() == "Help & reference",
               "app guides come first and help comes last");
-        for (const char *id : {"welcome", "first-model", "conversations", "tool-mode", "knowledge", "blueprints",
-                               "blueprint-nodes", "training-studio", "settings-data"})
+        for (const char *id : {"welcome", "first-model", "conversations", "knowledge", "training-studio", "settings-data"})
             check(docs.library().article(id) != nullptr, QString("app guide %1 exists").arg(id).toUtf8().constData());
+        for (const char *id : {"tool-mode", "blueprints", "blueprint-nodes"})
+            check((docs.library().article(id) != nullptr) == Features::blueprintsAndTools,
+                  QString("app guide %1 follows the build profile").arg(id).toUtf8().constData());
+        if (!Features::blueprintsAndTools) {
+            QStringList mentions;
+            for (const auto &article : docs.library().articles()) {
+                for (const auto &text : {article.title, article.shortTitle, article.description})
+                    if (text.contains("Blueprint") || text.contains("Tool mode"))
+                        mentions << article.id;
+                for (const auto &section : article.sections)
+                    if (section.text.contains("Blueprint") || section.text.contains("Tool mode"))
+                        mentions << article.id + "/" + section.id;
+            }
+            const QString title = docs.library().article("conversations")->title;
+            check(mentions == QStringList{"conversations/modes"} && !title.contains("Blueprint"),
+                  "switched-off builds describe only the features they ship");
+        }
         {
             QString previousGroup;
             QStringList closed;
@@ -336,7 +355,8 @@ int runDocsChecks(const QString &captures) {
                 pump(220);
                 docs.grab().save(captures + "/docs-home-" + suffix + ".png");
                 for (const auto &id :
-                     QStringList{"model-learning", "data-distribution", "dataset-format", "generalization", "first-model", "blueprints"}) {
+                     QStringList{"model-learning", "data-distribution", "dataset-format", "generalization", "first-model",
+                                 Features::blueprintsAndTools ? "blueprints" : "conversations"}) {
                     docs.openArticle(id, docs.library().article(id)->sections.first().id);
                     pump(180);
                     scroll->verticalScrollBar()->setValue(0);

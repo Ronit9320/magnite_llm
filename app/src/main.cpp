@@ -13,9 +13,12 @@
 #include <QDir>
 #include <QFont>
 #include <QSettings>
+#include <QProxyStyle>
+#include <QStyleFactory>
 #include <QTimer>
 #include <QFileInfo>
 #include <QFile>
+#include <QFrame>
 #include "widgets/confirmation.h"
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
@@ -23,9 +26,25 @@
 #include <unistd.h>
 #endif
 
+namespace {
+// Fusion, minus the frames the stylesheet cannot reach: a combo box popup takes its outline
+// from this hint rather than from any QSS rule.
+class AppStyle : public QProxyStyle {
+public:
+    AppStyle() : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion"))) {}
+    int styleHint(StyleHint hint, const QStyleOption *option, const QWidget *widget,
+                  QStyleHintReturn *data) const override {
+        if (hint == SH_ComboBox_PopupFrameStyle) return QFrame::NoFrame;
+        return QProxyStyle::styleHint(hint, option, widget, data);
+    }
+};
+}  // namespace
+
 int main(int argc, char *argv[]) {
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
+    // One widget style on every platform; the stylesheet and tokens sit on top of it.
+    QApplication::setStyle(new AppStyle);
     WindowChrome::install(app);
     QCoreApplication::setOrganizationName("Magnite");
     QCoreApplication::setOrganizationDomain("magnite.local");

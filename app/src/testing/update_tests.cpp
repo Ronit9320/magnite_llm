@@ -41,18 +41,19 @@ int main(int argc, char **argv) {
         {"size", 100}, {"sha256", QString(64, 'a')}, {"commit", QString(40, 'b')}, {"minimum_glibc", "2.35"},
         {"url", base + "download/" + version + "/Magnite-" + version + "-linux-x86_64.AppImage"},
         {"notes_url", base + "tag/" + version}};
-    auto verify = [&](const QJsonObject &object) {
+    auto verifyFor = [&](const QJsonObject &object, const QString &platform) {
         const auto payload = QJsonDocument(object).toJson();
         QString error; QJsonObject result;
-        return UpdateManager::verifyManifest(payload, sign(payload), publicKey, "test/magnite", &result, &error);
+        return UpdateManager::verifyManifest(payload, sign(payload), publicKey, "test/magnite", &result, &error, platform);
     };
+    auto verify = [&](const QJsonObject &object) { return verifyFor(object, "linux-x86_64"); };
     check(verify(manifest), "valid publisher signature and compatible metadata accepted");
     auto payload = QJsonDocument(manifest).toJson();
     auto signature = sign(payload);
     payload[5] = payload[5] ^ 1;
     QString error;
-    check(!UpdateManager::verifyManifest(payload, signature, publicKey, "test/magnite", nullptr, &error), "tampered manifest rejected");
-    check(!UpdateManager::verifyManifest(payload, QByteArray(64, 'x'), publicKey, "test/magnite", nullptr, &error), "untrusted signature rejected");
+    check(!UpdateManager::verifyManifest(payload, signature, publicKey, "test/magnite", nullptr, &error, "linux-x86_64"), "tampered manifest rejected");
+    check(!UpdateManager::verifyManifest(payload, QByteArray(64, 'x'), publicKey, "test/magnite", nullptr, &error, "linux-x86_64"), "untrusted signature rejected");
     for (const auto &change : QList<QPair<QString, QJsonValue>>{
         {"url", "https://attacker.invalid/update"}, {"data_schema", MAGNITE_DATA_SCHEMA + 1}, {"architecture", "aarch64"},
         {"channel", "stable"}, {"variant", "cuda"}, {"size", -1}, {"size", 1e20},
@@ -66,6 +67,43 @@ int main(int argc, char **argv) {
         check(!verify(invalid), qPrintable("incompatible signed field rejected: " + change.first));
     }
     check(!UpdateManager::verifyManifest(QByteArray(16385, 'x'), signature, publicKey, "test/magnite", nullptr, &error), "oversized metadata rejected");
+
+    // macOS and Windows publish their own signed metadata for their own packages.
+    QJsonObject mac = manifest;
+    mac.remove("minimum_glibc");
+    mac.insert("platform", "macos"); mac.insert("architecture", "arm64"); mac.insert("minimum_macos", "14.0");
+    mac.insert("url", base + "download/" + version + "/" + UpdateManager::packageName("macos-arm64", version));
+    QJsonObject windows = manifest;
+    windows.remove("minimum_glibc");
+    windows.insert("platform", "windows"); windows.insert("minimum_windows", "10.0.17763");
+    windows.insert("url", base + "download/" + version + "/" + UpdateManager::packageName("windows-x86_64", version));
+    check(verifyFor(mac, "macos-arm64"), "signed macOS metadata accepted for macOS");
+    check(verifyFor(windows, "windows-x86_64"), "signed Windows metadata accepted for Windows");
+    check(!verifyFor(mac, "linux-x86_64") && !verifyFor(manifest, "macos-arm64") && !verifyFor(windows, "macos-arm64")
+              && !verifyFor(manifest, "windows-x86_64"),
+          "metadata for another platform is rejected");
+    check(!verifyFor(manifest, "") && !verifyFor(manifest, "linux-aarch64"), "unsupported platforms are rejected");
+    for (const auto &change : QList<QPair<QString, QJsonValue>>{
+        {"minimum_macos", ""}, {"minimum_macos", "fourteen"},
+        {"url", base + "download/" + version + "/Magnite-" + version + "-arm64.dmg"},
+#ifdef Q_OS_MACOS
+        {"minimum_macos", "999.0"},
+#endif
+        {"architecture", "x86_64"}}) {
+        auto invalid = mac; invalid.insert(change.first, change.second);
+        check(!verifyFor(invalid, "macos-arm64"), qPrintable("incompatible macOS field rejected: " + change.first));
+    }
+    for (const auto &change : QList<QPair<QString, QJsonValue>>{
+        {"minimum_windows", ""}, {"minimum_windows", "6.1"},
+#ifdef Q_OS_WIN
+        {"minimum_windows", "10.0.999999"},
+#endif
+        {"url", base + "download/" + version + "/Magnite-" + version + "-windows-x86_64.zip"}}) {
+        auto invalid = windows; invalid.insert(change.first, change.second);
+        check(!verifyFor(invalid, "windows-x86_64"), qPrintable("incompatible Windows field rejected: " + change.first));
+    }
+    check(UpdateManager::packageName("linux-x86_64", version) == "Magnite-" + version + "-linux-x86_64.AppImage",
+          "Linux package name is unchanged for existing installations");
     EVP_PKEY_free(key);
     return failures ? 1 : 0;
 }

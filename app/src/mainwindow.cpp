@@ -8,6 +8,7 @@
 #include "backend_client.h"
 #include "update_manager.h"
 #include "update_config.h"
+#include "build_features.h"
 #include "panels/basepanel.h"
 #include "panels/modelspanel.h"
 #include "panels/modelhubpanel.h"
@@ -260,12 +261,12 @@ void MainWindow::setupUi() {
     mainLayout->setSpacing(0);
 
     // ---- Left menu ----
-    m_sidebar = new Sidebar({{"Model hub", "search", PanelHub},
-                             {"Library", "box", PanelModels},
-                             {"Training", "graduation-cap", PanelTraining},
-                             {"Blueprints", "layers", PanelBlueprints},
-                             {"Docs", "file-text", PanelDocs}},
-                            {"Settings", "settings", PanelSettings}, PanelChat);
+    QList<Sidebar::NavItem> workspaces{{"Model hub", "search", PanelHub},
+                                    {"Library", "box", PanelModels},
+                                    {"Training", "graduation-cap", PanelTraining}};
+    if (Features::blueprintsAndTools) workspaces.append({"Blueprints", "layers", PanelBlueprints});
+    workspaces.append({"Docs", "file-text", PanelDocs});
+    m_sidebar = new Sidebar(workspaces, {"Settings", "settings", PanelSettings}, PanelChat);
     m_history = m_sidebar->history();
     connect(m_sidebar, &Sidebar::panelRequested, this, &MainWindow::switchPanel);
 
@@ -325,27 +326,9 @@ void MainWindow::setupUi() {
     m_chatPanel = new ChatPanel();
     m_chatPanel->setKnowledgePanel(m_ragPanel);
     connect(m_chatPanel, &ChatPanel::adaptersRequested, this, [this] { switchPanel(PanelAdapters); });
-    auto *blueprintPreview = new BlueprintPreview(*m_backendClient, this);
-    m_blueprintPanel = new BlueprintPanel(blueprintPreview);
-    auto *toolMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Tool);
-    auto *blueprintMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Blueprint);
-    m_chatPanel->setRunPanels(toolMode, blueprintMode);
-    connect(m_modelsPanel, &ModelsPanel::modelsChanged, blueprintPreview, &BlueprintPreview::refreshOptions);
-    connect(m_blueprintPanel, &BlueprintPanel::chatRequested, this, [this] { switchPanel(PanelChat); });
-    for (auto *mode : {toolMode, blueprintMode}) {
-        connect(mode, &ConversationRunPanel::runRequested, this, [this](const QString &id) {
-            m_blueprintPanel->openRun(id);
-            switchPanel(PanelBlueprints);
-        });
-    }
-    connect(blueprintMode, &ConversationRunPanel::libraryRequested, this, [this] {
-        m_blueprintPanel->showLibrary();
-        switchPanel(PanelBlueprints);
-    });
-    connect(m_blueprintPanel, &BlueprintPanel::conversationRequested, this, [this](const QString &id) {
-        switchPanel(PanelChat);
-        m_chatPanel->showBlueprint(id);
-    });
+    // Switched-off builds never create the Blueprint surfaces, so nothing calls
+    // their (unmounted) backend routes; Conversation keeps only ordinary chat.
+    if (Features::blueprintsAndTools) setUpBlueprints();
     // Verification runs keep their chats in a throwaway folder unless a data folder was chosen explicitly.
     m_chatTemp = verificationRun() && qEnvironmentVariableIsEmpty("MAGNITE_HOME") ? std::make_unique<QTemporaryDir>() : nullptr;
     m_chatStore = new ChatStore(m_chatTemp ? m_chatTemp->path() + "/chats" : ChatStore::defaultDir(), this);
@@ -385,7 +368,8 @@ void MainWindow::setupUi() {
     m_docsPanel = new DocsPanel;
     m_stack->addWidget(m_docsPanel);
     m_stack->addWidget(m_modelHubPanel);
-    m_stack->addWidget(m_blueprintPanel);
+    if (m_blueprintPanel) m_stack->addWidget(m_blueprintPanel);
+    else m_stack->addWidget(new QWidget); // Keep PanelBlueprints' index stable.
     connect(m_modelHubPanel, &ModelHubPanel::loadRequested, this, [this](const QString &id) {
         switchPanel(PanelChat);
         m_chatPanel->loadModel(id);
@@ -554,8 +538,33 @@ void MainWindow::setupUi() {
     m_sidebar->setCurrentPanel(m_stack->currentIndex());
 }
 
+void MainWindow::setUpBlueprints() {
+    auto *blueprintPreview = new BlueprintPreview(*m_backendClient, this);
+    m_blueprintPanel = new BlueprintPanel(blueprintPreview);
+    auto *toolMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Tool);
+    auto *blueprintMode = new ConversationRunPanel(blueprintPreview, ConversationRunPanel::Mode::Blueprint);
+    m_chatPanel->setRunPanels(toolMode, blueprintMode);
+    connect(m_modelsPanel, &ModelsPanel::modelsChanged, blueprintPreview, &BlueprintPreview::refreshOptions);
+    connect(m_blueprintPanel, &BlueprintPanel::chatRequested, this, [this] { switchPanel(PanelChat); });
+    for (auto *mode : {toolMode, blueprintMode}) {
+        connect(mode, &ConversationRunPanel::runRequested, this, [this](const QString &id) {
+            m_blueprintPanel->openRun(id);
+            switchPanel(PanelBlueprints);
+        });
+    }
+    connect(blueprintMode, &ConversationRunPanel::libraryRequested, this, [this] {
+        m_blueprintPanel->showLibrary();
+        switchPanel(PanelBlueprints);
+    });
+    connect(m_blueprintPanel, &BlueprintPanel::conversationRequested, this, [this](const QString &id) {
+        switchPanel(PanelChat);
+        m_chatPanel->showBlueprint(id);
+    });
+}
+
 void MainWindow::switchPanel(int index) {
     if (m_startupPage) return;
+    if (index == PanelBlueprints && !m_blueprintPanel) index = PanelChat;
     if (index == PanelRag) {
         m_chatPanel->showKnowledge();
         index = PanelChat;
@@ -893,7 +902,10 @@ void MainWindow::runSelfTest() {
             switchPanel(i);
         }
 
-        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==PanelBlueprints, "settings opens as a window above the current workspace");
+        // Switched-off builds redirect the Blueprints slot to Conversation.
+        const int lastWorkspace = Features::blueprintsAndTools ? int(PanelBlueprints) : int(PanelChat);
+        checkC(m_settingsWindow->isVisible() && m_stack->currentIndex()==lastWorkspace, "settings opens as a window above the current workspace");
+        checkC((m_blueprintPanel != nullptr) == Features::blueprintsAndTools, "Blueprints exist only when the build profile enables them");
         checkC(m_stack->count() == PanelCount-1, "eight workspace slots plus a settings window");
         switchPanel(PanelDocs);
         checkC(m_docsPanel->openArticle("model-learning"), "Docs opens a bundled reference in the real workspace");

@@ -5,6 +5,7 @@
 #include "panels/greeting.h"
 #include "theme.h"
 #include "update_config.h"
+#include "build_features.h"
 #include "update_manager.h"
 #include "widgets/brandmark.h"
 #include "widgets/button.h"
@@ -26,6 +27,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsOpacityEffect>
@@ -57,6 +59,19 @@ const QStringList titles = {"General",           "Appearance",    "Chat",       
 const QStringList icons = {"settings", "layers", "message-circle", "cpu",
                            "database", "box",    "file-text",      "refresh-cw", "user"};
 constexpr int kProfilePage = 8;
+// A one-line label that keeps its own font's line height as an explicit minimum, so a
+// layout that measured it before its stylesheet font applied can never squeeze it.
+class LineLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void changeEvent(QEvent* event) override {
+        QLabel::changeEvent(event);
+        if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange)
+            setMinimumHeight(fontMetrics().height() + contentsMargins().top() + contentsMargins().bottom());
+    }
+};
 QLabel* label(const QString& text, const char* name, QWidget* parent = nullptr) {
     auto* result = new QLabel(text, parent);
     result->setObjectName(name);
@@ -129,7 +144,19 @@ void SettingsPanel::setupUi() {
     auto* nav = new QWidget;
     nav->setObjectName("settingsNavigation");
     nav->setFixedWidth(218);
-    auto* navBody = new QVBoxLayout(nav);
+    // The sidebar scrolls when it is taller than the window (large interface sizes,
+    // short screens) instead of squeezing its labels.
+    auto* navFrame = new QVBoxLayout(nav);
+    navFrame->setContentsMargins(0, 0, 0, 0);
+    auto* navScroll = new QScrollArea;
+    navScroll->setObjectName("settingsScroll");
+    navScroll->setFrameShape(QFrame::NoFrame);
+    navScroll->setWidgetResizable(true);
+    navScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    navFrame->addWidget(navScroll);
+    auto* navContent = new QWidget;
+    navScroll->setWidget(navContent);
+    auto* navBody = new QVBoxLayout(navContent);
     navBody->setContentsMargins(16, 28, 16, 22);
     navBody->setSpacing(4);
     navBody->addWidget(label("Settings", "settingsNavTitle"));
@@ -453,6 +480,9 @@ void SettingsPanel::setupUi() {
         grid->setSpacing(10);
         int index = 0;
         for (const auto& stat : stats) {
+            const QString key = stat.key;
+            if (!Features::blueprintsAndTools && (key == "blueprints" || key == "tasks"))
+                continue; // Not part of this build.
             auto* tile = new QFrame;
             tile->setObjectName("settingsMetric");
             tile->setProperty("profileStat", stat.key);
@@ -467,7 +497,10 @@ void SettingsPanel::setupUi() {
             head->addWidget(icon);
             head->addWidget(label(stat.title, "settingsHint"), 1);
             l->addLayout(head);
-            auto* value = label("—", "settingsProfileValue");
+            // A short number on one line; see LineLabel.
+            auto* value = new LineLabel("—");
+            value->setObjectName("settingsProfileValue");
+            value->setTextFormat(Qt::PlainText);
             value->setAccessibleName(stat.title);
             m_statValues.insert(stat.key, value);
             l->addWidget(value);
@@ -836,7 +869,9 @@ void SettingsPanel::refreshProfile() {
             set("knowledge", count(num(k, "documents")),
                 num(k, "chunks") ? QString("%1 indexed %2").arg(count(num(k, "chunks")), plural(num(k, "chunks"), "passage")) : QString());
         }
-        if (missing("blueprints")) unavailable << "Blueprints";
+        if (!Features::blueprintsAndTools) {
+            // This build has no Blueprints or Tool mode, so there is nothing to count.
+        } else if (missing("blueprints")) unavailable << "Blueprints";
         else {
             const auto b = section("blueprints");
             set("blueprints", count(num(b, "blueprints")),

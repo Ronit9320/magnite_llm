@@ -1,11 +1,12 @@
-# Linux preview packaging
+# Native packaging
 
-The canonical first release is **v0.1-preview**. Current native package work
-is integrated on `release/integration`; the original Linux implementation used
-`release/v0.1-testing`. The public preview remains Linux-only; native Mac/Windows
-packages are testing artifacts. See [native evidence](../docs/development/NATIVE_PACKAGES.md).
-See [the release/update architecture and work log](../docs/development/RELEASE_PIPELINE.md)
-for CI, signing setup, updater behavior, deferred checklist work and later platforms.
+Packages for Linux (AppImage), macOS (DMG plus an update `.zip`) and Windows
+(per-user installer) are built by the recipes below and, in CI, by the reusable
+`build-{linux,macos,windows}.yml` workflows. The current release is
+**v0.2-preview** (magnite-spacev0.2) from `release/magnite-spacev0.2`. See
+[native evidence](../docs/development/NATIVE_PACKAGES.md) and
+[the release pipeline](../docs/development/RELEASE_PIPELINE.md) for CI, signing,
+updater behavior and publication.
 
 ## Linux x86-64
 
@@ -23,9 +24,11 @@ installs the pinned CPU ML runtime and the backend wheel, builds portable CPU
 llama.cpp, then assembles Qt and native libraries into an AppImage. No developer
 venv, personal store or model caches are copied.
 
-The shared runtime builder also stages the pinned Node.js executable and the
-production dependencies from the Pi npm lockfile. Both runtime profiles
-include Pi. The command below builds a GGUF package without optional ML
+When `BLUEPRINTS_AND_TOOLS` is on in `backend/src/backend/_features.py`, the
+shared runtime builder also stages the pinned Node.js executable and the
+production dependencies from the Pi npm lockfile, in both runtime profiles. With
+it off (v0.2-preview), neither is staged and the Pi smoke check confirms they are
+absent. The command below builds a GGUF package without optional ML
 dependencies in separate staging and output directories.
 
 ```sh
@@ -36,8 +39,9 @@ bash packaging/build_appimage.sh
 ```
 
 Use a separate staging directory for each runtime profile. `build-info`
-records the profile and bundled Node and Pi versions. The relocated smoke
-starts Blueprints, runs the Pi worker with host Node removed from PATH, and
+records the profile and any bundled Node and Pi versions. With the features on,
+the relocated smoke starts Blueprints and runs the Pi worker with host Node
+removed from PATH; it always
 uses `--features` to exercise GGUF on both profiles and LoRA/RAG on the ML
 profile. The macOS and Windows smoke checks also run the Pi worker from the
 installed package.
@@ -63,14 +67,14 @@ included. An adjacent packaged runtime is mandatory; packaged startup never
 falls back to host Python. Source checkout discovery remains available otherwise.
 
 ```sh
-python3 packaging/smoke_appimage.py dist/Magnite-v0.1-preview-linux-x86_64.AppImage \
+python3 packaging/smoke_appimage.py dist/Magnite-v0.2-preview-linux-x86_64.AppImage \
   --logs build/packaging/relocated-tests --cache build/packaging/test-cache --features
 ```
 
 The smoke test requires loopback access and downloads tiny models. It checks
 relocated theme/UI/startup, GGUF inference, and CPU LoRA/adapter/RAG while
-supplying deliberately broken host Python paths. CI signs and publishes only
-after the exact package passes. Local builds do not publish or push anything.
+supplying deliberately broken host Python paths. Only `release.yml` signs and
+publishes, after the exact packages for all three platforms pass. Local builds do not publish or push anything.
 
 ## macOS Apple silicon (arm64)
 
@@ -79,8 +83,8 @@ The macOS recipe lives in [`macos/`](macos/README.md). It needs Command Line Too
 
 ```sh
 bash packaging/macos/build_app.sh     # Qt + isolated Python 3.12 runtime + backend -> ad-hoc signed Magnite.app, verify_bundle.py gate
-bash packaging/macos/build_dmg.sh     # -> dist/Magnite-v0.1-preview-arm64.dmg and dist/SHA256SUMS-macos
-bash packaging/macos/check_dmg.sh dist/Magnite-v0.1-preview-arm64.dmg
+bash packaging/macos/build_dmg.sh     # -> dist/Magnite-v0.2-preview-arm64.dmg and dist/SHA256SUMS-macos
+bash packaging/macos/check_dmg.sh dist/Magnite-v0.2-preview-arm64.dmg
 bash packaging/macos/verify_installed.sh <app> <log-dir> <hf-cache>   # full acceptance set on an installed copy
 ```
 

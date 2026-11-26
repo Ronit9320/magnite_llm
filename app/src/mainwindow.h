@@ -58,6 +58,7 @@ private slots:
     void onBackendStarted();
     void onBackendError(QProcess::ProcessError error);
     void onBackendDataDirInUse();
+    void setUpBlueprints();
     void switchPanel(int index);
     void savePanelSettings();
 

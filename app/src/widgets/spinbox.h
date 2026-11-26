@@ -1,5 +1,6 @@
 #pragma once
 #include "theme.h"
+#include <QLineEdit>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QPainter>
@@ -22,14 +23,14 @@ inline void arrows(QAbstractSpinBox *widget,const QStyleOptionSpinBox &option) {
 class SpinBox : public QSpinBox {
     Q_OBJECT
 public:
-    explicit SpinBox(QWidget *parent=nullptr) : QSpinBox(parent) {}
+    explicit SpinBox(QWidget *parent=nullptr) : QSpinBox(parent) { lineEdit()->setTextMargins(8,0,0,0); }  // QSS padding never reaches the inner field
 protected:
     void paintEvent(QPaintEvent *event) override { QSpinBox::paintEvent(event); QStyleOptionSpinBox option; initStyleOption(&option); SpinControls::arrows(this,option); }
 };
 class DoubleSpinBox : public QDoubleSpinBox {
     Q_OBJECT
 public:
-    explicit DoubleSpinBox(QWidget *parent=nullptr) : QDoubleSpinBox(parent) {}
+    explicit DoubleSpinBox(QWidget *parent=nullptr) : QDoubleSpinBox(parent) { lineEdit()->setTextMargins(8,0,0,0); }
 protected:
     void paintEvent(QPaintEvent *event) override { QDoubleSpinBox::paintEvent(event); QStyleOptionSpinBox option; initStyleOption(&option); SpinControls::arrows(this,option); }
 };

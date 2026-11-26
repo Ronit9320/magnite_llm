@@ -5,7 +5,16 @@ design_doc.md
 PHASE_5_5.md
 RELEASE_READINESS_ASSESSMENT.md
 /RELEASE_PLAN.md
-design/
+# Design work stays local, except the launch social posts and the 2D launch film's sources.
+/design/*
+!/design/social/
+!/design/launch-storyboard-film/
+/design/launch-storyboard-film/*
+!/design/launch-storyboard-film/2d/
+/design/launch-storyboard-film/2d/renders/
+/design/launch-storyboard-film/2d/renders_4k/
+/design/launch-storyboard-film/2d/*.blend
+/design/launch-storyboard-film/2d/*.blend1
 
 # Python
 __pycache__/

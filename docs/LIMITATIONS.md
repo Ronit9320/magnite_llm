@@ -1,22 +1,33 @@
 # Preview limitations
 
-Reviewed 2026-11-02 against the integrated source and recorded verification.
+Reviewed 2026-11-20 for magnite-spacev0.2 (v0.2-preview).
 See [native package evidence](development/NATIVE_PACKAGES.md) for exact builds
 and [the release checklist](../RELEASE_CHECKLIST.md) for remaining acceptance work.
 
 ## Distribution and platform coverage
 
-- The public `v0.1-preview` release provides a Linux x86-64 CPU AppImage with
-  signed preview updates. Clean-source Linux AppImage, Mac ARM DMG and Windows
-  x86-64 installer candidates passed the native integration workflow recorded
-  on 2026-10-30. Mac/Windows candidates are testing artifacts, not public releases.
+- v0.2-preview publishes a Linux x86-64 CPU AppImage, a macOS Apple-silicon DMG
+  and a Windows x86-64 per-user CPU installer from one source commit, each with
+  signed in-app preview updates.
+- Blueprints, Tool mode and the bundled Node.js/Pi worker are switched off in this
+  release. They remain in development on `dev`.
+- The macOS build is ad-hoc signed and not notarized; the Windows installer is
+  not Authenticode-signed. Both systems warn on first launch
+  ([macOS](MACOS_FIRST_LAUNCH.md), [Windows](WINDOWS_FIRST_LAUNCH.md)). Windows
+  Smart App Control blocks the installer entirely.
+- In-app updates: Linux and macOS roll back a version that does not start;
+  Windows reports it but does not roll back. macOS can ask for App Management
+  permission, and an app opened from the disk image or a read-only location
+  can't update itself. The macOS and Windows install steps are covered by hosted
+  checks and script tests, not yet by an update between two published releases
+  on physical machines.
+- v0.1-preview cannot update to v0.2-preview in place because `DATA_SCHEMA`
+  changed; install the new package manually. There is no migration framework.
 - Linux CI builds on Ubuntu 22.04 and gates ELF glibc requirements at 2.35.
-  The old local test AppImage's glibc 2.43 requirement is historical, not the
-  current CI package baseline. Broader native desktop/distro checks remain open.
-- Mac candidates target Apple silicon/macOS 14+, are ad-hoc signed and not
-  notarized. Windows candidates are unsigned per-user CPU installers. Hosted
-  checks do not establish clean consumer-machine installation, every OS version,
-  or physical GPU support. Platform updaters/publication remain separate work.
+  Broader native desktop/distro checks remain open.
+- Hosted checks do not establish clean consumer-machine installation, every OS
+  version, or physical GPU support. Linux and Windows packages are CPU builds;
+  the macOS package uses Metal/MPS, checked on an M1 with small models.
 - Source installation depends on the checkout layout. Packaging uses isolated
   Python runtimes and platform dependency locks; editable source installs retain
   broad dependency bounds unless constraints are explicitly supplied.

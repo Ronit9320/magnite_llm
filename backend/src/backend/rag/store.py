@@ -11,6 +11,7 @@ import sqlite3
 from backend.database import connection, open_or_quarantine
 import threading
 import time
+import traceback
 import uuid
 from typing import Optional
 
@@ -487,6 +488,7 @@ class RagStore:
             self._reindexing = True
         path = os.path.join(self._data_dir, f"reindex-{uuid.uuid4().hex[:8]}.tmp")
         staged = {"array": None}
+        array = None
         ids: list = []
 
         def batches():
@@ -515,8 +517,15 @@ class RagStore:
             array.flush()
             self._apply_reindex(array, ids, model, truncate_dim)
             return self.get_config()
+        except BaseException as exc:
+            # Failed frames in the traceback still reference the memory map; release them.
+            traceback.clear_frames(exc.__traceback__)
+            raise
         finally:
+            # Drop every reference to the memory map before deleting its file: Windows
+            # cannot delete a file that is still mapped.
             staged["array"] = None
+            array = None
             try:
                 os.remove(path)
             except OSError:

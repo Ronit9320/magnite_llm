@@ -24,6 +24,7 @@ from backend.models.schemas import ModelRecord
 from backend.routes.adapters import _get_store
 from backend.routes.models import _get_registry
 from backend.routes.training import _get_datasets, _get_manager
+from backend._features import BLUEPRINTS_AND_TOOLS
 from backend.server import app
 from backend.training.schemas import TrainingJob
 from order_blueprint_fixture import order_blueprint, order_samples, training_examples
@@ -89,6 +90,7 @@ def read_events(body):
     ]
 
 
+@unittest.skipUnless(BLUEPRINTS_AND_TOOLS, "Blueprints and Tool mode are switched off in this build")
 class BlueprintApiTests(unittest.TestCase):
     def setUp(self):
         resources = ExitStack()

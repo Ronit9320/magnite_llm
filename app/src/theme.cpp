@@ -1,3 +1,4 @@
+#include "widgets/wheelguard.h"
 #include "theme.h"
 #include "systemappearance.h"
 
@@ -79,6 +80,8 @@ std::vector<Token> tokens() {
         {"@brandInk", Theme::brandInk()},
         {"@brandText", Theme::brandText()},
         {"@canvasBackground",     Theme::canvasBackground()},
+        {"@blueprintPanelFill",   Theme::blueprintPanelFill()},
+        {"@blueprintCanvasDot",   Theme::blueprintCanvasDot()},
         {"@insetBackground",      Theme::insetBackground()},
         {"@accentSurface", Theme::accentSurface()},
         {"@accentLabel",        Theme::accentLabel()},
@@ -92,7 +95,13 @@ std::vector<Token> tokens() {
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
         {"@controlBorder",        Theme::controlBorder()},
+        {"@divider",              Theme::divider()},
+        {"@fieldFillHover",       Theme::fieldFillHover()},
+        {"@fieldFill",            Theme::fieldFill()},
         {"@warningSurface",       Theme::warningSurface()},
+        {"@successSurface",       Theme::statusSurface(Theme::statusSuccess())},
+        {"@errorSurface",         Theme::statusSurface(Theme::statusError())},
+        {"@runningSurface",       Theme::statusSurface(Theme::comparisonSeries())},
         {"@textPrimary",        Theme::textPrimary()},
         {"@textSecondary",      Theme::textSecondary()},
         {"@textMuted",          Theme::textMuted()},
@@ -174,6 +183,7 @@ void Theme::loadFonts() {
 
 void Theme::setupApplicationTheme() {
     loadFonts();
+    WheelGuard::install();
     // Start the refined dark-first design in dark mode once, then remember the switch.
     QSettings appearance;
     if (!appearance.value("appearance/darkRefinementApplied", false).toBool()) {
@@ -277,6 +287,10 @@ void Theme::setDark(bool dark, bool animate) {
     palette.setColor(QPalette::PlaceholderText, QColor(textMuted()));
     palette.setColor(QPalette::Highlight, QColor(accentPrimary()));
     palette.setColor(QPalette::HighlightedText, QColor(accentText()));
+    // Fusion draws bevels and outlines from these roles; left alone they keep the desktop's
+    // (often white) values, which is where stray light borders come from.
+    for (auto role : {QPalette::Light, QPalette::Midlight}) palette.setColor(role, QColor(surfaceFillHover()));
+    for (auto role : {QPalette::Mid, QPalette::Dark, QPalette::Shadow}) palette.setColor(role, QColor(divider()));
     qApp->setPalette(palette);
     qApp->setStyleSheet(qss());
     for (auto *widget : QApplication::allWidgets()) {
@@ -403,6 +417,13 @@ int Theme::selfCheck() {
             validColors = validColors && QColor(value).isValid();
     }
     check("qss() color literals valid", validColors);
+    {
+        const QString tpl = loadText(QStringLiteral(":/theme/theme.qss"));
+        check("qss base layer makes frames borderless",
+              tpl.contains(QStringLiteral("QFrame, QAbstractScrollArea { border: none; }")));
+        check("qss dividers use @divider, not @surfaceBorder", !tpl.contains(QStringLiteral("@surfaceBorder")));
+        check("divider token valid", QColor(Theme::divider()).isValid() && Theme::divider() != Theme::surfaceFill());
+    }
 
     // 3. Qt resource tree: theme/fonts/icons embedded via resources.qrc.
     check("theme.qss embedded", !loadText(":/theme/theme.qss").isEmpty());
@@ -411,6 +432,8 @@ int Theme::selfCheck() {
                             !loadText(":/fonts/JetBrainsMono-Regular.ttf").isEmpty());
     Theme::loadFonts();   // --theme-check runs before setupApplicationTheme()
     check("monoFont is bundled JetBrains Mono", Theme::monoFont() == "JetBrains Mono");
+    check("light fields stand apart by fill", isDark() || (fieldFill() != surfaceFill() && fieldFill() != canvasBackground() && fieldFillHover() != fieldFill()));
+    check("light focus ring reaches 3:1 on fields", isDark() || contrastRatio(accentLabel(), fieldFill()) >= 3.0);
     check("light control border reaches 3:1", isDark() || (contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0));
     {
         // Type scale: every QSS font-size sits on the shared scale, never below 11px.
@@ -441,7 +464,7 @@ int Theme::selfCheck() {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
         "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
-        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain", "user"};
+        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain", "user", "info"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
@@ -532,6 +555,8 @@ int Theme::selfCheck() {
     check("refined dark surface", surfaceFill() == "#111113");
     check("refined dark border", surfaceBorder() == "#36363C");
     check("dark control border reaches 3:1", contrastRatio(controlBorder(), surfaceFill()) >= 3.0 && contrastRatio(controlBorder(), canvasBackground()) >= 3.0);
+    check("dark fields stand apart by fill", fieldFill() != surfaceFill() && fieldFill() != canvasBackground() && fieldFillHover() != fieldFill());
+    check("dark focus ring reaches 3:1 on fields", contrastRatio(accentLabel(), fieldFill()) >= 3.0);
     check("dark palette uses dark surfaces", QColor(canvasBackground()).lightness() <= 12);
     check("dark surfaces retain elevation", QColor(insetBackground()).lightness()<QColor(canvasBackground()).lightness() && QColor(canvasBackground()).lightness()<QColor(surfaceFill()).lightness() && QColor(surfaceFill()).lightness()<QColor(surfaceFillHover()).lightness());
     check("dark palette uses light text", QColor(textPrimary()).lightness() > 220);
@@ -559,6 +584,26 @@ int Theme::selfCheck() {
         check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
         check("chart hover colours valid",QColor(chartHoverFill()).isValid() && QColor(chartHoverText()).isValid());
         check("chart hover text contrast >= 4.5",contrast(chartHoverText(),chartHoverFill())>=4.5);
+        // Blueprints editor tokens.
+        bool editorValid=true, wiresVisible=true, headersReadable=true;
+        for(const auto &value:{blueprintTypeText(),blueprintTypeNumber(),blueprintTypeBoolean(),blueprintTypeObject(),blueprintTypeArray(),blueprintTypeReceipt(),blueprintTypeAdapter(),
+                               blueprintFamilySources(),blueprintFamilyTransform(),blueprintFamilyKnowledge(),blueprintFamilyModels(),blueprintFamilyTools(),blueprintFamilyOutput(),
+                               blueprintPanelFill(),blueprintPanelShadow(),blueprintCanvasDot()})
+            editorValid &= QColor(value).isValid();
+        for(const auto &value:{blueprintTypeText(),blueprintTypeNumber(),blueprintTypeBoolean(),blueprintTypeObject(),blueprintTypeArray(),blueprintTypeReceipt(),blueprintTypeAdapter()})
+            wiresVisible &= contrast(value,canvasBackground())>=3.0;
+        for(const auto &family:{blueprintFamilySources(),blueprintFamilyTransform(),blueprintFamilyKnowledge(),blueprintFamilyModels(),blueprintFamilyTools(),blueprintFamilyOutput()}) {
+            const QColor tint(family),base(blueprintPanelFill());
+            const qreal alpha=0.22;  // BlueprintStyle::headerTintAlpha
+            const QColor blended=QColor::fromRgbF(base.redF()+(tint.redF()-base.redF())*alpha,
+                                                  base.greenF()+(tint.greenF()-base.greenF())*alpha,
+                                                  base.blueF()+(tint.blueF()-base.blueF())*alpha);
+            headersReadable &= contrast(textPrimary(),blended.name())>=4.5;
+        }
+        check(dark ? "dark Blueprints editor tokens valid" : "light Blueprints editor tokens valid",editorValid);
+        check(dark ? "dark wire colours reach 3:1 on the canvas" : "light wire colours reach 3:1 on the canvas",wiresVisible);
+        check(dark ? "dark node header text contrast >= 4.5" : "light node header text contrast >= 4.5",headersReadable);
+        check("Blueprints canvas dot differs from the canvas",QColor(blueprintCanvasDot())!=QColor(canvasBackground()));
     }
     setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);
