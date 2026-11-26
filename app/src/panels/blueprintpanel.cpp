@@ -909,7 +909,7 @@ void BlueprintPanel::setupEditor() {
     m_inspectorPanel = new FloatingPanel;
     m_inspectorPanel->setObjectName("blueprintInspector");
     m_inspectorPanel->setAccessibleName("Node inspector");
-    m_inspectorPanel->setFixedWidth(320 + 2 * shadow);
+    m_inspectorPanel->setFixedWidth(BlueprintInspector::panelWidth + 2 * shadow);
     m_inspectorPanel->setProperty("slideIn", true);
     auto *inspectorLayout = new QVBoxLayout(m_inspectorPanel);
     inspectorLayout->setContentsMargins(4, 4, 0, 0);

@@ -18,6 +18,8 @@ class BlueprintInspector : public QWidget {
     Q_OBJECT
 public:
     explicit BlueprintInspector(BlueprintPreview &preview, QWidget *parent = nullptr);
+    // Width of the floating panel body that holds the inspector.
+    static constexpr int panelWidth = 360;
 
     // Shows nodeId from graph; an empty id clears. A pending text edit for the previous
     // node is committed (for that node) first.

@@ -6,6 +6,7 @@
 #include "widgets/surface.h"
 
 #include <QEvent>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -308,9 +309,15 @@ void BlueprintNodeFields::refreshBindings(const QString &selection) {
 
 void BlueprintNodeFields::appendPort(QVBoxLayout *rows, const QString &side, const QJsonObject &port, bool chooseType,
                                      bool editable) {
+    // An editable port takes two lines (key and label, then type and remove), so each box keeps
+    // room for its text; a fixed port is one line of label and type.
     auto *row = new QWidget;
-    auto *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
+    auto *layout = new QGridLayout(row);
+    layout->setContentsMargins(0, 0, 0, editable ? 4 : 0);
+    layout->setHorizontalSpacing(6);
+    layout->setVerticalSpacing(6);
+    layout->setColumnStretch(0, 1);
+    layout->setColumnStretch(1, 1);
     rows->addWidget(row);
     const QString direction = side == "in" ? "Input" : "Output";
     QLineEdit *key = nullptr;
@@ -319,14 +326,16 @@ void BlueprintNodeFields::appendPort(QVBoxLayout *rows, const QString &side, con
         key->setMaxLength(64);
         key->setAccessibleName(direction + " port key");
         key->setToolTip("Key used in JSON and connections");
-        layout->addWidget(key, 1);
+        key->setPlaceholderText("Key");
+        layout->addWidget(key, 0, 0);
         watchLine(key);
     }
     auto *name = new QLineEdit(port["name"].toString());
     name->setMaxLength(60);
     name->setPlaceholderText(m_preview.portLabel(port));
     name->setAccessibleName(direction + " port name");
-    layout->addWidget(name, 1);
+    name->setToolTip("Label shown on the node");
+    layout->addWidget(name, 0, editable ? 1 : 0);
     watchLine(name);
     auto *type = new ComboBox;
     type->setAccessibleName(direction + " port type");
@@ -345,12 +354,14 @@ void BlueprintNodeFields::appendPort(QVBoxLayout *rows, const QString &side, con
         type->addItem(contracts.value(selected).toObject()["label"].toString(), selected);
     type->setCurrentIndex(type->findData(selected));
     type->setEnabled(chooseType);
-    layout->addWidget(type);
+    if (editable) layout->addWidget(type, 1, 0);
+    else layout->addWidget(type, 0, 1);
     connect(type, &QComboBox::currentIndexChanged, this, &BlueprintNodeFields::edited);
     if (editable) {
-        auto *remove = new Button("−");
+        auto *remove = new Button("Remove");
+        remove->setFlat(true);
         remove->setAccessibleName("Remove " + direction.toLower() + " port");
-        layout->addWidget(remove);
+        layout->addWidget(remove, 1, 1, Qt::AlignLeft);
         connect(remove, &Button::clicked, row, [this, row] {
             m_ports.removeIf([row](const auto &editor) { return editor.row == row; });
             row->hide();

@@ -182,7 +182,14 @@ QHash<QWidget *, QRect> BlueprintView::overlayLayout() const {
         switch (overlay.edge) {
         case OverlayEdge::TopLeft: case OverlayEdge::BottomLeft: at.setX(area.left() + m); break;
         case OverlayEdge::TopRight: case OverlayEdge::BottomRight: at.setX(area.right() + 1 - m - size.width()); break;
-        default: at.setX(left + (right + 1 - left - size.width()) / 2); break;
+        default: {
+            // Centred on the whole canvas so it stays put as side panels open and close; moved
+            // aside only as far as needed when a panel would cover it.
+            int x = area.left() + (area.width() - size.width()) / 2;
+            if (right + 1 - left >= size.width()) x = qBound(left, x, right + 1 - size.width());
+            at.setX(x);
+            break;
+        }
         }
         switch (overlay.edge) {
         case OverlayEdge::BottomLeft: case OverlayEdge::Bottom: case OverlayEdge::BottomRight: at.setY(area.bottom() + 1 - m - size.height()); break;

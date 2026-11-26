@@ -167,8 +167,8 @@ QDoubleSpinBox::up-button:disabled { background: @insetBackground; }
 QDoubleSpinBox::down-button { width: 20px; background: transparent; border: none; border-bottom-right-radius: 7px; }
 QDoubleSpinBox::down-button:hover { background: @surfaceFillHover; }
 QDoubleSpinBox::down-button:disabled { background: @insetBackground; }
-QSpinBox:disabled { background: @insetBackground; color: @textMuted; }
-QDoubleSpinBox:disabled { background: @insetBackground; color: @textMuted; }
+QSpinBox:disabled { background: transparent; color: @textMuted; }
+QDoubleSpinBox:disabled { background: transparent; color: @textMuted; }
 QTextEdit:disabled { background: @insetBackground; color: @textMuted; }
 QPlainTextEdit:disabled { background: @insetBackground; color: @textMuted; }
 QScrollBar:horizontal { background: transparent; height: 12px; margin: 0; }
