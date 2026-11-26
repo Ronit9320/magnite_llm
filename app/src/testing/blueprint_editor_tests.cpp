@@ -1,5 +1,6 @@
 #include "testing/blueprint_editor_tests.h"
 
+#include "backend_client.h"
 #include "panels/blueprintbindingfields.h"
 #include "panels/blueprintdetails.h"
 #include "panels/blueprintinspector.h"
@@ -22,6 +23,7 @@
 #include <QDropEvent>
 #include <QListWidget>
 #include <QMimeData>
+#include <QScrollArea>
 #include <QShortcut>
 #include <QCursor>
 #include <QDir>
@@ -926,9 +928,13 @@ void checkShell(BlueprintPreview &preview, const QString &captures) {
     pump(50);
     check(library && library->isChecked() && tree && tree->isVisible() && view->isAncestorOf(tree),
           "the library toggle shows the node library over the canvas");
+    auto *toolbar = library ? library->parentWidget() : nullptr;
+    while (toolbar && !qobject_cast<FloatingPanel *>(toolbar)) toolbar = toolbar->parentWidget();
+    const int toolbarX = toolbar ? toolbar->x() : -1;
     if (library) library->click();
     pump(50);
     check(tree && !tree->isVisible(), "the library toggle hides it again");
+    check(toolbar && toolbar->x() == toolbarX, "the bottom toolbar stays still while the library opens and closes");
     if (library) library->click();
     pump(50);
 
@@ -1761,6 +1767,50 @@ void checkReviewFixes(BlueprintPreview &preview) {
     preview.deleteBlueprint("refit-check");
 }
 
+// Model, Reasoning and LoRA settings at both interface sizes, in fixture and live mode (the live
+// fields only appear with a backend, so a client that never connects stands in for one).
+void checkModelInspectorFit(BlueprintPreview &fixture, const QString &captures) {
+    BackendClient offline;
+    BlueprintPreview live(offline, nullptr);
+    const int storedSize = QSettings().value("appearance/interfaceSize", 1).toInt();
+    for (auto *preview : {&fixture, &live}) {
+        for (const QString operation : {"generate", "reason", "lora", "build-object"}) {
+            auto node = preview->makeNode(operation, "m", 0, 0);
+            const QJsonObject graph{{"id", "fit"}, {"nodes", QJsonArray{node}}, {"edges", QJsonArray{}}};
+            for (const int size : {1, 2}) {
+                QSettings().setValue("appearance/interfaceSize", size);
+                Theme::applyPreferences();
+                FloatingPanel host;
+                host.setFixedSize(BlueprintInspector::panelWidth + 2 * FloatingPanel::shadowMargin(), 1300);
+                auto *layout = new QVBoxLayout(&host);
+                auto *scroll = new QScrollArea;
+                scroll->setWidgetResizable(true);
+                scroll->setFrameShape(QFrame::NoFrame);
+                scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                auto *inspector = new BlueprintInspector(*preview);
+                scroll->setWidget(inspector);
+                layout->addWidget(scroll);
+                inspector->setNode(graph, "m");
+                host.show();
+                pump(80);
+                QStringList found = TextFit::clippedText(&host);
+                found.removeDuplicates();
+                const auto name = QString("%1/%2/%3").arg(preview->live() ? "live" : "fixture", operation,
+                                                           size == 2 ? "Large" : "Default");
+                check(found.isEmpty() && inspector->width() <= scroll->viewport()->width(),
+                      qPrintable(TextFit::describe(name, "Model inspector", found)));
+                if (!captures.isEmpty() && size == 1 && preview->live() && operation == "generate") {
+                    QDir().mkpath(captures);
+                    host.grab().save(QDir(captures).filePath("blueprints-model-inspector-dark.png"));
+                }
+            }
+        }
+    }
+    QSettings().setValue("appearance/interfaceSize", storedSize);
+    Theme::applyPreferences();
+    Theme::setDark(true);
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1781,6 +1831,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkDetails(preview);
     checkPolish(preview, captures);
     checkReviewFixes(preview);
+    checkModelInspectorFit(preview, captures);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

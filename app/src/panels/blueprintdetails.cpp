@@ -207,13 +207,6 @@ void BlueprintDetails::showFor(const QString &operation, const QJsonObject &node
     const auto about = doc["about"].toString(spec["detail"].toString());
     m_overview->addWidget(text(about.isEmpty() ? "No description is available for this node yet." : about,
                                "blueprintDetailsBody"));
-    const auto example = doc["example"].toObject();
-    if (!example.isEmpty()) {
-        m_overview->addSpacing(4);
-        m_overview->addWidget(section("Example"));
-        m_overview->addWidget(block(example["inputLabel"].toString(), example["input"].toString()));
-        m_overview->addWidget(block(example["outputLabel"].toString(), example["output"].toString()));
-    }
     const auto tips = doc["tips"].toArray();
     if (!tips.isEmpty()) {
         m_overview->addSpacing(4);
