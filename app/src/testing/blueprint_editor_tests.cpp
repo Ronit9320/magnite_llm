@@ -1,5 +1,7 @@
 #include "testing/blueprint_editor_tests.h"
 
+#include "panels/blueprintbindingfields.h"
+#include "panels/blueprintnodefields.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
 #include "panels/blueprinttopbar.h"
@@ -19,6 +21,8 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QLineEdit>
+#include <QComboBox>
+#include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <optional>
@@ -961,6 +965,59 @@ void checkShell(BlueprintPreview &preview, const QString &captures) {
 }
 }  // namespace
 
+void checkFieldWidgets(BlueprintPreview &preview) {
+    const auto input = preview.makeNode("input", "in", 0, 0);
+    BlueprintNodeFields fields(preview, "input", input);
+    fields.show();
+    pump();
+    int edits = 0;
+    QObject::connect(&fields, &BlueprintNodeFields::edited, [&] { ++edits; });
+    auto *name = visibleNamed<QLineEdit>(fields, "Output port name");
+    if (name) {
+        name->setText("Payload");
+        name->setModified(true);
+        emit name->editingFinished();
+    }
+    check(name && fields.node()["out"].toArray().first().toObject()["name"] == "Payload" && fields.error().isEmpty()
+              && edits == 1,
+          "node fields edit a port name outside the dialog and report the commit");
+    check(!fields.portsChanged(), "renaming a port is not a port change");
+    auto *type = visibleNamed<QComboBox>(fields, "Output port type");
+    if (type) type->setCurrentIndex(type->findData("object"));
+    check(type && fields.portsChanged() && edits == 2, "changing a port type is reported as a port change");
+    if (name) {
+        name->setText("");
+        name->setPlaceholderText("");
+    }
+    check(fields.node().isEmpty() == !fields.error().isEmpty(), "node() is empty exactly when error() explains why");
+
+    QJsonObject model;
+    for (const auto &value : preview.example()["nodes"].toArray())
+        if (!value.toObject()["model"].toString().isEmpty()) { model = value.toObject(); break; }
+    BlueprintBindingFields binding(preview, preview.example(), model);
+    binding.show();
+    pump();
+    QComboBox *models = nullptr;
+    for (auto *combo : binding.findChildren<QComboBox *>())
+        if (combo->findData(model["model"].toString()) >= 0) { models = combo; break; }
+    const int other = models ? (models->currentIndex() + 1) % qMax(1, models->count()) : -1;
+    if (models && models->count() > 1) models->setCurrentIndex(other);
+    check(models && models->count() > 1 && binding.node()["model"] != model["model"]
+              && binding.node()["model"] == models->itemData(other).toString(),
+          "binding fields change the checkpoint");
+
+    auto dataset = preview.makeNode("dataset-rows", "rows", 0, 0);
+    BlueprintDatasetFields rows(preview, dataset);
+    rows.show();
+    pump();
+    auto *text = rows.findChild<QPlainTextEdit *>();
+    if (text) text->setPlainText("[{\"a\": 1}]");
+    check(text && rows.node()["setting"] == "[{\"a\": 1}]" && rows.error().isEmpty(),
+          "dataset fields edit inline rows");
+    if (text) text->setPlainText("not json");
+    check(!rows.error().isEmpty(), "dataset fields explain invalid rows");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -973,6 +1030,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkPanelCanvas(preview);
     checkOverlays(preview);
     checkShell(preview, captures);
+    checkFieldWidgets(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

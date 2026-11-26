@@ -577,6 +577,17 @@ QJsonObject BlueprintPreview::makeNode(const QString &operationKey, const QStrin
     return node;
 }
 
+QJsonObject BlueprintPreview::adapterSource(const QJsonObject &graph, const QJsonObject &node) {
+    if (findById(node["in"].toArray(), "adapter")["type"] != "adapter-ref") return {};
+    for (const auto &value : graph["edges"].toArray()) {
+        const auto edge = value.toObject();
+        if (edge["to"] == node["id"] && edge["in"] == "adapter")
+            return findById(graph["nodes"].toArray(), edge["from"].toString());
+    }
+    return {};
+}
+
+
 QString BlueprintPreview::id() { return QUuid::createUuid().toString(QUuid::Id128); }
 
 bool BlueprintPreview::choosesType(const QJsonObject &node, const QString &side, const QString &portId) const {

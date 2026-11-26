@@ -69,6 +69,8 @@ public:
                const QJsonObject &settings, Result done);
     void jobs(const QString &blueprint, const QString &node, Result done);
     void bindTraining(const QJsonObject &graph, const QString &node, const QString &job, Result done);
+    // The Adapter node wired into a model node's LoRA adapter input, or empty.
+    static QJsonObject adapterSource(const QJsonObject &graph, const QJsonObject &node);
     static QJsonObject inputContracts(const QJsonObject &graph, const QString &target);
     QStringList issues(const QJsonObject &blueprint) const;
     QString connectionError(const QJsonObject &blueprint, const QJsonObject &edge) const;

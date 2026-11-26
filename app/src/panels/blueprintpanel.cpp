@@ -2,6 +2,7 @@
 #include "textformat.h"
 
 #include "panels/blueprintpreview.h"
+#include "panels/blueprintbindingfields.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
@@ -137,16 +138,6 @@ QJsonObject findById(const QJsonArray &array, const QString &id) {
     for (const auto &v : array) {
         const auto item = v.toObject();
         if (item["id"].toString() == id) return item;
-    }
-    return {};
-}
-
-QJsonObject adapterSource(const QJsonObject &graph, const QJsonObject &node) {
-    if (findById(node["in"].toArray(), "adapter")["type"] != "adapter-ref") return {};
-    for (const auto &value : graph["edges"].toArray()) {
-        const auto edge = value.toObject();
-        if (edge["to"] == node["id"] && edge["in"] == "adapter")
-            return findById(graph["nodes"].toArray(), edge["from"].toString());
     }
     return {};
 }
@@ -1146,7 +1137,7 @@ void BlueprintPanel::refreshInspector() {
         m_inspector->addWidget(label("Checkpoint & adapter", "headingLabel"));
         const auto checkpoint = node["model"].toString();
         const auto adapter = node["adapter"].toString();
-        const auto linked = adapterSource(m_graph, node);
+        const auto linked = BlueprintPreview::adapterSource(m_graph, node);
         m_inspector->addWidget(wrapped(checkpoint.isEmpty() ? "Choose a checkpoint from the local model library."
             : findById(fixtures["models"].toArray(), checkpoint)["name"].toString(checkpoint)));
         m_inspector->addWidget(wrapped(!linked.isEmpty() ? "Adapter node · " + linked["name"].toString()
@@ -1749,210 +1740,70 @@ bool BlueprintPanel::removeConnection(const QJsonObject &edge) {
 
 void BlueprintPanel::editBinding() {
     if (m_preview->live()) { editLiveBinding(); return; }
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
     SettingsDetailDialog dialog(m_canvas);
     dialog.setWindowTitle("Model & adapter");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
     body->addWidget(wrapped("Choose a local binding for " + node["name"].toString() + "."));
-    const auto fixtures = m_preview->fixtures();
-    auto *models = new ComboBox;
-    auto *adapters = new ComboBox;
-    for (const auto &value : fixtures["models"].toArray()) {
-        const auto model = value.toObject();
-        models->addItem(model["name"].toString() + " · " + model["engine"].toString(), model["id"].toString());
-    }
-    models->setCurrentIndex(qMax(0, models->findData(node["model"].toString())));
-    Surface::field(body, "Base checkpoint", models);
-    Surface::field(body, "Reuse a LoRA adapter", adapters);
-    auto *note = wrapped({});
+    auto *fields = new BlueprintBindingFields(*m_preview, m_graph, node);
+    body->addWidget(fields);
+    auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
-    auto refresh = [&] {
-        const auto model = findById(fixtures["models"].toArray(), models->currentData().toString());
-        adapters->clear();
-        adapters->addItem("Select compatible adapter");
-        const bool supported = model["supported"].toBool();
-        for (const auto &value : m_preview->compatibleAdapters(model["id"].toString(), BlueprintPreview::operationId(node))) {
-            const auto adapter = value.toObject();
-            adapters->addItem(adapter["name"].toString(), adapter["id"].toString());
-        }
-        adapters->setCurrentIndex(qMax(0, adapters->findData(node["adapter"].toString())));
-        adapters->setEnabled(supported);
-        note->setText(!supported ? "This engine cannot switch PEFT adapters between blueprint nodes."
-            : adapters->count() == 1 ? "No adapters match this checkpoint and node type."
-            : "Adapters must match the selected checkpoint and node type.");
-    };
-    refresh();
-    connect(models, &ComboBox::currentIndexChanged, &dialog, refresh);
     auto *buttons = dialogButtons(&dialog, body, "Save binding");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        if (!adapters->isEnabled() || adapters->currentIndex() < 1) {
-            note->setText("Choose a Torch / PEFT checkpoint and a compatible adapter.");
-            return;
-        }
-        dialog.accept();
+        const auto error = fields->error();
+        note->setText(error);
+        if (error.isEmpty()) dialog.accept();
     });
     dialog.resize(450, dialog.sizeHint().height());
-    if (dialog.exec() != QDialog::Accepted) return;
-    node["model"] = models->currentData().toString();
-    node["adapter"] = adapters->currentData().toString();
-    changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::editLiveBinding() {
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
     if (node.isEmpty()) return;
-    const bool reasoning = node["kind"] == "reasoning";
-    const auto linked = adapterSource(m_graph, node);
     SettingsDetailDialog dialog(this);
-    dialog.setWindowTitle(reasoning ? "Reasoning checkpoint" : "Model & adapter");
+    dialog.setWindowTitle(node["kind"] == "reasoning" ? "Reasoning checkpoint" : "Model & adapter");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
-    auto *models = new ComboBox;
-    auto *adapters = new ComboBox;
-    for (auto *combo : {models, adapters}) {
-        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        combo->setMinimumContentsLength(22);
-    }
-    Surface::field(body, "Base checkpoint", models);
-    Surface::field(body, "Direct LoRA adapter", adapters);
-    auto *note = wrapped({});
+    auto *fields = new BlueprintBindingFields(*m_preview, m_graph, node);
+    body->addWidget(fields);
+    auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
-    auto *budget = new SpinBox;
-    budget->setRange(1, 32768);
-    budget->setValue(node["maxTokens"].toInt(reasoning ? 1024 : 256));
-    Surface::field(body, "Maximum output tokens", budget);
-    auto *response = new ComboBox;
-    response->addItem("Typed JSON", "json");
-    response->addItem("Plain text", "text");
-    response->setCurrentIndex(node["response"] == "text" ? 1 : 0);
-    Surface::field(body, "Response format", response);
-    auto *prompt = new QPlainTextEdit(node["prompt"].toString("Return only the requested JSON value."));
-    prompt->setTabChangesFocus(true);
-    prompt->setFixedHeight(100);
-    Surface::field(body, "System prompt", prompt);
     auto *buttons = dialogButtons(&dialog, body, "Save binding");
     auto *save = buttons->buttons().last();
     for (auto *button : buttons->buttons())
         if (buttons->buttonRole(button) == QDialogButtonBox::AcceptRole) save = button;
-    auto refresh = [&] {
-        const auto model = models->currentData().toString();
-        adapters->clear();
-        adapters->addItem("No adapter", "");
-        adapters->setEnabled(false);
-        save->setEnabled(false);
-        if (model.isEmpty()) {
-            note->setText("Download a Transformers checkpoint in the model library, then select it here.");
-            return;
-        }
-        note->setText("Checking this checkpoint…");
-        m_preview->checkpoint(model, [guard = QPointer(&dialog), models, adapters, note, budget, save, reasoning, node, model, linked]
-            (const auto &info, const auto &error) {
-            if (!guard || models->currentData().toString() != model) return;
-            if (!error.isEmpty()) { note->setText(error); return; }
-            const bool supported = info["reasoning"].toBool();
-            if (reasoning && !supported) { note->setText("This checkpoint does not support explicit thinking."); return; }
-            const int context = info["context_tokens"].toInt();
-            note->setText(QString("%1 context tokens%2").arg(context).arg(supported ? " · Explicit thinking available" : ""));
-            budget->setMaximum(qBound(1, context - 1, 32768));
-            adapters->clear();
-            adapters->addItem("No adapter", "");
-            for (const auto &value : info["adapters"].toArray()) {
-                const auto adapter = value.toObject();
-                adapters->addItem(adapter["name"].toString(), adapter["id"].toString());
-            }
-            adapters->setCurrentIndex(qMax(0, adapters->findData(node["adapter"].toString())));
-            adapters->setEnabled(linked.isEmpty());
-            save->setEnabled(true);
-        });
-    };
-    const auto options = [&] {
-        const auto selected = models->currentData().toString();
-        QSignalBlocker blocker(models);
-        models->clear();
-        models->addItem("Choose a checkpoint", "");
-        const auto entries = m_preview->fixtures()["models"].toArray();
-        for (const auto &value : entries) {
-            const auto entry = value.toObject();
-            const bool unsupported = reasoning && entry["thinking"] == false;
-            models->addItem(entry["name"].toString() + (unsupported ? " · no thinking" : ""), entry["id"].toString());
-            if (unsupported) BlueprintPreview::disableItem(models, models->count() - 1);
-        }
-        models->setCurrentIndex(qMax(0, models->findData(selected.isEmpty() ? node["model"].toString() : selected)));
-        refresh();
-    };
-    options();
-    m_preview->refreshOptions();
-    connect(m_preview, &BlueprintPreview::optionsChanged, &dialog, options);
-    connect(models, &ComboBox::currentIndexChanged, &dialog, refresh);
+    save->setEnabled(fields->ready());
+    connect(fields, &BlueprintBindingFields::readyChanged, save, &QWidget::setEnabled);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        if (prompt->toPlainText().size() > 16000) { note->setText("Use at most 16,000 characters for the system prompt."); return; }
-        if (response->currentData() == "text") {
-            const auto ports = node["out"].toArray();
-            if (ports.size() != 1 || ports.first().toObject()["schema"].toObject()["type"] != "string") {
-                note->setText("Plain text requires one string output port.");
-                return;
-            }
-        }
-        dialog.accept();
+        const auto error = fields->error();
+        note->setText(error);
+        if (error.isEmpty()) dialog.accept();
     });
     dialog.resize(460, dialog.sizeHint().height());
-    if (dialog.exec() != QDialog::Accepted) return;
-    node["model"] = models->currentData().toString();
-    node["adapter"] = adapters->currentData().toString();
-    node["maxTokens"] = budget->value();
-    node["response"] = response->currentData().toString();
-    node["prompt"] = prompt->toPlainText();
-    changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::editDataset() {
-    auto node = findById(m_graph["nodes"].toArray(), m_selected);
+    const auto node = findById(m_graph["nodes"].toArray(), m_selected);
     SettingsDetailDialog dialog(this);
     dialog.setWindowTitle("Dataset source");
     auto *body = new QVBoxLayout(&dialog);
     titleBar(body, dialog.windowTitle());
-    auto *datasets = new ComboBox;
-    datasets->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    datasets->setMinimumContentsLength(22);
-    auto populate = [&] {
-        const auto current = datasets->count() ? datasets->currentData().toString() : node["dataset"].toString();
-        datasets->clear();
-        datasets->addItem("Inline rows", "");
-        for (const auto &value : m_preview->datasets()) {
-            const auto item = value.toObject();
-            datasets->addItem(QString("%1 · %2 rows").arg(item["name"].toString()).arg(item["rows"].toInt()), item["id"].toString());
-        }
-        if (!current.isEmpty() && datasets->findData(current) < 0) datasets->addItem("Missing dataset · " + current, current);
-        datasets->setCurrentIndex(qMax(0, datasets->findData(current)));
-    };
-    populate();
-    connect(m_preview, &BlueprintPreview::optionsChanged, &dialog, populate);
-    m_preview->refreshOptions();
-    Surface::field(body, "Source", datasets);
-    auto *rows = new QPlainTextEdit(node["setting"].toString("[]"));
-    rows->setTabChangesFocus(true);
-    auto *field = new QWidget;
-    auto *rowsBody = new QVBoxLayout(field);
-    rowsBody->setContentsMargins(0, 0, 0, 0);
-    Surface::field(rowsBody, "Inline rows (JSON array)", rows);
-    body->addWidget(field);
-    const auto enabled = [datasets, field] { field->setVisible(datasets->currentData().toString().isEmpty()); };
-    connect(datasets, &ComboBox::currentIndexChanged, &dialog, enabled);
-    enabled();
-    body->addWidget(wrapped("Add local datasets in Training. Set the row type under the Rows port’s JSON Schema."));
+    auto *fields = new BlueprintDatasetFields(*m_preview, node);
+    body->addWidget(fields);
     auto *note = wrapped({}, "blueprintError");
     body->addWidget(note);
     auto *buttons = dialogButtons(&dialog, body, "Save dataset");
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        node["dataset"] = datasets->currentData().toString();
-        node["setting"] = rows->toPlainText();
-        const auto error = m_preview->settingError(node);
+        const auto error = fields->error();
+        note->setText(error);
         if (error.isEmpty()) dialog.accept();
-        else note->setText(error);
     });
     dialog.resize(470, 340);
-    if (dialog.exec() == QDialog::Accepted) changeNode(node);
+    if (dialog.exec() == QDialog::Accepted) changeNode(fields->node());
 }
 
 void BlueprintPanel::liveTraining() {
@@ -1979,7 +1830,7 @@ void BlueprintPanel::liveTraining() {
     examples->setPlaceholderText("[{\"inputs\": {\"port\": \"value\"}, \"outputs\": {\"port\": \"answer\"}}]");
     Surface::field(body, "Typed examples (JSON array)", examples);
     auto *note = wrapped("Provide examples matching the named input and output ports. Follow queued jobs in Training.");
-    const bool usesAdapterNode = !adapterSource(graph, findById(graph["nodes"].toArray(), node)).isEmpty();
+    const bool usesAdapterNode = !BlueprintPreview::adapterSource(graph, findById(graph["nodes"].toArray(), node)).isEmpty();
     if (usesAdapterNode)
         note->setText("Select completed adapter weights on the connected Adapter node.");
     body->addWidget(note);
