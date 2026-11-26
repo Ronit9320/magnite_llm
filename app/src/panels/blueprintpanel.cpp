@@ -4,6 +4,7 @@
 #include "panels/blueprintpreview.h"
 #include "panels/blueprintbindingfields.h"
 #include "panels/blueprintinspector.h"
+#include "panels/blueprintlibrarydock.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
@@ -47,7 +48,6 @@
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QTimer>
-#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <utility>
@@ -860,7 +860,7 @@ void BlueprintPanel::setupEditor() {
     center->addStretch();
     m_canvasPages->addWidget(empty);
 
-    // The library dock slot holds the node tree until the library dock replaces it.
+    // The node library: operations to add, and the nodes already in this workflow.
     const int shadow = FloatingPanel::shadowMargin();
     m_libraryPanel = new FloatingPanel;
     m_libraryPanel->setObjectName("blueprintLibraryDock");
@@ -868,22 +868,26 @@ void BlueprintPanel::setupEditor() {
     m_libraryPanel->setFixedWidth(248 + 2 * shadow);
     auto *libraryLayout = new QVBoxLayout(m_libraryPanel);
     libraryLayout->setContentsMargins(4, 4, 0, 0);
-    libraryLayout->setSpacing(6);
-    libraryLayout->addWidget(label("Workflow nodes", "headingLabel"));
-    m_nodeTree = new QTreeWidget;
-    m_nodeTree->setObjectName("blueprintNodeTree");
-    m_nodeTree->setAccessibleName("Workflow nodes and connections");
-    m_nodeTree->setHeaderHidden(true);
-    m_nodeTree->setUniformRowHeights(true);
-    libraryLayout->addWidget(m_nodeTree, 1);
+    m_libraryDock = new BlueprintLibraryDock(*m_preview);
+    libraryLayout->addWidget(m_libraryDock, 1);
     m_canvas->addOverlay(m_libraryPanel, OverlayEdge::Left);
     connect(m_canvas, &BlueprintView::libraryToggled, m_libraryPanel, &QWidget::setVisible);
     m_canvas->setLibraryShown(true);
-    connect(m_nodeTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
-        if (!item) return;
-        m_selected = item->data(0, Qt::UserRole).toString();
-        m_canvas->revealNode(m_selected);
+    connect(m_libraryDock, &BlueprintLibraryDock::addRequested, this,
+            [this](const BlueprintLibraryDock::Entry &entry) { addEntry(entry); });
+    connect(m_canvas, &BlueprintView::entryDropped, this, [this](const QByteArray &json, const QPointF &graph) {
+        addEntry(BlueprintLibraryDock::Entry::fromJson(json), graph);
+    });
+    connect(m_libraryDock, &BlueprintLibraryDock::nodeActivated, this, [this](const QString &id) {
+        m_selected = id;
+        m_canvas->revealNode(id);
         refreshInspector();
+    });
+    // "/" jumps to the library search; text fields keep it as a character.
+    auto *search = new QShortcut(QKeySequence(Qt::Key_Slash), m_canvas, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
+    connect(search, &QShortcut::activated, this, [this] {
+        m_canvas->setLibraryShown(true);
+        m_libraryDock->focusSearch();
     });
 
     // Today's inspector content, floating at the right while a node is selected.
@@ -1038,7 +1042,14 @@ void BlueprintPanel::refreshEditor(bool fit) {
         m_target->addItem("Node only · " + node["name"].toString(), node["id"].toString());
     }
     m_target->setCurrentIndex(qMax(0, m_target->findData(target)));
-    refreshNodeTree();
+    QHash<QString, QString> warnings;
+    const auto issues = m_preview->issues(m_graph);
+    for (const auto &value : nodes) {
+        const auto node = value.toObject();
+        warnings.insert(node["id"].toString(),
+                        BlueprintScene::warningLines(*m_preview, m_graph, node, issues).join('\n'));
+    }
+    m_libraryDock->setGraph(m_graph, warnings);
     refreshInspector();
     if (m_preview->live()) refreshRunOptions();
 }
@@ -1096,18 +1107,7 @@ void BlueprintPanel::applyCompactRule() {
 void BlueprintPanel::refreshInspector() {
     m_canvas->setSelection(m_selected);
     const auto nodes = m_graph["nodes"].toArray();
-    const auto *current = m_nodeTree->currentItem();
-    if (!current || current->data(0, Qt::UserRole).toString() != m_selected) {
-        const QSignalBlocker blocked(m_nodeTree);
-        m_nodeTree->setCurrentItem(nullptr);
-        for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
-            auto *item = m_nodeTree->topLevelItem(i);
-            if (item->data(0, Qt::UserRole).toString() == m_selected) {
-                m_nodeTree->setCurrentItem(item);
-                break;
-            }
-        }
-    }
+    m_libraryDock->setCurrentNode(m_selected);
     const auto node = findById(nodes, m_selected);
     // The inspector floats in while a node is selected and leaves when nothing is.
     m_inspectorPanel->setVisible(!node.isEmpty());
@@ -1143,49 +1143,6 @@ void BlueprintPanel::changeNode(const QJsonObject &node, bool reconcilePorts) {
         if (!saveGraph(graph)) refreshEditor();
         return;
     }
-}
-
-void BlueprintPanel::refreshNodeTree() {
-    const QSignalBlocker blocked(m_nodeTree);
-    QSet<QString> expanded;
-    for (int i = 0; i < m_nodeTree->topLevelItemCount(); ++i) {
-        const auto *item = m_nodeTree->topLevelItem(i);
-        if (item->isExpanded()) expanded.insert(item->data(0, Qt::UserRole).toString());
-    }
-    m_nodeTree->clear();
-    QHash<QString, QJsonObject> nodes;
-    QHash<QString, QTreeWidgetItem *> items;
-    for (const auto &value : m_graph["nodes"].toArray()) {
-        const auto node = value.toObject();
-        const auto id = node["id"].toString();
-        const auto kind = node["kind"].toString();
-        auto *item = new QTreeWidgetItem(m_nodeTree, {node["name"].toString()});
-        item->setData(0, Qt::UserRole, id);
-        item->setIcon(0, Theme::coloredIcon(BlueprintStyle::nodeIcon(kind), BlueprintStyle::familyColor(BlueprintStyle::nodeFamily(kind)), 15));
-        nodes.insert(id, node);
-        items.insert(id, item);
-    }
-    for (const auto &value : m_graph["edges"].toArray()) {
-        const auto edge = value.toObject();
-        const auto from = edge["from"].toString();
-        const auto to = edge["to"].toString();
-        if (!items.contains(from) || !items.contains(to)) continue;
-        const auto source = nodes.value(from);
-        const auto target = nodes.value(to);
-        const auto out = m_preview->portLabel(findById(source["out"].toArray(), edge["out"].toString()));
-        const auto in = m_preview->portLabel(findById(target["in"].toArray(), edge["in"].toString()));
-        const auto downstream = QString("%1 → %2 · %3").arg(out, target["name"].toString(), in);
-        const auto upstream = QString("%1 ← %2 · %3").arg(in, source["name"].toString(), out);
-        auto *outgoing = new QTreeWidgetItem(items.value(from), {downstream});
-        outgoing->setData(0, Qt::UserRole, to);
-        outgoing->setToolTip(0, downstream);
-        auto *incoming = new QTreeWidgetItem(items.value(to), {upstream});
-        incoming->setData(0, Qt::UserRole, from);
-        incoming->setToolTip(0, upstream);
-    }
-    for (const auto &id : expanded)
-        if (auto *item = items.value(id)) item->setExpanded(true);
-    if (auto *selected = items.value(m_selected)) m_nodeTree->setCurrentItem(selected);
 }
 
 void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
@@ -1359,6 +1316,22 @@ void BlueprintPanel::openNodePicker(std::optional<QPointF> position) {
     dialog->setFixedWidth(width);
     dialog->resize(width, dialog->sizeHint().height());
     dialog->open();
+}
+
+void BlueprintPanel::addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at) {
+    auto node = entry.operation.isEmpty() ? entry.savedNode : m_preview->makeNode(entry.operation, BlueprintPreview::id(), 0, 0);
+    if (node.isEmpty()) return;
+    node["id"] = BlueprintPreview::id();
+    QPointF point;
+    if (at) point = *at;
+    else {
+        // The middle of the canvas the floating panels leave free.
+        const auto size = BlueprintScene::nodeRect(node).size();
+        point = m_canvas->mapToScene(m_canvas->freeArea().center()) - QPointF(size.width(), size.height()) / 2;
+    }
+    node["x"] = qRound(point.x());
+    node["y"] = qRound(point.y());
+    addNode(node);
 }
 
 void BlueprintPanel::configureNode(const QString &id) {

@@ -72,6 +72,8 @@ signals:
     // A picked-up wire was dropped on another input: one edit replacing oldEdge with newEdge.
     void wireMoved(const QJsonObject &oldEdge, const QJsonObject &newEdge);
     void wireDropped(const QString &fromNode, const QString &outPort, const QPoint &screen, const QPointF &graph);
+    // A node library entry (BlueprintLibraryDock::Entry JSON) was dropped at a graph position.
+    void entryDropped(const QByteArray &entry, const QPointF &graph);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -83,6 +85,9 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
     bool event(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void changeEvent(QEvent *event) override;

@@ -33,7 +33,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QTemporaryDir>
-#include <QTreeWidget>
+#include <QListWidget>
 #include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
@@ -45,10 +45,10 @@ using namespace BlueprintTest;
 
 namespace {
 
-// The workflow node tree, shown or not: the compact rule may have closed the library it sits in.
-QTreeWidget *nodeTree(QWidget &panel) {
-    for (auto *tree : panel.findChildren<QTreeWidget *>())
-        if (tree->accessibleName() == "Workflow nodes and connections") return tree;
+// The In this workflow list, shown or not: the compact rule may have closed the library it sits in.
+QListWidget *nodeTree(QWidget &panel) {
+    for (auto *list : panel.findChildren<QListWidget *>())
+        if (list->accessibleName() == "Workflow nodes") return list;
     return nullptr;
 }
 
@@ -125,9 +125,9 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     back();
     if (!check(open(), "the draft reopens from the native library")) return false;
     auto *tree = nodeTree(panel);
-    if (!tree || tree->topLevelItemCount() != 3)
-        return check(false, "the Model node appears in the workflow tree");
-    tree->setCurrentItem(tree->topLevelItem(1));
+    if (!tree || tree->count() != 3)
+        return check(false, "the Model node appears in the workflow list");
+    tree->setCurrentRow(1);
     pump();
 
     // Enter the actual modal selector and wait for the checkpoint options request.
@@ -277,9 +277,12 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     back();
     if (!open()) return false;
     tree = nodeTree(panel);
-    if (!check(tree && tree->topLevelItemCount() == 4 && tree->topLevelItem(3)->childCount() == 1,
-               "the workflow tree shows the Adapter node and its outgoing link")) return false;
-    tree->setCurrentItem(tree->topLevelItem(3));
+    const auto adapterNode = session.blueprint(id)["nodes"].toArray().at(3).toObject()["id"].toString();
+    const auto adapterLinks = session.blueprint(id)["edges"].toArray();
+    if (!check(tree && tree->count() == 4 && std::count_if(adapterLinks.cbegin(), adapterLinks.cend(), [&](const auto &e) {
+                   return e.toObject()["from"] == adapterNode; }) == 1,
+               "the workflow list shows the Adapter node, which has one outgoing link")) return false;
+    tree->setCurrentRow(3);
     pump();
     const auto adapterDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
@@ -302,7 +305,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
                "the LoRA link persists on a new revision")) return false;
     pump();
     if (!captures.isEmpty()) panel.grab().save(QDir(captures).filePath("linked-adapter-graph.png"));
-    tree->setCurrentItem(tree->topLevelItem(1));
+    tree->setCurrentRow(1);
     pump();
     if (auto *testLinked = visibleButton(panel, "Test this node")) testLinked->click();
     if (!check(runInEditor("Test node") && latest()["target"] == "answer",
@@ -426,8 +429,8 @@ int runBlueprintChecks(const QString &captures) {
         firstNodeId = node["id"].toString();
         const auto port = node["out"].toArray().first().toObject();
         auto *tree = nodeTree(panel);
-        check(tree && tree->topLevelItemCount() == 1 && tree->currentItem() == tree->topLevelItem(0),
-              "the new node appears selected in the workflow tree");
+        check(tree && tree->count() == 1 && tree->currentRow() == 0,
+              "the new node appears selected in the workflow list");
         check(node["name"].toString() == "Input" && port["name"].toString() == "Payload"
                   && port["type"].toString() == "object",
               "a generic Input accepts a named and typed output without requiring a node name");
@@ -551,7 +554,7 @@ int runBlueprintChecks(const QString &captures) {
         }
     }
     if (auto *tree = nodeTree(panel))
-        tree->setCurrentItem(tree->topLevelItem(1));
+        tree->setCurrentRow(1);
     pump();
     auto *adapter = visibleNamed<QComboBox>(panel, "Node adapter");
     check(canvas->isVisible() && visibleText(panel, "Node inspector") && adapter &&
@@ -904,7 +907,7 @@ int runLiveBlueprintChecks(const QString &captures) {
           "compact light canvas fits with reduced motion enabled");
     capture(panel, "live-canvas-compact-light");
 
-    if (auto *tree = nodeTree(panel); tree && tree->topLevelItemCount()) tree->setCurrentItem(tree->topLevelItem(0));
+    if (auto *tree = nodeTree(panel); tree && tree->count()) tree->setCurrentRow(0);
     pump();
     if (auto *test = visibleButton(panel, "Test this node")) test->click();
     if (check(until([&] {
@@ -1150,7 +1153,7 @@ int runLiveBlueprintChecks(const QString &captures) {
         auto *tree = nodeTree(panel);
         int captured = 0;
         for (int i = 0; tree && i < operations.size(); ++i) {
-            tree->setCurrentItem(tree->topLevelItem(i));
+            tree->setCurrentRow(i);
             pump();
             captured += captureDialog("dialog-configure-" + operations[i], [&] {
                 triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…");

@@ -5,11 +5,11 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QWidget>
+#include "panels/blueprintlibrarydock.h"
 #include <optional>
 
 class BlueprintView;
 class FloatingPanel;
-class QTreeWidget;
 class BlueprintInspector;
 class BlueprintPreview;
 class Button;
@@ -63,7 +63,7 @@ private:
     // With a node selected, a canvas narrower than 240px between the panels closes the library.
     void applyCompactRule();
     void refreshInspector();
-    void refreshNodeTree();
+    void addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at = {});
     void openNodePicker(std::optional<QPointF> position = {});
     void configureNode(const QString &id);
     void saveNodeTemplate(const QString &id);
@@ -119,7 +119,7 @@ private:
     QVBoxLayout *m_barSlot;
     QStackedWidget *m_views;  // Build · Test cases · Run history, in BlueprintTopBar::View order
     bool m_canGoBack = false;  // the open run came from Conversation
-    QTreeWidget *m_nodeTree;
+    BlueprintLibraryDock *m_libraryDock;
     FloatingPanel *m_libraryPanel;
     QStackedWidget *m_canvasPages;
     BlueprintView *m_canvas;

@@ -9,6 +9,8 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QCursor>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QGraphicsPathItem>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -34,6 +36,8 @@ constexpr qreal sceneExtent = 100000;
 BlueprintView::BlueprintView(const BlueprintPreview &preview, QWidget *parent)
     : QGraphicsView(parent), m_scene(new BlueprintScene(preview, this)) {
     setObjectName("blueprintView");
+    setAcceptDrops(true);
+    viewport()->setAcceptDrops(true);
     setProperty("transientScroll", true);  // the wheel zooms here; SmoothWheel must not scroll it
     setAccessibleName("Workflow graph");
     setAccessibleDescription("Drag the background to pan and drag a node to move it. Scroll to zoom. "
@@ -712,4 +716,23 @@ void BlueprintView::keyPressEvent(QKeyEvent *event) {
     default: QGraphicsView::keyPressEvent(event); return;
     }
     event->accept();
+}
+
+void BlueprintView::dragEnterEvent(QDragEnterEvent *event) {
+    if (event->mimeData()->hasFormat(BlueprintStyle::entryMimeType)) event->acceptProposedAction();
+    else event->ignore();
+}
+
+void BlueprintView::dragMoveEvent(QDragMoveEvent *event) {
+    if (event->mimeData()->hasFormat(BlueprintStyle::entryMimeType)) event->acceptProposedAction();
+    else event->ignore();
+}
+
+void BlueprintView::dropEvent(QDropEvent *event) {
+    if (!event->mimeData()->hasFormat(BlueprintStyle::entryMimeType)) {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+    emit entryDropped(event->mimeData()->data(BlueprintStyle::entryMimeType), mapToScene(event->position().toPoint()));
 }

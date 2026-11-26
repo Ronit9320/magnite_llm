@@ -9,6 +9,9 @@
 // icons and node metrics. Colours come from the Blueprints tokens in theme.h.
 namespace BlueprintStyle {
 
+// Drag payload for a node library entry dropped onto the canvas.
+inline constexpr const char *entryMimeType = "application/x-magnite-blueprint-entry";
+
 // Node geometry in scene units.
 constexpr qreal nodeWidth = 190;  // the old canvas width: saved layouts space nodes 219px apart
 constexpr qreal headerHeight = 36;

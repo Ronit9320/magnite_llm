@@ -2,6 +2,7 @@
 
 #include "panels/blueprintbindingfields.h"
 #include "panels/blueprintinspector.h"
+#include "panels/blueprintlibrarydock.h"
 #include "panels/blueprintnodefields.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
@@ -16,11 +17,14 @@
 #include "widgets/floatingpanel.h"
 
 #include <QContextMenuEvent>
+#include <QDropEvent>
+#include <QListWidget>
+#include <QMimeData>
+#include <QShortcut>
 #include <QDir>
 #include <QMenu>
 #include <QRegularExpression>
 #include <QTabWidget>
-#include <QTreeWidget>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QPlainTextEdit>
@@ -904,13 +908,13 @@ void checkShell(BlueprintPreview &preview, const QString &captures) {
     pump(50);
     check(view->isVisible() && bar && view->isAncestorOf(bar), "Build returns the bar to the canvas");
 
-    // The library dock (node tree for now) is the Left overlay, driven by the dock toggle.
+    // The library dock is the Left overlay, driven by the dock toggle.
     auto *library = visibleButton(*view, "Show node library");
-    auto *tree = panel.findChild<QTreeWidget *>("blueprintNodeTree");
+    auto *tree = panel.findChild<BlueprintLibraryDock *>();
     if (library && !library->isChecked()) library->click();
     pump(50);
     check(library && library->isChecked() && tree && tree->isVisible() && view->isAncestorOf(tree),
-          "the library toggle shows the node tree over the canvas");
+          "the library toggle shows the node library over the canvas");
     if (library) library->click();
     pump(50);
     check(tree && !tree->isVisible(), "the library toggle hides it again");
@@ -1130,6 +1134,111 @@ void checkInspector(BlueprintPreview &preview) {
     preview.deleteBlueprint("inspect-check");
 }
 
+void checkLibrary(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    using Entry = BlueprintLibraryDock::Entry;
+    const auto all = BlueprintLibraryDock::groups(preview, {}, {});
+    bool legacy = false;
+    QHash<QString, QStringList> ops;
+    for (const auto &[group, entries] : all)
+        for (const auto &entry : entries) {
+            legacy |= QStringList{"selector", "extractor", "lookup", "pricing", "tool"}.contains(entry.operation);
+            ops[group] << entry.operation;
+        }
+    check(!all.isEmpty() && !legacy, "legacy operations never appear in the library");
+    check(ops["sources"].contains("input") && ops["sources"].contains("dataset-rows") && ops["transform"].contains("count"),
+          "operations are grouped by family");
+    const auto json = BlueprintLibraryDock::groups(preview, "parse text", {});
+    check(json.size() == 1 && json.first().second.size() == 1 && json.first().second.first().operation == "parse-json",
+          "search filters operations by label and detail");
+    const auto transforms = BlueprintLibraryDock::groups(preview, {}, "transform");
+    check(transforms.size() == 1 && transforms.first().first == "transform", "a family chip shows only that family");
+    const bool hadSaved = !preview.nodeLibrary().isEmpty();
+    preview.saveNodeTemplate("Object input", preview.makeNode("input", "saved-in", 0, 0));
+    const auto withSaved = BlueprintLibraryDock::groups(preview, {}, {});
+    check(!hadSaved && withSaved.last().first == BlueprintLibraryDock::savedGroup && withSaved.last().second.size() == 1
+              && withSaved.last().second.first().savedName == "Object input",
+          "saved nodes form a Saved group");
+    const Entry roundTrip = Entry::fromJson(withSaved.last().second.first().toJson());
+    check(roundTrip.savedId == withSaved.last().second.first().savedId && !roundTrip.savedNode.isEmpty(),
+          "a library entry survives the drag payload");
+
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    preview.saveBlueprint(QJsonObject{{"id", "library-check"}, {"name", "Library check"}, {"revision", 1},
+                                      {"nodes", QJsonArray{preview.makeNode("output", "out", 0, 0)}}, {"edges", QJsonArray{}}});
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Library check")) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    auto *dock = panel.findChild<BlueprintLibraryDock *>();
+    const bool opened = view && dock && dock->isVisible() && view->graphScene()->node("out");
+    check(opened, "the library check graph opens with the dock shown");
+    if (!opened) return;
+    const auto stored = [&] { return preview.blueprint("library-check")["nodes"].toArray(); };
+    const auto added = [&](const QString &op) {
+        for (const auto &value : stored())
+            if (value.toObject()["operation"] == op) return value.toObject();
+        return QJsonObject{};
+    };
+    QWidget *parseRow = nullptr;
+    for (auto *frame : dock->findChildren<QFrame *>("blueprintLibraryRow"))
+        if (frame->isVisible() && frame->accessibleName() == "Add Parse JSON") parseRow = frame;
+    if (parseRow) click(parseRow, QRectF(parseRow->rect()).center());
+    pump(50);
+    const auto parse = added("parse-json");
+    const auto centre = parse.isEmpty() ? QPointF() : BlueprintScene::nodeRect(parse).center();
+    check(parseRow && !parse.isEmpty() && stored().size() == 2 && view->selection() == parse["id"].toString()
+              && view->freeArea().contains(view->mapFromScene(centre)),
+          "clicking a library row adds the node at once, selected, in the free canvas");
+
+    QMimeData mime;
+    mime.setData(BlueprintStyle::entryMimeType, Entry{"count", {}, {}, {}}.toJson());
+    // A free corner of the canvas, clear of the nodes already there.
+    const QPointF at = QPointF(view->freeArea().topLeft()) + QPointF(24, 24);
+    const auto target = view->mapToScene(at.toPoint());
+    QDragEnterEvent enter(at, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view->viewport(), &enter);
+    QDropEvent drop(at, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view->viewport(), &drop);
+    pump(50);
+    const auto count = added("count");
+    check(!count.isEmpty() && QLineF(QPointF(count["x"].toDouble(), count["y"].toDouble()), target).length() <= 40,
+          "dragging a row drops the node there");
+
+    QListWidget *list = nullptr;
+    for (auto *candidate : dock->findChildren<QListWidget *>())
+        if (candidate->accessibleName() == "Workflow nodes") list = candidate;
+    if (auto *tab = visibleButton(*dock, "In this workflow")) tab->click();
+    pump();
+    bool needsInput = false;
+    for (int i = 0; list && i < list->count(); ++i)
+        if (list->item(i)->data(Qt::UserRole) == "out") needsInput = list->item(i)->text().contains("needs input");
+    check(list && list->isVisible() && list->count() == 3 && needsInput,
+          "In this workflow lists the graph's nodes and what needs input");
+    for (int i = 0; list && i < list->count(); ++i)
+        if (list->item(i)->data(Qt::UserRole) == "out") list->setCurrentRow(i);
+    pump(50);
+    check(view->selection() == "out", "clicking a workflow row selects that node");
+
+    view->setFocus();
+    QShortcutEvent shortcut(QKeySequence(Qt::Key_Slash), 0);
+    for (auto *candidate : panel.findChildren<QShortcut *>())
+        if (candidate->key() == QKeySequence(Qt::Key_Slash)) QCoreApplication::sendEvent(candidate, &shortcut);
+    pump();
+    auto *search = visibleNamed<QLineEdit>(*dock, "Search nodes");
+    check(search && search->isVisible(), "/ opens the library search");
+    for (const auto &value : preview.nodeLibrary()) preview.removeNodeTemplate(value.toObject()["id"].toString());
+    preview.deleteBlueprint("library-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1144,6 +1253,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkShell(preview, captures);
     checkFieldWidgets(preview);
     checkInspector(preview);
+    checkLibrary(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;
