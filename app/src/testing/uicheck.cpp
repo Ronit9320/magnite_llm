@@ -51,6 +51,7 @@
 #include "widgets/toggleswitch.h"
 #include "widgets/button.h"
 #include "testing/textfit.h"
+#include "testing/frameaudit.h"
 #include "widgets/tabwidget.h"
 #include "widgets/combobox.h"
 #include "widgets/progressbar.h"
@@ -607,6 +608,9 @@ int runUiCheck(const QString &captures) {
         if (!pass) ++failures;
         fprintf(stderr,"[ui-check] %s %s\n",pass?"ok:":"FAIL:",qUtf8Printable(message));
     };
+    // Every window the checks below open is audited for frames the theme does not draw.
+    FrameAudit::Watcher frameWatcher;
+    qApp->installEventFilter(&frameWatcher);
     check(TrainingTime::duration(0)=="0s" && TrainingTime::duration(59)=="59s" &&
           TrainingTime::duration(60)=="1m 0s" && TrainingTime::duration(3599)=="59m 59s",
           "training durations format seconds and minutes at unit boundaries");
@@ -1129,6 +1133,14 @@ int runUiCheck(const QString &captures) {
     for (const auto &entry : panels)
         for (auto *checkbox : entry.second->findChildren<QCheckBox *>()) allSwitches &= qobject_cast<ToggleSwitch *>(checkbox)!=nullptr;
     check(allSwitches,"every checkbox setting uses the shared switch presentation");
+    for (const auto &entry : panels) {
+        const QSize size=entry.second->size(); const bool shown=entry.second->isVisible();
+        entry.second->resize(1100,760); entry.second->show(); pump(120);
+        const auto found=FrameAudit::nativeFrames(entry.second);
+        check(found.isEmpty(),"frame audit ["+entry.first+"]: no platform-style borders"+(found.isEmpty()?QString():" — "+found.join("; ")));
+        if (!shown) entry.second->hide();
+        entry.second->resize(size);
+    }
     if (!captures.isEmpty()) QDir().mkpath(captures);
     auto capture = [&](QWidget *widget,const QString &name) {
         if (!captures.isEmpty()) check(widget->grab().save(captures+"/"+name+".png"),"capture "+name);
@@ -4353,6 +4365,12 @@ int runUiCheck(const QString &captures) {
     // Blueprints are not part of switched-off builds; dev builds keep covering them.
     if (Features::blueprintsAndTools) failures += runBlueprintChecks(captures) + runBlueprintEditorChecks(captures);
     else std::printf("[blueprints] SKIP: switched off in this build\n");
+    pump(20);
+    qApp->removeEventFilter(&frameWatcher);
+    {
+        QStringList found(frameWatcher.findings.begin(),frameWatcher.findings.end()); found.sort();
+        check(found.isEmpty(),"frame audit [every window shown]: no platform-style borders"+(found.isEmpty()?QString():" — "+found.join("; ")));
+    }
     fprintf(stderr,"[ui-check] %s (%d failures)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

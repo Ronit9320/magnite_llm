@@ -95,6 +95,7 @@ std::vector<Token> tokens() {
         {"@surfaceFillActive",    Theme::surfaceFillActive()},
         {"@surfaceBorder",        Theme::surfaceBorder()},
         {"@controlBorder",        Theme::controlBorder()},
+        {"@divider",              Theme::divider()},
         {"@fieldFillHover",       Theme::fieldFillHover()},
         {"@fieldFill",            Theme::fieldFill()},
         {"@warningSurface",       Theme::warningSurface()},
@@ -286,6 +287,10 @@ void Theme::setDark(bool dark, bool animate) {
     palette.setColor(QPalette::PlaceholderText, QColor(textMuted()));
     palette.setColor(QPalette::Highlight, QColor(accentPrimary()));
     palette.setColor(QPalette::HighlightedText, QColor(accentText()));
+    // Fusion draws bevels and outlines from these roles; left alone they keep the desktop's
+    // (often white) values, which is where stray light borders come from.
+    for (auto role : {QPalette::Light, QPalette::Midlight}) palette.setColor(role, QColor(surfaceFillHover()));
+    for (auto role : {QPalette::Mid, QPalette::Dark, QPalette::Shadow}) palette.setColor(role, QColor(divider()));
     qApp->setPalette(palette);
     qApp->setStyleSheet(qss());
     for (auto *widget : QApplication::allWidgets()) {
@@ -412,6 +417,13 @@ int Theme::selfCheck() {
             validColors = validColors && QColor(value).isValid();
     }
     check("qss() color literals valid", validColors);
+    {
+        const QString tpl = loadText(QStringLiteral(":/theme/theme.qss"));
+        check("qss base layer makes frames borderless",
+              tpl.contains(QStringLiteral("QFrame, QAbstractScrollArea { border: none; }")));
+        check("qss dividers use @divider, not @surfaceBorder", !tpl.contains(QStringLiteral("@surfaceBorder")));
+        check("divider token valid", QColor(Theme::divider()).isValid() && Theme::divider() != Theme::surfaceFill());
+    }
 
     // 3. Qt resource tree: theme/fonts/icons embedded via resources.qrc.
     check("theme.qss embedded", !loadText(":/theme/theme.qss").isEmpty());

@@ -56,7 +56,12 @@ hardcode hex colors in widgets/stylesheets. Icons use `stroke="currentColor"`
 and Theme::coloredIcon. Preserve keyboard focus, both themes, and reduced motion.
 The implementation in `app/src/theme.h`, `app/resources/theme/console.qss`, and
 `app/resources/brand/` defines the current design. Keep new feature styling
-consistent with it. Boolean settings use the shared `ToggleSwitch` in
+consistent with it. The app runs on Fusion everywhere, and the top of `console.qss`
+is a base layer that makes every frame and scroll area borderless, so new widgets
+need no `setFrameShape(QFrame::NoFrame)`. Fields, buttons and cards have no outline;
+lines between regions use the `@divider` token (`Theme::divider()`), never
+`@surfaceBorder`. `--ui-check` fails on any frame still drawn by the platform style.
+Boolean settings use the shared `ToggleSwitch` in
 `app/src/widgets/toggleswitch.h`; it preserves native checked-state and keyboard
 behavior while drawing the themed track and thumb. Use shared `Button`,
 `ComboBox`, `TabWidget`, `SpinBox`/`DoubleSpinBox` and `ProgressBar` components for

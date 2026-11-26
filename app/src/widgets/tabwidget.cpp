@@ -33,7 +33,7 @@ void SegmentedTabBar::paintEvent(QPaintEvent *) {
     painter.setBrush(QColor(Theme::insetBackground())); painter.setPen(Qt::NoPen);
     const bool underline=property("underline").toBool();
     if (underline) {
-        painter.setPen(QPen(QColor(Theme::surfaceBorder()),1));
+        painter.setPen(QPen(QColor(Theme::divider()),1));
         painter.drawLine(0,height()-1,width(),height()-1);
     } else painter.drawRoundedRect(QRectF(rect()).adjusted(0.5,0.5,-0.5,-0.5),10,10);
     if (m_indicator.isValid()) {

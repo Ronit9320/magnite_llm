@@ -47,6 +47,10 @@ inline QString fieldFillHover()      { return isDark() ? QStringLiteral("#222225
 // Scroll handles and other drawn strokes that must reach 3:1 against their fill (WCAG 1.4.11).
 inline QString controlBorder()       { return isDark() ? QStringLiteral("#63636B") : QStringLiteral("#878C7C"); }
 
+// Hairline dividers between regions (sidebar edge, toolbars, table rows, menu separators).
+// The one place that decides how strong, or whether visible, every divider in the app is.
+inline QString divider()             { return surfaceBorder(); }
+
 // Unfilled part of the context meter ring and bar.
 inline QString meterTrack()          { return surfaceBorder(); }
 
