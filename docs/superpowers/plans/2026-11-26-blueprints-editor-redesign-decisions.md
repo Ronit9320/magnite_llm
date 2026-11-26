@@ -1,0 +1,91 @@
+# Blueprints editor redesign: decisions and deferred items
+
+Recorded while building the plan in `2026-11-26-blueprints-editor-redesign.md` (November 2026). Each ruling says what was decided, why, and what it costs if wrong.
+
+## Rulings
+
+- Ruling: where a test step names an action on "the example graph" without exact ids, the implementer picks ids from preview.example() and writes them in the test — plan intent is clear — cost if wrong: a weaker test, caught in review.
+- Ruling: no undo/redo buttons (plan T6) — spec allows leaving them out — cost: none.
+- Ruling: Tab stays a quick-add key on the canvas (spec names "Space or Tab"); Shift+Tab leaves the canvas and the accessible description must say so; Task 14's keyboard path uses Shift+Tab / focus order rather than plain Tab out of the canvas — cost if wrong: one key binding change.
+- Ruling: edge auto-pan while dragging (old canvas had it) is carried to Task 14 polish — cost: small regression until then.
+- Ruling: source port (chooseType) adopts the target's type only when it has no other outgoing wires; target adoption as written — spec says chooseType ports "accept any type they can be set to" and adopting a wire's type; retyping a source that already feeds other wires would silently break them — cost if wrong: an Input with wires can't be retargeted by drop (user changes type in inspector).
+- Ruling: BlueprintStyle::nodeWidth goes back to the old canvas width (190) so saved layouts (example spaced 219px) keep a gap and pins don't overlap — spec forbids re-saving positions; cost if wrong: narrower nodes than the mockup (more eliding).
+- Ruling: cap wire curve reach for backward wires so they don't loop far outside the nodes (screenshot shows a wide loop) — fix in Task 5 round 1.
+- Ruling: moving a picked-up wire must be one graph update and one save; a declined prompt must leave the old wire — add a view signal wireMoved(old, new) handled by the panel atomically (fix in Task 5 round 1).
+- Task 8: Ruling: adapterSource moved from blueprintpanel.cpp into static BlueprintPreview::adapterSource so the panel and BlueprintBindingFields share one copy — cost if wrong: none (pure function).
+- Task 8: Ruling: NodeDialog's scroll area now wraps the whole BlueprintNodeFields (kind/operation/name included) instead of only the options — the fields are one widget the inspector also hosts — cost: header fields scroll with the rest in a short dialog.
+- Task 9: Ruling: inspector adds signals schemaRequested(side, port) and trainRequested(id) and a reload() method beyond the plan's interface — the port schema editor and training flows had no other home in the inspector, and reload() reverts fields when the host declines a change — cost: none.
+- Task 9: Ruling: pending text edits are flushed by reading the node immediately and emitting nodeChanged on the next event-loop turn (not by clearing focus) — offscreen/inactive windows never deliver focus-out, and emitting during a canvas mouse press could rebuild the scene under the pressed item — cost: the save lands one event later.
+- Task 9: Ruling: the fixture binding's adapter combo is labelled "Node adapter" (was "Reuse a LoRA adapter" in the dialog) so the inspector keeps its existing accessible name — cost: label wording in the Change binding dialog.
+- Task 9: Ruling: live tests now open Configure node… / Change binding… / Choose dataset… from the node right-click menu (helper triggerNodeMenu) since the inspector no longer has those buttons; live suite not run here (needs models).
+- Task 9: Ruling: "test value" from the brief's inspector list is not a field — Test this node opens Test cases where the input lives — cost: one extra click to set a test value.
+- Task 10: Ruling: the plan's search check used "json", which also matches Read run input, Provide JSON rows and Format as text in the catalog; the check searches "parse text" (only Parse JSON) — cost: none.
+- Task 10: Ruling: the drop check sends DragEnter then Drop to the viewport (a real drag does; Qt drops nothing without an accepted enter) and compares against the scene point before the drop (adding reveals the node and moves the camera); the view also calls viewport()->setAcceptDrops(true).
+- Task 10: Ruling: the drag MIME type lives once in BlueprintStyle::entryMimeType (the view must not include a panel header) — cost: none.
+- Task 10: Ruling: the live check "workflow tree shows the Adapter node and its outgoing link" now checks the workflow list's row count and the stored graph's edge (links are shown in the inspector, not in the list) — cost: live suite not run here.
+- Task 10: Ruling: the picker checks ("Add Input"/"Add Dataset"/"Add Transform", picker cards) stay until Task 11 retires the picker.
+- Task 10: Ruling: "/" is a canvas shortcut (WidgetWithChildren on the view); text fields keep "/" as a character.
+- Task 11: Ruling: the dropped-wire filter check drags from a Count output (integer) instead of an Input (text) — Task 4's ruling lets an unwired chooseType source adopt the target's type, so an Input's wire legitimately offers Count — cost: none.
+- Task 11: Ruling: quick-add has one instance that re-parents to the visible host — the empty-canvas page (Start with a node → Add node) or the view's viewport — because the view is hidden while a graph is empty — cost: none.
+- Task 11: Ruling: picker-specific checks (card grid layout, saved-node paging "Page 1 of 2") are retired with the picker; replaced by quick-add equivalents (Add node opens quick-add, search finds Input and saved nodes); the node-config dialog capture on add is gone (adding is instant; ports set in the inspector).
+- Task 11: Ruling: the live check "all nine live cards fit…" becomes "the live quick-add lists the Knowledge family and no Pi agent" (not run here: needs the live backend).
+- Task 11: Ruling: the Space-placement check sets the cursor with QCursor::setPos (the view places quick-add at QCursor::pos) and allows the menu to flip upward near the bottom edge.
+- Task 12: Ruling: Run in Build (and Run history, which switches to Build) runs on the canvas; Run in Test cases still starts the shown case — supersedes Task 7's "Run opens Test cases"; the old check that clicked Run to reach the run setup now clicks the Test cases segment.
+- Task 12: Ruling: the toast is a Bottom overlay with a 72px margin so it sits above the bottom dock; its duration is the sum of step durations (runs carry no run-level duration).
+- Task 12: Ruling: the live "save a revision first" step sits at the end of the live model flow (revision 3 → 4) so it cannot shift the revision numbers later checks expect; live suite not run here.
+- Task 13: Ruling: BlueprintDetails places itself in BlueprintView::freeArea() by finding the view as its host's parent, instead of taking the area as a parameter — keeps the planned showFor signature — cost: none.
+- Task 13: Ruling: the docs check covers the fixture catalog plus a hardcoded list of the live catalog's operations on dev (generate, reason, lora, constant, build-object, template, compare, choose, validate, filter, sort, search), since a live catalog needs a backend; pass and format keep docs until the nodes branch removes them.
+- Task 13: Ruling: nodes show the ⓘ at the header's right edge on hover or selection; a click on it opens details (view mouse press), alongside the i key, the inspector header ⓘ, library row ⓘ and Shift+Enter in quick-add.
+- Task 14: Ruling: Fit and node reveal now use the canvas the floating panels leave open (freeArea minus the top bar and bottom dock) — the spec's "no node under a panel" intent; the deferred Task 6/7 gap — cost: older checks that clicked the viewport centre now aim at the node.
+- Task 14: Ruling: FloatingPanel re-applies its shadow margins after style polish (the style sheet reset them to 0 for quick-add and the details window, so their content overhung the panel) — cost: none.
+- Task 14: Ruling: the details window is 372px wide (plan: 340) and its pages scroll, so "Inputs & outputs" fits at Large size and long explanations don't squeeze — cost: slightly wider window.
+- Task 14: Ruling: library chips are an even 3-column grid (FlowLayout is a column grid, not a free flow) with tighter padding so "Knowledge" fits — cost: chips don't hug their labels.
+- Task 14: Ruling: edge auto-pan while dragging a node (carried from Task 3) implemented with a 28px band.
+- Task 14: Ruling: the keyboard check verifies the inspector fields and Delete node are in the focus chain after the canvas (Tab itself opens quick-add on the canvas, per the Task 3 ruling).
+- Final: fixed live inspector binding edits lost while the checkpoint check runs — pending flag saved on readyChanged(true); no fixture test possible (needs live backend), verified by reading — Ruling: shipped untested in live mode — cost if wrong: checkpoint picks in the inspector still not saved (Change binding… dialog still works).
+- Final: fixed failed live canvas run leaving m_runOnCanvas stuck and showing nothing — reset on every callback path, notice on error; live-only, verified by reading — Ruling: shipped untested in live mode.
+
+## Deferred minors
+
+- Task 1: minor (deferred): three copies of WCAG contrast maths (editor tests vs theme.cpp).
+- Task 1: minor (deferred): unused BlueprintPreview in editor tests stub.
+- Task 1: minor (deferred): family colour test only checks isValid.
+- Task 1: minor (deferred): selfCheck hardcodes 0.22 instead of headerTintAlpha.
+- Task 2: minor (deferred): dash animation offset 0..8 vs period 6 hitches.
+- Task 2: minor (deferred): WireItem::boundingRect re-strokes path each call.
+- Task 2: minor (deferred): every node move updates all wires.
+- Task 2: minor (deferred): WireItem raw PinItem* pointers — dangling risk if nodes removed without rebuild.
+- Task 2: minor (deferred): test uses wires().first() unguarded; missing #include <algorithm> in blueprintscene.cpp.
+- Task 2: minor (deferred): shadow pixmap ignores devicePixelRatio; shadowFor returns QHash reference.
+- Task 2: minor (deferred): previewLine recomputed repeatedly.
+- Task 2: minor (deferred): example-graph wire check now guarded by isEmpty (slightly weaker).
+- Task 3: minor (deferred → fixed in round 1 since Ctrl+Tab needs it): keyPressEvent ignores modifiers.
+- Task 3: minor (deferred → Task 10/14 keyboard audit): node selection/move are mouse-only on the canvas; In this workflow list gives keyboard selection; Task 14 should add arrow-key nudge or node cycling if missing.
+- Task 3: minor (deferred): test reuses stale `empty` point after camera changes.
+- Task 3: minor (deferred): dots check accepts any non-background pixel; repaint timing wall-clock.
+- Task 3: minor (deferred): dead setRubberBandSelectionMode; duplicate NoFrame.
+- Task 3: minor (deferred): nodeAt O(items×nodes); transitive includes for std::exchange/none_of.
+- Task 3: minor (deferred): Ctrl+Shift+Tab untested; synthesized mouse events drop timestamps; Alt+I check depends on earlier state.
+- Task 4: minor (deferred): validator sees picked-up edge during re-drop (cycle check could be too strict).
+- Task 4: minor (deferred): release on a node body cancels silently, restoring picked-up wire.
+- Task 4: minor (deferred → Task 9 inspector Disconnect / Task 14 keyboard audit): connecting and wire selection are mouse-only.
+- Task 4: minor (deferred): failed-drop message has no accessible alert.
+- Task 4: minor (deferred): drop on output pin / node body cancels silently.
+- Task 4: minor (deferred): comments on setDropValidator / connectGraph order.
+- Task 5: minor (deferred): no test of dropConnection confirm path or Connect dialog removeConnection; reveal re-centre branch untested; no-save check doesn't assert zoom changed.
+- Task 5: minor (deferred): addConnection (dialog) vs connectGraph (drops) differ on occupied input / retype — unify when dialog retired.
+- Task 5: minor (deferred): tighter user layouts can still put input pins within hit radius of neighbouring outputs (consider output hit priority).
+- Task 6: minor (deferred): freeArea over-reserves shadow width; placeOverlays uses WA_WState_ExplicitShowHide; shadow ignores DPR; panel shadow clipped at viewport edge; minimap pointer-only; fit() ignores freeArea (Task 10); null focusWidget guard in Ctrl+Tab loop; accessible description doesn't mention dock.
+- Task 6: minor (deferred): blurAlpha sits in blueprintstyle (pure-mapping header) — move to a render util; unused <QVector> in floatingpanel.cpp; long accessible-description line; magic numbers in dock height check; border check can't see QSS borders if paintEvent skips base.
+- Task 7: minor (deferred): compact rule re-closes library after each edit; no checks for validation-click, Connect ports menu, Run in Test cases, ⋯ actions, fullscreen outside Build; showBlueprint fits before showView(Build); minimap hidden under inspector; Run in Test cases starts a run (unrequested — keep+test or navigate only); keyboard route to Connect needs a selected node.
+- Final: minor (deferred): toast "Open in Run history" lands on the list, not the run.
+- Final: minor (deferred): flush() queues whole-node snapshots; two pending sections can overwrite each other.
+- Final: minor (deferred): an inspector button click right after typing may be swallowed by the rebuild (needs a manual check).
+- Final: minor (deferred): pin labels show name only (spec: name and type); finished steps show a dot, not a ✓.
+- Final: minor (deferred): shadows ignore the light token's tint colour and devicePixelRatio.
+- Final: minor (deferred): ElidedLabel sets its tooltip while painting.
+- Final: minor (deferred): live inspector rebuilds call refreshOptions() and a checkpoint request each save.
+- Final: minor (deferred): dead/stale code — setRubberBandSelectionMode, duplicate FloatingPanel forward declaration, comments that still mention the retired picker.
+- Final: minor (deferred): reopening the library at compact width with a node selected doesn't re-run the compact rule.
+- Final: minor (deferred): inspector subtitle shows a dangling "Kind · " for an unknown operation.
+- Final: minor (deferred): nodes can't be moved from the keyboard (not a regression).
