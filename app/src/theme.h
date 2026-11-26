@@ -56,6 +56,25 @@ inline QString statusWarning() { return isDark() ? QStringLiteral("#E8C478") : Q
 inline QString statusError()   { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
 inline QString comparisonSeries() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
 
+// ---- Blueprints editor: wire (port type) colours, node family colours, floating panels ----
+inline QString blueprintTypeText() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+inline QString blueprintTypeNumber() { return isDark() ? QStringLiteral("#7FD8E0") : QStringLiteral("#0B6B75"); }
+inline QString blueprintTypeBoolean() { return isDark() ? QStringLiteral("#FF9E82") : QStringLiteral("#B13D24"); }
+inline QString blueprintTypeObject() { return isDark() ? QStringLiteral("#C3A6FF") : QStringLiteral("#6B47B8"); }
+inline QString blueprintTypeArray() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
+inline QString blueprintTypeReceipt() { return isDark() ? QStringLiteral("#B6BAC2") : QStringLiteral("#5B6370"); }
+inline QString blueprintTypeAdapter() { return isDark() ? QStringLiteral("#E8C478") : QStringLiteral("#855C14"); }
+inline QString blueprintFamilySources() { return isDark() ? QStringLiteral("#6FCF97") : QStringLiteral("#2E7D4F"); }
+inline QString blueprintFamilyTransform() { return isDark() ? QStringLiteral("#9AA3B2") : QStringLiteral("#5B6370"); }
+inline QString blueprintFamilyKnowledge() { return isDark() ? QStringLiteral("#85B9F4") : QStringLiteral("#245B92"); }
+inline QString blueprintFamilyModels() { return isDark() ? QStringLiteral("#FF784E") : QStringLiteral("#B8420F"); }
+inline QString blueprintFamilyTools() { return isDark() ? QStringLiteral("#C3A6FF") : QStringLiteral("#6B47B8"); }
+inline QString blueprintFamilyOutput() { return isDark() ? QStringLiteral("#8ED5AD") : QStringLiteral("#276749"); }
+inline QString blueprintPanelFill() { return isDark() ? QStringLiteral("#111113") : QStringLiteral("#FFFEF8"); }
+// Soft drop shadow colour for floating panels, #AARRGGBB.
+inline QString blueprintPanelShadow() { return isDark() ? QStringLiteral("#73000000") : QStringLiteral("#33281E14"); }
+inline QString blueprintCanvasDot() { return isDark() ? QStringLiteral("#1A1A1C") : QStringLiteral("#D3CFC0"); }
+
 // Graph readouts stay dark and compact in both appearances.
 inline QString chartHoverFill() { return brandInk(); }
 inline QString chartHoverText() { return isDark() ? textPrimary() : canvasBackground(); }

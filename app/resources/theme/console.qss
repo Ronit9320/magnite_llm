@@ -657,12 +657,20 @@ QPushButton#blueprintStep {
 QPushButton#blueprintStep:hover, QPushButton#blueprintStep:checked { background: @surfaceFillHover; }
 QPushButton#blueprintStep:focus { border: 1px solid @accentLabel; }
 QWidget#blueprintStepDetail { background: @surfaceFill; }
-QPushButton#blueprintFullscreen { padding: 0; }
-QFrame#blueprintCanvasPanel { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 8px; }
+QGraphicsView#blueprintView { background: @canvasBackground; border: none; }
+/* Floating panels paint their own fill (@blueprintPanelFill) and shadow; no border. */
+QFrame#blueprintFloating { background: transparent; border: none; }
+/* Editor top bar: name, pills, the Build · Test cases · Run history segments, validation and Run ▾. */
+QLabel#blueprintBarName { font-family: @headingFont; font-size: 16px; font-weight: 600; color: @textPrimary; }
+QLabel#blueprintBarMeta { font-size: 12px; color: @textMuted; }
+QLabel#blueprintPill { font-size: 11px; font-weight: 500; color: @textSecondary; background: @surfaceFillHover; border: none; border-radius: 9px; padding: 2px 8px; }
+QFrame#blueprintSegments { background: @canvasBackground; border: none; border-radius: 10px; }
+QPushButton#blueprintSegment { padding: 5px 12px; min-height: 18px; }
+QPushButton#blueprintValidation { padding: 5px 8px; min-height: 18px; }
+QPushButton#blueprintRunMenu { padding: 0; }
+QLabel#blueprintDropMessage { color: @textPrimary; background: @blueprintPanelFill; border: 1px solid @statusError; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
 QFrame#blueprintCreateForm { background: @surfaceFill; border: none; border-radius: 8px; }
-QTreeWidget#blueprintNodeTree { background: @canvasBackground; border: 1px solid @surfaceBorder; border-radius: 6px; }
-QPushButton#blueprintIconButton, QPushButton#blueprintEdit, QPushButton#blueprintDuplicate,
-QPushButton#blueprintDelete { padding: 0; }
+QPushButton#blueprintIconButton { padding: 0; }
 QLabel#blueprintNodeIcon, QFrame#blueprintBinding { background: @canvasBackground; border: none; border-radius: 7px; }
 QLabel#blueprintBindingValue { color: @textPrimary; font-size: 12px; font-weight: 500; }
 QLabel#blueprintRevision {
@@ -680,8 +688,18 @@ QPushButton#blueprintStartCard {
 }
 QPushButton#blueprintStartCard:hover { background: @surfaceFillHover; }
 QPushButton#blueprintStartCard:focus { border: 1px solid @accentLabel; }
-QTreeWidget#blueprintNodeTree::item { padding: 2px 0; }
-QTreeWidget#blueprintNodeTree::item:selected { background: @surfaceFillHover; color: @textPrimary; }
+QLabel#blueprintToastText { font-size: 13px; color: @textPrimary; }
+/* Node library dock: family chips, grouped rows, and the In this workflow list. */
+QPushButton#blueprintLibraryChip { font-size: 11px; padding: 2px 4px; min-height: 16px; min-width: 0; border-radius: 9px; }
+QPushButton#blueprintLibraryChip:checked { background: @surfaceFillActive; color: @textPrimary; }
+QLabel#blueprintLibraryGroup { font-size: 11px; font-weight: 500; color: @textMuted; padding: 8px 0 2px 2px; }
+QLabel#blueprintLibraryTitle { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QFrame#blueprintLibraryRow { background: transparent; border: none; border-radius: 7px; }
+QFrame#blueprintLibraryRow:hover { background: @surfaceFillHover; }
+QFrame#blueprintLibraryRow:focus { background: @surfaceFillHover; border: 1px solid @accentLabel; }
+QListWidget#blueprintWorkflowList { background: transparent; border: none; }
+QListWidget#blueprintWorkflowList::item { padding: 5px 2px; border-radius: 6px; }
+QListWidget#blueprintWorkflowList::item:selected { background: @surfaceFillHover; color: @textPrimary; }
 
 /* Shared empty state (widgets/emptystate.h) */
 QFrame#emptyState { background: @surfaceFill; border: 1px dashed @surfaceBorder; border-radius: 10px; }

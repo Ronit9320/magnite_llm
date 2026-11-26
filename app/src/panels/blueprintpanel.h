@@ -1,12 +1,20 @@
 #pragma once
 
+#include "panels/blueprinttopbar.h"
+
 #include <QHash>
 #include <QJsonObject>
 #include <QWidget>
+#include "panels/blueprintlibrarydock.h"
 #include <optional>
 
-class BlueprintCanvas;
-class QTreeWidget;
+class BlueprintView;
+class FloatingPanel;
+class BlueprintDetails;
+class BlueprintInspector;
+class BlueprintQuickAdd;
+class FloatingPanel;
+class QTimer;
 class BlueprintPreview;
 class Button;
 class ComboBox;
@@ -17,7 +25,6 @@ class QPlainTextEdit;
 class QProgressBar;
 class QScrollArea;
 class QStackedWidget;
-class TabWidget;
 class QVBoxLayout;
 
 class BlueprintPanel : public QWidget {
@@ -36,7 +43,6 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    void updateCanvasFooter();
     void showRecentRuns();
     void refreshLibrary();
     void openBlueprint(const QString &id);
@@ -52,9 +58,22 @@ private:
     bool saveGraph(QJsonObject graph, bool revision = true);
     void setupEditor();
     void refreshEditor(bool fit = false);
+    void refreshBar();
+    void showView(BlueprintTopBar::View view);
+    // The bar floats over the canvas in Build (and fullscreen) and sits above the page otherwise.
+    void placeBar();
+    void checkValidation(int issue);
+    void showRunMenu(const QPoint &globalPosition);
+    // With a node selected, a canvas narrower than 240px between the panels closes the library.
+    void applyCompactRule();
     void refreshInspector();
-    void refreshNodeTree();
-    void openNodePicker(std::optional<QPointF> position = {});
+    void addEntry(const BlueprintLibraryDock::Entry &entry, std::optional<QPointF> at = {});
+    void openQuickAdd(QWidget *host, const QPoint &position, const QPointF &graph,
+                      const QString &fromNode = {}, const QString &outPort = {});
+    QJsonObject entryNode(const BlueprintLibraryDock::Entry &entry, const QPointF &at) const;
+    QString connectedInput(const BlueprintLibraryDock::Entry &entry, const QString &fromNode, const QString &outPort) const;
+    void addConnectedEntry(const BlueprintLibraryDock::Entry &entry, const QPointF &at,
+                           const QString &fromNode, const QString &outPort);
     void configureNode(const QString &id);
     void saveNodeTemplate(const QString &id);
     void addNode(const QJsonObject &node);
@@ -63,6 +82,10 @@ private:
     void renameNode(const QString &id);
     void connectPorts(const QString &inputNode = {}, const QString &inputPort = {});
     bool addConnection(const QJsonObject &edge, QWidget *parent);
+    bool dropConnection(const QJsonObject &edge);
+    bool removeConnection(const QJsonObject &edge);
+    bool moveConnection(const QJsonObject &oldEdge, const QJsonObject &newEdge);
+    bool saveConnected(const QJsonObject &base, const QJsonObject &edge);
     void editBinding();
     void editLiveBinding();
     void saveTrainingRecipe();
@@ -74,10 +97,14 @@ private:
     void changeNode(const QJsonObject &node, bool reconcilePorts = false);
     void toggleFullscreen();
     void leaveFullscreen();
-    void refreshCanvasActions();
-    void setupRun();
+    QWidget *setupRun();
     void showTest(const QString &node = {});
     void startRun();
+    void runFromCanvas();
+    void showNodeDetails(const QString &id);
+    void showEntryDetails(const BlueprintLibraryDock::Entry &entry, const QRect &anchor);
+    void showCanvasRun(const QJsonObject &run);
+    void showRunToast(const QJsonObject &run);
     void refreshRunOptions();
     void refreshRun();
     void refreshHistory();
@@ -85,8 +112,6 @@ private:
     BlueprintPreview *m_preview;
     QJsonObject m_graph;
     QString m_selected;
-    QString m_outputNode;
-    QString m_outputPort;
     QString m_runId;
     QString m_traceId;
     QString m_traceStatus;
@@ -103,31 +128,30 @@ private:
     QPlainTextEdit *m_newDescription;
     QLabel *m_createError;
     QVBoxLayout *m_libraryBody;
-    QLabel *m_title;
-    QLabel *m_revision;
-    QLabel *m_description;
     QLabel *m_service;
-    Button *m_publish;
-    Button *m_reload;
-    Button *m_openInConversation;
-    Button *m_backToChat;
-    TabWidget *m_tabs;
-    QVBoxLayout *m_canvasHome;
-    QWidget *m_canvasPanel;
-    QTreeWidget *m_nodeTree;
+    BlueprintTopBar *m_bar;
+    QVBoxLayout *m_barSlot;
+    QStackedWidget *m_views;  // Build · Test cases · Run history, in BlueprintTopBar::View order
+    bool m_canGoBack = false;  // the open run came from Conversation
+    BlueprintLibraryDock *m_libraryDock;
+    BlueprintQuickAdd *m_quickAdd = nullptr;
+    QString m_canvasRunId;
+    QString m_toastedRun;
+    bool m_runOnCanvas = false;
+    bool m_runAfterPublish = false;
+    FloatingPanel *m_toast = nullptr;
+    BlueprintDetails *m_details = nullptr;
+    QLabel *m_toastText = nullptr;
+    QTimer *m_toastTimer = nullptr;
+    FloatingPanel *m_libraryPanel;
     QStackedWidget *m_canvasPages;
-    BlueprintCanvas *m_canvas;
-    Button *m_connect;
-    Button *m_addNode;
+    BlueprintView *m_canvas;
+    QWidget *m_emptyCanvas;
     Button *m_emptyAdd;
-    Button *m_fullscreen;
-    QLabel *m_zoom;
-    QLabel *m_gestureHint;
-    QWidget *m_zoomControls;
-    QLabel *m_canvasCount;
-    Button *m_validation;
     QDialog *m_fullscreenDialog = nullptr;
+    FloatingPanel *m_inspectorPanel;
     QVBoxLayout *m_inspector;
+    BlueprintInspector *m_nodeInspector;
 
     QScrollArea *m_runSetup;
     ComboBox *m_target;

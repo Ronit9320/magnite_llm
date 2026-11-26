@@ -59,15 +59,42 @@ configure_file(src/build_features.h.in generated/build_features.h @ONLY)
 set(MAGNITE_SOURCES
     src/testing/blueprint_tests.cpp
     src/testing/blueprint_tests.h
+    src/testing/blueprint_test_support.h
+    src/testing/blueprint_editor_tests.cpp
+    src/testing/blueprint_editor_tests.h
     src/panels/blueprintpanel.cpp
     src/panels/blueprintnodedialog.cpp
     src/panels/blueprintnodedialog.h
+    src/panels/blueprintnodefields.cpp
+    src/panels/blueprintnodefields.h
+    src/panels/blueprintbindingfields.cpp
+    src/panels/blueprintbindingfields.h
+    src/panels/blueprintinspector.cpp
+    src/panels/blueprintinspector.h
+    src/panels/blueprintlibrarydock.cpp
+    src/panels/blueprintlibrarydock.h
+    src/panels/blueprintquickadd.cpp
+    src/panels/blueprintquickadd.h
+    src/panels/blueprintdetails.cpp
+    src/panels/blueprintdetails.h
     src/panels/blueprintpanel.h
+    src/panels/blueprinttopbar.cpp
+    src/panels/blueprinttopbar.h
     src/panels/blueprintpreview.cpp
     src/panels/blueprintbackend.cpp
     src/panels/blueprintpreview.h
-    src/widgets/blueprintcanvas.cpp
-    src/widgets/blueprintcanvas.h
+    src/widgets/blueprintitems.cpp
+    src/widgets/blueprintminimap.cpp
+    src/widgets/blueprintminimap.h
+    src/widgets/floatingpanel.cpp
+    src/widgets/floatingpanel.h
+    src/widgets/blueprintitems.h
+    src/widgets/blueprintscene.cpp
+    src/widgets/blueprintscene.h
+    src/widgets/blueprintstyle.cpp
+    src/widgets/blueprintstyle.h
+    src/widgets/blueprintview.cpp
+    src/widgets/blueprintview.h
     src/panels/modelhubpanel.cpp
     src/panels/modelhubpanel.h
     src/testing/modelhub_tests.cpp

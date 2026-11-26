@@ -79,6 +79,8 @@ std::vector<Token> tokens() {
         {"@brandInk", Theme::brandInk()},
         {"@brandText", Theme::brandText()},
         {"@canvasBackground",     Theme::canvasBackground()},
+        {"@blueprintPanelFill",   Theme::blueprintPanelFill()},
+        {"@blueprintCanvasDot",   Theme::blueprintCanvasDot()},
         {"@insetBackground",      Theme::insetBackground()},
         {"@accentSurface", Theme::accentSurface()},
         {"@accentLabel",        Theme::accentLabel()},
@@ -441,7 +443,7 @@ int Theme::selfCheck() {
         "database", "graduation-cap", "folder", "layers", "message-circle",
         "settings", "search", "refresh-cw", "download", "trash", "plus",
         "file-up", "file-down", "send", "circle-stop", "chevron-up", "chevron-down",
-        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain", "user"};
+        "pencil", "chevron-left", "chevron-right", "copy", "check", "expand", "shrink", "brain", "user", "info"};
     for (const char *name : kIcons) {
         const QString hit = QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(name));
         check(name, !loadText(hit).isEmpty());
@@ -559,6 +561,26 @@ int Theme::selfCheck() {
         check("primary button text contrast >= 4.5",contrast(accentText(),accentPrimary())>=4.5);
         check("chart hover colours valid",QColor(chartHoverFill()).isValid() && QColor(chartHoverText()).isValid());
         check("chart hover text contrast >= 4.5",contrast(chartHoverText(),chartHoverFill())>=4.5);
+        // Blueprints editor tokens.
+        bool editorValid=true, wiresVisible=true, headersReadable=true;
+        for(const auto &value:{blueprintTypeText(),blueprintTypeNumber(),blueprintTypeBoolean(),blueprintTypeObject(),blueprintTypeArray(),blueprintTypeReceipt(),blueprintTypeAdapter(),
+                               blueprintFamilySources(),blueprintFamilyTransform(),blueprintFamilyKnowledge(),blueprintFamilyModels(),blueprintFamilyTools(),blueprintFamilyOutput(),
+                               blueprintPanelFill(),blueprintPanelShadow(),blueprintCanvasDot()})
+            editorValid &= QColor(value).isValid();
+        for(const auto &value:{blueprintTypeText(),blueprintTypeNumber(),blueprintTypeBoolean(),blueprintTypeObject(),blueprintTypeArray(),blueprintTypeReceipt(),blueprintTypeAdapter()})
+            wiresVisible &= contrast(value,canvasBackground())>=3.0;
+        for(const auto &family:{blueprintFamilySources(),blueprintFamilyTransform(),blueprintFamilyKnowledge(),blueprintFamilyModels(),blueprintFamilyTools(),blueprintFamilyOutput()}) {
+            const QColor tint(family),base(blueprintPanelFill());
+            const qreal alpha=0.22;  // BlueprintStyle::headerTintAlpha
+            const QColor blended=QColor::fromRgbF(base.redF()+(tint.redF()-base.redF())*alpha,
+                                                  base.greenF()+(tint.greenF()-base.greenF())*alpha,
+                                                  base.blueF()+(tint.blueF()-base.blueF())*alpha);
+            headersReadable &= contrast(textPrimary(),blended.name())>=4.5;
+        }
+        check(dark ? "dark Blueprints editor tokens valid" : "light Blueprints editor tokens valid",editorValid);
+        check(dark ? "dark wire colours reach 3:1 on the canvas" : "light wire colours reach 3:1 on the canvas",wiresVisible);
+        check(dark ? "dark node header text contrast >= 4.5" : "light node header text contrast >= 4.5",headersReadable);
+        check("Blueprints canvas dot differs from the canvas",QColor(blueprintCanvasDot())!=QColor(canvasBackground()));
     }
     setDark(originalDark);
     std::fprintf(stderr, "[theme-check] %d failure(s)\n", failures);

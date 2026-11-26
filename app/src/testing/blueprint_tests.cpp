@@ -1,12 +1,15 @@
 #include "testing/blueprint_tests.h"
+#include "testing/blueprint_test_support.h"
 
 #include "backend_client.h"
 #include "backend_manager.h"
 #include "panels/blueprintpanel.h"
 #include "panels/blueprintpreview.h"
+#include "panels/blueprintquickadd.h"
 #include "panels/chatpanel.h"
 #include "theme.h"
-#include "widgets/blueprintcanvas.h"
+#include "widgets/blueprintscene.h"
+#include "widgets/blueprintview.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -31,7 +34,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QTemporaryDir>
-#include <QTreeWidget>
+#include <QListWidget>
 #include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
@@ -39,82 +42,57 @@
 #include <memory>
 #include <optional>
 
+using namespace BlueprintTest;
+
 namespace {
-void pump(int ms = 15) {
-    QEventLoop loop;
-    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
-    loop.exec();
-}
 
-template<class Widget>
-Widget *visibleNamed(QWidget &parent, const QString &name) {
-    for (auto *widget : parent.findChildren<Widget *>())
-        if (widget->isVisible() && widget->accessibleName() == name) return widget;
+// The quick-add menu if it is open.
+BlueprintQuickAdd *openQuickAdd(QWidget &panel) {
+    for (auto *menu : panel.findChildren<BlueprintQuickAdd *>())
+        if (menu->isVisible()) return menu;
     return nullptr;
 }
 
-QPushButton *visibleButton(QWidget &parent, const QString &text) {
-    for (auto *button : parent.findChildren<QPushButton *>())
-        if (button->isVisible() && (button->text() == text || (button->text().isEmpty() && button->accessibleName() == text)))
-            return button;
+// Types a search into the open quick-add menu and adds the first match.
+bool quickAddFirst(QWidget &panel, const QString &query) {
+    auto *menu = openQuickAdd(panel);
+    auto *search = menu ? visibleNamed<QLineEdit>(*menu, "Search nodes to add") : nullptr;
+    if (!search) return false;
+    search->setText(query);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(search, &enter);
+    pump();
+    return true;
+}
+
+// The In this workflow list, shown or not: the compact rule may have closed the library it sits in.
+QListWidget *nodeTree(QWidget &panel) {
+    for (auto *list : panel.findChildren<QListWidget *>())
+        if (list->accessibleName() == "Workflow nodes") return list;
     return nullptr;
 }
 
-bool visibleText(QWidget &parent, const QString &fragment) {
-    for (const auto *label : parent.findChildren<QLabel *>())
-        if (label->isVisible() && label->text().contains(fragment)) return true;
-    return false;
-}
-
-void drag(QWidget *widget, const QPointF &from, const QPointF &to, int holdMs = 0) {
-    QMouseEvent press(QEvent::MouseButtonPress, from, widget->mapToGlobal(from.toPoint()),
-        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent move(QEvent::MouseMove, to, widget->mapToGlobal(to.toPoint()),
-        Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-    QMouseEvent release(QEvent::MouseButtonRelease, to, widget->mapToGlobal(to.toPoint()),
-        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QCoreApplication::sendEvent(widget, &press);
-    QCoreApplication::sendEvent(widget, &move);
-    if (holdMs) pump(holdMs);
-    QCoreApplication::sendEvent(widget, &release);
-}
-
-void confirmDelete(QWidget *host) {
-    QTimer::singleShot(0, host, [] {
-        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
-            if (auto *submit = visibleButton(*dialog, "Delete")) submit->click();
-            else dialog->reject();
+// The texts of the top bar's ⋯ menu (the popup closes again).
+QStringList moreActions(QWidget &panel) {
+    QStringList texts;
+    auto *more = visibleNamed<QPushButton>(panel, "More blueprint actions");
+    if (!more) return texts;
+    QTimer::singleShot(0, more, [&texts] {
+        if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+            for (const auto *action : menu->actions())
+                if (action->isVisible() && !action->isSeparator()) texts << action->text();
+            menu->close();
         }
     });
-}
-
-bool waitForState(BlueprintPreview &preview, const QString &id, const QString &status, int timeout = 5000) {
-    QElapsedTimer timer;
-    timer.start();
-    while (timer.elapsed() < timeout) {
-        if (preview.run(id)["status"].toString() == status) {
-            pump();  // Let widgets added by runChanged finish entering the layout.
-            return true;
-        }
-        pump(35);
-    }
-    return false;
-}
-
-bool waitFor(const std::function<bool()> &condition, int timeout = 6000) {
-    QElapsedTimer timer;
-    timer.start();
-    while (!condition() && timer.elapsed() < timeout) pump(30);
-    return condition();
+    more->click();
+    pump();
+    return texts;
 }
 
 QString modelId(QString repo) {
     return "huggingface:" + repo.replace("/", "--");
 }
 
-QJsonObject edge(const QString &from, const QString &out, const QString &to, const QString &in) {
-    return {{"from", from}, {"out", out}, {"to", to}, {"in", in}};
-}
 
 bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &panel, ChatPanel &chat,
     const QString &model, const QString &reasoningModel, const QString &captures) {
@@ -130,7 +108,7 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
         return 0;
     };
     const auto back = [&] {
-        if (auto *button = visibleNamed<QPushButton>(panel, "Blueprint library")) button->click();
+        if (auto *button = visibleNamed<QPushButton>(panel, "Back to library")) button->click();
         pump();
     };
     back();
@@ -166,10 +144,10 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     };
     back();
     if (!check(open(), "the draft reopens from the native library")) return false;
-    auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
-    if (!tree || tree->topLevelItemCount() != 3)
-        return check(false, "the Model node appears in the workflow tree");
-    tree->setCurrentItem(tree->topLevelItem(1));
+    auto *tree = nodeTree(panel);
+    if (!tree || tree->count() != 3)
+        return check(false, "the Model node appears in the workflow list");
+    tree->setCurrentRow(1);
     pump();
 
     // Enter the actual modal selector and wait for the checkpoint options request.
@@ -194,13 +172,13 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     });
     dialogTime.start();
     driver.start();
-    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
-    else fprintf(stderr, "[blueprints-model] Configure button unavailable after selecting the model\n");
+    if (!triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…"))
+        fprintf(stderr, "[blueprints-model] Configure node… unavailable after selecting the model\n");
     driver.stop();
     QObject::disconnect(bindingDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(1).toObject()["model"] == modelId(model),
                "the Model node binds the local checkpoint in the desktop picker")) return false;
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(waitFor([&] { return publishedRevision(id) == 1 && visibleText(panel, "Revision 1"); }),
                "the model graph publishes revision 1")) return false;
 
@@ -318,10 +296,13 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (!session.saveBlueprint(linked)) return false;
     back();
     if (!open()) return false;
-    tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
-    if (!check(tree && tree->topLevelItemCount() == 4 && tree->topLevelItem(3)->childCount() == 1,
-               "the workflow tree shows the Adapter node and its outgoing link")) return false;
-    tree->setCurrentItem(tree->topLevelItem(3));
+    tree = nodeTree(panel);
+    const auto adapterNode = session.blueprint(id)["nodes"].toArray().at(3).toObject()["id"].toString();
+    const auto adapterLinks = session.blueprint(id)["edges"].toArray();
+    if (!check(tree && tree->count() == 4 && std::count_if(adapterLinks.cbegin(), adapterLinks.cend(), [&](const auto &e) {
+                   return e.toObject()["from"] == adapterNode; }) == 1,
+               "the workflow list shows the Adapter node, which has one outgoing link")) return false;
+    tree->setCurrentRow(3);
     pump();
     const auto adapterDriver = QObject::connect(&driver, &QTimer::timeout, &panel, [&] {
         auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
@@ -334,17 +315,17 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     });
     dialogTime.restart();
     driver.start();
-    if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…");
     driver.stop();
     QObject::disconnect(adapterDriver);
     if (!check(session.blueprint(id)["nodes"].toArray().at(3).toObject()["adapter"] == adapter,
                "the Adapter node can select the real trained weights")) return false;
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(waitFor([&] { return publishedRevision(id) == 3 && visibleText(panel, "Revision 3"); }),
                "the LoRA link persists on a new revision")) return false;
     pump();
     if (!captures.isEmpty()) panel.grab().save(QDir(captures).filePath("linked-adapter-graph.png"));
-    tree->setCurrentItem(tree->topLevelItem(1));
+    tree->setCurrentRow(1);
     pump();
     if (auto *testLinked = visibleButton(panel, "Test this node")) testLinked->click();
     if (!check(runInEditor("Test node") && latest()["target"] == "answer",
@@ -352,6 +333,33 @@ bool runModelBlueprintAcceptance(BlueprintPreview &session, BlueprintPanel &pane
     if (auto *target = visibleNamed<QComboBox>(panel, "Run target")) target->setCurrentIndex(0);
     if (!check(runInEditor("Start run") && latest()["revision"].toInt() == 3 &&
                latest()["result"] == editorRun["result"], "local generation uses the linked adapter")) return false;
+
+    // A full run of an edited draft from the canvas offers to save a revision first.
+    if (auto *build = visibleButton(panel, "Build")) build->click();
+    if (auto *list = nodeTree(panel)) list->setCurrentRow(0);
+    pump();
+    if (auto *name = visibleNamed<QLineEdit>(panel, "Name (optional)")) {
+        name->setText(name->text() + " (edited)");
+        name->setModified(true);
+        emit name->editingFinished();
+        pump();
+    }
+    bool offered = false;
+    QTimer::singleShot(0, &panel, [&] {
+        if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
+            offered = visibleText(*dialog, "saved revision");
+            if (auto *save = visibleButton(*dialog, "Save and run")) save->click();
+            else dialog->reject();
+        }
+    });
+    const auto beforeCanvas = latest()["id"].toString();
+    if (auto *run = visibleButton(panel, "Run")) run->click();
+    if (!check(offered && waitFor([&] {
+                   const auto run = latest();
+                   return publishedRevision(id) == 4 && run["id"] != beforeCanvas && run["revision"].toInt() == 4
+                       && (run["status"] == "passed" || run["status"] == "failed");
+               }, 180000),
+               "Run on an edited draft offers to save a revision and runs it")) return false;
 
     if (reasoningModel.isEmpty()) return true;
     const QJsonObject integer{{"type", "integer"}};
@@ -389,49 +397,27 @@ int runBlueprintChecks(const QString &captures) {
     };
     auto capture = [&](QWidget &widget, const QString &name) {
         if (captures.isEmpty()) return;
+        pump(200);  // let deferred layouts (the inspector's scroll area) settle before grabbing
         QDir().mkpath(captures);
         check(widget.grab().save(QDir(captures).filePath(name + ".png")), "saved reference capture");
     };
     const bool original = Theme::isDark();
     Theme::setDark(true);
     BlueprintPreview preview(nullptr, false);
-    {
-        BlueprintCanvas cable;
-        cable.resize(600, 250);
-        auto graph = QJsonObject{{"nodes", QJsonArray{
-            preview.makeNode("input", "first", 0, 0), preview.makeNode("output", "second", 203, 0)}}};
-        cable.setGraph(graph, preview.fixtures());
-        const auto before = cable.grab().toImage();
-        graph["edges"] = QJsonArray{edge("first", "text", "second", "value")};
-        cable.setGraph(graph, preview.fixtures());
-        const auto after = cable.grab().toImage();
-        QRect difference;
-        for (int y = 0; y < before.height(); ++y)
-            for (int x = 0; x < before.width(); ++x)
-                if (before.pixel(x, y) != after.pixel(x, y))
-                    difference = difference.united(QRect(x, y, 1, 1));
-        check(!difference.isEmpty() && difference.height() <= qCeil(4 * after.devicePixelRatio()),
-              "a short link between aligned ports stays straight");
-        bool gridVisible = false;
-        for (int y = 0; y < qCeil(30 * after.devicePixelRatio()); ++y)
-            for (int x = 0; x < qCeil(30 * after.devicePixelRatio()); ++x)
-                gridVisible |= after.pixelColor(x, y) != QColor(Theme::canvasBackground());
-        check(gridVisible, "canvas dots remain visible when the canvas contains nodes");
-    }
     BlueprintPanel panel(&preview);
     panel.resize(1120, 720);
     panel.show();
     pump();
 
     auto *create = visibleButton(panel, "Create new");
-    check(create && !panel.findChild<BlueprintCanvas *>()->isVisible(), "library starts with Create new and no open graph");
+    check(create && !panel.findChild<BlueprintView *>()->isVisible(), "library starts with Create new and no open graph");
     capture(panel, "blueprints-library-dark");
     if (create) {
         create->click();
         pump();
         auto *name = visibleNamed<QLineEdit>(panel, "Name");
         auto *submit = visibleButton(panel, "Create blueprint");
-        check(name && submit && !submit->isEnabled() && !panel.findChild<BlueprintCanvas *>()->isVisible(),
+        check(name && submit && !submit->isEnabled() && !panel.findChild<BlueprintView *>()->isVisible(),
               "Create new opens an in-workspace form and requires a name");
         if (name) name->setText("Blank workflow");
         capture(panel, "blueprints-create-dark");
@@ -441,59 +427,56 @@ int runBlueprintChecks(const QString &captures) {
     check(preview.saved().size() == 1 && preview.saved().first().toObject()["nodes"].toArray().isEmpty()
               && visibleText(panel, "Start with a node"),
           "naming a blueprint opens an empty canvas and saves it");
+    check(!visibleNamed<QPushButton>(panel, "Fullscreen canvas"),
+          "an empty canvas offers no fullscreen button that would do nothing");
 
     const auto blankId = preview.saved().isEmpty() ? QString{} : preview.saved().first().toObject()["id"].toString();
-    auto *canvas = panel.findChild<BlueprintCanvas *>();
+    auto *canvas = panel.findChild<BlueprintView *>();
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    auto *picker = visibleNamed<QDialog>(panel, "Add node picker");
-    check(picker, "Add node opens a separate themed dialog");
-    if (picker) {
-        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 6 && !picker->findChild<QScrollArea *>() &&
-              cards[0]->y() == cards[1]->y() && cards[0]->x() < cards[1]->x() && cards[3]->y() > cards[0]->y(),
-              "the node picker lays out built-in cards across columns without scrolling");
-        capture(*picker, "blueprints-palette-dark");
+    auto *menu = openQuickAdd(panel);
+    check(menu && visibleNamed<QLineEdit>(*menu, "Search nodes to add"), "Add node opens the quick-add menu");
+    if (menu) {
+        capture(*menu, "blueprints-quick-add-dark");
         Theme::setDark(false);
         pump();
-        capture(*picker, "blueprints-palette-light");
+        capture(*menu, "blueprints-quick-add-light");
         Theme::setDark(true);
         pump();
     }
     panel.resize(782, 628);
     pump();
-    check(panel.width() == 782 && visibleNamed<QPushButton>(panel, "Add Input")
-              && visibleNamed<QPushButton>(panel, "Add Dataset") && visibleNamed<QPushButton>(panel, "Add Transform"),
-          "the node picker lists general node kinds in the compact workspace");
-    if (auto *addInput = visibleNamed<QPushButton>(panel, "Add Input")) {
-        QTimer::singleShot(0, &panel, [&] {
-            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
-                if (auto *port = visibleNamed<QLineEdit>(*dialog, "Output port name")) port->setText("Payload");
-                if (auto *type = visibleNamed<QComboBox>(*dialog, "Output port type"))
-                    type->setCurrentIndex(type->findData("object"));
-                capture(*dialog, "blueprints-node-config-dark");
-                if (auto *submit = visibleButton(*dialog, "Create node")) submit->click();
-                else dialog->reject();
-            }
-        });
-        addInput->click();
+    check(panel.width() == 782 && quickAddFirst(panel, "Read run input"),
+          "quick-add finds the Input node in the compact workspace");
+    // Adding is instant; the port is named and typed in the inspector afterwards.
+    if (auto *port = visibleNamed<QLineEdit>(panel, "Output port name")) {
+        port->setText("Payload");
+        port->setModified(true);
+        emit port->editingFinished();
+        pump();
     }
-    pump();
+    if (auto *type = visibleNamed<QComboBox>(panel, "Output port type")) {
+        type->setCurrentIndex(type->findData("object"));
+        pump();
+    }
     check(canvas->isVisible() && preview.blueprint(blankId)["nodes"].toArray().size() == 1,
-          "choosing a palette item inserts and selects a node");
+          "choosing a quick-add entry inserts and selects a node");
     const auto initialNodes = preview.blueprint(blankId)["nodes"].toArray();
     QString firstNodeId;
     if (canvas->isVisible() && !initialNodes.isEmpty()) {
         const auto node = initialNodes.first().toObject();
         firstNodeId = node["id"].toString();
         const auto port = node["out"].toArray().first().toObject();
-        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
-        check(tree && tree->topLevelItemCount() == 1 && tree->currentItem() == tree->topLevelItem(0),
-              "the new node appears selected in the workflow tree");
+        auto *tree = nodeTree(panel);
+        check(tree && tree->count() == 1 && tree->currentRow() == 0,
+              "the new node appears selected in the workflow list");
         check(node["name"].toString() == "Input" && port["name"].toString() == "Payload"
                   && port["type"].toString() == "object",
               "a generic Input accepts a named and typed output without requiring a node name");
-        const QPoint center = canvas->rect().center();
+        auto *surface = canvas->viewport();
+        const QPoint center = canvas->graphScene()->node(firstNodeId)
+            ? canvas->mapFromScene(canvas->graphScene()->node(firstNodeId)->sceneBoundingRect().center())
+            : surface->rect().center();
         bool nodeMenu = false;
         QTimer::singleShot(0, &panel, [&] {
             if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
@@ -504,10 +487,10 @@ int runBlueprintChecks(const QString &captures) {
                 menu->close();
             }
         });
-        QContextMenuEvent context(QContextMenuEvent::Mouse, center, canvas->mapToGlobal(center));
-        QCoreApplication::sendEvent(canvas, &context);
+        QContextMenuEvent context(QContextMenuEvent::Mouse, center, surface->mapToGlobal(center));
+        QCoreApplication::sendEvent(surface, &context);
         check(nodeMenu, "right-clicking a node offers configuration, rename, reuse, and deletion");
-        drag(canvas, center, QPointF(-120, -120), 80);
+        drag(surface, center, QPointF(-120, -120), 80);
         pump();
         const auto moved = preview.blueprint(blankId)["nodes"].toArray().first().toObject();
         check(moved["x"].toInt() < 0 && moved["y"].toInt() < 0,
@@ -531,7 +514,7 @@ int runBlueprintChecks(const QString &captures) {
         check(preview.blueprint(blankId)["nodes"].toArray().isEmpty(), "deleting the final node returns to the empty canvas");
     }
 
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     pump();
     if (auto *newGraph = visibleButton(panel, "Create new")) newGraph->click();
     pump();
@@ -542,20 +525,7 @@ int runBlueprintChecks(const QString &captures) {
         preview.saveNodeTemplate(QString("Saved input %1").arg(i + 1), preview.makeNode("input", "input", 0, 0));
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    if (auto *savedPicker = visibleNamed<QDialog>(panel, "Add node picker")) {
-        if (auto *tabs = savedPicker->findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
-        pump();
-        auto *next = visibleButton(*savedPicker, "Next");
-        check(next && next->isEnabled() && visibleText(*savedPicker, "Page 1 of 2") &&
-              !visibleNamed<QPushButton>(*savedPicker, "Add saved node Object input") &&
-              !savedPicker->findChild<QScrollArea *>(), "the saved-node grid pages through larger libraries");
-        if (next) next->click();
-        pump();
-        check(visibleText(*savedPicker, "Page 2 of 2") && next && !next->isEnabled(),
-              "the next page shows the remaining cards and stops at the end");
-    }
-    if (auto *savedNode = visibleNamed<QPushButton>(panel, "Add saved node Object input")) savedNode->click();
-    pump();
+    check(quickAddFirst(panel, "Object input"), "saved nodes appear in quick-add search");
     const auto savedGraphs = preview.saved();
     const auto reusedGraph = savedGraphs.isEmpty() ? QJsonObject{} : savedGraphs.first().toObject();
     const auto reusedNodes = reusedGraph["nodes"].toArray();
@@ -604,15 +574,15 @@ int runBlueprintChecks(const QString &captures) {
 
     panel.resize(1120, 720);
     preview.saveBlueprint(preview.example());
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     for (auto *button : panel.findChildren<QPushButton *>()) {
         if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Order intake")) {
             button->click();
             break;
         }
     }
-    if (auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections"))
-        tree->setCurrentItem(tree->topLevelItem(1));
+    if (auto *tree = nodeTree(panel))
+        tree->setCurrentRow(1);
     pump();
     auto *adapter = visibleNamed<QComboBox>(panel, "Node adapter");
     check(canvas->isVisible() && visibleText(panel, "Node inspector") && adapter &&
@@ -630,32 +600,33 @@ int runBlueprintChecks(const QString &captures) {
     pump();
     check(canvas->window() != &panel && canvas->window()->isFullScreen(), "canvas opens in a native fullscreen window");
     if (canvas->isVisible()) {
-        const QPointF point = canvas->rect().center();
+        auto *surface = canvas->viewport();
+        const QPointF point = surface->rect().center();
         int percent = 0;
-        const auto observation = QObject::connect(canvas, &BlueprintCanvas::zoomChanged, &panel, [&](int value) { percent = value; });
+        const auto observation = QObject::connect(canvas, &BlueprintView::zoomChanged, &panel, [&](int value) { percent = value; });
         canvas->fit();
         const int fitted = percent;
-        QWheelEvent wheel(point, canvas->mapToGlobal(point.toPoint()), {}, QPoint(0, 120),
+        QWheelEvent wheel(point, surface->mapToGlobal(point.toPoint()), {}, QPoint(0, 120),
             Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-        QCoreApplication::sendEvent(canvas, &wheel);
+        QCoreApplication::sendEvent(surface, &wheel);
         check(wheel.isAccepted() && percent > fitted, "wheel zooms the fullscreen canvas");
         const auto before = canvas->centerInGraph();
         const auto savedBeforePan = preview.saved();
         const auto nodes = preview.example()["nodes"].toArray();
         std::optional<QPointF> background;
-        for (int y = 4; y < canvas->height() && !background; y += 12) {
-            for (int x = 4; x < canvas->width(); x += 12) {
+        for (int y = 4; y < surface->height() && !background; y += 12) {
+            for (int x = 4; x < surface->width(); x += 12) {
                 const QPointF candidate(x, y);
-                const auto position = before + (candidate - QRectF(canvas->rect()).center()) / (percent / 100.0);
+                const auto position = canvas->mapToScene(candidate.toPoint());
                 if (std::none_of(nodes.cbegin(), nodes.cend(), [&](const auto &node) {
-                    return BlueprintCanvas::nodeRect(node.toObject()).adjusted(-16, -8, 16, 8).contains(position);
+                    return BlueprintScene::nodeRect(node.toObject()).adjusted(-16, -8, 16, 8).contains(position);
                 })) {
                     background = candidate;
                     break;
                 }
             }
         }
-        if (background) drag(canvas, *background, *background + QPointF(63, 29));
+        if (background) drag(surface, *background, *background + QPointF(63, 29));
         check(background && before != canvas->centerInGraph() && savedBeforePan == preview.saved(),
               "left-dragging the background moves the camera without editing node positions");
         QObject::disconnect(observation);
@@ -668,7 +639,8 @@ int runBlueprintChecks(const QString &captures) {
     const QJsonObject badEdge{{"from", "input"}, {"out", "text"}, {"to", "lookup"}, {"in", "index"}};
     check(preview.connectionError(graph, badEdge).contains("Text cannot connect to Integer"),
           "editor rejects incompatible typed ports");
-    if (auto *runButton = visibleButton(panel, "Run blueprint")) runButton->click();
+    // Run now runs on the canvas; the full run setup lives in Test cases.
+    if (auto *testCases = visibleButton(panel, "Test cases")) testCases->click();
     pump();
     auto *start = visibleButton(panel, "Start run");
     auto *scenario = visibleNamed<QComboBox>(panel, "Fixture scenario");
@@ -710,7 +682,7 @@ int runBlueprintChecks(const QString &captures) {
     capture(chat, "tool-task-approval");
     panel.openRun(toolId);
     pump();
-    check(visibleText(panel, "Working directory") && visibleButton(panel, "Back to Conversation"),
+    check(visibleText(panel, "Working directory") && moreActions(panel).contains("Back to Conversation"),
           "the exact chat run shares the approval view in Blueprints");
     if (auto *deny = visibleButton(panel, "Deny")) deny->click();
     pump();
@@ -757,7 +729,7 @@ int runBlueprintChecks(const QString &captures) {
         pump(300);
         capture(flows, "conversation-blueprint-new");
     }
-    if (auto *library = visibleNamed<QPushButton>(panel, "Blueprint library")) library->click();
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
     pump();
     for (auto *remove : panel.findChildren<QPushButton *>()) {
         if (!remove->isVisible() || remove->accessibleName() != "Delete blueprint" ||
@@ -856,7 +828,7 @@ int runLiveBlueprintChecks(const QString &captures) {
     pump();
     if (auto *open = visibleButton(panel, "Open")) open->click();
     pump();
-    check(panel.findChild<BlueprintCanvas *>()->isVisible() && visibleText(panel, "Draft"),
+    check(panel.findChild<BlueprintView *>()->isVisible() && visibleText(panel, "Draft"),
           "canvas distinguishes an unpublished draft");
     {
         // New transform nodes: built by the editor's factory, mapped by apiNode, run by the backend.
@@ -933,37 +905,27 @@ int runLiveBlueprintChecks(const QString &captures) {
 
     if (auto *add = visibleButton(panel, "Add node")) add->click();
     pump();
-    if (auto *picker = visibleNamed<QDialog>(panel, "Add node picker")) {
-        const auto cards = picker->findChildren<QPushButton *>("blueprintNodeCard");
-        check(cards.size() == 9 && !picker->findChild<QScrollArea *>() &&
-              std::none_of(cards.begin(), cards.end(), [](const auto *card) {
-                  return card->accessibleName() == "Add Pi Agent";
-              }) &&
-              std::any_of(cards.begin(), cards.end(), [](const auto *card) {
-                  return card->accessibleName() == "Add Knowledge";
-              }) &&
-              picker->height() <= picker->screen()->availableGeometry().height() &&
-              std::all_of(cards.begin(), cards.end(), [picker](const auto *card) {
-                  const auto *title = card->template findChild<QLabel *>("headingLabel");
-                  const auto *caption = card->template findChild<QLabel *>("cardMeta");
-                  return card->isVisible() && picker->rect().contains(card->mapTo(picker, QPoint())) &&
-                         picker->rect().contains(card->mapTo(picker, card->rect().bottomRight())) &&
-                         title && card->accessibleName() == "Add " + title->text() &&
-                         caption && caption->height() >= caption->heightForWidth(caption->width());
-              }), "all nine live cards fit without scrolling, with Knowledge and without Pi Agent");
-        capture(*picker, "live-add-node-cards");
-        picker->reject();
+    if (auto *menu = openQuickAdd(panel)) {
+        QStringList rows;
+        if (auto *list = menu->findChild<QListWidget *>()) for (int i = 0; i < list->count(); ++i) rows << list->item(i)->text();
+        check(rows.contains("Knowledge") && std::none_of(rows.cbegin(), rows.cend(), [](const QString &row) {
+                  return row.contains("Pi agent", Qt::CaseInsensitive);
+              }), "the live quick-add lists the Knowledge family and no Pi agent");
+        capture(*menu, "live-quick-add");
+        menu->dismiss();
         pump();
-    } else check(false, "the live node picker opens");
+    } else check(false, "the live quick-add opens");
     capture(panel, "live-canvas-dark");
     QSettings().setValue("appearance/studio3ReducedMotion", true);
     panel.resize(740, 620);
     Theme::setDark(false);
     pump();
-    check(panel.width() == 740 && panel.findChild<BlueprintCanvas *>()->isVisible(),
+    check(panel.width() == 740 && panel.findChild<BlueprintView *>()->isVisible(),
           "compact light canvas fits with reduced motion enabled");
     capture(panel, "live-canvas-compact-light");
 
+    if (auto *tree = nodeTree(panel); tree && tree->count()) tree->setCurrentRow(0);
+    pump();
     if (auto *test = visibleButton(panel, "Test this node")) test->click();
     if (check(until([&] {
         const auto *start = visibleButton(panel, "Test node");
@@ -976,7 +938,7 @@ int runLiveBlueprintChecks(const QString &captures) {
               "isolated draft node returns the supplied typed input");
     }
 
-    if (auto *save = visibleButton(panel, "Save revision")) save->click();
+    if (auto *save = visibleButton(panel, "Publish")) save->click();
     if (!check(until([&] { return !session.published().isEmpty() && visibleText(panel, "Revision 1"); }),
                "saving publishes a backend revision from the native editor")) return failures;
     check(until([&] {
@@ -1107,14 +1069,14 @@ int runLiveBlueprintChecks(const QString &captures) {
             }, 30000), "a Pi follow-up sends the previous prompt and answer as context");
 
 
-            if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+            if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
             if (auto *triage = visibleButton(panel, "Request triage example")) triage->click();
             const auto triageDraft = [&] {
                 for (const auto &value : session.saved())
                     if (value.toObject()["name"] == "Request triage") return value.toObject()["id"].toString();
                 return QString{};
             }();
-            if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Save revision"); }),
+            if (check(!triageDraft.isEmpty() && until([&] { return visibleButton(panel, "Publish"); }),
                       "the desktop opens the editable request triage example")) {
                 // The example's Model node starts unbound; bind the cached checkpoint and reopen it.
                 QJsonObject draft;
@@ -1128,7 +1090,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                 }
                 draft["nodes"] = nodes;
                 session.saveBlueprint(draft);
-                if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+                if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
                 pump();
                 for (auto *button : panel.findChildren<QPushButton *>()) {
                     if (button->isVisible() && button->text() == "Open"
@@ -1137,13 +1099,13 @@ int runLiveBlueprintChecks(const QString &captures) {
                         break;
                     }
                 }
-                until([&] { return visibleButton(panel, "Save revision"); });
+                until([&] { return visibleButton(panel, "Publish"); });
                 pump();
                 capture(panel, "live-triage-graph");
-                visibleButton(panel, "Save revision")->click();
+                visibleButton(panel, "Publish")->click();
                 if (check(until([&] { return visibleText(panel, "Revision 1"); }),
                           "the Model node, constant, and object builder publish together")) {
-                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(1);
+                    if (auto *tests = visibleButton(panel, "Test cases")) tests->click();
                     if (auto *message = visibleNamed<QPlainTextEdit>(panel, "Run input"))
                         message->setPlainText("Please send replacement labels for order 245.");
                     if (auto *start = visibleButton(panel, "Start run")) start->click();
@@ -1155,7 +1117,7 @@ int runLiveBlueprintChecks(const QString &captures) {
                                !record["summary"].toString().trimmed().isEmpty() && run["decisions"].toArray().isEmpty();
                     }, 60000), "the triage Model node returns text and builds the review record");
                     capture(panel, "live-triage-result");
-                    if (auto *tabs = panel.findChild<QTabWidget *>()) tabs->setCurrentIndex(2);
+                    if (auto *history = visibleButton(panel, "Run history")) history->click();
                     pump(300);
                     capture(panel, "live-run-history");
                     if (auto *mode = visibleButton(chat, "Blueprint")) mode->click();
@@ -1176,7 +1138,7 @@ int runLiveBlueprintChecks(const QString &captures) {
             nodes.append(session.makeNode(operations[i], QString("n%1").arg(i), (i % 3) * 230, (i / 3) * 170));
         tour["nodes"] = nodes;
         session.saveBlueprint(tour);
-        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
         pump();
         for (auto *button : panel.findChildren<QPushButton *>()) {
             if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Dialog tour")) {
@@ -1205,21 +1167,21 @@ int runLiveBlueprintChecks(const QString &captures) {
             QObject::disconnect(connection);
             return seen;
         };
-        auto *tree = visibleNamed<QTreeWidget>(panel, "Workflow nodes and connections");
+        auto *tree = nodeTree(panel);
         int captured = 0;
         for (int i = 0; tree && i < operations.size(); ++i) {
-            tree->setCurrentItem(tree->topLevelItem(i));
+            tree->setCurrentRow(i);
             pump();
             captured += captureDialog("dialog-configure-" + operations[i], [&] {
-                if (auto *configure = visibleButton(panel, "Configure…")) configure->click();
+                triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Configure node…");
             });
             if (operations[i] == "generate" || operations[i] == "reason")
                 captured += captureDialog("dialog-binding-" + operations[i], [&] {
-                    if (auto *binding = visibleButton(panel, "Change binding")) binding->click();
+                    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Change binding…");
                 });
             if (operations[i] == "dataset-rows") {
                 captured += captureDialog("dialog-dataset", [&] {
-                    if (auto *source = visibleButton(panel, "Choose dataset")) source->click();
+                    triggerNodeMenu(panel.findChild<BlueprintView *>(), panel.findChild<BlueprintView *>()->selection(), "Choose dataset…");
                 });
                 captured += captureDialog("dialog-schema", [&] {
                     for (auto *button : panel.findChildren<QPushButton *>("blueprintPortContract"))
@@ -1230,7 +1192,7 @@ int runLiveBlueprintChecks(const QString &captures) {
         capture(panel, "dialog-tour-canvas");
         check(captured == int(operations.size()) + 4, "every editor dialog opens and closes in the dialog tour");
         session.deleteBlueprint(tour["id"].toString());
-        if (auto *back = visibleNamed<QPushButton>(panel, "Blueprint library")) back->click();
+        if (auto *back = visibleNamed<QPushButton>(panel, "Back to library")) back->click();
         pump();
     }
 

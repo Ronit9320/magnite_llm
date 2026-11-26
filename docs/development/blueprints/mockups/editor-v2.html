@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blueprints — layout mockup v2</title>
+<style>
+@font-face { font-family: "Space Grotesk"; src: url("../../../../app/resources/fonts/SpaceGrotesk-Medium.ttf"); font-weight: 500; }
+@font-face { font-family: "Space Grotesk"; src: url("../../../../app/resources/fonts/SpaceGrotesk-SemiBold.ttf"); font-weight: 600; }
+@font-face { font-family: "DM Sans"; src: url("../../../../app/resources/fonts/DMSans-Regular.ttf"); font-weight: 400; }
+@font-face { font-family: "DM Sans"; src: url("../../../../app/resources/fonts/DMSans-Medium.ttf"); font-weight: 500; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../app/resources/fonts/JetBrainsMono-Regular.ttf"); font-weight: 400; }
+
+:root {
+  /* App tokens (theme.h, dark) */
+  --canvas: #09090B; --inset: #050506; --surface: #111113; --surface-hover: #1A1A1D; --surface-active: #222225;
+  --text: #F1EFE7; --text-2: #B6BAC2; --text-3: #888F9A;
+  --accent: #FF5C28; --accent-hover: #FF784E; --accent-label: #FF784E; --accent-ink: #201D18;
+  --ok: #8ED5AD; --warn: #E8C478; --err: #FF9E82; --blue: #85B9F4;
+  /* Mockup-only: data types and node families */
+  --t-text: #85B9F4; --t-object: #C3A6FF; --t-array: #8ED5AD; --t-number: #7FD8E0; --t-bool: #FF9E82; --t-resource: #E8C478; --t-any: #B6BAC2;
+  --k-source: #6FCF97; --k-logic: #9AA3B2; --k-knowledge: #85B9F4; --k-ai: #FF784E; --k-adapter: #E8C478; --k-tool: #C3A6FF; --k-output: #8ED5AD;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 10px 30px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.35);
+  --radius: 12px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--text); font: 13px/1.4 "DM Sans", system-ui, sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+input, textarea, select { font: inherit; color: var(--text); }
+svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- App frame ---------- */
+.app { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
+.topbar { display: flex; align-items: center; gap: 14px; padding: 0 16px 0 12px; background: var(--canvas); position: relative; z-index: 20; }
+.iconbtn { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: var(--text-2); }
+.iconbtn:hover { background: var(--surface-hover); color: var(--text); }
+.title { display: flex; flex-direction: column; min-width: 0; }
+.title b { font: 600 16px "Space Grotesk"; letter-spacing: -.01em; }
+.title span { font-size: 12px; color: var(--text-3); }
+.pill { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 99px; background: var(--surface-hover); color: var(--text-2); }
+.seg { margin: 0 auto; display: flex; padding: 3px; gap: 2px; background: var(--surface); border-radius: 11px; }
+.seg button { padding: 7px 16px; border-radius: 8px; color: var(--text-3); font-weight: 500; }
+.seg button.on { background: var(--surface-active); color: var(--text); }
+.check { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 9px; color: var(--text-2); }
+.check:hover { background: var(--surface-hover); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(142,213,173,.15); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(232,196,120,.15); }
+.run { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.run:hover { background: var(--accent-hover); }
+
+.workspace { position: relative; overflow: hidden; }
+
+/* ---------- Canvas ---------- */
+.viewport { position: absolute; inset: 0; cursor: default; background-color: var(--canvas);
+  background-image: radial-gradient(circle, rgba(255,255,255,.07) 1px, transparent 1.2px); }
+.viewport.panning { cursor: grabbing; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+svg.wires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke-width: 2.25; opacity: .9; }
+.wire-glow { fill: none; stroke-width: 7; opacity: .12; }
+.wire.temp { stroke-dasharray: 5 6; opacity: .8; }
+.wire.flow { stroke-dasharray: 8 10; animation: flow .6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -18; } }
+
+/* ---------- Nodes ---------- */
+.node { position: absolute; width: 236px; border-radius: var(--radius); background: #141417; box-shadow: var(--shadow); user-select: none; transition: box-shadow .15s; }
+.node:hover { box-shadow: var(--shadow), 0 0 0 1px rgba(255,255,255,.06); }
+.node.sel { box-shadow: var(--shadow), 0 0 0 2px var(--accent), 0 0 24px rgba(255,92,40,.25); }
+.node .head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 9px; border-radius: var(--radius) var(--radius) 0 0; cursor: grab;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 22%, #141417) 0%, color-mix(in srgb, var(--kc) 8%, #141417) 100%); }
+.node .glyph { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--kc); background: color-mix(in srgb, var(--kc) 16%, transparent); }
+.node .glyph svg { width: 15px; height: 15px; }
+.node .names { min-width: 0; flex: 1; }
+.node .names b { display: block; font: 600 13px "Space Grotesk"; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node .names span { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node .badge { width: 18px; height: 18px; border-radius: 50%; color: var(--ok); background: rgba(142,213,173,.14); display: none; place-items: center; font-size: 11px; flex: none; }
+.node.done .badge { display: grid; }
+.node.active .head { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { filter: brightness(1.35); } }
+.node .warnmark { color: var(--warn); display: none; }
+.node.incomplete .warnmark { display: block; }
+.node .pins { padding: 8px 0 10px; }
+.row { position: relative; height: 26px; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-2); }
+.pin { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 12px; }
+.pin.out { margin-left: auto; flex-direction: row-reverse; }
+.pin .t { font: 10.5px "JetBrains Mono"; color: var(--text-3); }
+.socket { width: 12px; height: 12px; border-radius: 50%; position: relative; cursor: crosshair; background: #141417; box-shadow: inset 0 0 0 2px var(--pc); }
+.socket.on { background: var(--pc); }
+.socket:hover { transform: scale(1.25); }
+.pin.in .socket { margin-left: -18px; }
+.pin.out .socket { margin-right: -18px; }
+.socket.need { box-shadow: inset 0 0 0 2px var(--pc), 0 0 0 4px rgba(232,196,120,.22); }
+.socket.compatible { box-shadow: inset 0 0 0 2px var(--pc), 0 0 0 5px color-mix(in srgb, var(--pc) 35%, transparent); }
+.node .preview { margin: 0 10px 10px; padding: 8px 10px; border-radius: 8px; background: var(--inset); font-size: 11.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
+.node .preview code { font: 11px "JetBrains Mono"; color: var(--text-2); white-space: pre-wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
+.chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+
+/* ---------- Floating panels (no borders: elevation only) ---------- */
+.float { position: absolute; background: rgba(17,17,19,.92); backdrop-filter: blur(14px); border-radius: 14px; box-shadow: var(--shadow); z-index: 10; }
+
+/* Library dock */
+.library { left: 12px; top: 12px; bottom: 12px; width: 276px; display: flex; flex-direction: column; overflow: hidden; transition: transform .2s; }
+.library.closed { transform: translateX(-300px); }
+.dock-tabs { display: flex; gap: 2px; padding: 10px 10px 0; }
+.dock-tabs button { flex: 1; padding: 7px 0; border-radius: 8px; color: var(--text-3); font-weight: 500; }
+.dock-tabs button.on { background: var(--surface-active); color: var(--text); }
+.search { margin: 10px; display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 36px; border-radius: 9px; background: var(--surface-hover); color: var(--text-3); }
+.search input { flex: 1; background: none; border: 0; outline: none; }
+.search kbd { font: 10.5px "JetBrains Mono"; padding: 1px 6px; border-radius: 5px; background: var(--surface-active); color: var(--text-3); }
+.cats { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 8px; }
+.cats button { padding: 4px 10px; border-radius: 99px; font-size: 12px; color: var(--text-3); background: var(--surface-hover); }
+.cats button.on { color: var(--accent-ink); background: var(--text); }
+.list { flex: 1; overflow: auto; padding: 0 6px 10px; scrollbar-width: thin; scrollbar-color: #3a3a40 transparent; }
+.group { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 12px 8px 6px; }
+.item { display: flex; gap: 10px; padding: 8px; border-radius: 9px; cursor: grab; align-items: flex-start; }
+.item:hover { background: var(--surface-hover); }
+.item .glyph { width: 28px; height: 28px; border-radius: 8px; flex: none; display: grid; place-items: center; color: var(--kc); background: color-mix(in srgb, var(--kc) 15%, transparent); }
+.item .glyph svg { width: 15px; height: 15px; }
+.item b { display: block; font-weight: 500; font-size: 12.5px; }
+.item span { display: block; font-size: 11.5px; color: var(--text-3); line-height: 1.35; }
+.outline-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 9px; cursor: pointer; }
+.outline-row:hover, .outline-row.sel { background: var(--surface-hover); }
+.outline-row .bar { width: 3px; height: 22px; border-radius: 2px; background: var(--kc); }
+.outline-row small { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.dock-foot { padding: 10px 14px; font-size: 11.5px; color: var(--text-3); background: rgba(0,0,0,.15); }
+
+/* Inspector */
+.inspector { right: 12px; top: 12px; width: 320px; max-height: calc(100% - 24px); overflow: auto; transition: transform .2s, opacity .2s; scrollbar-width: thin; scrollbar-color: #3a3a40 transparent; }
+.inspector.closed { transform: translateX(340px); opacity: 0; }
+.insp-head { display: flex; gap: 12px; align-items: center; padding: 16px 16px 12px; }
+.insp-head .glyph { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--kc); background: color-mix(in srgb, var(--kc) 16%, transparent); }
+.insp-head b { font: 600 15px "Space Grotesk"; display: block; }
+.insp-head span { font-size: 12px; color: var(--text-3); }
+.insp-head .iconbtn:first-of-type { margin-left: auto; }
+.field { padding: 6px 16px 10px; }
+.field label { display: block; font-size: 11.5px; color: var(--text-3); margin-bottom: 6px; }
+.input { width: 100%; padding: 9px 11px; border-radius: 9px; background: var(--surface-hover); border: 0; outline: none; }
+.input:focus { box-shadow: 0 0 0 2px rgba(255,120,78,.6); }
+textarea.input { resize: vertical; min-height: 86px; font: 12px/1.5 "JetBrains Mono"; }
+.segs { display: flex; padding: 3px; border-radius: 9px; background: var(--surface-hover); }
+.segs button { flex: 1; padding: 6px 0; border-radius: 7px; color: var(--text-3); font-size: 12px; }
+.segs button.on { background: var(--surface-active); color: var(--text); }
+.portlist { display: flex; flex-direction: column; gap: 2px; }
+.port { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--surface-hover); font-size: 12px; }
+.port i { width: 8px; height: 8px; border-radius: 50%; background: var(--pc); }
+.port em { margin-left: auto; font: normal 10.5px "JetBrains Mono"; color: var(--text-3); }
+.port .from { color: var(--text-3); font-size: 11px; }
+.insp-foot { display: flex; gap: 8px; padding: 12px 16px 16px; }
+.ghost { flex: 1; padding: 9px 0; border-radius: 9px; background: var(--surface-hover); color: var(--text); font-weight: 500; }
+.ghost:hover { background: var(--surface-active); }
+.danger { color: var(--err); flex: 0 0 auto; padding: 9px 12px; }
+
+/* Bottom dock: tools + zoom */
+.dock { left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 5px; border-radius: 13px; }
+.dock .iconbtn { width: 36px; height: 36px; }
+.dock .iconbtn.on { background: var(--surface-active); color: var(--text); }
+.dock .div { width: 1px; height: 20px; background: rgba(255,255,255,.08); margin: 0 6px; }
+.dock .zoom { min-width: 48px; text-align: center; font: 11.5px "JetBrains Mono"; color: var(--text-2); }
+.dock .add { display: flex; align-items: center; gap: 8px; padding: 0 14px 0 10px; height: 36px; border-radius: 9px; background: var(--text); color: var(--accent-ink); font-weight: 500; }
+.dock .add kbd { font: 10.5px "JetBrains Mono"; padding: 1px 6px; border-radius: 5px; background: rgba(0,0,0,.08); }
+
+/* Minimap */
+.minimap { right: 12px; bottom: 14px; width: 196px; height: 124px; padding: 8px; overflow: hidden; }
+.minimap canvas { width: 100%; height: 100%; display: block; border-radius: 8px; background: rgba(0,0,0,.25); }
+
+/* Hint */
+.hint { position: absolute; left: 50%; bottom: 70px; transform: translateX(-50%); font-size: 12px; color: var(--text-3); z-index: 5; pointer-events: none; transition: opacity .3s; white-space: nowrap; }
+.hint kbd { font: 10.5px "JetBrains Mono"; padding: 1px 6px; border-radius: 5px; background: var(--surface-hover); color: var(--text-2); }
+
+/* ---------- Quick-add palette (the new node selector) ---------- */
+.palette { position: absolute; width: 360px; z-index: 30; display: none; overflow: hidden; }
+.palette.open { display: block; animation: pop .12s ease-out; }
+@keyframes pop { from { opacity: 0; transform: scale(.97) translateY(-4px); } }
+.palette .search { margin: 10px 10px 4px; background: var(--surface-active); }
+.palette .ctx { padding: 4px 16px 6px; font-size: 11.5px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.palette .ctx i { width: 8px; height: 8px; border-radius: 50%; background: var(--pc); display: inline-block; }
+.palette .list { max-height: 340px; padding-bottom: 6px; }
+.palette .item { cursor: pointer; align-items: center; }
+.palette .item.hi { background: var(--surface-active); }
+.palette .item .accepts { margin-left: auto; font: 10.5px "JetBrains Mono"; color: var(--text-3); white-space: nowrap; }
+.palette .foot { display: flex; gap: 14px; padding: 8px 14px; font-size: 11px; color: var(--text-3); background: rgba(0,0,0,.2); }
+.palette .foot kbd { font: 10px "JetBrains Mono"; padding: 0 5px; border-radius: 4px; background: var(--surface-active); }
+
+/* Run result toast */
+.toast { left: 50%; top: 14px; transform: translate(-50%, -140%); padding: 12px 16px; display: flex; gap: 12px; align-items: center; transition: transform .3s; z-index: 25; }
+.toast.show { transform: translate(-50%, 0); }
+.toast code { font: 11.5px "JetBrains Mono"; color: var(--text-2); background: var(--inset); padding: 6px 9px; border-radius: 7px; }
+
+/* Info buttons */
+.info { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--text-3); flex: none; opacity: .75; }
+.info:hover { opacity: 1; color: var(--text); background: rgba(255,255,255,.08); }
+.info svg { width: 14px; height: 14px; }
+.node .head .info { opacity: 0; transition: opacity .12s; }
+.node:hover .head .info, .node.sel .head .info, .node .head .info.on { opacity: .9; }
+.item .info { margin-left: auto; align-self: center; opacity: 0; }
+.item:hover .info, .item.hi .info { opacity: .8; }
+
+/* Node details window */
+.infowin { width: 380px; max-height: min(640px, calc(100% - 24px)); display: none; flex-direction: column; z-index: 35; overflow: hidden; background: rgba(20,20,23,.97); }
+.infowin.open { display: flex; animation: pop .14s ease-out; }
+.iw-head { display: flex; gap: 12px; align-items: center; padding: 14px 12px 12px 16px; cursor: grab; user-select: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--kc) 18%, transparent), transparent); }
+.iw-head:active { cursor: grabbing; }
+.iw-head .glyph { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; color: var(--kc); background: color-mix(in srgb, var(--kc) 18%, transparent); flex: none; }
+.iw-head .glyph svg { width: 18px; height: 18px; }
+.iw-head b { font: 600 15px "Space Grotesk"; display: block; }
+.iw-head span { font-size: 12px; color: var(--text-3); }
+.iw-head .acts { margin-left: auto; display: flex; gap: 2px; }
+.iw-tabs { display: flex; gap: 2px; padding: 0 12px 8px; }
+.iw-tabs button { padding: 6px 12px; border-radius: 8px; color: var(--text-3); font-weight: 500; font-size: 12px; }
+.iw-tabs button.on { background: var(--surface-active); color: var(--text); }
+.iw-body { overflow: auto; padding: 4px 16px 14px; scrollbar-width: thin; scrollbar-color: #3a3a40 transparent; }
+.iw-body p { margin: 0 0 12px; color: var(--text-2); line-height: 1.5; }
+.iw-sec { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin: 14px 0 8px; }
+.iw-port { display: grid; grid-template-columns: 10px auto 1fr; gap: 4px 10px; align-items: baseline; padding: 8px 10px; border-radius: 9px; background: var(--surface-hover); margin-bottom: 4px; }
+.iw-port i { width: 8px; height: 8px; border-radius: 50%; background: var(--pc); align-self: center; }
+.iw-port b { font-weight: 500; font-size: 12.5px; }
+.iw-port em { font: normal 10.5px "JetBrains Mono"; color: var(--pc); justify-self: end; }
+.iw-port small { grid-column: 2 / 4; color: var(--text-3); font-size: 11.5px; line-height: 1.4; }
+.iw-port .wired { grid-column: 2 / 4; font-size: 11px; color: var(--text-2); }
+.iw-ex { display: grid; gap: 6px; }
+.iw-ex div { border-radius: 9px; background: var(--inset); padding: 8px 10px; }
+.iw-ex label { display: block; font-size: 10.5px; color: var(--text-3); margin-bottom: 3px; }
+.iw-ex code { font: 11.5px/1.5 "JetBrains Mono"; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+.iw-tips { margin: 0; padding-left: 16px; color: var(--text-2); }
+.iw-tips li { margin: 5px 0; line-height: 1.45; }
+.iw-stat { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.iw-stat div { background: var(--surface-hover); border-radius: 9px; padding: 8px 10px; }
+.iw-stat label { display: block; font-size: 10.5px; color: var(--text-3); }
+.iw-stat b { font: 500 14px "Space Grotesk"; }
+.iw-empty { padding: 18px 12px; text-align: center; color: var(--text-3); border-radius: 9px; background: var(--surface-hover); }
+.iw-foot { display: flex; gap: 8px; padding: 10px 12px; background: rgba(0,0,0,.18); }
+.iw-foot button { padding: 8px 12px; border-radius: 9px; font-weight: 500; font-size: 12.5px; }
+.iw-foot .primary { background: var(--text); color: var(--accent-ink); }
+.iw-foot .plain { background: var(--surface-hover); }
+.iw-foot .plain:hover { background: var(--surface-active); }
+.iw-foot .link { margin-left: auto; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.iw-foot .link:hover { color: var(--text); }
+
+/* Notes for the reviewer */
+.notes { position: fixed; right: 16px; top: 64px; width: 300px; z-index: 40; padding: 14px 16px; font-size: 12px; color: var(--text-2); display: none; }
+.notes.open { display: block; }
+.notes b { font: 600 13px "Space Grotesk"; color: var(--text); display: block; margin-bottom: 6px; }
+.notes li { margin: 4px 0; }
+.notes ul { padding-left: 16px; margin: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <button class="iconbtn" title="Back to Blueprints"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="title"><b>Support ticket routing</b><span>Revision 3 · saved just now</span></div>
+    <span class="pill">Draft</span>
+    <nav class="seg"><button class="on">Build</button><button>Test cases</button><button>Run history</button></nav>
+    <button class="check" id="checkBtn"><span class="dot" id="checkDot"></span><span id="checkText">Ready to run</span></button>
+    <button class="iconbtn" id="notesBtn" title="Mockup notes"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+    <button class="run" id="runBtn"><svg class="i" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>Run</button>
+  </header>
+
+  <main class="workspace" id="workspace">
+    <div class="viewport" id="viewport">
+      <div class="world" id="world"><svg class="wires" id="wires"></svg></div>
+    </div>
+
+    <aside class="float library" id="library">
+      <div class="dock-tabs"><button class="on" data-tab="nodes">Nodes</button><button data-tab="outline">In this workflow</button></div>
+      <div id="tabNodes" style="display:flex;flex-direction:column;min-height:0;flex:1">
+        <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="libSearch" placeholder="Search nodes"><kbd>/</kbd></label>
+        <div class="cats" id="cats"></div>
+        <div class="list" id="libList"></div>
+      </div>
+      <div id="tabOutline" class="list" style="display:none;padding-top:8px"></div>
+      <div class="dock-foot">Drag onto the canvas, or press <b style="color:var(--text-2)">Space</b> anywhere.</div>
+    </aside>
+
+    <aside class="float inspector" id="inspector"></aside>
+
+    <div class="float dock" id="dock">
+      <button class="iconbtn" id="libToggle" title="Node library"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <div class="div"></div>
+      <button class="add" id="addBtn"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add node <kbd>Space</kbd></button>
+      <div class="div"></div>
+      <button class="iconbtn" title="Undo"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></button>
+      <button class="iconbtn" title="Redo"><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg></button>
+      <div class="div"></div>
+      <button class="iconbtn" id="zoomOut" title="Zoom out"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <span class="zoom" id="zoomLabel">100%</span>
+      <button class="iconbtn" id="zoomIn" title="Zoom in"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="iconbtn" id="fitBtn" title="Fit (F)"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+
+    <div class="float minimap" id="minimapWrap"><canvas id="minimap" width="360" height="216"></canvas></div>
+    <div class="hint" id="hint">Drag from a pin to connect · drop on empty space to pick a node · <kbd>Space</kbd> add · <kbd>Del</kbd> remove · <kbd>F</kbd> fit</div>
+
+    <div class="float palette" id="palette">
+      <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="palSearch" placeholder="Search nodes" autocomplete="off"></label>
+      <div class="ctx" id="palCtx" style="display:none"></div>
+      <div class="list" id="palList"></div>
+      <div class="foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> add</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> details</span><span><kbd>Esc</kbd> close</span></div>
+    </div>
+
+    <div class="float infowin" id="infowin" role="dialog" aria-label="Node details"></div>
+
+    <div class="float toast" id="toast"><span class="dot"></span><div><b style="font-weight:500">Run finished · 1.4 s</b><div style="font-size:11.5px;color:var(--text-3)">Routing record returned</div></div><code>{ "queue": "billing", "priority": "high" }</code></div>
+
+    <div class="float notes" id="notes">
+      <b>What changed in this mockup</b>
+      <ul>
+        <li>No borders: panels float over the canvas and separate by shade and shadow.</li>
+        <li>Nodes have a coloured header per family; pins and wires are coloured by data type.</li>
+        <li>Node selector: a searchable library dock on the left, plus a quick-add menu that opens where you press Space, right-click or double-click.</li>
+        <li>Drag a wire onto empty space: the menu only lists nodes that accept that type, and connects it for you.</li>
+        <li>Build / Test cases / Run history replace the tabs; settings live in a floating inspector.</li>
+        <li>Press Run to see wires and nodes animate.</li>
+        <li>The ⓘ on a node (hover it), in the library and in the quick-add menu opens a details window: overview with an example, every pin explained and what it is connected to, and the node's last run. Press <kbd>i</kbd> on a selected node, or Shift+Enter in the menu.</li>
+      </ul>
+    </div>
+  </main>
+</div>
+
+<script>
+// ---------- Icons ----------
+const ICON = {
+  input: '<path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z"/>',
+  dataset: '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  logic: '<path d="M8 4H6a2 2 0 00-2 2v4l-2 2 2 2v4a2 2 0 002 2h2M16 4h2a2 2 0 012 2v4l2 2-2 2v4a2 2 0 01-2 2h-2"/>',
+  knowledge: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  model: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  reasoning: '<path d="M9 4a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 002 5 3 3 0 006 0V7a3 3 0 00-3-3zM15 4a3 3 0 013 3 3 3 0 012 5 3 3 0 01-2 5 3 3 0 01-6 0"/>',
+  adapter: '<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+  tool: '<path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.8-.7-.7-2.8 2.5-2.5z"/>',
+  output: '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/>',
+  warn: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4M12 17h.01"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>'
+};
+const svg = name => `<svg class="i" viewBox="0 0 24 24">${ICON[name]}</svg>`;
+
+// ---------- Catalog (from NODE_CATALOG.md) ----------
+const FAM = {
+  source: { label: 'Sources', color: 'var(--k-source)' }, logic: { label: 'Transform', color: 'var(--k-logic)' },
+  knowledge: { label: 'Knowledge', color: 'var(--k-knowledge)' }, ai: { label: 'Models', color: 'var(--k-ai)' },
+  adapter: { label: 'Models', color: 'var(--k-adapter)' }, tool: { label: 'Tools', color: 'var(--k-tool)' }, output: { label: 'Output', color: 'var(--k-output)' }
+};
+const T = { text: 'var(--t-text)', object: 'var(--t-object)', array: 'var(--t-array)', number: 'var(--t-number)', boolean: 'var(--t-bool)', resource: 'var(--t-resource)', any: 'var(--t-any)' };
+const P = (n, t) => ({ n, t });
+const TYPES = [
+  { id: 'input', fam: 'source', icon: 'input', name: 'Run input', desc: 'A value supplied when the run starts', ins: [], outs: [P('value', 'text')] },
+  { id: 'dataset', fam: 'source', icon: 'dataset', name: 'Dataset', desc: 'Inline JSON or a Training dataset', ins: [], outs: [P('rows', 'array')] },
+  { id: 'constant', fam: 'source', icon: 'logic', name: 'Constant', desc: 'A fixed JSON value saved on the node', ins: [], outs: [P('value', 'any')] },
+  { id: 'parse', fam: 'logic', icon: 'logic', name: 'Parse JSON', desc: 'JSON text to a typed value', ins: [P('text', 'text')], outs: [P('value', 'object')] },
+  { id: 'field', fam: 'logic', icon: 'logic', name: 'Get object field', desc: 'One named field of an object', ins: [P('object', 'object')], outs: [P('value', 'any')] },
+  { id: 'first', fam: 'logic', icon: 'logic', name: 'Get first item', desc: 'The first item of an array', ins: [P('items', 'array')], outs: [P('item', 'any')] },
+  { id: 'count', fam: 'logic', icon: 'logic', name: 'Count items', desc: 'How many items an array has', ins: [P('items', 'array')], outs: [P('count', 'number')] },
+  { id: 'format', fam: 'logic', icon: 'logic', name: 'Format as text', desc: 'Any value as text', ins: [P('value', 'any')], outs: [P('text', 'text')] },
+  { id: 'object', fam: 'logic', icon: 'logic', name: 'Build an object', desc: 'Named inputs into one object', ins: [P('queue', 'text'), P('priority', 'text'), P('summary', 'text')], outs: [P('object', 'object')] },
+  { id: 'template', fam: 'logic', icon: 'logic', name: 'Fill a text template', desc: '{key} placeholders from inputs', ins: [P('ticket', 'text'), P('context', 'text')], outs: [P('text', 'text')] },
+  { id: 'compare', fam: 'logic', icon: 'logic', name: 'Compare two values', desc: 'Equals, contains, greater than…', ins: [P('left', 'any'), P('right', 'any')], outs: [P('result', 'boolean')] },
+  { id: 'choose', fam: 'logic', icon: 'logic', name: 'Choose a value', desc: 'Pick one of two values by a condition', ins: [P('condition', 'boolean'), P('if true', 'any'), P('if false', 'any')], outs: [P('value', 'any')] },
+  { id: 'validate', fam: 'logic', icon: 'logic', name: 'Validate data', desc: 'Check a value against rules', ins: [P('value', 'any')], outs: [P('value', 'any'), P('valid', 'boolean')] },
+  { id: 'filter', fam: 'logic', icon: 'logic', name: 'Filter rows', desc: 'Keep rows like amount >= 100', ins: [P('rows', 'array')], outs: [P('rows', 'array')] },
+  { id: 'sort', fam: 'logic', icon: 'logic', name: 'Sort rows', desc: 'Order rows by one field', ins: [P('rows', 'array')], outs: [P('rows', 'array')] },
+  { id: 'search', fam: 'knowledge', icon: 'knowledge', name: 'Search documents', desc: 'Passages from your Knowledge library', ins: [P('query', 'text')], outs: [P('context', 'text'), P('results', 'array')] },
+  { id: 'model', fam: 'ai', icon: 'model', name: 'Generate a response', desc: 'A local model writes text or JSON', ins: [P('prompt', 'text'), P('adapter', 'resource')], outs: [P('text', 'text')] },
+  { id: 'reason', fam: 'ai', icon: 'reasoning', name: 'Reason through a task', desc: 'A thinking model returns a final answer', ins: [P('task', 'text')], outs: [P('answer', 'text')] },
+  { id: 'adapter', fam: 'adapter', icon: 'adapter', name: 'Attach trained LoRA', desc: 'Your fine-tuned weights for a model', ins: [], outs: [P('adapter', 'resource')] },
+  { id: 'approval', fam: 'tool', icon: 'tool', name: 'Request approval', desc: 'Pause for a person to approve an action', ins: [P('action', 'object')], outs: [P('receipt', 'object')] },
+  { id: 'output', fam: 'output', icon: 'output', name: 'Return value', desc: 'Exposed in the run result', ins: [P('value', 'any')], outs: [] }
+];
+const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
+
+// Longer explanations for the details window (wording follows NODE_CATALOG.md).
+const DETAILS = {
+  input: { about: 'Takes a value supplied when the run starts and passes it on. Every workflow starts from at least one Run input, a Dataset or a Constant.',
+    ports: { value: 'The value given when the run starts, checked against the type you pick.' },
+    example: ['Run started with', '"My card was charged twice for March"', 'value', '"My card was charged twice for March"'],
+    tips: ['Set a sample value so Test this node works without starting a run.', 'Conversation fills this in when the workflow runs from a chat.'] },
+  dataset: { about: 'Reads inline JSON or a dataset registered in Training and emits its rows as a typed array.',
+    ports: { rows: 'Every row of the dataset, in file order.' },
+    example: ['Dataset', 'tickets.jsonl · 240 rows', 'rows', '[{ "id": 1, "text": "…" }, …]'],
+    tips: ['Pair with Filter rows or Sort rows before sending rows to a model.', 'Large datasets are read once per run.'] },
+  constant: { about: 'Emits a fixed JSON value saved on the node. Use it for settings, thresholds and default values.',
+    ports: { value: 'The saved value, unchanged on every run.' },
+    example: ['Saved value', '100', 'value', '100'], tips: ['Name it after what it means, e.g. "Refund limit".'] },
+  parse: { about: 'Takes JSON text, usually a model response, and returns a value of the selected type.',
+    ports: { text: 'JSON text to read.', value: 'The parsed value, checked against the type you choose.' },
+    example: ['text', '{"queue":"billing","priority":"high"}', 'value', '{ queue: "billing", priority: "high" }'],
+    tips: ['If the text is not valid JSON, the step fails and the run shows where.', 'Models set to Typed JSON usually do not need this node.'] },
+  field: { about: 'Takes an object and returns the value of one named field.', ports: { object: 'The object to read from.', value: 'The value of the chosen field.' },
+    example: ['object', '{ "queue": "billing", "priority": "high" }', 'value  (field: queue)', '"billing"'], tips: ['A missing field fails the step instead of returning nothing.'] },
+  first: { about: 'Takes an array and returns its first item. An empty array fails the step.', ports: { items: 'The array.', item: 'Its first item.' },
+    example: ['items', '["billing", "refunds"]', 'item', '"billing"'], tips: ['Sort rows first if "first" should mean "highest" or "newest".'] },
+  count: { about: 'Takes an array and returns an integer count.', ports: { items: 'The array to count.', count: 'How many items it has.' },
+    example: ['items', '[3 search results]', 'count', '3'], tips: ['Compare the count with a Constant to check for empty results.'] },
+  format: { about: 'Takes any value and returns text. Structured values become JSON text.', ports: { value: 'Any value.', text: 'The value as text.' },
+    example: ['value', '{ "queue": "billing" }', 'text', '"{\\"queue\\":\\"billing\\"}"'], tips: ['Use before a template input that expects text.'] },
+  object: { about: 'Takes named, typed inputs and returns one object with those input names as keys.',
+    ports: { queue: 'Becomes the "queue" key.', priority: 'Becomes the "priority" key.', summary: 'Becomes the "summary" key.', object: 'The assembled object.' },
+    example: ['inputs', 'queue = "billing", priority = "high"', 'object', '{ "queue": "billing", "priority": "high" }'], tips: ['Add or rename inputs in the inspector; each input becomes a key.'] },
+  template: { about: 'Takes named inputs and returns text. {key} inserts an input (structured values as JSON); {{ and }} are literal braces.',
+    ports: { ticket: 'Inserted wherever the template says {ticket}.', context: 'Inserted wherever the template says {context}.', text: 'The filled-in text.' },
+    example: ['template', 'Classify this ticket:\n{ticket}', 'text', 'Classify this ticket:\nMy card was charged twice…'],
+    tips: ['Every placeholder needs an input pin; missing ones show as warnings.', 'Use it to build prompts instead of writing them inside the model node.'] },
+  compare: { about: 'Takes left and right and returns a boolean. Equals and Does not equal use JSON equality (true is not 1). The four ordering comparisons take numbers. Contains checks text or arrays.',
+    ports: { left: 'The value to check.', right: 'What to compare it with.', result: 'true or false.' },
+    example: ['left / right', '250 / 100  (greater than)', 'result', 'true'], tips: ['Feed the result into Choose a value.'] },
+  choose: { about: 'Takes a boolean condition and two values, and returns if true or if false. Both inputs are computed; this is not branching.',
+    ports: { condition: 'Which value to return.', 'if true': 'Returned when the condition is true.', 'if false': 'Returned when it is false.', value: 'The chosen value.' },
+    example: ['condition', 'true', 'value', 'the "if true" value'], tips: ['Both sides run every time, so keep expensive model calls out of them.'] },
+  validate: { about: 'Takes a value and saved rules (type, properties, required, items, minimum, minLength) and returns the value with a pass/fail flag.',
+    ports: { value: 'The value to check; passed through on the value output.', valid: 'true when every rule passes.' },
+    example: ['rules', 'required: ["queue", "priority"]', 'valid', 'true'], tips: ['Put it right after a model to catch malformed answers early.'] },
+  filter: { about: 'Takes an array of objects and keeps rows whose field passes a one-line rule such as amount >= 100, status = "open" or tags contains "urgent".',
+    ports: { rows: 'Rows in, and the rows that pass the rule out.' },
+    example: ['rule', 'priority = "high"', 'rows', '12 of 240 rows'], tips: ['Comparisons: = != > >= < <= contains.'] },
+  sort: { about: 'Takes an array of objects and orders it by one field, for example amount desc or name. Rows without the field go last.',
+    ports: { rows: 'Rows in, and the sorted rows out.' }, example: ['order', 'amount desc', 'rows', 'largest amount first'], tips: ['Mixed value kinds in the field fail the step.'] },
+  search: { about: 'Takes a text query and searches the Knowledge panel\'s documents with its embedder and search mode.',
+    ports: { query: 'What to search for.', context: 'The best passages joined into one block, ready for a prompt.', results: 'Each match: document, chunk, text and score.' },
+    example: ['query', '"charged twice"', 'context', '[Refund policy §2] Duplicate charges are refunded within…'],
+    tips: ['Uses the whole Knowledge library today; per-document filters are planned.', 'Lower the passage count if prompts get too long for the model.'] },
+  model: { about: 'Takes named inputs and produces typed JSON or a single text output using a local Transformers checkpoint.',
+    ports: { prompt: 'The prompt or named inputs the model reads.', adapter: 'Optional trained LoRA weights from an Attach trained LoRA node.', text: 'The model\'s answer: typed JSON or plain text.' },
+    example: ['prompt', 'Classify this ticket: My card was charged twice…', 'text', '{"queue":"billing","priority":"high","summary":"Duplicate charge"}'],
+    tips: ['Typed JSON responses are checked against the output type before the run continues.', 'Attach an adapter to use your fine-tuned behaviour without changing the prompt.'] },
+  reason: { about: 'Takes named inputs and produces a typed final answer using a checkpoint with explicit thinking support.',
+    ports: { task: 'What the model should work through.', answer: 'The final answer; the thinking is kept in the run trace.' },
+    example: ['task', 'Is this refund within policy?', 'answer', '"Yes: within 30 days"'], tips: ['The checkpoint picker disables models without thinking support.'] },
+  adapter: { about: 'Takes a binding to registered LoRA weights and provides it to a compatible Model or Reasoning node.',
+    ports: { adapter: 'A link to the adapter, plugged into a model node\'s adapter pin.' },
+    example: ['adapter', 'support-tone-v2 · r=8', 'used by', 'Classify ticket'], tips: ['The adapter\'s base model must match the model node\'s checkpoint.', 'One adapter node can feed several model nodes.'] },
+  approval: { about: 'Takes a structured action and emits a receipt after a person approves it and it runs.',
+    ports: { action: 'What should happen, as an object.', receipt: 'What was approved and when.' },
+    example: ['action', '{ "type": "refund", "amount": 42 }', 'receipt', '{ "approved": true, "by": "you" }'], tips: ['The run pauses until someone approves or rejects it.'] },
+  output: { about: 'Takes a typed value and exposes it in the run result. A workflow can have several outputs.',
+    ports: { value: 'The value to return.' }, example: ['value', '{ "queue": "billing" }', 'run result', 'Routing record = { "queue": "billing" }'],
+    tips: ['Conversation shows the outputs when the workflow runs from a chat.'] }
+};
+const lastRun = {};   // node id -> { ms, out, at }
+const SAMPLE_OUT = { input: '"My card was charged twice for March"', search: '[Refund policy §2] Duplicate charges are refunded…', template: 'Classify this ticket:\nMy card was charged twice…',
+  adapter: 'support-tone-v2', model: '{"queue":"billing","priority":"high","summary":"Duplicate charge"}', parse: '{ queue: "billing", priority: "high", … }', output: '{ "queue": "billing", "priority": "high" }' };
+const CATS = ['All', 'Sources', 'Transform', 'Knowledge', 'Models', 'Tools', 'Output'];
+
+// ---------- Graph: support ticket routing ----------
+let uid = 100;
+const nodes = [
+  { id: 'n1', type: 'input', x: 80, y: 140, title: 'Ticket', sub: 'Run input · text', preview: 'My card was charged twice for March…' },
+  { id: 'n2', type: 'search', x: 380, y: 40, title: 'Find policy', sub: 'Search documents', preview: 'Top 4 passages · hybrid search' },
+  { id: 'n3', type: 'template', x: 680, y: 120, title: 'Routing prompt', sub: 'Fill a text template', preview: 'Classify this ticket:\n{ticket}\n\nPolicy:\n{context}' },
+  { id: 'n4', type: 'adapter', x: 680, y: 400, title: 'support-tone-v2', sub: 'Attach trained LoRA', preview: 'r=8 · LoRA · 15.3 MB' },
+  { id: 'n5', type: 'model', x: 990, y: 210, title: 'Classify ticket', sub: 'Generate a response', model: true },
+  { id: 'n6', type: 'parse', x: 1300, y: 160, title: 'Read decision', sub: 'Parse JSON' },
+  { id: 'n7', type: 'output', x: 1580, y: 190, title: 'Routing record', sub: 'Return value' }
+];
+const edges = [
+  { from: ['n1', 'value'], to: ['n2', 'query'] },
+  { from: ['n1', 'value'], to: ['n3', 'ticket'] },
+  { from: ['n2', 'context'], to: ['n3', 'context'] },
+  { from: ['n3', 'text'], to: ['n5', 'prompt'] },
+  { from: ['n4', 'adapter'], to: ['n5', 'adapter'] },
+  { from: ['n5', 'text'], to: ['n6', 'text'] },
+  { from: ['n6', 'value'], to: ['n7', 'value'] }
+];
+let selected = null;
+const view = { x: 0, y: 0, z: 1 };
+
+// ---------- DOM helpers ----------
+const $ = s => document.querySelector(s);
+const world = $('#world'), wires = $('#wires'), viewport = $('#viewport');
+const famColor = t => FAM[TYPE[t].fam].color;
+const nodeById = id => nodes.find(n => n.id === id);
+const end = (e, dir) => dir === 'in' ? e.to : e.from;
+const connected = (id, port, dir) => edges.some(e => end(e, dir)[0] === id && end(e, dir)[1] === port);
+const typeOf = (id, port, dir) => { const t = TYPE[nodeById(id).type]; return (dir === 'in' ? t.ins : t.outs).find(p => p.n === port)?.t; };
+const fits = (from, to) => from === to || from === 'any' || to === 'any';
+const missingInputs = n => TYPE[n.type].ins.filter(p => p.t !== 'resource' && !connected(n.id, p.n, 'in'));
+
+// ---------- Render nodes ----------
+function nodeHTML(n) {
+  const t = TYPE[n.type];
+  const rows = Math.max(t.ins.length, t.outs.length);
+  let pins = '';
+  for (let i = 0; i < rows; i++) {
+    const a = t.ins[i], b = t.outs[i];
+    pins += '<div class="row">' +
+      (a ? `<div class="pin in"><span class="socket ${connected(n.id, a.n, 'in') ? 'on' : (a.t !== 'resource' ? 'need' : '')}" data-node="${n.id}" data-port="${a.n}" data-dir="in" style="--pc:${T[a.t]}"></span>${a.n}<span class="t">${a.t}</span></div>` : '<span></span>') +
+      (b ? `<div class="pin out"><span class="socket ${connected(n.id, b.n, 'out') ? 'on' : ''}" data-node="${n.id}" data-port="${b.n}" data-dir="out" style="--pc:${T[b.t]}"></span>${b.n}<span class="t">${b.t}</span></div>` : '') +
+      '</div>';
+  }
+  let preview = '';
+  if (n.model) preview = `<div class="preview"><span class="chip"><i></i>Qwen3-0.6B · JSON response</span><span class="chip" style="color:var(--text-3)">with support-tone-v2</span></div>`;
+  else if (n.preview) preview = `<div class="preview"><code>${n.preview.replace(/</g, '&lt;')}</code></div>`;
+  return `<div class="node ${n.id === selected ? 'sel' : ''} ${missingInputs(n).length ? 'incomplete' : ''}" id="${n.id}" style="left:${n.x}px;top:${n.y}px;--kc:${famColor(n.type)}">
+    <div class="head" data-drag="${n.id}"><span class="glyph">${svg(t.icon)}</span>
+      <span class="names"><b>${n.title}</b><span>${n.sub || t.name}</span></span>
+      <button class="info" data-info-node="${n.id}" title="About this node">${svg('info')}</button><span class="badge" title="Finished in the last run">✓</span><span class="warnmark" title="An input is not connected">${svg('warn')}</span></div>
+    <div class="pins">${pins}</div>${preview}</div>`;
+}
+function render() {
+  world.querySelectorAll('.node').forEach(e => e.remove());
+  world.insertAdjacentHTML('beforeend', nodes.map(nodeHTML).join(''));
+  drawWires(); renderOutline(); renderInspector(); updateCheck(); drawMinimap();
+}
+
+// ---------- Wires ----------
+function socketPos(id, port, dir) {
+  const el = world.querySelector(`.socket[data-node="${id}"][data-port="${CSS.escape(port)}"][data-dir="${dir}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect(), w = world.getBoundingClientRect();
+  return { x: (r.left + r.width / 2 - w.left) / view.z, y: (r.top + r.height / 2 - w.top) / view.z };
+}
+const curve = (a, b) => { const d = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + d},${a.y} ${b.x - d},${b.y} ${b.x},${b.y}`; };
+function drawWires(flowing = new Set()) {
+  let html = '';
+  edges.forEach((e, i) => {
+    const a = socketPos(e.from[0], e.from[1], 'out'), b = socketPos(e.to[0], e.to[1], 'in');
+    if (!a || !b) return;
+    const c = T[typeOf(e.from[0], e.from[1], 'out')] || T.any;
+    html += `<path class="wire-glow" d="${curve(a, b)}" style="stroke:${c}"/><path class="wire ${flowing.has(i) ? 'flow' : ''}" d="${curve(a, b)}" style="stroke:${c}"/>`;
+  });
+  if (drag.wire) html += `<path class="wire temp" d="${curve(drag.wire.a, drag.wire.b)}" style="stroke:${drag.wire.color}"/>`;
+  wires.innerHTML = html;
+}
+
+// ---------- View transform ----------
+function applyView() {
+  world.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.z})`;
+  viewport.style.backgroundSize = `${22 * view.z}px ${22 * view.z}px`;
+  viewport.style.backgroundPosition = `${view.x}px ${view.y}px`;
+  $('#zoomLabel').textContent = Math.round(view.z * 100) + '%';
+  drawMinimap();
+}
+const toWorld = (cx, cy) => { const r = viewport.getBoundingClientRect(); return { x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z }; };
+function zoomAt(f, cx, cy) {
+  const r = viewport.getBoundingClientRect(); const px = cx - r.left, py = cy - r.top;
+  const z = Math.min(2, Math.max(.35, view.z * f)); const k = z / view.z;
+  view.x = px - (px - view.x) * k; view.y = py - (py - view.y) * k; view.z = z; applyView();
+}
+function fit() {
+  const r = viewport.getBoundingClientRect();
+  if (!nodes.length) return;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs) + 236, minY = Math.min(...ys), maxY = Math.max(...ys) + 200;
+  const left = 300, right = selected ? 345 : 24, top = 30, bottom = 90;
+  const w = r.width - left - right, h = r.height - top - bottom;
+  view.z = Math.min(1.1, Math.max(.35, Math.min(w / (maxX - minX), h / (maxY - minY))));
+  view.x = left + (w - (maxX - minX) * view.z) / 2 - minX * view.z;
+  view.y = top + (h - (maxY - minY) * view.z) / 2 - minY * view.z;
+  applyView(); drawWires();
+}
+
+// ---------- Interaction ----------
+const drag = { mode: null };
+let mouse = { x: 0, y: 0 };
+viewport.addEventListener('mousedown', ev => {
+  if (ev.button !== 0) return;
+  closePalette();
+  const infoBtn = ev.target.closest('.info');
+  if (infoBtn) { ev.stopPropagation(); openInfo({ nodeId: infoBtn.dataset.infoNode, anchor: infoBtn }); return; }
+  const sock = ev.target.closest('.socket');
+  const head = ev.target.closest('[data-drag]');
+  const node = ev.target.closest('.node');
+  if (sock && sock.dataset.dir === 'out') {
+    const a = socketPos(sock.dataset.node, sock.dataset.port, 'out');
+    const t = typeOf(sock.dataset.node, sock.dataset.port, 'out');
+    Object.assign(drag, { mode: 'wire', wire: { a, b: a, color: T[t], from: [sock.dataset.node, sock.dataset.port], t } });
+    markCompatible(t); ev.preventDefault(); return;
+  }
+  if (sock && sock.dataset.dir === 'in') {      // pull an existing wire off an input
+    const i = edges.findIndex(e => e.to[0] === sock.dataset.node && e.to[1] === sock.dataset.port);
+    if (i >= 0) {
+      const e = edges.splice(i, 1)[0]; render();
+      const a = socketPos(e.from[0], e.from[1], 'out'), t = typeOf(e.from[0], e.from[1], 'out');
+      Object.assign(drag, { mode: 'wire', wire: { a, b: toWorld(ev.clientX, ev.clientY), color: T[t], from: e.from, t } });
+      markCompatible(t); ev.preventDefault(); return;
+    }
+  }
+  if (head || node) {
+    const id = node.id;
+    select(id);
+    if (head) { const n = nodeById(id); Object.assign(drag, { mode: 'node', id, sx: ev.clientX, sy: ev.clientY, ox: n.x, oy: n.y }); }
+    return;
+  }
+  select(null);
+  Object.assign(drag, { mode: 'pan', sx: ev.clientX, sy: ev.clientY, ox: view.x, oy: view.y });
+  viewport.classList.add('panning');
+});
+window.addEventListener('mousemove', ev => {
+  mouse = { x: ev.clientX, y: ev.clientY };
+  if (drag.mode === 'pan') { view.x = drag.ox + ev.clientX - drag.sx; view.y = drag.oy + ev.clientY - drag.sy; applyView(); }
+  if (drag.mode === 'node') {
+    const n = nodeById(drag.id); n.x = drag.ox + (ev.clientX - drag.sx) / view.z; n.y = drag.oy + (ev.clientY - drag.sy) / view.z;
+    const el = document.getElementById(n.id); el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; drawWires(); drawMinimap();
+  }
+  if (drag.mode === 'wire') { drag.wire.b = toWorld(ev.clientX, ev.clientY); drawWires(); }
+});
+window.addEventListener('mouseup', ev => {
+  if (drag.mode === 'wire') {
+    const sock = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.socket[data-dir="in"]');
+    const from = drag.wire.from, t = drag.wire.t;
+    drag.wire = null; clearCompatible();
+    if (sock && fits(t, typeOf(sock.dataset.node, sock.dataset.port, 'in')) && sock.dataset.node !== from[0]) {
+      const i = edges.findIndex(e => e.to[0] === sock.dataset.node && e.to[1] === sock.dataset.port);
+      if (i >= 0) edges.splice(i, 1);
+      edges.push({ from, to: [sock.dataset.node, sock.dataset.port] }); render();
+    } else if (!sock && ev.target.closest('#viewport') && !ev.target.closest('.node')) {
+      openPalette(ev.clientX, ev.clientY, { from, t });
+    } else render();
+  }
+  drag.mode = null; viewport.classList.remove('panning');
+});
+viewport.addEventListener('wheel', ev => { ev.preventDefault(); zoomAt(ev.deltaY < 0 ? 1.1 : 1 / 1.1, ev.clientX, ev.clientY); drawWires(); }, { passive: false });
+viewport.addEventListener('contextmenu', ev => { ev.preventDefault(); openPalette(ev.clientX, ev.clientY); });
+viewport.addEventListener('dblclick', ev => { if (!ev.target.closest('.node')) openPalette(ev.clientX, ev.clientY); });
+function markCompatible(t) { world.querySelectorAll('.socket[data-dir="in"]').forEach(s => { if (fits(t, typeOf(s.dataset.node, s.dataset.port, 'in'))) s.classList.add('compatible'); }); }
+function clearCompatible() { world.querySelectorAll('.compatible').forEach(s => s.classList.remove('compatible')); }
+
+function select(id) {
+  selected = id;
+  world.querySelectorAll('.node').forEach(e => e.classList.toggle('sel', e.id === id));
+  renderInspector(); renderOutline(); drawMinimap();
+}
+
+document.addEventListener('keydown', ev => {
+  const typing = ev.target.matches('input, textarea, select');
+  if (ev.key === 'Escape') { if (pal.open) closePalette(); else closeInfo(); return; }
+  if (ev.key === 'i' && !typing && selected) { openInfo({ nodeId: selected, anchor: document.getElementById(selected) }); return; }
+  if (typing) return;
+  if (ev.key === ' ' || ev.key === 'Tab') { ev.preventDefault(); openPalette(mouse.x || innerWidth / 2, mouse.y || innerHeight / 2); }
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && selected) removeNode(selected);
+  if (ev.key === 'f' || ev.key === 'F') fit();
+  if (ev.key === '/') { ev.preventDefault(); openLibrary(); $('#libSearch').focus(); }
+});
+function removeNode(id) {
+  const i = nodes.findIndex(n => n.id === id); if (i < 0) return;
+  nodes.splice(i, 1);
+  for (let k = edges.length - 1; k >= 0; k--) if (edges[k].from[0] === id || edges[k].to[0] === id) edges.splice(k, 1);
+  selected = null; if (info.nodeId === id) closeInfo(); render();
+}
+function addNode(typeId, wx, wy, pending) {
+  const t = TYPE[typeId];
+  const n = { id: 'n' + (uid++), type: typeId, x: wx, y: wy, title: t.name, sub: FAM[t.fam].label };
+  nodes.push(n);
+  if (pending) { const port = t.ins.find(p => fits(pending.t, p.t)); if (port) edges.push({ from: pending.from, to: [n.id, port.n] }); }
+  selected = n.id; render();
+}
+
+// ---------- Quick-add palette ----------
+const pal = { open: false, pending: null, hi: 0, items: [] };
+function openPalette(cx, cy, pending = null) {
+  const wr = $('#workspace').getBoundingClientRect();
+  const el = $('#palette');
+  Object.assign(pal, { open: true, pending, hi: 0, world: toWorld(cx, cy) });
+  el.style.left = Math.max(8, Math.min(cx - wr.left, wr.width - 372)) + 'px';
+  el.style.top = Math.max(8, Math.min(cy - wr.top, wr.height - 470)) + 'px';
+  el.classList.add('open');
+  const ctx = $('#palCtx');
+  if (pending) { ctx.style.display = 'flex'; ctx.innerHTML = `<i style="--pc:${T[pending.t]}"></i>Nodes that accept <b style="color:var(--text-2);font-weight:500">${pending.t}</b> · connects on add`; }
+  else ctx.style.display = 'none';
+  $('#palSearch').value = ''; renderPalette(); setTimeout(() => $('#palSearch').focus(), 0);
+}
+function closePalette() { if (!pal.open) return; pal.open = false; $('#palette').classList.remove('open'); drawWires(); }
+function renderPalette() {
+  const q = $('#palSearch').value.trim().toLowerCase();
+  let list = TYPES.filter(t => !q || (t.name + ' ' + t.desc + ' ' + FAM[t.fam].label).toLowerCase().includes(q));
+  if (pal.pending) list = list.filter(t => t.ins.some(p => fits(pal.pending.t, p.t)));
+  pal.items = list; pal.hi = Math.min(pal.hi, Math.max(0, list.length - 1));
+  let html = '', last = '';
+  list.forEach((t, i) => {
+    const g = FAM[t.fam].label;
+    if (g !== last) { html += `<div class="group">${g}</div>`; last = g; }
+    const acc = pal.pending ? t.ins.find(p => fits(pal.pending.t, p.t)).n : '';
+    html += `<div class="item ${i === pal.hi ? 'hi' : ''}" data-i="${i}" style="--kc:${FAM[t.fam].color}"><span class="glyph">${svg(t.icon)}</span><div><b>${t.name}</b><span>${t.desc}</span></div>${acc ? `<span class="accepts">→ ${acc}</span>` : ''}<button class="info" data-info-type="${t.id}" title="About this node">${svg('info')}</button></div>`;
+  });
+  $('#palList').innerHTML = html || '<div class="group" style="text-transform:none;letter-spacing:0">No nodes match</div>';
+  $('#palList .item.hi')?.scrollIntoView({ block: 'nearest' });
+}
+$('#palSearch').addEventListener('input', () => { pal.hi = 0; renderPalette(); });
+$('#palSearch').addEventListener('keydown', ev => {
+  if (ev.key === 'ArrowDown') { pal.hi = Math.min(pal.items.length - 1, pal.hi + 1); renderPalette(); ev.preventDefault(); }
+  if (ev.key === 'ArrowUp') { pal.hi = Math.max(0, pal.hi - 1); renderPalette(); ev.preventDefault(); }
+  if (ev.key === 'Enter' && ev.shiftKey && pal.items[pal.hi]) { ev.preventDefault(); openInfo({ typeId: pal.items[pal.hi].id, anchor: $('#palList .item.hi'), fromPalette: true }); return; }
+  if (ev.key === 'Enter' && pal.items[pal.hi]) choose(pal.items[pal.hi].id);
+});
+$('#palList').addEventListener('mousedown', ev => { const ib = ev.target.closest('.info'); if (ib) { ev.preventDefault(); openInfo({ typeId: ib.dataset.infoType, anchor: ib, fromPalette: true }); return; } const it = ev.target.closest('.item'); if (it) { ev.preventDefault(); choose(pal.items[+it.dataset.i].id); } });
+$('#palette').addEventListener('mousedown', ev => ev.stopPropagation());
+function choose(id) { const w = pal.world, p = pal.pending; closePalette(); addNode(id, w.x, w.y - 20, p); }
+
+// ---------- Library dock ----------
+let cat = 'All';
+function renderLibrary() {
+  $('#cats').innerHTML = CATS.map(c => `<button class="${c === cat ? 'on' : ''}" data-c="${c}">${c}</button>`).join('');
+  const q = $('#libSearch').value.trim().toLowerCase();
+  let html = '', last = '';
+  TYPES.filter(t => (cat === 'All' || FAM[t.fam].label === cat) && (!q || (t.name + ' ' + t.desc).toLowerCase().includes(q))).forEach(t => {
+    const g = FAM[t.fam].label;
+    if (g !== last) { html += `<div class="group">${g}</div>`; last = g; }
+    html += `<div class="item" draggable="true" data-t="${t.id}" style="--kc:${FAM[t.fam].color}"><span class="glyph">${svg(t.icon)}</span><div><b>${t.name}</b><span>${t.desc}</span></div><button class="info" data-info-type="${t.id}" title="About this node">${svg('info')}</button></div>`;
+  });
+  $('#libList').innerHTML = html;
+}
+$('#cats').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) { cat = b.dataset.c; renderLibrary(); } });
+$('#libSearch').addEventListener('input', renderLibrary);
+$('#libList').addEventListener('dragstart', ev => { const it = ev.target.closest('.item'); ev.dataTransfer.setData('text/plain', it.dataset.t); });
+$('#libList').addEventListener('click', ev => { const ib = ev.target.closest('.info'); if (ib) { openInfo({ typeId: ib.dataset.infoType, anchor: ib }); return; } const it = ev.target.closest('.item'); if (!it) return; const r = viewport.getBoundingClientRect(); const w = toWorld(r.left + r.width / 2, r.top + r.height / 2); addNode(it.dataset.t, w.x - 118, w.y - 60); });
+viewport.addEventListener('dragover', ev => ev.preventDefault());
+viewport.addEventListener('drop', ev => { ev.preventDefault(); const t = ev.dataTransfer.getData('text/plain'); if (TYPE[t]) { const w = toWorld(ev.clientX, ev.clientY); addNode(t, w.x - 30, w.y - 20); } });
+document.querySelectorAll('.dock-tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.dock-tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('#tabNodes').style.display = b.dataset.tab === 'nodes' ? 'flex' : 'none';
+  $('#tabOutline').style.display = b.dataset.tab === 'outline' ? 'block' : 'none';
+}));
+function renderOutline() {
+  $('#tabOutline').innerHTML = nodes.map(n => {
+    const t = TYPE[n.type]; const miss = missingInputs(n).length;
+    return `<div class="outline-row ${n.id === selected ? 'sel' : ''}" data-id="${n.id}" style="--kc:${famColor(n.type)}"><span class="bar"></span><div><div style="font-weight:500">${n.title}</div><div style="font-size:11.5px;color:var(--text-3)">${t.name}</div></div><small style="${miss ? 'color:var(--warn)' : ''}">${miss ? 'needs input' : t.ins.length + ' in · ' + t.outs.length + ' out'}</small></div>`;
+  }).join('');
+}
+$('#tabOutline').addEventListener('click', ev => {
+  const r = ev.target.closest('.outline-row'); if (!r) return; select(r.dataset.id);
+  const n = nodeById(r.dataset.id), vr = viewport.getBoundingClientRect();
+  view.x = vr.width / 2 - (n.x + 118) * view.z; view.y = vr.height / 2 - (n.y + 80) * view.z; applyView(); drawWires();
+});
+function openLibrary() { $('#library').classList.remove('closed'); $('#libToggle').classList.add('on'); }
+$('#libToggle').addEventListener('click', () => { const lib = $('#library'); lib.classList.toggle('closed'); $('#libToggle').classList.toggle('on', !lib.classList.contains('closed')); });
+
+// ---------- Inspector ----------
+function renderInspector() {
+  const el = $('#inspector'); const n = nodeById(selected);
+  if (!n) { el.classList.add('closed'); return; }
+  el.classList.remove('closed');
+  const t = TYPE[n.type];
+  const ports = (list, dir) => list.map(p => {
+    const e = edges.find(e => end(e, dir)[0] === n.id && end(e, dir)[1] === p.n);
+    const other = e ? nodeById(dir === 'in' ? e.from[0] : e.to[0])?.title : null;
+    return `<div class="port" style="--pc:${T[p.t]}"><i></i>${p.n}<span class="from">${other ? (dir === 'in' ? '← ' : '→ ') + other : (dir === 'in' && p.t !== 'resource' ? '<span style="color:var(--warn)">not connected</span>' : '')}</span><em>${p.t}</em></div>`;
+  }).join('');
+  let specific = '';
+  if (n.type === 'model') specific = `
+    <div class="field"><label>Checkpoint</label><select class="input"><option>Qwen3-0.6B</option><option>tiny-gpt2</option></select></div>
+    <div class="field"><label>Response</label><div class="segs"><button class="on">Typed JSON</button><button>Plain text</button></div></div>
+    <div class="field"><label>Instructions</label><textarea class="input">Return {"queue", "priority", "summary"} for the ticket. Use the policy passages when they apply.</textarea></div>
+    <div class="field"><label>Temperature · 0.2</label><input type="range" min="0" max="20" value="2" style="width:100%;accent-color:var(--accent)"></div>`;
+  else if (n.type === 'template') specific = `<div class="field"><label>Template</label><textarea class="input">${n.preview || '{value}'}</textarea></div>`;
+  else if (n.type === 'input') specific = `<div class="field"><label>Type</label><div class="segs"><button class="on">Text</button><button>Number</button><button>Object</button></div></div><div class="field"><label>Sample value for tests</label><textarea class="input" style="font-family:'DM Sans';min-height:60px">${n.preview || ''}</textarea></div>`;
+  else if (n.type === 'search') specific = `<div class="field"><label>Passages to return · 4</label><input type="range" min="1" max="10" value="4" style="width:100%;accent-color:var(--accent)"></div><div class="field"><label>Search mode</label><div class="segs"><button class="on">Hybrid</button><button>Vector</button><button>Keyword</button></div></div>`;
+  else if (n.type === 'adapter') specific = `<div class="field"><label>Adapter</label><select class="input"><option>support-tone-v2 · Qwen3-0.6B</option></select></div>`;
+  el.innerHTML = `
+    <div class="insp-head" style="--kc:${famColor(n.type)}"><span class="glyph">${svg(t.icon)}</span><div><b>${n.title}</b><span>${t.name}</span></div>
+      <button class="iconbtn" onclick="openInfo({nodeId:'${n.id}', anchor:this})" title="About this node">${svg('info')}</button><button class="iconbtn" onclick="select(null)" title="Close">${svg('close')}</button></div>
+    <div class="field"><label>Name</label><input class="input" value="${n.title}" oninput="nodeById('${n.id}').title=this.value;document.querySelector('#${n.id} .names b').textContent=this.value;renderOutline()"></div>
+    ${specific}
+    ${t.ins.length ? `<div class="field"><label>Inputs</label><div class="portlist">${ports(t.ins, 'in')}</div></div>` : ''}
+    ${t.outs.length ? `<div class="field"><label>Outputs</label><div class="portlist">${ports(t.outs, 'out')}</div></div>` : ''}
+    <div class="insp-foot"><button class="ghost">Test this node</button><button class="ghost danger" onclick="removeNode('${n.id}')">Delete</button></div>`;
+}
+$('#inspector').addEventListener('click', ev => { const b = ev.target.closest('.segs button'); if (b) b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+
+// ---------- Node details window ----------
+const info = { open: false, typeId: null, nodeId: null, tab: 'about', fromPalette: false };
+function openInfo({ typeId = null, nodeId = null, anchor = null, fromPalette = false }) {
+  const n = nodeId ? nodeById(nodeId) : null;
+  const t = n ? n.type : typeId;
+  Object.assign(info, { open: true, nodeId, typeId: t, fromPalette, tab: info.nodeId === nodeId && info.typeId === t ? info.tab : 'about' });
+  const el = $('#infowin'), wr = $('#workspace').getBoundingClientRect();
+  renderInfo(); el.classList.add('open');
+  // Beside what was clicked, in the free span between the library and the inspector.
+  const a = anchor ? anchor.getBoundingClientRect() : { left: wr.left + wr.width / 2, right: wr.left + wr.width / 2, top: wr.top + 80 };
+  const w = 380, h = Math.min(el.offsetHeight, wr.height - 24);
+  const lib = $('#library'), insp = $('#inspector');
+  // offsetLeft ignores the slide-in transform, so a panel that is still animating is placed correctly.
+  const minX = lib.classList.contains('closed') ? 12 : lib.offsetLeft + lib.offsetWidth + 12;
+  const maxX = (insp.classList.contains('closed') ? wr.width : insp.offsetLeft) - 12 - w;
+  let x = a.right + 12 - wr.left; if (x > maxX) x = a.left - w - 12 - wr.left;
+  if (x < minX) x = maxX;
+  const y = a.top - 14 - wr.top;
+  el.style.left = Math.max(12, x) + 'px';
+  el.style.top = Math.max(12, Math.min(y, wr.height - h - 12)) + 'px';
+  world.querySelectorAll('.head .info').forEach(b => b.classList.toggle('on', b.dataset.infoNode === nodeId));
+}
+function closeInfo() { info.open = false; $('#infowin').classList.remove('open'); world.querySelectorAll('.head .info.on').forEach(b => b.classList.remove('on')); }
+function renderInfo() {
+  const t = TYPE[info.typeId]; if (!t) return;
+  const d = DETAILS[t.id] || { about: t.desc, ports: {}, tips: [] };
+  const n = info.nodeId ? nodeById(info.nodeId) : null;
+  const esc = x => x.replace(/</g, '&lt;');
+  const wiredTo = (p, dir) => {
+    if (!n) return '';
+    const list = edges.filter(e => end(e, dir)[0] === n.id && end(e, dir)[1] === p.n).map(e => nodeById(dir === 'in' ? e.from[0] : e.to[0])?.title);
+    if (list.length) return `<span class="wired">${dir === 'in' ? '← from' : '→ to'} ${list.join(', ')}</span>`;
+    return dir === 'in' && p.t !== 'resource' ? '<span class="wired" style="color:var(--warn)">Not connected yet</span>' : '';
+  };
+  const port = (p, dir) => `<div class="iw-port" style="--pc:${T[p.t]}"><i></i><b>${p.n}</b><em>${p.t}${p.t === 'resource' ? ' · optional' : ''}</em><small>${d.ports[p.n] || ''}</small>${wiredTo(p, dir)}</div>`;
+  const tabs = n ? ['about', 'pins', 'run'] : ['about', 'pins'];
+  const names = { about: 'Overview', pins: 'Inputs & outputs', run: 'Last run' };
+  if (!tabs.includes(info.tab)) info.tab = 'about';
+  let body = '';
+  if (info.tab === 'about') {
+    body = `<p>${d.about}</p>`;
+    if (d.example) body += `<div class="iw-sec">Example</div><div class="iw-ex"><div><label>${d.example[0]}</label><code>${esc(d.example[1])}</code></div><div><label>${d.example[2]}</label><code>${esc(d.example[3])}</code></div></div>`;
+    if (d.tips?.length) body += `<div class="iw-sec">Good to know</div><ul class="iw-tips">${d.tips.map(x => `<li>${x}</li>`).join('')}</ul>`;
+  } else if (info.tab === 'pins') {
+    body = (t.ins.length ? `<div class="iw-sec" style="margin-top:6px">Inputs</div>${t.ins.map(p => port(p, 'in')).join('')}` : '<div class="iw-sec" style="margin-top:6px">Inputs</div><p>None. This node starts a branch of the workflow.</p>') +
+           (t.outs.length ? `<div class="iw-sec">Outputs</div>${t.outs.map(p => port(p, 'out')).join('')}` : '<div class="iw-sec">Outputs</div><p>None. Its value appears in the run result.</p>');
+  } else {
+    const r = lastRun[n.id];
+    body = r ? `<div class="iw-stat" style="margin-top:6px"><div><label>Status</label><b style="color:var(--ok)">Done</b></div><div><label>Time</label><b>${r.ms} ms</b></div><div><label>Ran</label><b>${r.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b></div></div>
+      <div class="iw-ex"><div><label>Output</label><code>${esc(r.out)}</code></div></div>`
+      : `<div class="iw-empty" style="margin-top:6px">This node hasn't run yet.<br>Press <b style="color:var(--text-2)">Run</b> or <b style="color:var(--text-2)">Test this node</b> to see its output here.</div>`;
+  }
+  const foot = n
+    ? `<button class="plain" onclick="select('${n.id}');closeInfo()">Edit settings</button><button class="plain" onclick="testNode('${n.id}')">Test this node</button>`
+    : `<button class="primary" onclick="addFromInfo('${t.id}')">Add to canvas</button>`;
+  $('#infowin').innerHTML = `
+    <div class="iw-head" id="iwHead" style="--kc:${FAM[t.fam].color}"><span class="glyph">${svg(t.icon)}</span>
+      <div style="min-width:0"><b>${n ? n.title : t.name}</b><span>${n ? t.name + ' · ' : ''}${FAM[t.fam].label}</span></div>
+      <div class="acts"><button class="iconbtn" onclick="closeInfo()" title="Close (Esc)">${svg('close')}</button></div></div>
+    <div class="iw-tabs">${tabs.map(k => `<button class="${k === info.tab ? 'on' : ''}" onclick="info.tab='${k}';renderInfo()">${names[k]}</button>`).join('')}</div>
+    <div class="iw-body">${body}</div>
+    <div class="iw-foot">${foot}<button class="link" title="Opens the Docs panel">Docs ${svg('external')}</button></div>`;
+}
+function testNode(id) {
+  const n = nodeById(id);
+  lastRun[id] = { ms: n.type === 'model' ? 1086 : 9, out: SAMPLE_OUT[n.type] || '…', at: new Date() };
+  info.tab = 'run'; renderInfo();
+}
+function addFromInfo(id) {
+  const fromPalette = info.fromPalette;
+  closeInfo();
+  if (fromPalette && pal.open) { choose(id); return; }
+  const r = viewport.getBoundingClientRect(), w = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+  addNode(id, w.x - 118, w.y - 60);
+}
+// Drag the window by its header; clicks inside never reach the canvas.
+$('#infowin').addEventListener('mousedown', ev => {
+  ev.stopPropagation();
+  const head = ev.target.closest('#iwHead'); if (!head || ev.target.closest('button')) return;
+  const el = $('#infowin'), sx = ev.clientX, sy = ev.clientY, ox = el.offsetLeft, oy = el.offsetTop;
+  const move = e => { el.style.left = ox + e.clientX - sx + 'px'; el.style.top = oy + e.clientY - sy + 'px'; };
+  const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+});
+
+// ---------- Validation + run ----------
+function updateCheck() {
+  const missing = nodes.reduce((s, n) => s + missingInputs(n).length, 0);
+  $('#checkDot').classList.toggle('warn', missing > 0);
+  $('#checkText').textContent = missing ? `${missing} input${missing === 1 ? '' : 's'} not connected` : 'Ready to run';
+}
+$('#runBtn').addEventListener('click', () => {
+  const order = [...nodes].sort((a, b) => a.x - b.x);
+  world.querySelectorAll('.node').forEach(e => e.classList.remove('done', 'active'));
+  $('#toast').classList.remove('show');
+  order.forEach((n, i) => setTimeout(() => {
+    const el = document.getElementById(n.id); if (!el) return;
+    lastRun[n.id] = { ms: [12, 184, 3, 9, 1086, 4, 2][i % 7], out: SAMPLE_OUT[n.type] || '…', at: new Date() };
+    world.querySelectorAll('.node.active').forEach(e => { e.classList.remove('active'); e.classList.add('done'); });
+    el.classList.add('active');
+    drawWires(new Set(edges.map((e, k) => e.to[0] === n.id ? k : -1).filter(k => k >= 0)));
+    if (i === order.length - 1) setTimeout(() => { el.classList.remove('active'); el.classList.add('done'); drawWires(); $('#toast').classList.add('show'); if (info.open) renderInfo(); setTimeout(() => $('#toast').classList.remove('show'), 4200); }, 500);
+  }, i * 380));
+});
+
+// ---------- Minimap ----------
+function drawMinimap() {
+  const c = $('#minimap'), g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height);
+  if (!nodes.length) return;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs) - 100, minY = Math.min(...ys) - 100, maxX = Math.max(...xs) + 340, maxY = Math.max(...ys) + 300;
+  const s = Math.min(c.width / (maxX - minX), c.height / (maxY - minY));
+  const css = getComputedStyle(document.documentElement);
+  nodes.forEach(n => {
+    const col = css.getPropertyValue('--k-' + TYPE[n.type].fam).trim() || '#9AA3B2';
+    g.fillStyle = col; g.globalAlpha = n.id === selected ? 1 : .5;
+    g.beginPath(); g.roundRect((n.x - minX) * s, (n.y - minY) * s, 236 * s, 120 * s, 4); g.fill();
+  });
+  g.globalAlpha = 1;
+  const r = viewport.getBoundingClientRect();
+  g.strokeStyle = 'rgba(241,239,231,.5)'; g.lineWidth = 2;
+  g.strokeRect((-view.x / view.z - minX) * s, (-view.y / view.z - minY) * s, r.width / view.z * s, r.height / view.z * s);
+}
+
+// ---------- Misc ----------
+$('#addBtn').addEventListener('click', () => { const r = viewport.getBoundingClientRect(); openPalette(r.left + r.width / 2 - 180, r.top + r.height / 2 - 200); });
+$('#zoomIn').addEventListener('click', () => { const r = viewport.getBoundingClientRect(); zoomAt(1.2, r.left + r.width / 2, r.top + r.height / 2); drawWires(); });
+$('#zoomOut').addEventListener('click', () => { const r = viewport.getBoundingClientRect(); zoomAt(1 / 1.2, r.left + r.width / 2, r.top + r.height / 2); drawWires(); });
+$('#fitBtn').addEventListener('click', fit);
+$('#notesBtn').addEventListener('click', () => $('#notes').classList.toggle('open'));
+$('#checkBtn').addEventListener('click', () => { document.querySelector('.dock-tabs [data-tab="outline"]').click(); openLibrary(); });
+window.addEventListener('resize', () => { applyView(); drawWires(); });
+
+$('#libToggle').classList.add('on');
+renderLibrary(); render();
+document.fonts.ready.then(() => { render(); fit(); });
+setTimeout(() => $('#hint').style.opacity = 0, 9000);
+</script>
+</body>
+</html>
