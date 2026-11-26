@@ -739,3 +739,18 @@ QLabel#blueprintPortName { font-size: 13px; color: @textPrimary; }
 QLabel#blueprintPortType { font-family: @monoFont; font-size: 11px; color: @textMuted; }
 QLabel#blueprintPortWire { font-size: 12px; color: @textSecondary; }
 QLabel#blueprintPortMissing { font-size: 12px; color: @statusWarning; }
+/* Node details window: tabs, body text, example blocks and pin cards. */
+QPushButton#blueprintDetailsTab { background: transparent; color: @textMuted; border: none; border-radius: 8px; padding: 6px 12px; min-height: 16px; font-size: 12px; font-weight: 500; }
+QPushButton#blueprintDetailsTab:hover { color: @textPrimary; }
+QPushButton#blueprintDetailsTab:checked { background: @surfaceFillActive; color: @textPrimary; }
+QPushButton#blueprintDetailsTab:focus { border: 1px solid @accentLabel; }
+QLabel#blueprintDetailsBody { font-size: 13px; color: @textSecondary; }
+QLabel#blueprintDetailsSection { font-size: 11px; font-weight: 500; letter-spacing: 1px; color: @textMuted; padding-top: 6px; }
+QFrame#blueprintDetailsBlock { background: @insetBackground; border: none; border-radius: 9px; }
+QFrame#blueprintDetailsPort { background: @fieldFill; border: none; border-radius: 9px; }
+QLabel#blueprintDetailsCaption { font-size: 11px; color: @textMuted; }
+QLabel#blueprintDetailsCode { font-family: @monoFont; font-size: 12px; color: @textSecondary; }
+QLabel#blueprintDetailsPortName { font-size: 13px; font-weight: 500; color: @textPrimary; }
+QLabel#blueprintDetailsNote { font-size: 12px; color: @textMuted; }
+QLabel#blueprintDetailsStat { font-family: @headingFont; font-size: 14px; font-weight: 500; color: @textPrimary; }
+QLabel#blueprintDetailsEmpty { font-size: 12px; color: @textMuted; background: @fieldFill; border-radius: 9px; padding: 18px 12px; }

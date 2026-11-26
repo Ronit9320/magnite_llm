@@ -940,6 +940,24 @@ void BlueprintPanel::setupEditor() {
         refreshInspector();
     });
     m_details = new BlueprintDetails(*m_preview, m_canvas->viewport());
+    connect(m_details, &BlueprintDetails::editRequested, this, [this](const QString &id) {
+        m_selected = id;
+        m_canvas->revealNode(id);
+        refreshInspector();
+    });
+    connect(m_details, &BlueprintDetails::testRequested, this, [this](const QString &id) { showTest(id); });
+    connect(m_details, &BlueprintDetails::addRequested, this, [this] {
+        if (m_quickAdd && m_quickAdd->isVisible()) {
+            // Opened from quick-add: add it where the menu was opened, as Enter would.
+            m_quickAdd->dismiss();
+            const auto at = m_quickAdd->property("graph").toPointF();
+            const auto from = m_quickAdd->property("fromNode").toString();
+            if (from.isEmpty()) addEntry(m_detailsEntry, at);
+            else addConnectedEntry(m_detailsEntry, at, from, m_quickAdd->property("outPort").toString());
+            return;
+        }
+        addEntry(m_detailsEntry);
+    });
     connect(m_nodeInspector, &BlueprintInspector::detailsRequested, this, &BlueprintPanel::showNodeDetails);
     connect(m_canvas, &BlueprintView::detailsRequested, this, &BlueprintPanel::showNodeDetails);
     connect(m_libraryDock, &BlueprintLibraryDock::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
@@ -1306,6 +1324,7 @@ void BlueprintPanel::showNodeDetails(const QString &id) {
 
 void BlueprintPanel::showEntryDetails(const BlueprintLibraryDock::Entry &entry, const QRect &anchor) {
     const auto operation = entry.operation.isEmpty() ? BlueprintPreview::operationId(entry.savedNode) : entry.operation;
+    m_detailsEntry = entry;
     m_details->showFor(operation, entry.savedNode, {}, {}, anchor);
 }
 
