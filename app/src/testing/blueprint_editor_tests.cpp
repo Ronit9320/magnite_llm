@@ -25,6 +25,8 @@
 #include <QShortcut>
 #include <QCursor>
 #include <QDir>
+#include <QSet>
+#include <QSettings>
 #include <QMenu>
 #include <QRegularExpression>
 #include <QTabWidget>
@@ -1479,7 +1481,7 @@ void checkDetails(BlueprintPreview &preview) {
         pump(50);
     };
     const auto tab = [&](const char *name) {
-        if (auto *button = visibleButton(*details, name)) button->click();
+        if (auto *button = visibleNamed<QPushButton>(*details, name)) button->click();
         pump();
     };
     select(first);
@@ -1536,6 +1538,151 @@ void checkDetails(BlueprintPreview &preview) {
     preview.deleteBlueprint("details-check");
 }
 
+void checkPolish(BlueprintPreview &preview, const QString &captures) {
+    auto example = preview.example();
+    example["id"] = "polish-check";
+    example["name"] = "Polish check";
+    preview.saveBlueprint(example);
+    const auto firstId = example["nodes"].toArray().at(0).toObject()["id"].toString();
+    BlueprintPanel panel(&preview);
+    panel.resize(1104, 720);
+    panel.show();
+    pump();
+    const auto openGraph = [&] {
+        if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+        pump();
+        for (auto *button : panel.findChildren<QPushButton *>())
+            if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), "Polish check")) {
+                button->click();
+                break;
+            }
+        pump(100);
+    };
+    openGraph();
+    auto *view = panel.findChild<BlueprintView *>();
+    auto *details = panel.findChild<BlueprintDetails *>();
+    if (!view || !details || !view->graphScene()->node(firstId)) {
+        check(false, "the polish check opens its graph");
+        return;
+    }
+    const auto capture = [&](QWidget &widget, const QString &name) {
+        if (captures.isEmpty()) return;
+        QDir().mkpath(captures);
+        check(widget.grab().save(QDir(captures).filePath(name + ".png")), "saved editor reference capture");
+    };
+    const auto select = [&](const QString &id) {
+        click(view->viewport(), viewPoint(*view, view->graphScene()->node(id)->sceneBoundingRect().center()));
+        pump(50);
+    };
+    const auto openQuickAdd = [&] {
+        QCursor::setPos(view->viewport()->mapToGlobal(view->freeArea().center()));
+        key(view->viewport(), Qt::Key_Space, {}, " ");
+        pump(50);
+        return panel.findChild<BlueprintQuickAdd *>();
+    };
+
+    const int storedSize = QSettings().value("appearance/interfaceSize", 1).toInt();
+    for (const bool dark : {true, false})
+        for (const int size : {1, 2})
+            for (const int width : {1104, 800}) {
+                QSettings().setValue("appearance/interfaceSize", size);
+                Theme::applyPreferences();
+                Theme::setDark(dark);
+                panel.resize(width, 720);
+                pump(150);
+                view->fit();
+                select(firstId);
+                QStringList found = TextFit::clippedText(view);
+                const auto name = QString("%1/%2/%3").arg(dark ? "dark" : "light", size == 2 ? "Large" : "Default").arg(width);
+                if (auto *menu = openQuickAdd()) {
+                    found << TextFit::clippedText(menu);
+                    if (size == 1 && width == 1104) capture(panel, QString("blueprints-quick-add-%1").arg(dark ? "dark" : "light"));
+                    menu->dismiss();
+                }
+                key(view->viewport(), Qt::Key_I, {}, "i");
+                pump(50);
+                if (details->isVisible()) {
+                    found << TextFit::clippedText(details);
+                    if (size == 1 && width == 1104) capture(panel, QString("blueprints-details-%1").arg(dark ? "dark" : "light"));
+                    details->hide();
+                }
+                if (size == 1) capture(panel, QString("blueprints-editor-%1%2").arg(dark ? "dark" : "light", width == 800 ? "-compact" : ""));
+                found.removeDuplicates();
+                check(found.isEmpty(), qPrintable(TextFit::describe(name, "Blueprints editor", found)));
+            }
+    QSettings().setValue("appearance/interfaceSize", storedSize);
+    Theme::applyPreferences();
+    Theme::setDark(true);
+    panel.resize(1104, 720);
+    pump(150);
+
+    // The editor from the keyboard alone.
+    view->fit();
+    pump();
+    QFocusEvent focusIn(QEvent::FocusIn, Qt::TabFocusReason);
+    QCoreApplication::sendEvent(view, &focusIn);
+    view->setFocus(Qt::TabFocusReason);
+    bool keyboard = true;
+    const auto step = [&](bool passed, const char *what) {
+        if (!passed) fprintf(stderr, "[blueprint-editor] keyboard step failed: %s\n", what);
+        keyboard &= passed;
+    };
+    const int nodesBefore = preview.blueprint("polish-check")["nodes"].toArray().size();
+    auto *menu = openQuickAdd();
+    step(menu && menu->isVisible(), "Space opens quick-add");
+    if (auto *field = menu ? menu->findChild<QLineEdit *>() : nullptr) {
+        field->setText("Count items");
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(field, &enter);
+        pump(50);
+    }
+    step(preview.blueprint("polish-check")["nodes"].toArray().size() == nodesBefore + 1, "Enter adds the node");
+    QShortcutEvent slash(QKeySequence(Qt::Key_Slash), 0);
+    for (auto *shortcut : panel.findChildren<QShortcut *>())
+        if (shortcut->key() == QKeySequence(Qt::Key_Slash)) QCoreApplication::sendEvent(shortcut, &slash);
+    pump();
+    auto *search = visibleNamed<QLineEdit>(panel, "Search nodes");
+    step(search && panel.window()->focusWidget() == search, "/ focuses the library search");
+    view->setFocus(Qt::TabFocusReason);
+    const auto before = view->centerInGraph();
+    key(view->viewport(), Qt::Key_Right);
+    pump();
+    step(view->centerInGraph() != before, "arrows pan");
+    int zoomed = -1;
+    const auto watch = QObject::connect(view, &BlueprintView::zoomChanged, [&](int percent) { zoomed = percent; });
+    key(view->viewport(), Qt::Key_F, {}, "f");
+    pump();
+    QObject::disconnect(watch);
+    step(zoomed > 0, "F fits");
+    view->setSelection(firstId);
+    key(view->viewport(), Qt::Key_I, {}, "i");
+    pump(50);
+    step(details->isVisible(), "i opens details");
+    QShortcutEvent escape(QKeySequence(Qt::Key_Escape), 0);
+    for (auto *shortcut : details->findChildren<QShortcut *>()) QCoreApplication::sendEvent(shortcut, &escape);
+    pump();
+    step(!details->isVisible(), "Esc closes details");
+    select(firstId);
+    QSet<QWidget *> chain;
+    for (QWidget *w = view->nextInFocusChain(); w && w != view && !chain.contains(w); w = w->nextInFocusChain()) chain.insert(w);
+    const auto reachable = [&](QWidget *target) {
+        return target && chain.contains(target) && (target->focusPolicy() & Qt::TabFocus);
+    };
+    step(reachable(visibleNamed<QLineEdit>(panel, "Name (optional)")) && reachable(visibleNamed<QPushButton>(panel, "Delete node")),
+         "Tab reaches the inspector's fields and Delete node");
+    check(keyboard, "every editor action works from the keyboard");
+
+    // Dragging a node to the canvas edge keeps scrolling.
+    view->fit();
+    pump();
+    const auto centre = view->centerInGraph();
+    const auto from = viewPoint(*view, view->graphScene()->node(firstId)->sceneBoundingRect().center());
+    drag(view->viewport(), from, QPointF(view->viewport()->width() - 4, from.y()), 250);
+    pump();
+    check(view->centerInGraph().x() > centre.x() + 20, "dragging a node to the edge scrolls the canvas");
+    preview.deleteBlueprint("polish-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1554,6 +1701,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkQuickAdd(preview);
     checkCanvasRun(preview);
     checkDetails(preview);
+    checkPolish(preview, captures);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

@@ -4,6 +4,11 @@
 (November 2026). Open it directly in a browser; it loads the app's fonts from
 `app/resources/fonts/`.
 
+The app now ships this design (`BlueprintView`, the floating panels, the node
+library, quick-add, the in-place inspector and the details window), so the
+mockup is historical. Where the two differ, the app and its checks are the
+reference.
+
 It is a reference for the look and the interactions, not a specification:
 
 - No borders: panels float over a dotted canvas and separate by shade and shadow.

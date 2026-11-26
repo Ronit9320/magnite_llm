@@ -322,10 +322,21 @@ void BlueprintView::fit() {
         extent = extent.united(QRectF(node->pos(), NodeItem::sizeFor(node->node())).adjusted(-24, -34, 24, 28));
     if (extent.isEmpty()) extent = QRectF(0, 0, 680, 438);
     m_autoFit = true;
-    const QSize size = viewport()->size();
-    const qreal value = qBound(fitFloor, qMin((size.width() - 26) / extent.width(), (size.height() - 26) / extent.height()), qreal(1));
+    // Fit into the canvas the floating panels leave open, so no node starts under one.
+    QRect area = freeArea();
+    const auto boxes = overlayLayout();
+    for (const auto &overlay : m_overlays) {
+        if (!overlay.widget->isVisibleTo(this) || overlay.widget->property("ignoredByFit").toBool()) continue;
+        const int pad = qobject_cast<const FloatingPanel *>(overlay.widget) ? FloatingPanel::shadowMargin() : 0;
+        const QRect box = boxes.value(overlay.widget).adjusted(pad, pad, -pad, -pad);
+        if (overlay.edge == OverlayEdge::Top) area.setTop(qMax(area.top(), box.bottom() + 1));
+        if (overlay.edge == OverlayEdge::Bottom) area.setBottom(qMin(area.bottom(), box.top() - 1));
+    }
+    if (area.width() < 240 || area.height() < 160) area = viewport()->rect();
+    const qreal value = qBound(fitFloor, qMin((area.width() - 26) / extent.width(), (area.height() - 26) / extent.height()), qreal(1));
     setTransform(QTransform::fromScale(value, value));
-    centerOn(extent.center());
+    // Centre the graph on the open area rather than on the whole viewport.
+    centerOn(extent.center() + QPointF(viewport()->rect().center() - area.center()) / value);
     emit zoomChanged(zoomPercent());
     viewport()->update();
 }
@@ -359,10 +370,12 @@ void BlueprintView::revealNode(const QString &id) {
     auto *item = m_scene->node(id);
     if (!item) return;
     const QRectF box(item->pos(), NodeItem::sizeFor(item->node()));
-    // Only move the camera when the node is not already fully in view.
-    if (mapToScene(viewport()->rect().adjusted(5, 5, -5, -5)).boundingRect().contains(box)) return;
+    // Only move the camera when the node is not already fully in the canvas the panels leave open.
+    QRect area = freeArea();
+    if (area.width() < 120) area = viewport()->rect();
+    if (mapToScene(area.adjusted(5, 5, -5, -5)).boundingRect().contains(box)) return;
     m_autoFit = false;
-    centerOn(box.center());
+    centerOn(box.center() + QPointF(viewport()->rect().center() - area.center()) / zoom());
 }
 
 void BlueprintView::setRunStates(const QHash<QString, QString> &statusByNode, const QString &activeNode) {
@@ -503,8 +516,37 @@ void BlueprintView::mouseMoveEvent(QMouseEvent *event) {
     if (m_dragged && event->buttons().testFlag(Qt::LeftButton)) {
         m_autoFit = false;
         viewport()->setCursor(Qt::ClosedHandCursor);
+        m_edgePointer = event->position();
+        if (!m_edgePan) {
+            m_edgePan = new QTimer(this);
+            m_edgePan->setInterval(16);
+            connect(m_edgePan, &QTimer::timeout, this, &BlueprintView::edgePanStep);
+        }
+        if (edgeVelocity(m_edgePointer).isNull()) m_edgePan->stop();
+        else if (!m_edgePan->isActive()) m_edgePan->start();
     }
     QGraphicsView::mouseMoveEvent(event);
+}
+
+QPointF BlueprintView::edgeVelocity(const QPointF &at) const {
+    constexpr qreal band = 28, speed = 14;
+    const auto axis = [&](qreal value, qreal size) {
+        if (value < band) return -speed * (band - qMax<qreal>(0, value)) / band;
+        if (value > size - band) return speed * (value - (size - band)) / band;
+        return qreal(0);
+    };
+    return {axis(at.x(), viewport()->width()), axis(at.y(), viewport()->height())};
+}
+
+void BlueprintView::edgePanStep() {
+    const QPointF velocity = edgeVelocity(m_edgePointer);
+    if (!m_dragged || velocity.isNull()) {
+        m_edgePan->stop();
+        return;
+    }
+    const QPointF step = velocity / zoom();
+    centerOn(mapToScene(viewport()->rect().center()) + step);
+    m_dragged->moveBy(step.x(), step.y());
 }
 
 void BlueprintView::mouseReleaseEvent(QMouseEvent *event) {
@@ -527,6 +569,7 @@ void BlueprintView::mouseReleaseEvent(QMouseEvent *event) {
     QGraphicsView::mouseReleaseEvent(&plain);
     event->setAccepted(plain.isAccepted());
     if (m_dragged && event->button() == Qt::LeftButton) {
+        if (m_edgePan) m_edgePan->stop();
         NodeItem *node = std::exchange(m_dragged, nullptr);
         viewport()->unsetCursor();
         if (node->pos().toPoint() != m_dragStart.toPoint()) emit nodeMoved(node->id(), node->pos().toPoint());

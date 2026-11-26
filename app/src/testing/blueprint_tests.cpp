@@ -474,7 +474,9 @@ int runBlueprintChecks(const QString &captures) {
                   && port["type"].toString() == "object",
               "a generic Input accepts a named and typed output without requiring a node name");
         auto *surface = canvas->viewport();
-        const QPoint center = surface->rect().center();
+        const QPoint center = canvas->graphScene()->node(firstNodeId)
+            ? canvas->mapFromScene(canvas->graphScene()->node(firstNodeId)->sceneBoundingRect().center())
+            : surface->rect().center();
         bool nodeMenu = false;
         QTimer::singleShot(0, &panel, [&] {
             if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {

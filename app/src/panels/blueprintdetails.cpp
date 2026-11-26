@@ -14,12 +14,13 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QScrollArea>
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
 namespace {
-constexpr int kWidth = 340;
+constexpr int kWidth = 372;
 
 QLabel *text(const QString &value, const char *style = "cardMeta") {
     auto *label = new QLabel(value);
@@ -85,14 +86,13 @@ BlueprintDetails::BlueprintDetails(const BlueprintPreview &preview, QWidget *par
     tabs->setSpacing(4);
     m_tabs = new QButtonGroup(this);
     for (const auto &name : {QString("Overview"), QString("Inputs & outputs"), QString("Last run")}) {
-        auto *tab = new Button(name);
+        auto *tab = new Button(QString(name).replace('&', "&&"));
         tab->setObjectName("blueprintSegment");
         tab->setCheckable(true);
         tab->setAccessibleName(name);
         m_tabs->addButton(tab, m_tabs->buttons().size());
         tabs->addWidget(tab);
     }
-    tabs->addStretch();
     body->addLayout(tabs);
     m_pages = new QStackedWidget;
     for (auto **layout : {&m_overview, &m_ports, &m_lastRun}) {
@@ -102,7 +102,14 @@ BlueprintDetails::BlueprintDetails(const BlueprintPreview &preview, QWidget *par
         (*layout)->setSpacing(6);
         m_pages->addWidget(page);
     }
-    body->addWidget(m_pages, 1);
+    // Long explanations scroll inside the window instead of squeezing.
+    auto *scroll = new QScrollArea;
+    scroll->setObjectName("blueprintDetailsScroll");
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(m_pages);
+    body->addWidget(scroll, 1);
     connect(m_tabs, &QButtonGroup::idClicked, m_pages, &QStackedWidget::setCurrentIndex);
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), this, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
     connect(escape, &QShortcut::activated, this, &QWidget::hide);
@@ -204,7 +211,7 @@ void BlueprintDetails::place(const QRect &anchor) {
     QRect area = host->rect();
     if (auto *view = qobject_cast<BlueprintView *>(host->parentWidget())) area = view->freeArea();
     const int width = kWidth + 2 * shadowMargin();
-    const int height = qMin(qMax(sizeHint().height(), 320), area.height());
+    const int height = qMin(qMax(sizeHint().height(), 380), area.height());
     resize(width, height);
     int x = anchor.right() + 12;
     if (x + width > area.right()) x = anchor.left() - 12 - width;

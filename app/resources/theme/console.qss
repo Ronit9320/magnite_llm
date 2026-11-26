@@ -690,7 +690,7 @@ QPushButton#blueprintStartCard:hover { background: @surfaceFillHover; }
 QPushButton#blueprintStartCard:focus { border: 1px solid @accentLabel; }
 QLabel#blueprintToastText { font-size: 13px; color: @textPrimary; }
 /* Node library dock: family chips, grouped rows, and the In this workflow list. */
-QPushButton#blueprintLibraryChip { font-size: 11px; padding: 2px 8px; min-height: 16px; border-radius: 9px; }
+QPushButton#blueprintLibraryChip { font-size: 11px; padding: 2px 4px; min-height: 16px; min-width: 0; border-radius: 9px; }
 QPushButton#blueprintLibraryChip:checked { background: @surfaceFillActive; color: @textPrimary; }
 QLabel#blueprintLibraryGroup { font-size: 11px; font-weight: 500; color: @textMuted; padding: 8px 0 2px 2px; }
 QLabel#blueprintLibraryTitle { font-size: 13px; font-weight: 500; color: @textPrimary; }

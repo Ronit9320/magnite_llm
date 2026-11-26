@@ -130,6 +130,11 @@ private:
     QPointF m_pressPos;
     QPointF m_panStartCenter;
     NodeItem *m_dragged = nullptr;
+    // Dragging a node near the edge keeps scrolling the canvas.
+    QTimer *m_edgePan = nullptr;
+    QPointF m_edgePointer;
+    QPointF edgeVelocity(const QPointF &viewPosition) const;
+    void edgePanStep();
     QPointF m_dragStart;
     WireItem *m_wire = nullptr;  // the selected wire, if any
     std::function<QString(const QJsonObject &)> m_validator;

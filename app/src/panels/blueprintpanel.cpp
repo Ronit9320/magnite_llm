@@ -913,6 +913,7 @@ void BlueprintPanel::setupEditor() {
     auto *inspectorLayout = new QVBoxLayout(m_inspectorPanel);
     inspectorLayout->setContentsMargins(4, 4, 0, 0);
     auto *inspectorScroll = scroller(&m_inspector);
+    inspectorScroll->setObjectName("blueprintInspectorScroll");
     m_inspector->setSpacing(6);
     m_nodeInspector = new BlueprintInspector(*m_preview);
     m_inspector->addWidget(m_nodeInspector);
@@ -2061,6 +2062,7 @@ void BlueprintPanel::showRunToast(const QJsonObject &run) {
         m_toastTimer->setInterval(6000);
         connect(m_toastTimer, &QTimer::timeout, m_toast, &QWidget::hide);
         // Above the bottom dock.
+        m_toast->setProperty("ignoredByFit", true);
         m_canvas->addOverlay(m_toast, OverlayEdge::Bottom, 72);
     }
     m_toast->setProperty("run", run["id"].toString());

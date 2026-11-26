@@ -184,8 +184,11 @@ BlueprintLibraryDock::BlueprintLibraryDock(BlueprintPreview &preview, QWidget *p
     m_search->setClearButtonEnabled(true);
     libraryBody->addWidget(m_search);
     auto *chips = new QWidget;
+    // FlowLayout lays chips out as an even grid; three columns fit the dock at every size.
     auto *chipFlow = new FlowLayout(chips, 4, 4);
     chipFlow->setContentsMargins(0, 0, 0, 0);
+    chipFlow->setColumnMinimumWidth(64);
+    chipFlow->setMaximumColumns(3);
     m_chips = new QButtonGroup(this);
     QStringList chipNames{QString()};
     chipNames << BlueprintStyle::families() << savedGroup;
@@ -209,6 +212,7 @@ BlueprintLibraryDock::BlueprintLibraryDock(BlueprintPreview &preview, QWidget *p
     connect(m_search, &QLineEdit::textChanged, this, &BlueprintLibraryDock::refreshLibrary);
 
     auto *scroll = new QScrollArea;
+    scroll->setObjectName("blueprintLibraryScroll");
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -252,11 +256,14 @@ QWidget *BlueprintLibraryDock::row(const Entry &entry) {
     layout->addWidget(icon, 0, Qt::AlignTop);
     auto *labels = new QVBoxLayout;
     labels->setSpacing(1);
+    // Both lines give way to the dock's width; the row's tooltip carries the full description.
     auto *titleLabel = text(name, "blueprintLibraryTitle");
+    titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     labels->addWidget(titleLabel);
     const auto detail = entry.operation.isEmpty() ? spec["label"].toString() : spec["detail"].toString();
     auto *detailLabel = text({}, "cardMeta");
-    detailLabel->setText(detailLabel->fontMetrics().elidedText(detail, Qt::ElideRight, 170));
+    detailLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    detailLabel->setText(detailLabel->fontMetrics().elidedText(detail, Qt::ElideRight, 160));
     labels->addWidget(detailLabel);
     layout->addLayout(labels, 1);
     auto *details = smallButton("info", "Details for " + name);

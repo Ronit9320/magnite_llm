@@ -21,6 +21,8 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    // The style sheet resets contents margins when it polishes a frame; the shadow needs them back.
+    bool event(QEvent *event) override;
     // The canvas underneath must not see clicks or wheel turns on a panel.
     void mousePressEvent(QMouseEvent *event) override { event->accept(); }
     void mouseReleaseEvent(QMouseEvent *event) override { event->accept(); }

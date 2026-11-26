@@ -1,5 +1,7 @@
 #include "widgets/floatingpanel.h"
 
+#include <QEvent>
+
 #include "theme.h"
 #include "widgets/blueprintstyle.h"
 
@@ -19,6 +21,15 @@ FloatingPanel::FloatingPanel(QWidget *parent) : QFrame(parent) {
     setFrameShape(QFrame::NoFrame);
     const int margin = shadowMargin() + padding;
     setContentsMargins(margin, margin, margin, margin);
+}
+
+bool FloatingPanel::event(QEvent *event) {
+    const bool handled = QFrame::event(event);
+    if (event->type() == QEvent::Polish || event->type() == QEvent::StyleChange) {
+        const int margin = shadowMargin() + padding;
+        if (contentsMargins() != QMargins(margin, margin, margin, margin)) setContentsMargins(margin, margin, margin, margin);
+    }
+    return handled;
 }
 
 void FloatingPanel::resizeEvent(QResizeEvent *event) {
