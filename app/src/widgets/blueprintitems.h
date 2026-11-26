@@ -85,6 +85,9 @@ public:
     void setRunStatus(const QString &status);
     QString runStatus() const { return m_runStatus; }
     static QSizeF sizeFor(const QJsonObject &node);
+    // The ⓘ that opens the node's details, in item coordinates; shown on hover or selection.
+    QRectF infoRect() const;
+    bool infoShown() const { return m_hover || isSelected(); }
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
@@ -95,6 +98,8 @@ signals:
 
 protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override;
 
 private:
     QJsonObject m_node;
@@ -106,5 +111,6 @@ private:
     QString m_runStatus;
     QList<PinItem *> m_pins;
     QSizeF m_size;
+    bool m_hover = false;
     const BlueprintPreview &m_preview;
 };

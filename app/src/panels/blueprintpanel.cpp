@@ -6,6 +6,7 @@
 #include "panels/blueprintinspector.h"
 #include "panels/blueprintlibrarydock.h"
 #include "panels/blueprintquickadd.h"
+#include "panels/blueprintdetails.h"
 #include "panels/blueprintnodedialog.h"
 #include "panels/chatbubble.h"
 #include "theme.h"
@@ -797,6 +798,7 @@ void BlueprintPanel::showBlueprint(const QJsonObject &graph) {
     m_runOnCanvas = false;
     m_canvas->clearRunStates();
     if (m_toast) m_toast->hide();
+    m_details->hide();
     const auto recent = m_preview->runs(id);
     m_runId = recent.isEmpty() ? QString{} : recent.first().toObject()["id"].toString();
     m_comparison = false;
@@ -934,6 +936,12 @@ void BlueprintPanel::setupEditor() {
     connect(m_nodeInspector, &BlueprintInspector::closeRequested, this, [this] {
         m_selected.clear();
         refreshInspector();
+    });
+    m_details = new BlueprintDetails(*m_preview, m_canvas->viewport());
+    connect(m_nodeInspector, &BlueprintInspector::detailsRequested, this, &BlueprintPanel::showNodeDetails);
+    connect(m_canvas, &BlueprintView::detailsRequested, this, &BlueprintPanel::showNodeDetails);
+    connect(m_libraryDock, &BlueprintLibraryDock::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
+        showEntryDetails(entry, m_libraryPanel->geometry());
     });
     m_canvas->addOverlay(m_inspectorPanel, OverlayEdge::Right);
     m_inspectorPanel->hide();
@@ -1179,6 +1187,9 @@ void BlueprintPanel::openQuickAdd(QWidget *host, const QPoint &position, const Q
                                   const QString &fromNode, const QString &outPort) {
     if (!m_quickAdd) {
         m_quickAdd = new BlueprintQuickAdd(*m_preview, host);
+        connect(m_quickAdd, &BlueprintQuickAdd::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
+            if (m_quickAdd->parentWidget() == m_canvas->viewport()) showEntryDetails(entry, m_quickAdd->geometry());
+        });
         connect(m_quickAdd, &BlueprintQuickAdd::accepted, this, [this](const BlueprintLibraryDock::Entry &entry) {
             const auto at = m_quickAdd->property("graph").toPointF();
             const auto from = m_quickAdd->property("fromNode").toString();
@@ -1258,6 +1269,22 @@ void BlueprintPanel::addEntry(const BlueprintLibraryDock::Entry &entry, std::opt
         node["y"] = qRound(point.y());
     }
     addNode(node);
+}
+
+void BlueprintPanel::showNodeDetails(const QString &id) {
+    const auto node = findById(m_graph["nodes"].toArray(), id);
+    auto *item = m_canvas->graphScene()->node(id);
+    if (node.isEmpty() || !item) return;
+    QJsonObject lastStep;
+    const auto runs = m_preview->runs(m_graph["id"].toString());
+    if (!runs.isEmpty()) lastStep = findById(runs.first().toObject()["steps"].toArray(), id);
+    const auto anchor = m_canvas->mapFromScene(item->sceneBoundingRect()).boundingRect();
+    m_details->showFor(BlueprintPreview::operationId(node), node, m_graph, lastStep, anchor);
+}
+
+void BlueprintPanel::showEntryDetails(const BlueprintLibraryDock::Entry &entry, const QRect &anchor) {
+    const auto operation = entry.operation.isEmpty() ? BlueprintPreview::operationId(entry.savedNode) : entry.operation;
+    m_details->showFor(operation, entry.savedNode, {}, {}, anchor);
 }
 
 void BlueprintPanel::configureNode(const QString &id) {

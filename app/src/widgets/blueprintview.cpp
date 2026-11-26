@@ -436,6 +436,13 @@ void BlueprintView::mousePressEvent(QMouseEvent *event) {
         return;
     }
     if (left) {
+        // The ⓘ on a hovered or selected node opens its details.
+        if (auto *node = nodeAt(event->position().toPoint()); node && node->infoShown()
+                && node->infoRect().contains(node->mapFromScene(mapToScene(event->position().toPoint())))) {
+            emit detailsRequested(node->id());
+            event->accept();
+            return;
+        }
         // The top-most pin or wire under the cursor wins over panning; nodes keep their own handling.
         for (auto *item : items(event->position().toPoint())) {
             if (item == m_temporary) continue;

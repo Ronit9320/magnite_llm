@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file alias="blueprints/node-catalog.json">resources/blueprints/node-catalog.json</file>
+        <file alias="blueprints/node-docs.json">resources/blueprints/node-docs.json</file>
         <file alias="blueprints/order-preview.json">resources/blueprints/order-preview.json</file>
         <file alias="docs/catalog.json">resources/docs/catalog.json</file>
         <!-- Installed-app update steps that run after the client exits (see update_manager.cpp). -->

@@ -200,6 +200,7 @@ QSizeF NodeItem::sizeFor(const QJsonObject &node) {
 NodeItem::NodeItem(const QJsonObject &node, const QJsonObject &operation, const BlueprintPreview &preview)
     : m_node(node), m_size(sizeFor(node)), m_preview(preview) {
     setFlags(ItemIsMovable | ItemIsSelectable | ItemSendsGeometryChanges);
+    setAcceptHoverEvents(true);
     setZValue(1);
     setPos(node["x"].toDouble(), node["y"].toDouble());
     const auto kind = operation["kind"].toString(node["kind"].toString());
@@ -250,6 +251,23 @@ QPainterPath NodeItem::shape() const {
 QVariant NodeItem::itemChange(GraphicsItemChange change, const QVariant &value) {
     if (change == ItemPositionHasChanged) emit moved();
     return QGraphicsObject::itemChange(change, value);
+}
+
+QRectF NodeItem::infoRect() const {
+    qreal right = m_size.width() - 10;
+    if (!m_warning.isEmpty()) right -= 20;
+    if (!m_runStatus.isEmpty()) right -= 16;
+    return QRectF(right - 15, (BlueprintStyle::headerHeight - 14) / 2, 14, 14);
+}
+
+void NodeItem::hoverEnterEvent(QGraphicsSceneHoverEvent *) {
+    m_hover = true;
+    update();
+}
+
+void NodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *) {
+    m_hover = false;
+    update();
 }
 
 void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
@@ -317,6 +335,11 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->setBrush(dot);
         painter->drawEllipse(QPointF(markRight - 4, BlueprintStyle::headerHeight / 2), 4, 4);
         markRight -= 16;
+    }
+
+    if (infoShown()) {
+        Theme::coloredIcon("info", QColor(Theme::textSecondary()), 14).paint(painter, infoRect().toRect());
+        markRight -= 20;
     }
 
     const QRectF glyph(10, (BlueprintStyle::headerHeight - 16) / 2, 16, 16);

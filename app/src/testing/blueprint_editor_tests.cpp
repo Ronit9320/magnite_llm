@@ -1,6 +1,7 @@
 #include "testing/blueprint_editor_tests.h"
 
 #include "panels/blueprintbindingfields.h"
+#include "panels/blueprintdetails.h"
 #include "panels/blueprintinspector.h"
 #include "panels/blueprintlibrarydock.h"
 #include "panels/blueprintnodefields.h"
@@ -1428,6 +1429,113 @@ void checkCanvasRun(BlueprintPreview &preview) {
     preview.deleteBlueprint("other-run-check");
 }
 
+void checkDetails(BlueprintPreview &preview) {
+    Theme::setDark(true);
+    const auto docs = BlueprintDetails::docs();
+    QStringList missing;
+    for (const auto &value : preview.fixtures()["operations"].toArray()) {
+        const auto spec = value.toObject();
+        const auto id = spec["id"].toString();
+        if (spec["legacyOnly"].toBool() || QStringList{"selector", "extractor", "lookup", "pricing"}.contains(id)) continue;
+        if (docs[id].toObject()["about"].toString().isEmpty()) missing << id;
+    }
+    // The live catalog on dev adds these; the fixture preview cannot build it without a backend.
+    for (const auto &id : {"generate", "reason", "lora", "constant", "build-object", "template", "compare", "choose",
+                           "validate", "filter", "sort", "search"})
+        if (docs[id].toObject()["about"].toString().isEmpty()) missing << id;
+    check(missing.isEmpty(), "every library operation has an explanation");
+    if (!missing.isEmpty()) fprintf(stderr, "[blueprint-editor] missing docs: %s\n", qPrintable(missing.join(", ")));
+
+    BlueprintPanel panel(&preview);
+    panel.resize(1120, 720);
+    panel.show();
+    pump();
+    // A fresh copy of the example, so no earlier check's runs count as its last run.
+    auto example = preview.example();
+    example["id"] = "details-check";
+    example["name"] = "Details check";
+    const auto graphId = example["id"].toString();
+    preview.saveBlueprint(example);
+    if (auto *library = visibleNamed<QPushButton>(panel, "Back to library")) library->click();
+    pump();
+    for (auto *button : panel.findChildren<QPushButton *>())
+        if (button->isVisible() && button->text() == "Open" && visibleText(*button->parentWidget(), example["name"].toString())) {
+            button->click();
+            break;
+        }
+    pump(100);
+    auto *view = panel.findChild<BlueprintView *>();
+    auto *details = panel.findChild<BlueprintDetails *>();
+    const auto nodes = example["nodes"].toArray();
+    const bool opened = view && details && nodes.size() > 1 && view->graphScene()->node(nodes.at(1).toObject()["id"].toString());
+    check(opened, "the details check opens the example");
+    if (!opened) return;
+    const auto first = nodes.at(0).toObject()["id"].toString();
+    const auto second = nodes.at(1).toObject()["id"].toString();
+    const auto select = [&](const QString &id) {
+        view->fit();
+        pump();
+        click(view->viewport(), viewPoint(*view, view->graphScene()->node(id)->sceneBoundingRect().center()));
+        pump(50);
+    };
+    const auto tab = [&](const char *name) {
+        if (auto *button = visibleButton(*details, name)) button->click();
+        pump();
+    };
+    select(first);
+    key(view->viewport(), Qt::Key_I, {}, "i");
+    pump(50);
+    const auto about = docs[BlueprintPreview::operationId(nodes.at(0).toObject())].toObject()["about"].toString();
+    check(details->isVisible() && !about.isEmpty() && visibleText(*details, about.left(30)),
+          "i opens the details window for the selected node");
+    FloatingPanel *inspector = nullptr, *library = nullptr;
+    for (auto *panelWidget : view->findChildren<FloatingPanel *>()) {
+        if (!panelWidget->isVisible()) continue;
+        if (panelWidget->accessibleName() == "Node inspector") inspector = panelWidget;
+        if (panelWidget->accessibleName() == "Node library") library = panelWidget;
+    }
+    const auto box = details->geometry().adjusted(FloatingPanel::shadowMargin(), FloatingPanel::shadowMargin(),
+                                                  -FloatingPanel::shadowMargin(), -FloatingPanel::shadowMargin());
+    const auto bodyOf = [](FloatingPanel *panelWidget) {
+        return panelWidget->geometry().adjusted(FloatingPanel::shadowMargin(), FloatingPanel::shadowMargin(),
+                                                -FloatingPanel::shadowMargin(), -FloatingPanel::shadowMargin());
+    };
+    check((!inspector || !box.intersects(bodyOf(inspector))) && (!library || !box.intersects(bodyOf(library)))
+              && view->freeArea().adjusted(-FloatingPanel::shadowMargin(), -FloatingPanel::shadowMargin(),
+                                           FloatingPanel::shadowMargin(), FloatingPanel::shadowMargin()).contains(details->geometry()),
+          "the details window opens in the free canvas area");
+    tab("Last run");
+    check(visibleText(*details, "Not run yet"), "Last run says when the node has not run");
+
+    select(second);
+    if (auto *info = visibleNamed<QPushButton>(panel, "Node details")) info->click();
+    pump(50);
+    tab("Inputs & outputs");
+    check(details->isVisible() && visibleText(*details, "Wired from " + nodes.at(0).toObject()["name"].toString()),
+          "details show what each pin is wired to");
+
+    if (auto *bar = panel.findChild<BlueprintTopBar *>())
+        if (auto *run = visibleButton(*bar, "Run")) run->click();
+    pump(50);
+    const auto runs = preview.runs(graphId);
+    check(!runs.isEmpty() && waitForState(preview, runs.first().toObject()["id"].toString(), "passed"), "the example runs");
+    select(first);
+    key(view->viewport(), Qt::Key_I, {}, "i");
+    pump(50);
+    tab("Last run");
+    check(details->isVisible() && visibleText(*details, "Completed"), "Last run shows the latest step");
+
+    details->showFor("unheard-op", {}, {}, {}, QRect(40, 40, 10, 10));
+    pump();
+    check(details->isVisible() && visibleText(*details, "No description"), "an operation without docs still shows details");
+    key(details, Qt::Key_Escape);
+    QShortcutEvent escape(QKeySequence(Qt::Key_Escape), 0);
+    for (auto *shortcut : details->findChildren<QShortcut *>()) QCoreApplication::sendEvent(shortcut, &escape);
+    pump();
+    check(!details->isVisible(), "Esc closes the details window");
+    preview.deleteBlueprint("details-check");
+}
+
 int runBlueprintEditorChecks(const QString &captures) {
     g_failures = 0;
     const bool original = Theme::isDark();
@@ -1445,6 +1553,7 @@ int runBlueprintEditorChecks(const QString &captures) {
     checkLibrary(preview);
     checkQuickAdd(preview);
     checkCanvasRun(preview);
+    checkDetails(preview);
     Theme::setDark(original);
     fprintf(stderr, "[blueprint-editor] %s (%d failures)\n", g_failures ? "FAIL" : "PASS", g_failures);
     return g_failures;

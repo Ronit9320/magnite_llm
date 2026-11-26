@@ -10,6 +10,7 @@
 
 class BlueprintView;
 class FloatingPanel;
+class BlueprintDetails;
 class BlueprintInspector;
 class BlueprintQuickAdd;
 class FloatingPanel;
@@ -100,6 +101,8 @@ private:
     void showTest(const QString &node = {});
     void startRun();
     void runFromCanvas();
+    void showNodeDetails(const QString &id);
+    void showEntryDetails(const BlueprintLibraryDock::Entry &entry, const QRect &anchor);
     void showCanvasRun(const QJsonObject &run);
     void showRunToast(const QJsonObject &run);
     void refreshRunOptions();
@@ -137,6 +140,7 @@ private:
     bool m_runOnCanvas = false;
     bool m_runAfterPublish = false;
     FloatingPanel *m_toast = nullptr;
+    BlueprintDetails *m_details = nullptr;
     QLabel *m_toastText = nullptr;
     QTimer *m_toastTimer = nullptr;
     FloatingPanel *m_libraryPanel;

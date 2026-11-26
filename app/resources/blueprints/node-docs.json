@@ -1,0 +1,134 @@
+{
+  "input": {
+    "about": "Starts the workflow with the value you give it when you run it: a test case, a sample, or what someone types in Conversation.",
+    "example": {"inputLabel": "Run input", "input": "Where is my order #4812?", "outputLabel": "Text", "output": "Where is my order #4812?"},
+    "tips": ["Change the output type to Object to receive JSON instead of text.", "A workflow can have several inputs; each one becomes a field in the run form."],
+    "ports": {"out.text": "The value supplied when the run starts."}
+  },
+  "dataset-rows": {
+    "about": "Supplies a list of records, either typed in as JSON rows or taken from a dataset you saved in Training.",
+    "example": {"inputLabel": "Rows", "input": "[{\"product\": \"A\"}, {\"product\": \"B\"}]", "outputLabel": "Rows", "output": "2 records"},
+    "tips": ["Set the row type on the Rows port so later steps know each record's fields.", "Large datasets are read when the run starts, not when you save."],
+    "ports": {"out.rows": "Every row, as a JSON array."}
+  },
+  "pass": {
+    "about": "Forwards its input unchanged. Useful as a named junction while you rearrange a graph.",
+    "example": {"inputLabel": "Value", "input": "hello", "outputLabel": "Value", "output": "hello"},
+    "tips": ["The output always has the same type as the input."],
+    "ports": {"in.value": "Any value.", "out.value": "The same value."}
+  },
+  "parse-json": {
+    "about": "Reads text as JSON and checks the result against the output type, so later steps get structured data.",
+    "example": {"inputLabel": "Text", "input": "{\"id\": 7, \"name\": \"Ada\"}", "outputLabel": "Object", "output": "id: 7, name: Ada"},
+    "tips": ["Put it after a Model that answers in JSON text.", "The step fails with the reason when the text is not valid JSON."],
+    "ports": {"in.value": "Text that contains JSON.", "out.value": "The parsed value."}
+  },
+  "field": {
+    "about": "Returns one named field from an object.",
+    "example": {"inputLabel": "Object", "input": "{\"name\": \"Ada\", \"age\": 36}", "outputLabel": "Field name: name", "output": "Ada"},
+    "tips": ["Set the field name in the inspector.", "Choose the output type that matches the field's value."],
+    "ports": {"in.value": "The object to read from.", "out.value": "The field's value."}
+  },
+  "first": {
+    "about": "Returns the first value in an array.",
+    "example": {"inputLabel": "Array", "input": "[\"red\", \"green\"]", "outputLabel": "First item", "output": "red"},
+    "tips": ["Sort or filter the rows first when order matters."],
+    "ports": {"in.value": "An array.", "out.value": "Its first value."}
+  },
+  "count": {
+    "about": "Counts the values in an array.",
+    "example": {"inputLabel": "Array", "input": "[\"a\", \"b\", \"c\"]", "outputLabel": "Count", "output": "3"},
+    "tips": ["Combine with Filter rows to count only matching records."],
+    "ports": {"in.value": "An array.", "out.value": "How many values it holds."}
+  },
+  "format": {
+    "about": "Turns any value into text. Objects and arrays become formatted JSON.",
+    "example": {"inputLabel": "Object", "input": "{\"total\": 84}", "outputLabel": "Text", "output": "{\"total\": 84}"},
+    "tips": ["Use Fill a text template when you need your own wording around the value."],
+    "ports": {"in.value": "Any value.", "out.value": "The value as text."}
+  },
+  "output": {
+    "about": "Marks a value as a result of the workflow. Runs, Conversation and Run history show it.",
+    "example": {"inputLabel": "Value", "input": "Your order ships tomorrow.", "outputLabel": "Result", "output": "Your order ships tomorrow."},
+    "tips": ["A workflow can return several outputs.", "Its type follows the wire you connect."],
+    "ports": {"in.value": "The value to return.", "out.value": "The same value, for chaining."}
+  },
+  "approval": {
+    "about": "Pauses the run and asks a person to approve an action before anything happens. The decision is recorded on the run.",
+    "example": {"inputLabel": "Action", "input": "Refund order #4812", "outputLabel": "Receipt", "output": "Approved by you"},
+    "tips": ["Denied or expired requests stop the run at this step."],
+    "ports": {"in.value": "The action to review.", "out.receipt": "The recorded decision."}
+  },
+  "generate": {
+    "about": "Sends its inputs to a local Transformers checkpoint and returns the answer as typed JSON or plain text.",
+    "example": {"inputLabel": "Input", "input": "Summarise: the order arrived late.", "outputLabel": "Result", "output": "Late delivery complaint."},
+    "tips": ["Choose the checkpoint in the inspector; the node warns until one is set.", "Plain text needs a single text output.", "Connect an Attach trained LoRA node to specialise the model."],
+    "ports": {"in.value": "What the model reads.", "in.adapter": "Optional LoRA adapter weights.", "out.value": "The model's answer."}
+  },
+  "reason": {
+    "about": "Uses a checkpoint that can think before answering. Only the final answer leaves the node.",
+    "example": {"inputLabel": "Task", "input": "What is 17 × 23 + 4?", "outputLabel": "Answer", "output": "395"},
+    "tips": ["Pick a checkpoint marked as supporting explicit thinking.", "Give it a larger output budget than a plain Model node."],
+    "ports": {"in.value": "The task to reason about.", "in.adapter": "Optional LoRA adapter weights.", "out.value": "The final answer."}
+  },
+  "lora": {
+    "about": "Loads adapter weights you trained and plugs them into a Model or Reasoning node.",
+    "example": {"inputLabel": "Adapter", "input": "order-selector-v2", "outputLabel": "LoRA adapter", "output": "Ready for Qwen2.5-0.5B"},
+    "tips": ["The adapter must match the checkpoint it connects to."],
+    "ports": {"out.adapter": "Connect to a model's LoRA adapter input."}
+  },
+  "constant": {
+    "about": "Supplies a fixed value, such as a label, a threshold or a default setting.",
+    "example": {"inputLabel": "Value (JSON)", "input": "100", "outputLabel": "Value", "output": "100"},
+    "tips": ["Write the value as JSON: quotes for text, plain digits for numbers."],
+    "ports": {"out.value": "The fixed value."}
+  },
+  "build-object": {
+    "about": "Combines connected values into one JSON object. Each input key becomes a field name.",
+    "example": {"inputLabel": "name, total", "input": "Ada, 84", "outputLabel": "Object", "output": "{\"name\": \"Ada\", \"total\": 84}"},
+    "tips": ["Add an input port for every field you need."],
+    "ports": {"in.field": "A value to include under this key.", "out.value": "The combined object."}
+  },
+  "template": {
+    "about": "Writes text from a template, filling in {key} with the value on the matching input.",
+    "example": {"inputLabel": "Template", "input": "Summary for {name}", "outputLabel": "Text", "output": "Summary for Ada"},
+    "tips": ["Write {{ and }} for literal braces.", "Each {key} needs an input port with that key."],
+    "ports": {"in.name": "The value for {name}.", "out.value": "The filled-in text."}
+  },
+  "compare": {
+    "about": "Compares two values and returns true or false.",
+    "example": {"inputLabel": "Value, Compared with", "input": "120, 100 (greater than)", "outputLabel": "Result", "output": "true"},
+    "tips": ["Ordering compares numbers; Contains looks inside text or an array.", "Feed the result into Choose a value."],
+    "ports": {"in.left": "The value to test.", "in.right": "What it is compared with.", "out.value": "True or false."}
+  },
+  "choose": {
+    "about": "Returns one of two values depending on a true or false condition.",
+    "example": {"inputLabel": "Condition", "input": "true", "outputLabel": "Chosen value", "output": "the If true value"},
+    "tips": ["Both values are computed before the choice is made."],
+    "ports": {"in.condition": "True or false.", "in.if_true": "Returned when the condition is true.", "in.if_false": "Returned when it is false.", "out.value": "The chosen value."}
+  },
+  "validate": {
+    "about": "Checks a value against rules. A mismatch fails the step with the field path, and later steps are skipped.",
+    "example": {"inputLabel": "Value", "input": "{\"id\": \"\"}", "outputLabel": "Result", "output": "Fails: id must not be empty"},
+    "tips": ["The rules are a small JSON Schema subset.", "Put it before steps that must not see bad data."],
+    "ports": {"in.value": "The value to check.", "out.value": "The same value, once it passes."}
+  },
+  "filter": {
+    "about": "Keeps the rows whose field passes a rule, such as amount >= 100.",
+    "example": {"inputLabel": "Rule: amount >= 100", "input": "3 rows", "outputLabel": "Matching rows", "output": "1 row"},
+    "tips": ["Rows without the field are left out."],
+    "ports": {"in.rows": "The rows to filter.", "out.rows": "The rows that pass."}
+  },
+  "sort": {
+    "about": "Orders rows by one field. Add desc for largest first.",
+    "example": {"inputLabel": "Sort by: amount desc", "input": "40, 120, 75", "outputLabel": "Sorted rows", "output": "120, 75, 40"},
+    "tips": ["Rows without the field go last."],
+    "ports": {"in.rows": "The rows to sort.", "out.rows": "The rows in order."}
+  },
+  "search": {
+    "about": "Finds passages in your Knowledge documents that match a query.",
+    "example": {"inputLabel": "Query", "input": "refund policy", "outputLabel": "Context", "output": "Refunds are issued within 14 days…"},
+    "tips": ["Connect Context to a Model prompt.", "Use Results when you need scores and sources."],
+    "ports": {"in.query": "What to look for.", "out.results": "Passages with scores and sources.", "out.context": "The passages as one block of text."}
+  }
+}
