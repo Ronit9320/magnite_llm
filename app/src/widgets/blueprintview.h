@@ -46,6 +46,8 @@ public:
     void removeOverlay(QWidget *widget);
     // The viewport minus the visible Left and Right overlays.
     QRect freeArea() const;
+    // The viewport below the top bar and above the bottom dock, across its full width (for menus).
+    QRect openArea() const;
     // Checks or unchecks the dock's "Show node library" toggle (libraryToggled reports the change).
     void setLibraryShown(bool shown);
     bool libraryShown() const;

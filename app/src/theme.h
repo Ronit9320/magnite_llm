@@ -41,7 +41,10 @@ inline QString surfaceFill()         { return isDark() ? QStringLiteral("#111113
 inline QString surfaceFillHover()    { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceFillActive()   { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#E5E8D5"); }
 inline QString surfaceBorder()       { return isDark() ? QStringLiteral("#36363C") : QStringLiteral("#C4C8B9"); }
-// Form-control edges must reach 3:1 against their fill (WCAG 1.4.11); card borders stay subtle.
+// Fields and buttons have no outline: their fill sets them apart, and focus draws an accent ring.
+inline QString fieldFill()           { return isDark() ? QStringLiteral("#1A1A1D") : QStringLiteral("#E8E6DB"); }
+inline QString fieldFillHover()      { return isDark() ? QStringLiteral("#222225") : QStringLiteral("#DEDCD0"); }
+// Scroll handles and other drawn strokes that must reach 3:1 against their fill (WCAG 1.4.11).
 inline QString controlBorder()       { return isDark() ? QStringLiteral("#63636B") : QStringLiteral("#878C7C"); }
 
 // Unfilled part of the context meter ring and bar.

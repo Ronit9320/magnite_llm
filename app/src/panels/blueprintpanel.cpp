@@ -1189,7 +1189,7 @@ void BlueprintPanel::openQuickAdd(QWidget *host, const QPoint &position, const Q
     if (!m_quickAdd) {
         m_quickAdd = new BlueprintQuickAdd(*m_preview, host);
         connect(m_quickAdd, &BlueprintQuickAdd::detailsRequested, this, [this](const BlueprintLibraryDock::Entry &entry) {
-            if (m_quickAdd->parentWidget() == m_canvas->viewport()) showEntryDetails(entry, m_quickAdd->geometry());
+            if (m_quickAdd->parentWidget() == m_canvas) showEntryDetails(entry, m_quickAdd->geometry());
         });
         connect(m_quickAdd, &BlueprintQuickAdd::accepted, this, [this](const BlueprintLibraryDock::Entry &entry) {
             const auto at = m_quickAdd->property("graph").toPointF();
@@ -1198,16 +1198,36 @@ void BlueprintPanel::openQuickAdd(QWidget *host, const QPoint &position, const Q
             else addConnectedEntry(entry, at, from, m_quickAdd->property("outPort").toString());
         });
     }
+    // Over the canvas the menu floats above the side panels, between the top bar and the dock.
+    QPoint at = position;
+    QRect bounds;
+    if (host == m_canvas->viewport()) {
+        at += m_canvas->viewport()->pos();
+        host = m_canvas;
+        bounds = m_canvas->openArea();
+    }
     if (m_quickAdd->parentWidget() != host) m_quickAdd->setParent(host);
+    m_quickAdd->setBounds(bounds);
     m_quickAdd->setProperty("graph", graph);
     m_quickAdd->setProperty("fromNode", fromNode);
     m_quickAdd->setProperty("outPort", outPort);
-    BlueprintQuickAdd::Filter filter;
-    if (!fromNode.isEmpty())
-        filter = [this, fromNode, outPort](const BlueprintLibraryDock::Entry &entry) {
-            return !connectedInput(entry, fromNode, outPort).isEmpty();
-        };
-    m_quickAdd->open(position, filter);
+    if (fromNode.isEmpty()) {
+        m_quickAdd->open(at);
+        return;
+    }
+    QString type;
+    for (const auto &value : m_graph["nodes"].toArray())
+        if (value.toObject()["id"].toString() == fromNode)
+            for (const auto &port : value.toObject()["out"].toArray())
+                if (port.toObject()["id"].toString() == outPort) type = port.toObject()["type"].toString();
+    m_quickAdd->openForWire(at, BlueprintStyle::typeFamily(type), BlueprintStyle::typeColor(type),
+        [this, fromNode, outPort](const BlueprintLibraryDock::Entry &entry) {
+            const auto port = connectedInput(entry, fromNode, outPort);
+            if (port.isEmpty()) return QString();
+            for (const auto &value : entryNode(entry, {})["in"].toArray())
+                if (value.toObject()["id"].toString() == port) return value.toObject()["label"].toString(port);
+            return port;
+        });
 }
 
 // The node an entry adds, with a fresh id, its top-left corner at a graph point.

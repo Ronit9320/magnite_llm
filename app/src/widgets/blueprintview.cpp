@@ -207,6 +207,19 @@ QRect BlueprintView::freeArea() const {
     return area;
 }
 
+QRect BlueprintView::openArea() const {
+    QRect area = viewport()->geometry();
+    const auto boxes = overlayLayout();
+    for (const auto &overlay : m_overlays) {
+        if (!overlay.widget->isVisibleTo(this) || overlay.widget->property("ignoredByFit").toBool()) continue;
+        const int pad = qobject_cast<const FloatingPanel *>(overlay.widget) ? FloatingPanel::shadowMargin() : 0;
+        const QRect box = boxes.value(overlay.widget).adjusted(pad, pad, -pad, -pad);
+        if (overlay.edge == OverlayEdge::Top) area.setTop(qMax(area.top(), box.bottom() + 1));
+        if (overlay.edge == OverlayEdge::Bottom) area.setBottom(qMin(area.bottom(), box.top() - 1));
+    }
+    return area;
+}
+
 void BlueprintView::placeOverlays() {
     if (m_placing) return;
     m_placing = true;

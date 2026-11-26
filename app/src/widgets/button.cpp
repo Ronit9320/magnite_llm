@@ -113,18 +113,18 @@ void Button::paintEvent(QPaintEvent *) {
     const bool danger=property("danger").toBool() || name=="destructiveBtn" || name=="cardDanger" || name=="cancelDownload" || name=="deleteAllChats";
     const bool ghost=isFlat() || name=="historyNew";
     const bool card = name == "docsCard" || name == "overviewTile" || name == "promptSuggestion";
-    QColor base(primary?Theme::accentPrimary():Theme::surfaceFill());
-    QColor hover(primary?Theme::accentHover():danger?Theme::dangerHover():Theme::surfaceFillHover());
-    QColor border(primary?Theme::accentPrimary():Theme::surfaceBorder());
+    QColor base(primary?Theme::accentPrimary():Theme::fieldFill());
+    QColor hover(primary?Theme::accentHover():danger?Theme::dangerHover():Theme::fieldFillHover());
+    QColor border(Qt::transparent);  // no outline: the fill sets the button apart
     QColor ink(primary?Theme::accentText():danger?Theme::statusError():Theme::textPrimary());
     if (ghost) { base.setAlpha(0); border.setAlpha(0); }
     QColor fill=mix(base,hover,m_hover->value());
     if (isDown()) fill=QColor(primary?Theme::accentActive():danger?Theme::dangerHover():Theme::surfaceFillActive());
     if (isCheckable() && isChecked()) { fill=QColor(primary?Theme::accentActive():Theme::surfaceFillActive()); }
-    if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Theme::surfaceBorder()); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
+    if (!isEnabled()) { fill=QColor(Theme::insetBackground()); ink=QColor(Theme::textMuted()); border=QColor(Qt::transparent); if (ghost) { fill.setAlpha(0); border.setAlpha(0); } }
     if (hasFocus() && isEnabled()) {
         if (!isDown() && !isChecked()) fill=hover;
-        border=QColor(primary?Theme::accentText():Theme::textMuted());
+        border=QColor(primary?Theme::accentText():Theme::accentLabel());
     }
     const QRectF bounds=QRectF(rect()).adjusted(1,1,-1,-1);
     painter.setBrush(fill);
